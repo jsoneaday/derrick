@@ -11,9 +11,13 @@ let package = Package(
             targets: ["DBRepository"]
         )
     ],
+    dependencies: [
+        .package(path: "../MemorySystem")
+    ],
     targets: [
         .target(
             name: "DBRepository",
+            dependencies: ["MemorySystem"],
             exclude: ["Resources"],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),

@@ -54,10 +54,11 @@ public actor MemoryCoordinator {
             toolCalls: input.toolCalls
         )
 
-        let record = MemoryRecord(pair: pair, scope: input.scope)
+        let record = MemoryRecord(id: pair.id, pair: pair, scope: input.scope)
         try await store.upsert(record)
 
         let entry = MemoryWorkingEntry(
+            id: pair.id,
             sessionKey: input.sessionKey,
             parentAgentID: input.parentAgentID,
             createdAt: pair.createdAt,

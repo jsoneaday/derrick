@@ -77,7 +77,7 @@ import Testing
         let result = try await coordinator.retrieve(MemoryRetrievalRequest(sessionKey: sessionKey, limit: 10))
 
         #expect(result.entries.count == 1)
-        #expect(result.entries.first?.rawPair == nil)
+        #expect(result.entries.first?.compressedSummary != nil)
     }
 }
 

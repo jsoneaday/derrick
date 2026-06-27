@@ -60,11 +60,11 @@ final class DBRepositoryTests: XCTestCase {
         let repository = DBRepository(configuration: configuration)
         let url = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
 
-        XCTAssertEqual(try schemaVersion(at: url), 2)
+        XCTAssertEqual(try schemaVersion(at: url), MemoryDatabaseSchema.latestVersion)
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
         XCTAssertTrue(try tableExists(named: "memory_records", at: url))
 
-        _ = try await repository.migrate(username: "app-user", password: "app-secret", to: 0)
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
 
         XCTAssertEqual(try schemaVersion(at: url), 0)
         XCTAssertFalse(try tableExists(named: "memory_sessions", at: url))

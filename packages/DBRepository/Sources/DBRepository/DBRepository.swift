@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+@_exported import MemorySystem
 
 public struct DBRepositoryConfiguration: Equatable, Sendable {
     public let applicationName: String
@@ -32,6 +33,7 @@ public enum DBRepositoryError: Error, LocalizedError, Equatable, Sendable {
     case sqliteOpenFailed(String)
     case sqliteCloseFailed(String)
     case sqliteMigrationFailed(String)
+    case sqliteOperationFailed(String)
     case authenticationFailed
     case unsupportedMigrationVersion(Int)
     case missingMigrationResource(String)
@@ -46,6 +48,8 @@ public enum DBRepositoryError: Error, LocalizedError, Equatable, Sendable {
             return "Unable to close the SQLite database: \(message)"
         case .sqliteMigrationFailed(let message):
             return "Unable to migrate the SQLite database: \(message)"
+        case .sqliteOperationFailed(let message):
+            return "Unable to operate on the SQLite database: \(message)"
         case .authenticationFailed:
             return "The supplied credentials do not match the repository configuration."
         case .unsupportedMigrationVersion(let version):
@@ -76,7 +80,7 @@ public actor DBRepository {
     }
 
     public func createEmptyDatabaseIfNeeded(username: String, password: String) throws -> URL {
-        try migrate(username: username, password: password)
+        try migrateSessionMemory(username: username, password: password)
     }
 
     public func authenticate(username: String, password: String) throws {
