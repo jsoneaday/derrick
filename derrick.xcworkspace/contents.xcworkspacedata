@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:ui/ui.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:packages/LLMAgentClient">
+   </FileRef>
+   <FileRef
+      location = "group:packages/PolicyEngine">
+   </FileRef>
+   <FileRef
+      location = "group:packages/MCPClient">
+   </FileRef>
+   <FileRef
+      location = "group:packages/MCPServer">
+   </FileRef>
+   <FileRef
+      location = "group:packages/MemorySystem">
+   </FileRef>
+   <FileRef
+      location = "group:.gitignore">
+   </FileRef>
+   <FileRef
+      location = "group:AGENTS.md">
+   </FileRef>
+</Workspace>

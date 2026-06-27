@@ -1,0 +1,35 @@
+# Xcode user-specific files
+*.xcuserstate
+**/xcuserdata/
+*.xcuserdatad/
+*.moved-aside
+
+# Xcode build products
+build/
+DerivedData/
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Local secrets / signing
+.env
+.env.*
+*.pem
+*.p8
+*.key
+*.mobileprovision
+*.cer
+*.p12
+
+# Logs / temp
+*.log
+*.tmp
+*.swp
