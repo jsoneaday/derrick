@@ -183,6 +183,35 @@ public struct MemoryBudget: Hashable, Codable, Sendable {
     public init(maxTokenCount: Int) {
         self.maxTokenCount = maxTokenCount
     }
+
+    public init(provider: String, modelName: String) {
+        self.maxTokenCount = Self.maxTokenCount(forProvider: provider, modelName: modelName)
+    }
+}
+
+public struct MemoryModelKey: Hashable, Codable, Sendable {
+    public let provider: String
+    public let name: String
+
+    public init(provider: String, name: String) {
+        self.provider = provider
+        self.name = name
+    }
+}
+
+public extension MemoryBudget {
+    static let defaultMaxTokenCount = 4_000
+
+    /// These values cap the in-memory working set, not the model's full context window.
+    static let recommendedMaxTokenCounts: [MemoryModelKey: Int] = [
+        .init(provider: "gemini", name: "gemini-2.5-flash-lite"): 50_000,
+        .init(provider: "gemini", name: "gemini-3.1-flash-lite"): 50_000,
+        .init(provider: "openai", name: "gpt-5-mini"): 25_000
+    ]
+
+    static func maxTokenCount(forProvider provider: String, modelName: String) -> Int {
+        recommendedMaxTokenCounts[.init(provider: provider, name: modelName)] ?? defaultMaxTokenCount
+    }
 }
 
 public struct MemoryRetrievalRequest: Hashable, Codable, Sendable {

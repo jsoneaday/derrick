@@ -113,6 +113,10 @@ public actor MemoryCoordinator {
                 if let index = entries.firstIndex(where: { $0.id == id }) {
                     entries[index].detailedSummary = nil
                 }
+            case .dropCompressed(let id):
+                if let index = entries.firstIndex(where: { $0.id == id }) {
+                    entries[index].compressedSummary = nil
+                }
             }
         }
 

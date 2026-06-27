@@ -4,16 +4,18 @@ import LLMAgentClient
 final class ConversationModel {
     let sessionKey: MemorySessionKey
     let memoryCoordinator: MemoryCoordinator
+    let model: GeminiModel
 
     init() {
         self.sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
+        self.model = .gemini31FlashLite
 
         let summarizer = GeminiMemorySummarizer()
         self.memoryCoordinator = MemoryCoordinator(
             store: InMemoryMemoryStore(),
             summarizer: summarizer,
             policy: TieredMemoryCompactionPolicy(),
-            budget: MemoryBudget(maxTokenCount: 1_500)
+            budget: MemoryBudget(provider: model.id.provider, modelName: model.id.rawValue)
         )
     }
 
@@ -24,7 +26,7 @@ final class ConversationModel {
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
             client: client,
-            model: .gemini31FlashLite,
+            model: model,
             retrievalLimit: 5
         )
 

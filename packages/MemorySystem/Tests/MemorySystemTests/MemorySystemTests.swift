@@ -27,4 +27,33 @@ import Testing
 
         #expect(plan.instructions.contains(.summarize(older.id)))
     }
+
+    @Test func compactionPolicyDropsCompressedSummaryLast() {
+        let policy = TieredMemoryCompactionPolicy()
+        let sessionKey = MemorySessionKey(sessionID: "s", agentID: "a")
+        let compressed = MemorySummary(
+            text: "compressed",
+            metadata: MemorySummaryMetadata(
+                keywords: [],
+                compressionRatio: 0.5,
+                sourceTokenCount: 10,
+                summaryTokenCount: 2
+            )
+        )
+        let entry = MemoryWorkingEntry(
+            sessionKey: sessionKey,
+            createdAt: .distantPast,
+            compressedSummary: compressed
+        )
+
+        let plan = policy.plan(entries: [entry], budget: MemoryBudget(maxTokenCount: 1))
+
+        #expect(plan.instructions.contains(.dropCompressed(entry.id)))
+    }
+
+    @Test func memoryBudgetUsesModelSpecificWorkingSetLimits() {
+        #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-2.5-flash-lite") == 50_000)
+        #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-3.1-flash-lite") == 50_000)
+        #expect(MemoryBudget.maxTokenCount(forProvider: "openai", modelName: "gpt-5-mini") == 25_000)
+    }
 }

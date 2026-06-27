@@ -4,6 +4,7 @@ public enum MemoryCompactionInstruction: Hashable, Codable, Sendable {
     case summarize(UUID)
     case dropRaw(UUID)
     case dropDetailed(UUID)
+    case dropCompressed(UUID)
 }
 
 public struct MemoryCompactionPlan: Hashable, Codable, Sendable {
@@ -51,6 +52,11 @@ public struct TieredMemoryCompactionPolicy: MemoryCompactionPolicy {
                 instructions.append(.dropDetailed(entry.id))
                 projectedTokens -= max(entry.detailedSummary?.metadata.summaryTokenCount ?? 0, 0)
                 projectedTokens += max(entry.compressedSummary?.metadata.summaryTokenCount ?? 0, 0)
+            }
+
+            if projectedTokens > budget.maxTokenCount, entry.compressedSummary != nil {
+                instructions.append(.dropCompressed(entry.id))
+                projectedTokens -= max(entry.compressedSummary?.metadata.summaryTokenCount ?? 0, 0)
             }
         }
 
