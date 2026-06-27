@@ -34,7 +34,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         prompt: String,
         parentAgentID: String? = nil,
         toolCalls: [ToolCallRecord] = [],
-        scope: MemoryScope = .private
+        scope: MemoryAccessibility = .private
     ) async -> AsyncThrowingStream<String, Error> {
         let retrieval = (try? await memoryCoordinator.retrieve(
             MemoryRetrievalRequest(

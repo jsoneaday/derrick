@@ -10,7 +10,7 @@ public struct MemorySessionKey: Hashable, Codable, Sendable {
     }
 }
 
-public enum MemoryScope: String, Codable, Sendable {
+public enum MemoryAccessibility: String, Codable, Sendable {
     case `private`
     case shared
     case broadcast
@@ -117,14 +117,14 @@ public struct MemorySummary: Hashable, Codable, Sendable {
 public struct MemoryRecord: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public let pair: PromptResponsePair
-    public let scope: MemoryScope
+    public let scope: MemoryAccessibility
     public var compressedSummary: MemorySummary?
     public var detailedSummary: MemorySummary?
 
     public init(
         id: UUID = UUID(),
         pair: PromptResponsePair,
-        scope: MemoryScope = .private,
+        scope: MemoryAccessibility = .private,
         compressedSummary: MemorySummary? = nil,
         detailedSummary: MemorySummary? = nil
     ) {
@@ -144,7 +144,7 @@ public struct MemoryWorkingEntry: Identifiable, Hashable, Codable, Sendable {
     public var rawPair: PromptResponsePair?
     public var detailedSummary: MemorySummary?
     public var compressedSummary: MemorySummary?
-    public let scope: MemoryScope
+    public let scope: MemoryAccessibility
 
     public init(
         id: UUID = UUID(),
@@ -154,7 +154,7 @@ public struct MemoryWorkingEntry: Identifiable, Hashable, Codable, Sendable {
         rawPair: PromptResponsePair? = nil,
         detailedSummary: MemorySummary? = nil,
         compressedSummary: MemorySummary? = nil,
-        scope: MemoryScope = .private
+        scope: MemoryAccessibility = .private
     ) {
         self.id = id
         self.sessionKey = sessionKey

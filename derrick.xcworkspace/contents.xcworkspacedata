@@ -5,6 +5,9 @@
       location = "group:ui/ui.xcodeproj">
    </FileRef>
    <FileRef
+      location = "group:packages/DBRepository">
+   </FileRef>
+   <FileRef
       location = "group:packages/LLMAgentClient">
    </FileRef>
    <FileRef

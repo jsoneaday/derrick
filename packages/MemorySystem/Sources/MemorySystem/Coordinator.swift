@@ -6,7 +6,7 @@ public struct MemoryIngestInput: Hashable, Codable, Sendable {
     public let prompt: String
     public let completion: String
     public let toolCalls: [ToolCallRecord]
-    public let scope: MemoryScope
+    public let scope: MemoryAccessibility
 
     public init(
         sessionKey: MemorySessionKey,
@@ -14,7 +14,7 @@ public struct MemoryIngestInput: Hashable, Codable, Sendable {
         prompt: String,
         completion: String,
         toolCalls: [ToolCallRecord] = [],
-        scope: MemoryScope = .private
+        scope: MemoryAccessibility = .private
     ) {
         self.sessionKey = sessionKey
         self.parentAgentID = parentAgentID
