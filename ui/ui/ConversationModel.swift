@@ -5,10 +5,13 @@ final class ConversationModel {
     let sessionKey: MemorySessionKey
     let memoryCoordinator: MemoryCoordinator
     let model: GeminiModel
+    let databaseDirectoryURL: URL
 
     init() {
         self.sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
         self.model = .gemini31FlashLite
+        self.databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui"))
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
 
         let summarizer = GeminiMemorySummarizer()
         self.memoryCoordinator = MemoryCoordinator(

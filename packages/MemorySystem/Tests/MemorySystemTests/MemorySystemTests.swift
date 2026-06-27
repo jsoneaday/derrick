@@ -56,4 +56,42 @@ import Testing
         #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-3.1-flash-lite") == 50_000)
         #expect(MemoryBudget.maxTokenCount(forProvider: "openai", modelName: "gpt-5-mini") == 25_000)
     }
+
+    @Test func retrievalPrefersCompactedWorkingSetStateOverPersistedRecord() async throws {
+        let coordinator = MemoryCoordinator(
+            store: InMemoryMemoryStore(),
+            summarizer: StubMemorySummarizer(),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 1)
+        )
+        let sessionKey = MemorySessionKey(sessionID: "s", agentID: "a")
+
+        try await coordinator.ingest(
+            MemoryIngestInput(
+                sessionKey: sessionKey,
+                prompt: "prompt",
+                completion: "completion"
+            )
+        )
+
+        let result = try await coordinator.retrieve(MemoryRetrievalRequest(sessionKey: sessionKey, limit: 10))
+
+        #expect(result.entries.count == 1)
+        #expect(result.entries.first?.rawPair == nil)
+    }
+}
+
+private struct StubMemorySummarizer: MemorySummarizer {
+    func summarize(_ pair: PromptResponsePair) async throws -> MemorySummaryPair {
+        let summary = MemorySummary(
+            text: "summary",
+            metadata: MemorySummaryMetadata(
+                keywords: [],
+                compressionRatio: 0.5,
+                sourceTokenCount: pair.totalTokenCount,
+                summaryTokenCount: 1
+            )
+        )
+        return MemorySummaryPair(layer1: summary, layer2: summary)
+    }
 }

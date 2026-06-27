@@ -14,6 +14,7 @@ let package = Package(
     targets: [
         .target(
             name: "DBRepository",
+            exclude: ["Resources"],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(

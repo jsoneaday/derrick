@@ -31,7 +31,10 @@ public enum DBRepositoryError: Error, LocalizedError, Equatable, Sendable {
     case invalidDatabaseDirectory(URL)
     case sqliteOpenFailed(String)
     case sqliteCloseFailed(String)
+    case sqliteMigrationFailed(String)
     case authenticationFailed
+    case unsupportedMigrationVersion(Int)
+    case missingMigrationResource(String)
 
     public var errorDescription: String? {
         switch self {
@@ -41,8 +44,14 @@ public enum DBRepositoryError: Error, LocalizedError, Equatable, Sendable {
             return "Unable to open the SQLite database: \(message)"
         case .sqliteCloseFailed(let message):
             return "Unable to close the SQLite database: \(message)"
+        case .sqliteMigrationFailed(let message):
+            return "Unable to migrate the SQLite database: \(message)"
         case .authenticationFailed:
             return "The supplied credentials do not match the repository configuration."
+        case .unsupportedMigrationVersion(let version):
+            return "Unsupported migration version: \(version)"
+        case .missingMigrationResource(let name):
+            return "Missing migration resource: \(name)"
         }
     }
 }
@@ -58,32 +67,16 @@ public actor DBRepository {
         configuration.databaseFileURL
     }
 
+    public var databaseDirectoryURL: URL {
+        configuration.databaseDirectoryURL
+    }
+
     public var applicationName: String {
         configuration.applicationName
     }
 
     public func createEmptyDatabaseIfNeeded(username: String, password: String) throws -> URL {
-        try authenticate(username: username, password: password)
-        try Self.ensureDirectory(at: configuration.databaseDirectoryURL)
-
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE
-        let status = sqlite3_open_v2(configuration.databaseFileURL.path, &handle, flags, nil)
-        guard status == SQLITE_OK else {
-            let message = String(cString: sqlite3_errstr(status))
-            if let handle {
-                sqlite3_close(handle)
-            }
-            throw DBRepositoryError.sqliteOpenFailed(message)
-        }
-
-        let closeStatus = sqlite3_close(handle)
-        guard closeStatus == SQLITE_OK else {
-            let message = String(cString: sqlite3_errstr(closeStatus))
-            throw DBRepositoryError.sqliteCloseFailed(message)
-        }
-
-        return configuration.databaseFileURL
+        try migrate(username: username, password: password)
     }
 
     public func authenticate(username: String, password: String) throws {
@@ -92,7 +85,7 @@ public actor DBRepository {
         }
     }
 
-    private static func ensureDirectory(at url: URL) throws {
+    static func ensureDirectory(at url: URL) throws {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         if exists && isDirectory.boolValue {

@@ -146,7 +146,7 @@ public actor MemoryCoordinator {
 
     private func merge(entries: [MemoryWorkingEntry]) -> [MemoryWorkingEntry] {
         var byID: [UUID: MemoryWorkingEntry] = [:]
-        for entry in entries.sorted(by: { $0.createdAt < $1.createdAt }) {
+        for entry in entries.reversed() {
             byID[entry.id] = entry
         }
         return byID.values.sorted(by: { $0.createdAt < $1.createdAt })
