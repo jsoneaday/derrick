@@ -90,7 +90,7 @@ public actor MemoryCoordinator {
                 )
             }
 
-        let combined = merge(entries: local + persisted)
+        let combined = merge(entries: persisted + local)
         let ranked = rank(entries: combined, query: request.query)
         let selected = Array(ranked.prefix(request.limit))
         let context = renderContext(for: selected)
@@ -109,14 +109,17 @@ public actor MemoryCoordinator {
             case .dropRaw(let id):
                 if let index = entries.firstIndex(where: { $0.id == id }) {
                     entries[index].rawPair = nil
+                    try await persist(entryID: id, in: entries)
                 }
             case .dropDetailed(let id):
                 if let index = entries.firstIndex(where: { $0.id == id }) {
                     entries[index].detailedSummary = nil
+                    try await persist(entryID: id, in: entries)
                 }
             case .dropCompressed(let id):
                 if let index = entries.firstIndex(where: { $0.id == id }) {
                     entries[index].compressedSummary = nil
+                    try await persist(entryID: id, in: entries)
                 }
             }
         }
@@ -134,23 +137,37 @@ public actor MemoryCoordinator {
         entries[index].detailedSummary = summaries.layer2
         entries[index].compressedSummary = summaries.layer1
 
-        try await store.upsert(
-            MemoryRecord(
-                id: raw.id,
-                pair: raw,
-                scope: entries[index].scope,
-                compressedSummary: summaries.layer1,
-                detailedSummary: summaries.layer2
-            )
-        )
+        try await persist(entryID: entryID, in: entries)
     }
 
     private func merge(entries: [MemoryWorkingEntry]) -> [MemoryWorkingEntry] {
         var byID: [UUID: MemoryWorkingEntry] = [:]
-        for entry in entries.reversed() {
+        for entry in entries {
             byID[entry.id] = entry
         }
         return byID.values.sorted(by: { $0.createdAt < $1.createdAt })
+    }
+
+    private func persist(entryID: UUID, in entries: [MemoryWorkingEntry]) async throws {
+        guard let entry = entries.first(where: { $0.id == entryID }) else {
+            return
+        }
+
+        let existing = try await store.record(id: entryID)
+        let pair = entry.rawPair ?? existing?.pair
+        guard let pair else {
+            return
+        }
+
+        try await store.upsert(
+            MemoryRecord(
+                id: entry.id,
+                pair: pair,
+                scope: entry.scope,
+                compressedSummary: entry.compressedSummary,
+                detailedSummary: entry.detailedSummary
+            )
+        )
     }
 
     private func rank(entries: [MemoryWorkingEntry], query: String?) -> [MemoryWorkingEntry] {
