@@ -127,7 +127,7 @@ struct ContentView: View {
         SecretStore(account: geminiKeychainAccount)
     }
 
-    @State private var conversation = ConversationModel()
+    @State private var conversation: ConversationModel?
     @State private var prompt = "Write a short haiku about layered architecture."
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
@@ -145,6 +145,10 @@ struct ContentView: View {
             Text("Send a prompt to `\(modelIdentifier)` and stream the response live.")
                 .foregroundStyle(.secondary)
 
+            if conversation == nil {
+                ProgressView("Loading session store...")
+            }
+
             TextField("Prompt", text: $prompt, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(4, reservesSpace: true)
@@ -154,7 +158,7 @@ struct ContentView: View {
                     startStreaming()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isStreaming || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(conversation == nil || isStreaming || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button("Clear") {
                     turns.removeAll()
@@ -225,6 +229,10 @@ struct ContentView: View {
             apiKeyPrompt
         }
         .task {
+            if conversation == nil {
+                conversation = await ConversationModel.makeDefault()
+            }
+
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
@@ -263,6 +271,11 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
+        guard let conversation else {
+            errorMessage = "Session store is still loading."
+            return
+        }
+
         guard let apiKey = resolveAPIKey() else {
             errorMessage = "API key is missing. Enter it for Gemini."
             shouldResumeAfterSavingKey = true
