@@ -1,7 +1,7 @@
 import Foundation
 import MCP
 
-public struct MCPToolDescriptor: Hashable, Sendable {
+public struct MCPToolDescriptor: Hashable, Codable, Sendable {
     public let name: String
     public let description: String?
 
@@ -11,7 +11,7 @@ public struct MCPToolDescriptor: Hashable, Sendable {
     }
 }
 
-public struct MCPToolResult: Hashable, Sendable {
+public struct MCPToolResult: Hashable, Codable, Sendable {
     public let content: String
     public let isError: Bool
 
@@ -21,10 +21,43 @@ public struct MCPToolResult: Hashable, Sendable {
     }
 }
 
+public struct MCPToolInvocation: Hashable, Codable, Sendable {
+    public let name: String
+    public let arguments: [String: Value]
+
+    public init(name: String, arguments: [String: Value] = [:]) {
+        self.name = name
+        self.arguments = arguments
+    }
+}
+
+public struct MCPToolBatchRequest: Hashable, Codable, Sendable {
+    public let invocations: [MCPToolInvocation]
+    public let filterQuery: String?
+
+    public init(invocations: [MCPToolInvocation], filterQuery: String? = nil) {
+        self.invocations = invocations
+        self.filterQuery = filterQuery
+    }
+}
+
+public struct MCPToolBatchResult: Hashable, Codable, Sendable {
+    public let results: [MCPToolResult]
+    public let combinedContent: String
+    public let isError: Bool
+
+    public init(results: [MCPToolResult], combinedContent: String, isError: Bool = false) {
+        self.results = results
+        self.combinedContent = combinedContent
+        self.isError = isError
+    }
+}
+
 public protocol MCPBackend: Sendable {
     var identifier: String { get }
     func searchTools(matching query: String) async throws -> [MCPToolDescriptor]
     func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult
+    func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult
 }
 
 public actor MCPClient {
@@ -40,6 +73,10 @@ public actor MCPClient {
 
     public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
         try await backend.callTool(named: name, arguments: arguments)
+    }
+
+    public func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
+        try await backend.batchCallTools(request)
     }
 }
 
@@ -81,6 +118,10 @@ public actor MCPOfficialBackend: MCPBackend {
     }
 
     public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
+        if let descriptors = try? await searchViaTool(query: query) {
+            return descriptors
+        }
+
         let (tools, _) = try await client.listTools()
         let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return tools.compactMap { tool in
@@ -104,5 +145,60 @@ public actor MCPOfficialBackend: MCPBackend {
             }
         }
         return MCPToolResult(content: pieces.joined(separator: "\n"), isError: isError ?? false)
+    }
+
+    public func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
+        if let batch = try? await batchViaTool(request) {
+            return batch
+        }
+
+        var results: [MCPToolResult] = []
+        for invocation in request.invocations {
+            results.append(try await callTool(named: invocation.name, arguments: invocation.arguments))
+        }
+
+        return MCPToolBatchResult(
+            results: results,
+            combinedContent: Self.combine(results: results, filterQuery: request.filterQuery),
+            isError: results.contains(where: \.isError)
+        )
+    }
+
+    private func searchViaTool(query: String) async throws -> [MCPToolDescriptor] {
+        let result = try await callTool(named: "tool_search", arguments: ["query": .string(query)])
+        let data = Data(result.content.utf8)
+        return try JSONDecoder().decode([MCPToolDescriptor].self, from: data)
+    }
+
+    private func batchViaTool(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
+        let payload = try JSONEncoder().encode(request)
+        let result = try await callTool(
+            named: "tool_batch",
+            arguments: [
+                "request_json": .string(String(decoding: payload, as: UTF8.self))
+            ]
+        )
+        let data = Data(result.content.utf8)
+        return try JSONDecoder().decode(MCPToolBatchResult.self, from: data)
+    }
+
+    private static func combine(results: [MCPToolResult], filterQuery: String?) -> String {
+        let joined = results.map(\.content).joined(separator: "\n\n")
+        let trimmedQuery = filterQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedQuery.isEmpty else {
+            return joined
+        }
+
+        let tokens = trimmedQuery.lowercased().split(whereSeparator: \.isWhitespace).map(String.init).filter { !$0.isEmpty }
+        guard !tokens.isEmpty else {
+            return joined
+        }
+
+        let lines = joined.components(separatedBy: .newlines)
+        let filtered = lines.filter { line in
+            let lowered = line.lowercased()
+            return tokens.allSatisfy { lowered.contains($0) }
+        }
+        return filtered.joined(separator: "\n")
     }
 }

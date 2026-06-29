@@ -1,15 +1,6 @@
 import Foundation
 import MCP
-
-public struct MCPServerTool: Hashable, Sendable {
-    public let name: String
-    public let description: String
-
-    public init(name: String, description: String) {
-        self.name = name
-        self.description = description
-    }
-}
+import MCPClient
 
 public actor MCPToolRegistry {
     public typealias Handler = @Sendable ([String: Value]) async throws -> String
@@ -22,11 +13,11 @@ public actor MCPToolRegistry {
         handlers[name] = (description, handler)
     }
 
-    public func search(matching query: String) -> [MCPServerTool] {
+    public func search(matching query: String) -> [MCPToolDescriptor] {
         let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return handlers.compactMap { name, entry in
             if lowered.isEmpty || name.lowercased().contains(lowered) || entry.description.lowercased().contains(lowered) {
-                return MCPServerTool(name: name, description: entry.description)
+                return MCPToolDescriptor(name: name, description: entry.description)
             }
             return nil
         }
@@ -38,6 +29,50 @@ public actor MCPToolRegistry {
             throw NSError(domain: "MCPServer", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unknown tool \(name)."])
         }
         return try await entry.handler(arguments)
+    }
+
+    public func batchCall(_ request: MCPToolBatchRequest) async -> MCPToolBatchResult {
+        var results: [MCPToolResult] = []
+
+        for invocation in request.invocations {
+            do {
+                let content = try await call(name: invocation.name, arguments: invocation.arguments)
+                results.append(MCPToolResult(content: content))
+            } catch {
+                print("[MCPServer] batch call failed for \(invocation.name): \(error)")
+                results.append(MCPToolResult(content: error.localizedDescription, isError: true))
+            }
+        }
+
+        return MCPToolBatchResult(
+            results: results,
+            combinedContent: Self.combine(results: results, filterQuery: request.filterQuery),
+            isError: results.contains(where: \.isError)
+        )
+    }
+
+    private static func combine(results: [MCPToolResult], filterQuery: String?) -> String {
+        let joined = results.map(\.content).joined(separator: "\n\n")
+        let trimmedQuery = filterQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedQuery.isEmpty else {
+            return joined
+        }
+
+        let tokens = trimmedQuery
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else {
+            return joined
+        }
+
+        let lines = joined.components(separatedBy: .newlines)
+        let filtered = lines.filter { line in
+            let lowered = line.lowercased()
+            return tokens.allSatisfy { lowered.contains($0) }
+        }
+        return filtered.joined(separator: "\n")
     }
 }
 
@@ -57,6 +92,24 @@ public final class MCPServerHost: @unchecked Sendable {
 
     public func registerTool(name: String, description: String, handler: @escaping MCPToolRegistry.Handler) async {
         await registry.register(name: name, description: description, handler: handler)
+    }
+
+    public func searchRegisteredTools(matching query: String) async -> [MCPToolDescriptor] {
+        await registry.search(matching: query)
+    }
+
+    public func executeBatch(_ request: MCPToolBatchRequest) async -> MCPToolBatchResult {
+        await registry.batchCall(request)
+    }
+
+    public func registerSessionMemorySearchTool(
+        description: String = "Search session memory for relevant context.",
+        handler: @escaping @Sendable (String) async throws -> String
+    ) async {
+        await registry.register(name: "session_memory_search", description: description) { arguments in
+            let query = arguments["query"]?.stringValue ?? ""
+            return try await handler(query)
+        }
     }
 
     public func startStdio() async throws {
@@ -98,6 +151,19 @@ public final class MCPServerHost: @unchecked Sendable {
                         ]),
                         "required": .array([.string("name")])
                     ])
+                ),
+                Tool(
+                    name: "tool_batch",
+                    description: "Call multiple registered tools and aggregate the results.",
+                    inputSchema: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "request_json": .object([
+                                "type": .string("string")
+                            ])
+                        ]),
+                        "required": .array([.string("request_json")])
+                    ])
                 )
             ]
             return .init(tools: tools)
@@ -108,8 +174,7 @@ public final class MCPServerHost: @unchecked Sendable {
             case "tool_search":
                 let query = params.arguments?["query"]?.stringValue ?? ""
                 let results = await registry.search(matching: query)
-                let lines = results.map { "\($0.name) - \($0.description)" }
-                return .init(content: [.text(text: lines.joined(separator: "\n"), annotations: nil, _meta: nil)], isError: false)
+                return .init(content: [.text(text: Self.encodeJSON(results), annotations: nil, _meta: nil)], isError: false)
 
             case "tool":
                 let name = params.arguments?["name"]?.stringValue ?? ""
@@ -117,6 +182,12 @@ public final class MCPServerHost: @unchecked Sendable {
                 let decoded = Self.decodeArguments(from: input)
                 let result = try await registry.call(name: name, arguments: decoded)
                 return .init(content: [.text(text: result, annotations: nil, _meta: nil)], isError: false)
+
+            case "tool_batch":
+                let input = params.arguments?["request_json"]?.stringValue ?? "{}"
+                let request = Self.decodeBatchRequest(from: input)
+                let result = await registry.batchCall(request)
+                return .init(content: [.text(text: Self.encodeJSON(result), annotations: nil, _meta: nil)], isError: false)
 
             default:
                 return .init(content: [.text(text: "Unknown tool \(params.name).", annotations: nil, _meta: nil)], isError: true)
@@ -130,5 +201,20 @@ public final class MCPServerHost: @unchecked Sendable {
             return [:]
         }
         return object
+    }
+
+    private static func decodeBatchRequest(from input: String) -> MCPToolBatchRequest {
+        guard let data = input.data(using: .utf8),
+              let request = try? JSONDecoder().decode(MCPToolBatchRequest.self, from: data) else {
+            return MCPToolBatchRequest(invocations: [])
+        }
+        return request
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return "[]"
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 }

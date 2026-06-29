@@ -11,6 +11,25 @@ import MCP
 
         #expect(results.map(\.name) == ["tool_search"])
     }
+
+    @Test func batchCallToolsAggregatesResults() async throws {
+        let backend = InMemoryBackend()
+        let client = MCPClient(backend: backend)
+
+        let request = MCPToolBatchRequest(
+            invocations: [
+                MCPToolInvocation(name: "tool_search", arguments: ["query": .string("search")]),
+                MCPToolInvocation(name: "tool", arguments: ["name": .string("tool_call"), "arguments": .string("{}")])
+            ],
+            filterQuery: "tool"
+        )
+
+        let result = try await client.batchCallTools(request)
+
+        #expect(result.results.count == 2)
+        #expect(result.combinedContent.contains("tool_search"))
+        #expect(result.isError == false)
+    }
 }
 
 private struct InMemoryBackend: MCPBackend {
@@ -27,5 +46,16 @@ private struct InMemoryBackend: MCPBackend {
 
     func callTool(named name: String, arguments: [String : Value]) async throws -> MCPToolResult {
         MCPToolResult(content: "\(name): \(arguments.count)")
+    }
+
+    func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
+        let results = request.invocations.map { invocation in
+            MCPToolResult(content: "\(invocation.name): \(invocation.arguments.count)")
+        }
+        return MCPToolBatchResult(
+            results: results,
+            combinedContent: results.map(\.content).joined(separator: "\n"),
+            isError: false
+        )
     }
 }
