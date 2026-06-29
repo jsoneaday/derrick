@@ -24,7 +24,6 @@ public extension DBRepository {
                     try Self.applyMemoryMigration(version: version, isUp: false, on: handle)
                 }
             }
-
             return databaseURL
         }
     }

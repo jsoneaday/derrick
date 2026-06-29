@@ -6,8 +6,8 @@ public enum MemoryDatabaseSchema {
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
         let fileSuffix = isUp ? "up" : "down"
-        let fileURL = migrationsDirectoryURL()
-            .appendingPathComponent("\(migrationName).\(fileSuffix).sql")
+        let resourceName = "\(migrationName).\(fileSuffix)"
+        let fileURL = try resourceURL(name: resourceName)
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw CocoaError(.fileNoSuchFile)
@@ -31,10 +31,11 @@ public enum MemoryDatabaseSchema {
         }
     }
 
-    private static func migrationsDirectoryURL() -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Resources", isDirectory: true)
-            .appendingPathComponent("Migrations", isDirectory: true)
+    private static func resourceURL(name: String) throws -> URL {
+        guard let fileURL = Bundle.module.url(forResource: name, withExtension: "sql") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        return fileURL
     }
 }

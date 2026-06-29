@@ -15,7 +15,9 @@ let package = Package(
         .target(
             name: "MemorySystem",
             path: "Sources/MemorySystem",
-            exclude: ["Resources"]
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "MemorySystemTests",

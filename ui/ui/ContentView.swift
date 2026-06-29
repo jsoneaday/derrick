@@ -122,6 +122,8 @@ struct ContentView: View {
     private let modelIdentifier = "gemini-3.1-flash-lite"
     private let geminiKeychainAccount = "gemini-api-key"
     private let secretResolver = AppSecretResolver()
+    private let isDebugEnabled = ProcessInfo.processInfo.environment["DEBUG_ENABLED"]?.lowercased() == "true"
+    @ObservedObject private var debugLogStore = DebugLogStore.shared
 
     private var secretStore: SecretStore {
         SecretStore(account: geminiKeychainAccount)
@@ -177,6 +179,10 @@ struct ContentView: View {
                 Spacer()
             }
 
+            if isDebugEnabled {
+                debugPanel
+            }
+
             if let errorMessage {
                 HStack(alignment: .top, spacing: 12) {
                     Text(errorMessage)
@@ -197,9 +203,20 @@ struct ContentView: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(turns) { turn in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Prompt")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text("Prompt")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                Spacer()
+
+                                Button("Copy All") {
+                                    copyTurn(turn)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
                             Text(turn.prompt)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
@@ -229,14 +246,124 @@ struct ContentView: View {
             apiKeyPrompt
         }
         .task {
+            if isDebugEnabled {
+                await MainActor.run {
+                    debugLogStore.log("Loading session store")
+                }
+            }
+
             if conversation == nil {
                 conversation = await ConversationModel.makeDefault()
+            }
+
+            if isDebugEnabled {
+                await MainActor.run {
+                    debugLogStore.log("Session store ready")
+                }
             }
 
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
         }
+    }
+
+    private func copyTurn(_ turn: ChatTurn) {
+        let clipboardText = [
+            "Prompt:",
+            turn.prompt,
+            "",
+            "Completion:",
+            turn.response
+        ]
+        .joined(separator: "\n")
+
+        copyToPasteboard(clipboardText)
+    }
+
+    private var debugPanel: some View {
+        let databaseURL = conversation?.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3")
+        let fileExists = databaseURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        let maxHeight = (NSScreen.main?.visibleFrame.height ?? 800) * 0.4
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Debug")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("DEBUG_ENABLED")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let conversation {
+                HStack(spacing: 12) {
+                    Text("DB")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(conversation.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3").path)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                HStack(spacing: 12) {
+                    Text("Exists")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(fileExists ? "yes" : "no")
+                        .font(.caption.monospaced())
+                }
+            } else {
+                Text("Session store is loading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(debugLogStore.entries) { entry in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(debugLogStore.formattedTimestamp(for: entry))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text(entry.message)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                            .id(entry.id)
+                        }
+
+                        if debugLogStore.entries.isEmpty {
+                            Text("No debug logs yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                }
+                .onChange(of: debugLogStore.entries.count) { _, _ in
+                    guard let lastID = debugLogStore.entries.last?.id else {
+                        return
+                    }
+
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(lastID, anchor: .bottom)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .font(.callout)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
+        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var apiKeyPrompt: some View {
@@ -304,6 +431,9 @@ struct ContentView: View {
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
+                    if isDebugEnabled {
+                        debugLog("Streaming failed: \(error)")
+                    }
                 }
             }
 
@@ -338,6 +468,9 @@ struct ContentView: View {
             }
         } catch {
             errorMessage = error.localizedDescription
+            if isDebugEnabled {
+                debugLog("API key save failed: \(error)")
+            }
         }
     }
 

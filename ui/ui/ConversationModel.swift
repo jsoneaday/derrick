@@ -8,17 +8,20 @@ final class ConversationModel {
     let memoryCoordinator: MemoryCoordinator
     let model: GeminiModel
     let databaseDirectoryURL: URL
+    let ragInstructions: String
 
     private init(
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
         model: GeminiModel,
-        databaseDirectoryURL: URL
+        databaseDirectoryURL: URL,
+        ragInstructions: String
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
         self.model = model
         self.databaseDirectoryURL = databaseDirectoryURL
+        self.ragInstructions = ragInstructions
     }
 
     static func makeDefault() async -> ConversationModel {
@@ -26,14 +29,21 @@ final class ConversationModel {
         let model: GeminiModel = .gemini31FlashLite
         let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
+        let ragInstructions = PromptResources.conversationRAGInstructions
+        let summarizerInstructions = PromptResources.memorySummarizerInstructions
 
         let budget = MemoryBudget(provider: model.id.provider, modelName: model.id.rawValue)
-        let summarizer = GeminiMemorySummarizer()
+        let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)
+        debugLog("Memory bootstrap started")
+        debugLog("Database directory: \(databaseDirectoryURL.path)")
 
-        if let repository = try? await makeMemoryStore(
-            applicationName: "ui",
-            databaseDirectoryURL: databaseDirectoryURL
-        ) {
+        do {
+            let repository = try await makeMemoryStore(
+                applicationName: "ui",
+                databaseDirectoryURL: databaseDirectoryURL
+            )
+            let repositoryURL = await repository.databaseURL
+            debugLog("Memory store ready: \(repositoryURL.path)")
             let memoryCoordinator = MemoryCoordinator(
                 store: repository,
                 summarizer: summarizer,
@@ -44,10 +54,14 @@ final class ConversationModel {
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
                 model: model,
-                databaseDirectoryURL: await repository.databaseDirectoryURL
+                databaseDirectoryURL: await repository.databaseDirectoryURL,
+                ragInstructions: ragInstructions
             )
+        } catch {
+            debugLog("Memory bootstrap failed: \(error)")
         }
 
+        debugLog("Falling back to in-memory session store")
         let memoryCoordinator = MemoryCoordinator(
             store: InMemoryMemoryStore(),
             summarizer: summarizer,
@@ -58,7 +72,8 @@ final class ConversationModel {
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
             model: model,
-            databaseDirectoryURL: databaseDirectoryURL
+            databaseDirectoryURL: databaseDirectoryURL,
+            ragInstructions: ragInstructions
         )
     }
 
@@ -88,6 +103,7 @@ final class ConversationModel {
             memoryCoordinator: memoryCoordinator,
             client: client,
             model: model,
+            ragInstructions: ragInstructions,
             retrievalLimit: 5
         )
 

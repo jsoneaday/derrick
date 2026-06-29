@@ -10,14 +10,17 @@ actor GeminiMemorySummarizer: MemorySummarizer {
 
     private let model: GeminiModel
     private let fallback: any MemorySummarizer
+    private let systemPrompt: String
     private let keywordFilter = MemoryKeywordFilter()
 
     init(
         model: GeminiModel = .gemini25FlashLite,
+        systemPrompt: String,
         fallback: any MemorySummarizer = DefaultMemorySummarizer()
     ) {
         self.model = model
         self.fallback = fallback
+        self.systemPrompt = systemPrompt
     }
 
     func summarize(_ pair: PromptResponsePair) async throws -> MemorySummaryPair {
@@ -43,7 +46,7 @@ actor GeminiMemorySummarizer: MemorySummarizer {
         let client = GeminiAgentClient(provider: GeminiProvider(apiKey: apiKey))
         let request = AgentRequest.prompt(
             Self.userPrompt(for: pair),
-            system: Self.systemPrompt,
+            system: systemPrompt,
             temperature: 0
         )
 
@@ -82,19 +85,6 @@ actor GeminiMemorySummarizer: MemorySummarizer {
                 summaryTokenCount: summaryTokenCount
             )
         )
-    }
-
-    private static var systemPrompt: String {
-        [
-            "You compress a completed prompt/response pair into durable memory.",
-            "Return only valid JSON with exactly these keys: layer1Text, layer2Text, keywords.",
-            "layer1Text must be highly compressed and focus on intent and durable facts.",
-            "layer2Text must be less compressed and include the prompt, the response, important decisions, unresolved items, and any tool use.",
-            "keywords must be semantic intent keywords only.",
-            "Do not include tool names, model names, provider names, or generic metadata fields in keywords unless they are part of the user's intent.",
-            "Do not wrap the answer in markdown fences. Do not add commentary."
-        ]
-        .joined(separator: "\n")
     }
 
     private static func userPrompt(for pair: PromptResponsePair) -> String {

@@ -14,6 +14,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
     let memoryCoordinator: MemoryCoordinator
     let client: Client
     let model: Client.Model
+    let ragInstructions: String
     let retrievalLimit: Int
 
     init(
@@ -21,12 +22,14 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         memoryCoordinator: MemoryCoordinator,
         client: Client,
         model: Client.Model,
+        ragInstructions: String,
         retrievalLimit: Int = 5
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
         self.client = client
         self.model = model
+        self.ragInstructions = ragInstructions
         self.retrievalLimit = retrievalLimit
     }
 
@@ -82,16 +85,15 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         }
     }
 
-    private func systemPrompt(from memoryContext: String) -> String? {
+    private func systemPrompt(from memoryContext: String) -> String {
         let trimmed = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return nil
-        }
+        let memoryBlock = trimmed.isEmpty
+            ? "Retrieved session memory: none."
+            : ["Retrieved session memory:", trimmed].joined(separator: "\n\n")
 
         return [
-            "Relevant memory from this session:",
-            trimmed,
-            "Use this only when it is relevant to the current prompt."
+            ragInstructions,
+            memoryBlock
         ]
         .joined(separator: "\n\n")
     }
