@@ -7,6 +7,7 @@ struct DebugLogEntry: Identifiable, Hashable {
     let message: String
 }
 
+/// Stores logs in memory in order to display in UI
 final class DebugLogStore: ObservableObject {
     static let shared = DebugLogStore()
 

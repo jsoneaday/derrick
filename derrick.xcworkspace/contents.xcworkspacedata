@@ -23,6 +23,9 @@
       location = "group:packages/MemorySystem">
    </FileRef>
    <FileRef
+      location = "group:packages/Lib">
+   </FileRef>
+   <FileRef
       location = "group:.gitignore">
    </FileRef>
    <FileRef
