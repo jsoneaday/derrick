@@ -24,13 +24,13 @@ final class ConversationModel {
         self.ragInstructions = ragInstructions
     }
 
-    static func makeDefault() async -> ConversationModel {
+    static func makeDefault() async throws -> ConversationModel {
         let sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
         let model: GeminiModel = .gemini31FlashLite
         let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
-        let ragInstructions = PromptResources.conversationRAGInstructions
-        let summarizerInstructions = PromptResources.memorySummarizerInstructions
+        let ragInstructions = try PromptResources.conversationRAGInstructions()
+        let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
 
         let budget = MemoryBudget(provider: model.id.provider, modelName: model.id.rawValue)
         let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)

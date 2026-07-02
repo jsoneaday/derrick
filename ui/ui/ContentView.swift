@@ -118,6 +118,87 @@ private struct MarkdownResponseView: View {
     }
 }
 
+private struct PromptInputView: NSViewRepresentable {
+    @Binding var text: String
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = PromptTextView()
+        textView.delegate = context.coordinator
+        textView.onSubmit = onSubmit
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.string = text
+        textView.textContainerInset = NSSize(width: 6, height: 8)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .bezelBorder
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? PromptTextView else {
+            return
+        }
+
+        textView.onSubmit = onSubmit
+
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else {
+                return
+            }
+
+            text = textView.string
+        }
+    }
+}
+
+private final class PromptTextView: NSTextView {
+    var onSubmit: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if (event.keyCode == 36 || event.keyCode == 76),
+           event.modifierFlags.intersection([.option, .shift]).isEmpty {
+            onSubmit?()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+}
+
 struct ContentView: View {
     private let modelIdentifier = "gemini-3.1-flash-lite"
     private let geminiKeychainAccount = "gemini-api-key"
@@ -139,6 +220,12 @@ struct ContentView: View {
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
 
+    private var canSendPrompt: Bool {
+        conversation != nil
+            && !isStreaming
+            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Gemini Stream")
@@ -151,16 +238,22 @@ struct ContentView: View {
                 ProgressView("Loading session store...")
             }
 
-            TextField("Prompt", text: $prompt, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(4, reservesSpace: true)
+            PromptInputView(text: $prompt) {
+                guard canSendPrompt else {
+                    return
+                }
+
+                startStreaming()
+            }
+            .frame(minHeight: 90)
+            .disabled(conversation == nil || isStreaming)
 
             HStack {
                 Button(isStreaming ? "Streaming..." : "Send") {
                     startStreaming()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(conversation == nil || isStreaming || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSendPrompt)
 
                 Button("Clear") {
                     turns.removeAll()
@@ -253,7 +346,16 @@ struct ContentView: View {
             }
 
             if conversation == nil {
-                conversation = await ConversationModel.makeDefault()
+                do {
+                    conversation = try await ConversationModel.makeDefault()
+                } catch {
+                    errorMessage = error.localizedDescription
+                    if isDebugEnabled {
+                        await MainActor.run {
+                            debugLog("Session store load failed: \(error)")
+                        }
+                    }
+                }
             }
 
             if isDebugEnabled {
