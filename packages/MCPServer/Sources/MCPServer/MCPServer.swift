@@ -82,6 +82,18 @@ public actor MCPToolRegistry {
     }
 }
 
+public struct SessionMemorySearchArguments: Sendable {
+    public let query: String?
+    public let limit: Int
+    public let page: Int
+
+    public init(query: String? = nil, limit: Int = 10, page: Int = 1) {
+        self.query = query
+        self.limit = limit
+        self.page = page
+    }
+}
+
 public final class MCPServerHost: @unchecked Sendable {
     private let server: Server
     private let registry: MCPToolRegistry
@@ -108,8 +120,8 @@ public final class MCPServerHost: @unchecked Sendable {
     }
 
     public func registerSessionMemorySearchTool(
-        description: String = "Search session memory for relevant context.",
-        handler: @escaping @Sendable (String) async throws -> String
+        description: String = "Search prior session memory entries with optional query and paging.",
+        handler: @escaping @Sendable (SessionMemorySearchArguments) async throws -> String
     ) async {
         await registry.register(
             name: "session_memory_search",
@@ -119,14 +131,28 @@ public final class MCPServerHost: @unchecked Sendable {
                 "properties": .object([
                     "query": .object([
                         "type": .string("string"),
-                        "description": .string("The memory search query.")
+                        "description": .string("Optional search text for matching prior memory entries.")
+                    ]),
+                    "limit": .object([
+                        "type": .string("number"),
+                        "description": .string("Number of prior entries to return per page.")
+                    ]),
+                    "page": .object([
+                        "type": .string("number"),
+                        "description": .string("Page number, starting at 1.")
                     ])
                 ]),
-                "required": .array([.string("query")])
+                "required": .array([.string("limit"), .string("page")])
             ])
         ) { arguments in
-            let query = arguments["query"]?.stringValue ?? ""
-            return try await handler(query)
+            let data = try JSONEncoder().encode(arguments)
+            let payload = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            let searchArguments = SessionMemorySearchArguments(
+                query: payload["query"] as? String,
+                limit: Self.integerValue(from: payload["limit"]) ?? 10,
+                page: Self.integerValue(from: payload["page"]) ?? 1
+            )
+            return try await handler(searchArguments)
         }
     }
 
@@ -252,6 +278,19 @@ public final class MCPServerHost: @unchecked Sendable {
             return "[]"
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func integerValue(from value: Any?) -> Int? {
+        switch value {
+        case let int as Int:
+            return int
+        case let number as NSNumber:
+            return number.intValue
+        case let string as String:
+            return Int(string)
+        default:
+            return nil
+        }
     }
 }
 

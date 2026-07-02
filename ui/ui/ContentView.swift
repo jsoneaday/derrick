@@ -211,7 +211,7 @@ struct ContentView: View {
     }
 
     @State private var conversation: ConversationModel?
-    @State private var prompt = "Write a short haiku about layered architecture."
+    @State private var prompt = ""
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?

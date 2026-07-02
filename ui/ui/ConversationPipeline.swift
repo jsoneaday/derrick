@@ -132,15 +132,6 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
     }
 
     private func retrieveMemoryContext(for prompt: String) async throws -> String {
-        if let mcpClient {
-            if let result = try? await mcpClient.callTool(
-                named: "session_memory_search",
-                arguments: ["query": .string(prompt)]
-            ) {
-                return result.content
-            }
-        }
-
         let retrieval = try await memoryCoordinator.retrieve(
             MemoryRetrievalRequest(
                 sessionKey: sessionKey,

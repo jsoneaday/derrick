@@ -71,6 +71,45 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertFalse(try tableExists(named: "memory_records", at: url))
     }
 
+    func testSearchPriorReturnsNewestMatchingPastSessionsOnly() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        try await repository.upsert(makeRecord(sessionID: "older", createdAt: Date(timeIntervalSince1970: 10), prompt: "older prompt"))
+        try await repository.upsert(makeRecord(sessionID: "newer", createdAt: Date(timeIntervalSince1970: 20), prompt: "newer prompt"))
+        try await repository.upsert(makeRecord(sessionID: "current", createdAt: Date(timeIntervalSince1970: 30), prompt: "current prompt"))
+
+        let results = try await repository.searchPrior(
+            sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
+            query: nil,
+            limit: 1,
+            page: 1
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.pair.prompt, "newer prompt")
+
+        let queryResults = try await repository.searchPrior(
+            sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
+            query: "older",
+            limit: 10,
+            page: 1
+        )
+
+        XCTAssertEqual(queryResults.map(\.pair.prompt), ["older prompt"])
+    }
+
     private func schemaVersion(at url: URL) throws -> Int {
         var handle: OpaquePointer?
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle else {
@@ -106,5 +145,16 @@ final class DBRepositoryTests: XCTestCase {
         defer { sqlite3_finalize(statement) }
 
         return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    private func makeRecord(sessionID: String, createdAt: Date, prompt: String) -> MemoryRecord {
+        let pair = PromptResponsePair(
+            sessionID: sessionID,
+            agentID: "ui",
+            prompt: prompt,
+            completion: "completion",
+            createdAt: createdAt
+        )
+        return MemoryRecord(id: pair.id, pair: pair)
     }
 }

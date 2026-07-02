@@ -232,7 +232,7 @@ import Testing
         let response = try await Self.collect(stream)
 
         #expect(response == "done")
-        #expect(await toolClient.calledTools == ["session_memory_search", "echo"])
+        #expect(await toolClient.calledTools == ["echo"])
         #expect(await toolClient.lastBatch?.invocations.first?.name == "echo")
         #expect(client.lastRequest?.messages.first?.content.contains("tool_search") == true)
         #expect(client.lastRequest?.messages.first?.content.contains("tool") == true)
@@ -325,11 +325,13 @@ private actor RecordingToolClient: ConversationToolClient {
             ),
             MCPToolDescriptor(
                 name: "session_memory_search",
-                description: "Search session memory.",
+                description: "Search prior session memory with optional query and paging.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
-                        "query": .object(["type": .string("string")])
+                        "query": .object(["type": .string("string")]),
+                        "limit": .object(["type": .string("number")]),
+                        "page": .object(["type": .string("number")])
                     ])
                 ])
             ),

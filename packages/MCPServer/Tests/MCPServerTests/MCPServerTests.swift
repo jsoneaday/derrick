@@ -34,8 +34,8 @@ import MCPClient
 
     @Test func sessionMemorySearchToolIsDiscoverable() async throws {
         let host = MCPServerHost()
-        await host.registerSessionMemorySearchTool { query in
-            "memory: \(query)"
+        await host.registerSessionMemorySearchTool { arguments in
+            "memory: \(arguments.query ?? "nil")/\(arguments.limit)/\(arguments.page)"
         }
 
         let results = await host.searchRegisteredTools(matching: "session")
@@ -45,8 +45,8 @@ import MCPClient
 
     @Test func localBridgeConnectsClientToServerOverStdio() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerSessionMemorySearchTool { query in
-                "bridge: \(query)"
+            await server.registerSessionMemorySearchTool { arguments in
+                "bridge: \(arguments.query ?? "nil")/\(arguments.limit)/\(arguments.page)"
             }
         }
 
@@ -55,10 +55,14 @@ import MCPClient
 
         let result = try await bridge.client.callTool(
             named: "session_memory_search",
-            arguments: ["query": .string("hello")]
+            arguments: [
+                "query": .string("hello"),
+                "limit": .string("3"),
+                "page": .string("2")
+            ]
         )
 
-        #expect(result.content == "bridge: hello")
+        #expect(result.content == "bridge: hello/3/2")
         #expect(result.isError == false)
     }
 }

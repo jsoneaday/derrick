@@ -5,6 +5,7 @@ public protocol MemoryStore: Sendable {
     func record(id: UUID) async throws -> MemoryRecord?
     func records(sessionKey: MemorySessionKey) async throws -> [MemoryRecord]
     func search(sessionKey: MemorySessionKey, query: String, limit: Int) async throws -> [MemoryRecord]
+    func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord]
 }
 
 public actor InMemoryMemoryStore: MemoryStore {
@@ -46,6 +47,31 @@ public actor InMemoryMemoryStore: MemoryStore {
             }
             .prefix(limit)
             .map(\.0)
+    }
+
+    public func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord] {
+        let filtered = recordOrder.compactMap { recordsByID[$0] }.filter {
+            $0.pair.sessionID != sessionKey.sessionID || $0.pair.agentID != sessionKey.agentID
+        }
+
+        let matching: [MemoryRecord]
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let tokens = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
+            matching = filtered.filter { record in
+                Self.score(record: record, tokens: tokens) > 0
+            }
+        } else {
+            matching = filtered
+        }
+
+        let pageSize = min(max(limit, 1), 20)
+        let pageIndex = max(page, 1)
+        let start = (pageIndex - 1) * pageSize
+        guard start < matching.count else {
+            return []
+        }
+
+        return Array(matching.sorted { $0.pair.createdAt > $1.pair.createdAt }.dropFirst(start).prefix(pageSize))
     }
 
     private static func score(record: MemoryRecord, tokens: [String]) -> Int {

@@ -64,6 +64,7 @@ final class ConversationModel {
                 budget: budget
             )
             let mcpBridge = try await makeLocalBridge(memoryCoordinator: memoryCoordinator, sessionKey: sessionKey)
+            debugLog("MCP Bridge started")
             return ConversationModel(
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
@@ -103,12 +104,13 @@ final class ConversationModel {
         sessionKey: MemorySessionKey
     ) async throws -> MCPLocalBridge {
         try await MCPLocalBridge.make { server in
-            await server.registerSessionMemorySearchTool { query in
-                let retrieval = try await memoryCoordinator.retrieve(
-                    MemoryRetrievalRequest(
+            await server.registerSessionMemorySearchTool { arguments in
+                let retrieval = try await memoryCoordinator.retrievePrior(
+                    MemoryPriorRetrievalRequest(
                         sessionKey: sessionKey,
-                        query: query,
-                        limit: 5
+                        query: arguments.query,
+                        limit: arguments.limit,
+                        page: arguments.page
                     )
                 )
                 return retrieval.context

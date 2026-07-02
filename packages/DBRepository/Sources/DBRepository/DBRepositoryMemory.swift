@@ -172,6 +172,51 @@ public extension DBRepository {
         return ranked.map(\.0)
     }
 
+    func searchPriorMemoryRecords(
+        sessionKey: MemorySessionKey,
+        applicationName: String,
+        query: String?,
+        limit: Int,
+        page: Int
+    ) throws -> [MemoryRecord] {
+        try withDatabaseHandle { handle in
+            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
+
+            let pageSize = min(max(limit, 1), 20)
+            let pageIndex = max(page, 1)
+            let offset = (pageIndex - 1) * pageSize
+
+            let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let whereClause: String
+            if let normalizedQuery, !normalizedQuery.isEmpty {
+                let escaped = normalizedQuery.lowercased().replacingOccurrences(of: "'", with: "''")
+                whereClause = """
+                AND (
+                    LOWER(prompt) LIKE '%\(escaped)%' OR
+                    LOWER(completion) LIKE '%\(escaped)%' OR
+                    LOWER(COALESCE(compressed_summary_text, '')) LIKE '%\(escaped)%' OR
+                    LOWER(COALESCE(detailed_summary_text, '')) LIKE '%\(escaped)%' OR
+                    LOWER(COALESCE(compressed_summary_keywords_json, '')) LIKE '%\(escaped)%' OR
+                    LOWER(COALESCE(detailed_summary_keywords_json, '')) LIKE '%\(escaped)%'
+                )
+                """
+            } else {
+                whereClause = ""
+            }
+
+            let sql = """
+            SELECT *
+            FROM memory_records
+            WHERE application_name = \(quoted(applicationName))
+              AND NOT (session_id = \(quoted(sessionKey.sessionID)) AND agent_id = \(quoted(sessionKey.agentID)))
+              \(whereClause)
+            ORDER BY created_at DESC
+            LIMIT \(pageSize) OFFSET \(offset);
+            """
+            return try allMemoryRecords(from: sql, on: handle)
+        }
+    }
+
     func deleteMemoryRecord(id: UUID) throws {
         try withDatabaseHandle { handle in
             try Self.execute("DELETE FROM memory_records WHERE id = \(quoted(id.uuidString));", on: handle)
@@ -205,6 +250,16 @@ extension DBRepository: MemoryStore {
 
     public func search(sessionKey: MemorySessionKey, query: String, limit: Int) async throws -> [MemoryRecord] {
         try searchMemoryRecords(sessionKey: sessionKey, applicationName: applicationName, query: query, limit: limit)
+    }
+
+    public func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord] {
+        try searchPriorMemoryRecords(
+            sessionKey: sessionKey,
+            applicationName: applicationName,
+            query: query,
+            limit: limit,
+            page: page
+        )
     }
 }
 

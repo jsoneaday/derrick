@@ -79,6 +79,47 @@ import Testing
         #expect(result.entries.count == 1)
         #expect(result.entries.first?.compressedSummary != nil)
     }
+
+    @Test func priorRetrievalReturnsNewestPastSessionsWithPaging() async throws {
+        let store = InMemoryMemoryStore()
+        let coordinator = MemoryCoordinator(
+            store: store,
+            summarizer: StubMemorySummarizer(),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 1)
+        )
+        let currentSession = MemorySessionKey(sessionID: "current", agentID: "a")
+
+        try await store.upsert(makeRecord(
+            sessionID: "older",
+            agentID: "a",
+            createdAt: Date(timeIntervalSince1970: 10),
+            prompt: "older prompt"
+        ))
+        try await store.upsert(makeRecord(
+            sessionID: "newer",
+            agentID: "a",
+            createdAt: Date(timeIntervalSince1970: 20),
+            prompt: "newer prompt"
+        ))
+        try await store.upsert(makeRecord(
+            sessionID: "current",
+            agentID: "a",
+            createdAt: Date(timeIntervalSince1970: 30),
+            prompt: "current prompt"
+        ))
+
+        let result = try await coordinator.retrievePrior(
+            MemoryPriorRetrievalRequest(
+                sessionKey: currentSession,
+                limit: 1,
+                page: 2
+            )
+        )
+
+        #expect(result.entries.count == 1)
+        #expect(result.entries.first?.pair.prompt == "older prompt")
+    }
 }
 
 private struct StubMemorySummarizer: MemorySummarizer {
@@ -94,4 +135,15 @@ private struct StubMemorySummarizer: MemorySummarizer {
         )
         return MemorySummaryPair(layer1: summary, layer2: summary)
     }
+}
+
+private func makeRecord(sessionID: String, agentID: String, createdAt: Date, prompt: String) -> MemoryRecord {
+    let pair = PromptResponsePair(
+        sessionID: sessionID,
+        agentID: agentID,
+        prompt: prompt,
+        completion: "completion",
+        createdAt: createdAt
+    )
+    return MemoryRecord(id: pair.id, pair: pair)
 }

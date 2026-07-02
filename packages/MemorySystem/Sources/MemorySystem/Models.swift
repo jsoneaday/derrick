@@ -236,6 +236,25 @@ public struct MemoryRetrievalRequest: Hashable, Codable, Sendable {
     }
 }
 
+public struct MemoryPriorRetrievalRequest: Hashable, Codable, Sendable {
+    public let sessionKey: MemorySessionKey
+    public let query: String?
+    public let limit: Int
+    public let page: Int
+
+    public init(
+        sessionKey: MemorySessionKey,
+        query: String? = nil,
+        limit: Int = 10,
+        page: Int = 1
+    ) {
+        self.sessionKey = sessionKey
+        self.query = query
+        self.limit = limit
+        self.page = page
+    }
+}
+
 public struct MemoryRetrievalResult: Hashable, Codable, Sendable {
     public let entries: [MemoryWorkingEntry]
     public let context: String

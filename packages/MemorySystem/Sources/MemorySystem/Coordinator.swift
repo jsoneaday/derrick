@@ -98,6 +98,36 @@ public actor MemoryCoordinator {
         return MemoryRetrievalResult(entries: selected, context: context, estimatedTokenCount: tokenCount)
     }
 
+    public func retrievePrior(_ request: MemoryPriorRetrievalRequest) async throws -> MemoryRetrievalResult {
+        let records = try await store.searchPrior(
+            sessionKey: request.sessionKey,
+            query: request.query,
+            limit: request.limit,
+            page: request.page
+        )
+
+        let entries = records.map { record in
+            MemoryWorkingEntry(
+                id: record.id,
+                sessionKey: MemorySessionKey(sessionID: record.pair.sessionID, agentID: record.pair.agentID),
+                parentAgentID: record.pair.parentAgentID,
+                createdAt: record.pair.createdAt,
+                rawPair: record.pair,
+                detailedSummary: record.detailedSummary,
+                compressedSummary: record.compressedSummary,
+                scope: record.scope
+            )
+        }
+
+        guard !entries.isEmpty else {
+            return MemoryRetrievalResult(entries: [], context: "", estimatedTokenCount: 0)
+        }
+
+        let context = renderContext(for: entries)
+        let tokenCount = entries.reduce(0) { $0 + $1.estimatedTokenCount }
+        return MemoryRetrievalResult(entries: entries, context: context, estimatedTokenCount: tokenCount)
+    }
+
     public func compact(sessionKey: MemorySessionKey) async throws {
         var entries = workingSets[sessionKey, default: []]
         let plan = policy.plan(entries: entries, budget: budget)
