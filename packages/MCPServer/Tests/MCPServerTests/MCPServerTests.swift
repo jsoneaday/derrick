@@ -42,4 +42,23 @@ import MCPClient
 
         #expect(results.map(\.name) == ["session_memory_search"])
     }
+
+    @Test func localBridgeConnectsClientToServerOverStdio() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.registerSessionMemorySearchTool { query in
+                "bridge: \(query)"
+            }
+        }
+
+        let tools = try await bridge.client.searchTools(matching: "session")
+        #expect(tools.map(\.name) == ["session_memory_search"])
+
+        let result = try await bridge.client.callTool(
+            named: "session_memory_search",
+            arguments: ["query": .string("hello")]
+        )
+
+        #expect(result.content == "bridge: hello")
+        #expect(result.isError == false)
+    }
 }

@@ -2,22 +2,28 @@ import Foundation
 import MCP
 import MCPClient
 
+#if canImport(System)
+import System
+#else
+@preconcurrency import SystemPackage
+#endif
+
 public actor MCPToolRegistry {
     public typealias Handler = @Sendable ([String: Value]) async throws -> String
 
-    private var handlers: [String: (description: String, handler: Handler)] = [:]
+    private var handlers: [String: (description: String, inputSchema: Value, handler: Handler)] = [:]
 
     public init() {}
 
-    public func register(name: String, description: String, handler: @escaping Handler) {
-        handlers[name] = (description, handler)
+    public func register(name: String, description: String, inputSchema: Value = .object([:]), handler: @escaping Handler) {
+        handlers[name] = (description, inputSchema, handler)
     }
 
     public func search(matching query: String) -> [MCPToolDescriptor] {
         let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return handlers.compactMap { name, entry in
             if lowered.isEmpty || name.lowercased().contains(lowered) || entry.description.lowercased().contains(lowered) {
-                return MCPToolDescriptor(name: name, description: entry.description)
+                return MCPToolDescriptor(name: name, description: entry.description, inputSchema: entry.inputSchema)
             }
             return nil
         }
@@ -87,7 +93,6 @@ public final class MCPServerHost: @unchecked Sendable {
             version: version,
             capabilities: .init(tools: .init(listChanged: true))
         )
-        Task { await self.installHandlers() }
     }
 
     public func registerTool(name: String, description: String, handler: @escaping MCPToolRegistry.Handler) async {
@@ -106,22 +111,49 @@ public final class MCPServerHost: @unchecked Sendable {
         description: String = "Search session memory for relevant context.",
         handler: @escaping @Sendable (String) async throws -> String
     ) async {
-        await registry.register(name: "session_memory_search", description: description) { arguments in
+        await registry.register(
+            name: "session_memory_search",
+            description: description,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "type": .string("string"),
+                        "description": .string("The memory search query.")
+                    ])
+                ]),
+                "required": .array([.string("query")])
+            ])
+        ) { arguments in
             let query = arguments["query"]?.stringValue ?? ""
             return try await handler(query)
         }
     }
 
+    public func start(transport: any Transport) async throws {
+        await installHandlers()
+        try await server.start(transport: transport)
+    }
+
     public func startStdio() async throws {
-        try await server.start(transport: StdioTransport())
+        try await start(transport: StdioTransport())
     }
 
     public func startHTTP(endpoint: URL) async throws {
+        await installHandlers()
         try await server.start(transport: HTTPClientTransport(endpoint: endpoint, streaming: true))
     }
 
     private func installHandlers() async {
-        await server.withMethodHandler(ListTools.self) { _ in
+        await server.withMethodHandler(ListTools.self) { [registry] _ in
+            let registeredTools = await registry.search(matching: "").map { descriptor in
+                Tool(
+                    name: descriptor.name,
+                    description: descriptor.description,
+                    inputSchema: descriptor.inputSchema ?? .object([:])
+                )
+            }
+
             let tools: [Tool] = [
                 Tool(
                     name: "tool_search",
@@ -165,7 +197,7 @@ public final class MCPServerHost: @unchecked Sendable {
                         "required": .array([.string("request_json")])
                     ])
                 )
-            ]
+            ] + registeredTools
             return .init(tools: tools)
         }
 
@@ -190,11 +222,15 @@ public final class MCPServerHost: @unchecked Sendable {
                 return .init(content: [.text(text: Self.encodeJSON(result), annotations: nil, _meta: nil)], isError: false)
 
             default:
-                return .init(content: [.text(text: "Unknown tool \(params.name).", annotations: nil, _meta: nil)], isError: true)
+                do {
+                    let result = try await registry.call(name: params.name, arguments: params.arguments ?? [:])
+                    return .init(content: [.text(text: result, annotations: nil, _meta: nil)], isError: false)
+                } catch {
+                    return .init(content: [.text(text: "Unknown tool \(params.name).", annotations: nil, _meta: nil)], isError: true)
+                }
             }
         }
     }
-
     private static func decodeArguments(from input: String) -> [String: Value] {
         guard let data = input.data(using: .utf8),
               let object = try? JSONDecoder().decode([String: Value].self, from: data) else {
@@ -216,5 +252,49 @@ public final class MCPServerHost: @unchecked Sendable {
             return "[]"
         }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+public final class MCPLocalBridge: @unchecked Sendable {
+    public let server: MCPServerHost
+    public let client: MCPClient
+
+    private init(server: MCPServerHost, client: MCPClient) {
+        self.server = server
+        self.client = client
+    }
+
+    public static func make(
+        serverName: String = "MCPServer",
+        serverVersion: String = "1.0.0",
+        clientName: String = "MCPClient",
+        clientVersion: String = "1.0.0",
+        configure: @escaping @Sendable (MCPServerHost) async throws -> Void = { _ in }
+    ) async throws -> MCPLocalBridge {
+        let server = MCPServerHost(name: serverName, version: serverVersion)
+        try await configure(server)
+
+        let (clientToServerRead, clientToServerWrite) = try FileDescriptor.pipe()
+        let (serverToClientRead, serverToClientWrite) = try FileDescriptor.pipe()
+
+        let serverTransport = StdioTransport(
+            input: clientToServerRead,
+            output: serverToClientWrite
+        )
+        let clientTransport = StdioTransport(
+            input: serverToClientRead,
+            output: clientToServerWrite
+        )
+
+        let backend = MCPStdioBackend(
+            identifier: "local-stdio",
+            name: clientName,
+            version: clientVersion,
+            transport: clientTransport
+        )
+        let client = MCPClient(backend: backend)
+
+        try await server.start(transport: serverTransport)
+        return MCPLocalBridge(server: server, client: client)
     }
 }

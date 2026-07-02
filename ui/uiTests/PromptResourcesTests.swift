@@ -29,6 +29,26 @@ import Testing
         #expect(instructions == "Summarizer instructions from file")
     }
 
+    @Test func loadsMCPToolInstructionsFromResourcesDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+
+        try "Tool instructions from file\n".write(
+            to: resources.appendingPathComponent("mcp_tool_instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Tool loop instructions from file\n".write(
+            to: resources.appendingPathComponent("mcp_tool_loop_instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        #expect(try PromptResources.mcpToolInstructions(from: root) == "Tool instructions from file")
+        #expect(try PromptResources.mcpToolLoopInstructions(from: root) == "Tool loop instructions from file")
+    }
+
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -73,5 +93,37 @@ import Testing
 
         #expect(matchedExpectedError)
         #expect(!sawUnexpectedError)
+    }
+
+    @Test func throwsWhenMCPToolInstructionsAreMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let instructionsError = PromptResourcesError.missingResource(
+            name: "mcp_tool_instructions",
+            resourceRoot: root
+        )
+        let loopError = PromptResourcesError.missingResource(
+            name: "mcp_tool_loop_instructions",
+            resourceRoot: root
+        )
+
+        var matchedInstructionsError = false
+        var matchedLoopError = false
+
+        do {
+            _ = try PromptResources.mcpToolInstructions(from: root)
+        } catch let error as PromptResourcesError {
+            matchedInstructionsError = error == instructionsError
+        }
+
+        do {
+            _ = try PromptResources.mcpToolLoopInstructions(from: root)
+        } catch let error as PromptResourcesError {
+            matchedLoopError = error == loopError
+        }
+
+        #expect(matchedInstructionsError)
+        #expect(matchedLoopError)
     }
 }

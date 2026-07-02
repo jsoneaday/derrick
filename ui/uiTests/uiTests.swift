@@ -1,5 +1,6 @@
 import Foundation
 import LLMAgentClient
+import MCP
 import Testing
 @testable import ui
 
@@ -191,6 +192,52 @@ import Testing
         #expect(capturedRequest?.messages.count == 1)
     }
 
+    @MainActor @Test func pipelineUsesMCPToolsWhenTheModelRequestsThem() async throws {
+        let sessionKey = MemorySessionKey(sessionID: "session-tool-loop", agentID: "agent-ui")
+        let store = InMemoryMemoryStore()
+        let coordinator = MemoryCoordinator(
+            store: store,
+            summarizer: RecordingSummarizer(
+                layer1: MemorySummary(
+                    text: "layer1",
+                    metadata: MemorySummaryMetadata(keywords: [], compressionRatio: 0.1, sourceTokenCount: 1, summaryTokenCount: 1)
+                ),
+                layer2: MemorySummary(
+                    text: "layer2",
+                    metadata: MemorySummaryMetadata(keywords: [], compressionRatio: 0.2, sourceTokenCount: 1, summaryTokenCount: 1)
+                )
+            ),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 10_000)
+        )
+        let toolClient = RecordingToolClient()
+        let client = ScriptedStreamingClient(responses: [
+            #"{"response_type":"tools","invocations":[{"name":"echo","arguments":{"text":"hello"}}]}"#,
+            #"{"response_type":"final","content":"done"}"#
+        ])
+
+        let pipeline = ConversationPipeline(
+            sessionKey: sessionKey,
+            memoryCoordinator: coordinator,
+            mcpClient: toolClient,
+            client: client,
+            model: FakeModel(),
+            ragInstructions: "rag",
+            mcpToolInstructions: "tool instructions",
+            mcpToolLoopInstructions: "loop instructions",
+            retrievalLimit: 5
+        )
+
+        let stream = await pipeline.stream(prompt: "Use the echo tool.")
+        let response = try await Self.collect(stream)
+
+        #expect(response == "done")
+        #expect(await toolClient.calledTools == ["session_memory_search", "echo"])
+        #expect(await toolClient.lastBatch?.invocations.first?.name == "echo")
+        #expect(client.lastRequest?.messages.first?.content.contains("tool_search") == true)
+        #expect(client.lastRequest?.messages.first?.content.contains("tool") == true)
+    }
+
     private static func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
         var output = ""
         for try await chunk in stream {
@@ -242,6 +289,111 @@ private final class RecordingClient: @unchecked Sendable, ConversationStreamingC
                 for chunk in chunks {
                     continuation.yield(chunk)
                 }
+                continuation.finish()
+            }
+        }
+    }
+}
+
+private actor RecordingToolClient: ConversationToolClient {
+    private(set) var calledTools: [String] = []
+    private(set) var lastBatch: MCPToolBatchRequest?
+
+    func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
+        [
+            MCPToolDescriptor(
+                name: "tool_search",
+                description: "Search tools.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object(["type": .string("string")])
+                    ])
+                ])
+            ),
+            MCPToolDescriptor(
+                name: "tool",
+                description: "Call a tool.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "name": .object(["type": .string("string")]),
+                        "arguments": .object(["type": .string("object")])
+                    ]),
+                    "required": .array([.string("name")])
+                ])
+            ),
+            MCPToolDescriptor(
+                name: "session_memory_search",
+                description: "Search session memory.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object(["type": .string("string")])
+                    ])
+                ])
+            ),
+            MCPToolDescriptor(
+                name: "echo",
+                description: "Echo text.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "text": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("text")])
+                ])
+            )
+        ]
+    }
+
+    func callTool(named name: String, arguments: [String : Value]) async throws -> MCPToolResult {
+        calledTools.append(name)
+        if name == "session_memory_search" {
+            return MCPToolResult(content: "")
+        }
+
+        if name == "echo" {
+            return MCPToolResult(content: arguments["text"]?.stringValue ?? "")
+        }
+
+        return MCPToolResult(content: "unknown", isError: true)
+    }
+
+    func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
+        lastBatch = request
+        let results = try await request.invocations.map { invocation in
+            try await callTool(named: invocation.name, arguments: invocation.arguments)
+        }
+        return MCPToolBatchResult(
+            results: results,
+            combinedContent: results.map(\.content).joined(separator: "\n\n"),
+            isError: results.contains(where: \.isError)
+        )
+    }
+}
+
+private final class ScriptedStreamingClient: @unchecked Sendable, ConversationStreamingClient {
+    typealias Model = FakeModel
+
+    private let responses: [String]
+    private var index = 0
+    private(set) var lastRequest: AgentRequest?
+    private(set) var lastModel: FakeModel?
+
+    init(responses: [String]) {
+        self.responses = responses
+    }
+
+    func stream(_ request: AgentRequest, model: FakeModel) -> AsyncThrowingStream<String, Error> {
+        lastRequest = request
+        lastModel = model
+        let response = index < responses.count ? responses[index] : ""
+        index += 1
+
+        return AsyncThrowingStream { continuation in
+            Task {
+                continuation.yield(response)
                 continuation.finish()
             }
         }

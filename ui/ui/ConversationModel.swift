@@ -1,27 +1,38 @@
 import Foundation
 import DBRepository
 import LLMAgentClient
+import MCPClient
+import MCPServer
 
 @MainActor
 final class ConversationModel {
     let sessionKey: MemorySessionKey
     let memoryCoordinator: MemoryCoordinator
+    let mcpBridge: MCPLocalBridge
     let model: GeminiModel
     let databaseDirectoryURL: URL
     let ragInstructions: String
+    let mcpToolInstructions: String
+    let mcpToolLoopInstructions: String
 
     private init(
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
+        mcpBridge: MCPLocalBridge,
         model: GeminiModel,
         databaseDirectoryURL: URL,
-        ragInstructions: String
+        ragInstructions: String,
+        mcpToolInstructions: String,
+        mcpToolLoopInstructions: String
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
+        self.mcpBridge = mcpBridge
         self.model = model
         self.databaseDirectoryURL = databaseDirectoryURL
         self.ragInstructions = ragInstructions
+        self.mcpToolInstructions = mcpToolInstructions
+        self.mcpToolLoopInstructions = mcpToolLoopInstructions
     }
 
     static func makeDefault() async throws -> ConversationModel {
@@ -31,6 +42,8 @@ final class ConversationModel {
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
         let ragInstructions = try PromptResources.conversationRAGInstructions()
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
+        let mcpToolInstructions = try PromptResources.mcpToolInstructions()
+        let mcpToolLoopInstructions = try PromptResources.mcpToolLoopInstructions()
 
         let budget = MemoryBudget(provider: model.id.provider, modelName: model.id.rawValue)
         let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)
@@ -50,12 +63,16 @@ final class ConversationModel {
                 policy: TieredMemoryCompactionPolicy(),
                 budget: budget
             )
+            let mcpBridge = try await makeLocalBridge(memoryCoordinator: memoryCoordinator, sessionKey: sessionKey)
             return ConversationModel(
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
+                mcpBridge: mcpBridge,
                 model: model,
                 databaseDirectoryURL: await repository.databaseDirectoryURL,
-                ragInstructions: ragInstructions
+                ragInstructions: ragInstructions,
+                mcpToolInstructions: mcpToolInstructions,
+                mcpToolLoopInstructions: mcpToolLoopInstructions
             )
         } catch {
             debugLog("Memory bootstrap failed: \(error)")
@@ -68,13 +85,35 @@ final class ConversationModel {
             policy: TieredMemoryCompactionPolicy(),
             budget: budget
         )
+        let mcpBridge = try await makeLocalBridge(memoryCoordinator: memoryCoordinator, sessionKey: sessionKey)
         return ConversationModel(
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
+            mcpBridge: mcpBridge,
             model: model,
             databaseDirectoryURL: databaseDirectoryURL,
-            ragInstructions: ragInstructions
+            ragInstructions: ragInstructions,
+            mcpToolInstructions: mcpToolInstructions,
+            mcpToolLoopInstructions: mcpToolLoopInstructions
         )
+    }
+
+    private static func makeLocalBridge(
+        memoryCoordinator: MemoryCoordinator,
+        sessionKey: MemorySessionKey
+    ) async throws -> MCPLocalBridge {
+        try await MCPLocalBridge.make { server in
+            await server.registerSessionMemorySearchTool { query in
+                let retrieval = try await memoryCoordinator.retrieve(
+                    MemoryRetrievalRequest(
+                        sessionKey: sessionKey,
+                        query: query,
+                        limit: 5
+                    )
+                )
+                return retrieval.context
+            }
+        }
     }
 
     private static func makeMemoryStore(
@@ -101,9 +140,12 @@ final class ConversationModel {
         let pipeline = ConversationPipeline(
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
+            mcpClient: mcpBridge.client,
             client: client,
             model: model,
             ragInstructions: ragInstructions,
+            mcpToolInstructions: mcpToolInstructions,
+            mcpToolLoopInstructions: mcpToolLoopInstructions,
             retrievalLimit: 5
         )
 
