@@ -24,4 +24,16 @@ struct ModelTests {
     @Test func openAIModelContextBudgetsArePresent() {
         #expect(OpenAIModel.gpt5Mini.maxSupportedContextTokens > OpenAIModel.gpt5Mini.maxIdealContextTokens)
     }
+
+    @Test func openAIStreamDecoderHandlesMultipleDataPayloads() throws {
+        let event = """
+        data: {"choices":[{"delta":{"content":"Hel"}}]}
+        data: {"choices":[{"delta":{"content":"lo"}}]}
+
+        data: [DONE]
+
+        """
+        let chunks = try openAITextChunks(from: event)
+        #expect(chunks == ["Hel", "lo"])
+    }
 }

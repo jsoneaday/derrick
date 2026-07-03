@@ -55,6 +55,13 @@ import Testing
         )
     }
 
+    @Test func llmProviderDefaultsToExpectedModels() {
+        #expect(LLMProviderChoice.gemini.defaultModel.displayName == "gemini-3.1-flash-lite")
+        #expect(LLMProviderChoice.openai.defaultModel.displayName == "gpt-5-mini")
+        #expect(LLMProviderChoice.gemini.apiKeyEnvironmentKeys.contains("GEMINI_API_KEY"))
+        #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
+    }
+
     @MainActor @Test func pipelineInjectsRelevantMemoryIntoTheNextPrompt() async throws {
         let sessionKey = MemorySessionKey(sessionID: "session-1", agentID: "agent-ui")
         let summarizer = RecordingSummarizer(

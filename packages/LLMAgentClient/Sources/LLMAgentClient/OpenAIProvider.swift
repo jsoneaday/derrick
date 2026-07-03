@@ -41,13 +41,7 @@ public struct OpenAIProvider: AgentProvider {
                     try validate(response: response)
 
                     for try await event in SSEDecoder(bytes: bytes).events {
-                        if event == "[DONE]" {
-                            continuation.finish()
-                            return
-                        }
-
-                        let chunk = try decode(OpenAIStreamChunk.self, from: Data(event.utf8))
-                        if let text = chunk.choices.first?.delta.content, !text.isEmpty {
+                        for text in try openAITextChunks(from: event) {
                             continuation.yield(text)
                         }
                     }
@@ -99,4 +93,27 @@ private struct OpenAIStreamChunk: Decodable {
     struct Delta: Decodable {
         let content: String?
     }
+}
+
+func openAITextChunks(from event: String) throws -> [String] {
+    var chunks: [String] = []
+    for payload in event.split(whereSeparator: \.isNewline).map(String.init).filter({ !$0.isEmpty }) {
+        let normalized: String
+        if payload.hasPrefix("data:") {
+            normalized = payload.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        } else {
+            normalized = payload
+        }
+
+        if normalized == "[DONE]" {
+            return chunks
+        }
+
+        let chunk = try decode(OpenAIStreamChunk.self, from: Data(normalized.utf8))
+        if let text = chunk.choices.first?.delta.content, !text.isEmpty {
+            chunks.append(text)
+        }
+    }
+
+    return chunks
 }

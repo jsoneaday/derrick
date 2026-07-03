@@ -200,14 +200,12 @@ private final class PromptTextView: NSTextView {
 }
 
 struct ContentView: View {
-    private let modelIdentifier = "gemini-3.1-flash-lite"
-    private let geminiKeychainAccount = "gemini-api-key"
     private let secretResolver = AppSecretResolver()
     private let isDebugEnabled = ProcessInfo.processInfo.environment["DEBUG_ENABLED"]?.lowercased() == "true"
     @ObservedObject private var debugLogStore = DebugLogStore.shared
 
     private var secretStore: SecretStore {
-        SecretStore(account: geminiKeychainAccount)
+        SecretStore(account: selectedProvider.keychainAccount)
     }
 
     @State private var conversation: ConversationModel?
@@ -219,6 +217,8 @@ struct ContentView: View {
     @State private var isPresentingAPIKeyPrompt = false
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
+    @State private var selectedProvider: LLMProviderChoice = .gemini
+    @State private var selectedModel: LLMModelChoice = .gemini(.gemini31FlashLite)
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -226,12 +226,16 @@ struct ContentView: View {
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var visibleModels: [LLMModelChoice] {
+        selectedProvider.models
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Gemini Stream")
+            Text("LLM Stream")
                 .font(.largeTitle.bold())
 
-            Text("Send a prompt to `\(modelIdentifier)` and stream the response live.")
+            Text("Send a prompt to `\(selectedModel.displayName)` and stream the response live.")
                 .foregroundStyle(.secondary)
 
             if conversation == nil {
@@ -248,7 +252,7 @@ struct ContentView: View {
             .frame(minHeight: 90)
             .disabled(conversation == nil || isStreaming)
 
-            HStack {
+            HStack(alignment: .center, spacing: 12) {
                 Button(isStreaming ? "Streaming..." : "Send") {
                     startStreaming()
                 }
@@ -270,6 +274,28 @@ struct ContentView: View {
                 }
 
                 Spacer()
+
+                HStack(spacing: 10) {
+                    Picker("Provider", selection: $selectedProvider) {
+                        ForEach(LLMProviderChoice.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(minWidth: 110)
+                    .disabled(isStreaming)
+
+                    Picker("Model", selection: $selectedModel) {
+                        ForEach(visibleModels) { model in
+                            Text(model.displayName).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(minWidth: 180)
+                    .disabled(isStreaming)
+                }
             }
 
             if isDebugEnabled {
@@ -366,6 +392,26 @@ struct ContentView: View {
 
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
+            }
+        }
+        .onChange(of: selectedProvider) { _, newProvider in
+            if selectedModel.provider != newProvider {
+                selectedModel = newProvider.defaultModel
+            }
+        }
+        .onChange(of: selectedModel) { _, newModel in
+            if selectedProvider != newModel.provider {
+                selectedProvider = newModel.provider
+            }
+        }
+        .onChange(of: selectedProvider) { _, newProvider in
+            if selectedModel.provider != newProvider {
+                selectedModel = newProvider.defaultModel
+            }
+        }
+        .onChange(of: selectedModel) { _, newModel in
+            if selectedProvider != newModel.provider {
+                selectedProvider = newModel.provider
             }
         }
     }
@@ -473,7 +519,7 @@ struct ContentView: View {
             Text("Enter API Key")
                 .font(.title2.bold())
 
-            Text("Store the Gemini API key in Keychain. This stays on your machine and is not bundled into the app.")
+            Text("Store the \(selectedProvider.displayName) API key in Keychain. This stays on your machine and is not bundled into the app.")
                 .foregroundStyle(.secondary)
 
             SecureField("API Key", text: $apiKeyDraft)
@@ -506,7 +552,7 @@ struct ContentView: View {
         }
 
         guard let apiKey = resolveAPIKey() else {
-            errorMessage = "API key is missing. Enter it for Gemini."
+            errorMessage = "API key is missing. Enter it for \(selectedProvider.displayName)."
             shouldResumeAfterSavingKey = true
             apiKeyDraft = ""
             isPresentingAPIKeyPrompt = true
@@ -525,7 +571,7 @@ struct ContentView: View {
 
         requestTask = Task {
             do {
-                let stream = await conversation.stream(prompt: promptText, apiKey: apiKey)
+                let stream = await conversation.stream(prompt: promptText, apiKey: apiKey, model: selectedModel)
                 for try await chunk in stream {
                     await MainActor.run {
                         turns[turnIndex].response += chunk
@@ -549,8 +595,8 @@ struct ContentView: View {
 
     private func resolveAPIKey() -> String? {
         secretResolver.resolve(
-            account: geminiKeychainAccount,
-            environmentKeys: [apiKeyEnvironmentKey, legacyAPIKeyEnvironmentKey]
+            account: selectedProvider.keychainAccount,
+            environmentKeys: apiKeyEnvironmentKeys
         )
     }
 
@@ -577,15 +623,8 @@ struct ContentView: View {
         }
     }
 
-    private var apiKeyEnvironmentKey: String {
-        modelIdentifier
-            .replacingOccurrences(of: "-", with: "_")
-            .uppercased()
-            + "_API_KEY"
-    }
-
-    private var legacyAPIKeyEnvironmentKey: String {
-        "GEMINI_API_KEY"
+    private var apiKeyEnvironmentKeys: [String] {
+        selectedProvider.apiKeyEnvironmentKeys
     }
 
     private func copyToPasteboard(_ text: String) {
