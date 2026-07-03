@@ -40,7 +40,7 @@ final class ConversationModel {
         let model: GeminiModel = .gemini31FlashLite
         let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
-        let ragInstructions = try PromptResources.conversationRAGInstructions()
+        let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
         let mcpToolLoopInstructions = try PromptResources.mcpToolLoopInstructions()

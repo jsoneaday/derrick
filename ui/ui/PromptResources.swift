@@ -1,8 +1,11 @@
 import Foundation
 
 enum PromptResources {
-    static func conversationRAGInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
-        try load(named: "conversation_rag_instructions", from: resourceRoot)
+    static func conversationRAGInstructions(
+        from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL,
+        prefixTxt: String? = nil
+    ) throws -> String {
+        try load(named: "conversation_rag_instructions", from: resourceRoot, prefixTxt)
     }
 
     static func memorySummarizerInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
@@ -17,7 +20,7 @@ enum PromptResources {
         try load(named: "mcp_tool_loop_instructions", from: resourceRoot)
     }
 
-    private static func load(named name: String, from resourceRoot: URL) throws -> String {
+    private static func load(named name: String, from resourceRoot: URL, _ prefixTxt: String? = nil) throws -> String {
         let candidates = [
             resourceRoot.appendingPathComponent("\(name).md"),
             resourceRoot.appendingPathComponent("Resources", isDirectory: true).appendingPathComponent("\(name).md")
@@ -25,10 +28,21 @@ enum PromptResources {
 
         for url in candidates where FileManager.default.fileExists(atPath: url.path) {
             let contents = try String(contentsOf: url, encoding: .utf8)
-            return contents.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+            return prefixTxt.map { "\($0)\n\n\(trimmed)" } ?? trimmed
         }
 
         throw PromptResourcesError.missingResource(name: name, resourceRoot: resourceRoot)
+    }
+
+    static func currentDatePrefix(date: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "MMMM d yyyy h:mma"
+        let timestamp = formatter.string(from: date).replacingOccurrences(of: "AM", with: "am").replacingOccurrences(of: "PM", with: "pm")
+        return "Today's date is \(timestamp)"
     }
 }
 

@@ -518,6 +518,7 @@ struct ContentView: View {
         isStreaming = true
 
         let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        prompt = ""
         turns.append(ChatTurn(prompt: promptText, response: ""))
 
         let turnIndex = turns.count - 1
