@@ -136,7 +136,9 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
             MemoryRetrievalRequest(
                 sessionKey: sessionKey,
                 query: prompt,
-                limit: retrievalLimit
+                limit: retrievalLimit,
+                idealTokenCount: model.maxIdealContextTokens,
+                maxSupportedTokenCount: model.maxSupportedContextTokens
             )
         )
         return retrieval.context

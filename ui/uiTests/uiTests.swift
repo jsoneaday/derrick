@@ -267,6 +267,14 @@ private struct FakeModel: AgentModel {
     var id: AgentModelID {
         AgentModelID(provider: "fake", name: "fake")
     }
+
+    var maxSupportedContextTokens: Int {
+        100_000
+    }
+
+    var maxIdealContextTokens: Int {
+        50_000
+    }
 }
 
 private final class RecordingClient: @unchecked Sendable, ConversationStreamingClient {
@@ -332,7 +340,8 @@ private actor RecordingToolClient: ConversationToolClient {
                         "query": .object(["type": .string("string")]),
                         "limit": .object(["type": .string("number")]),
                         "page": .object(["type": .string("number")])
-                    ])
+                    ]),
+                    "required": .array([.string("limit"), .string("page")])
                 ])
             ),
             MCPToolDescriptor(

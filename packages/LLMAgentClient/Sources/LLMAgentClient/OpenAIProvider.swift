@@ -6,6 +6,14 @@ public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
     public var id: AgentModelID {
         .init(provider: "openai", name: rawValue)
     }
+
+    public var maxSupportedContextTokens: Int {
+        400_000
+    }
+
+    public var maxIdealContextTokens: Int {
+        200_000
+    }
 }
 
 public struct OpenAIProvider: AgentProvider {

@@ -52,6 +52,8 @@ public struct AgentModelID: Hashable, Codable, Sendable {
 
 public protocol AgentModel: Hashable, Codable, Sendable {
     var id: AgentModelID { get }
+    var maxSupportedContextTokens: Int { get }
+    var maxIdealContextTokens: Int { get }
 }
 
 public protocol AgentProvider: Sendable {

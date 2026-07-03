@@ -7,6 +7,24 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
     public var id: AgentModelID {
         .init(provider: "gemini", name: rawValue)
     }
+
+    public var maxSupportedContextTokens: Int {
+        switch self {
+        case .gemini25FlashLite:
+            return 1_048_576
+        case .gemini31FlashLite:
+            return 1_048_576
+        }
+    }
+
+    public var maxIdealContextTokens: Int {
+        switch self {
+        case .gemini25FlashLite:
+            return 64_000
+        case .gemini31FlashLite:
+            return 128_000
+        }
+    }
 }
 
 public struct GeminiProvider: AgentProvider {

@@ -45,7 +45,7 @@ final class ConversationModel {
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
         let mcpToolLoopInstructions = try PromptResources.mcpToolLoopInstructions()
 
-        let budget = MemoryBudget(provider: model.id.provider, modelName: model.id.rawValue)
+        let budget = MemoryBudget(maxTokenCount: model.maxIdealContextTokens)
         let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)
         debugLog("Memory bootstrap started")
         debugLog("Database directory: \(databaseDirectoryURL.path)")

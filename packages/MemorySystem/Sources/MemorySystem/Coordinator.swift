@@ -92,7 +92,12 @@ public actor MemoryCoordinator {
 
         let combined = merge(entries: persisted + local)
         let ranked = rank(entries: combined, query: request.query)
-        let selected = Array(ranked.prefix(request.limit))
+        let selected = project(
+            entries: ranked,
+            limit: request.limit,
+            idealTokenCount: request.idealTokenCount,
+            maxSupportedTokenCount: request.maxSupportedTokenCount
+        )
         let context = renderContext(for: selected)
         let tokenCount = selected.reduce(0) { $0 + $1.estimatedTokenCount }
         return MemoryRetrievalResult(entries: selected, context: context, estimatedTokenCount: tokenCount)
@@ -137,20 +142,11 @@ public actor MemoryCoordinator {
             case .summarize(let id):
                 try await summarize(entryID: id, in: &entries)
             case .dropRaw(let id):
-                if let index = entries.firstIndex(where: { $0.id == id }) {
-                    entries[index].rawPair = nil
-                    try await persist(entryID: id, in: entries)
-                }
+                _ = id
             case .dropDetailed(let id):
-                if let index = entries.firstIndex(where: { $0.id == id }) {
-                    entries[index].detailedSummary = nil
-                    try await persist(entryID: id, in: entries)
-                }
+                _ = id
             case .dropCompressed(let id):
-                if let index = entries.firstIndex(where: { $0.id == id }) {
-                    entries[index].compressedSummary = nil
-                    try await persist(entryID: id, in: entries)
-                }
+                _ = id
             }
         }
 
@@ -206,17 +202,8 @@ public actor MemoryCoordinator {
         }
 
         let tokens = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
-        return entries
-            .map { entry in
-                (entry, score(entry: entry, tokens: tokens))
-            }
-            .sorted { lhs, rhs in
-                if lhs.1 == rhs.1 {
-                    return lhs.0.createdAt > rhs.0.createdAt
-                }
-                return lhs.1 > rhs.1
-            }
-            .map(\.0)
+        let matching = entries.filter { score(entry: $0, tokens: tokens) > 0 }
+        return (matching.isEmpty ? entries : matching).sorted { $0.createdAt > $1.createdAt }
     }
 
     private func score(entry: MemoryWorkingEntry, tokens: [String]) -> Int {
@@ -256,5 +243,101 @@ public actor MemoryCoordinator {
         }
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
+    }
+
+    private func project(
+        entries: [MemoryWorkingEntry],
+        limit: Int,
+        idealTokenCount: Int,
+        maxSupportedTokenCount: Int
+    ) -> [MemoryWorkingEntry] {
+        let usableLimit = max(limit, 1)
+        let ideal = max(idealTokenCount, 1)
+        let maxSupported = max(maxSupportedTokenCount, ideal)
+        let switchToDetailed = max(Int(Double(ideal) * 0.7), 1)
+        let switchToCompressed = max(Int(Double(ideal) * 0.8), switchToDetailed)
+
+        var projectedTokens = 0
+        var selected: [MemoryWorkingEntry] = []
+
+        for entry in entries.prefix(usableLimit) {
+            let projection = project(
+                entry: entry,
+                projectedTokens: projectedTokens,
+                switchToDetailed: switchToDetailed,
+                switchToCompressed: switchToCompressed
+            )
+            projectedTokens += projection.estimatedTokenCount
+            selected.append(projection)
+
+            if projectedTokens >= maxSupported {
+                break
+            }
+        }
+
+        return selected
+    }
+
+    private func project(
+        entry: MemoryWorkingEntry,
+        projectedTokens: Int,
+        switchToDetailed: Int,
+        switchToCompressed: Int
+    ) -> MemoryWorkingEntry {
+        let currentTier: MemoryLayer
+        if projectedTokens < switchToDetailed {
+            currentTier = .raw
+        } else if projectedTokens < switchToCompressed {
+            currentTier = .detailed
+        } else {
+            currentTier = .compressed
+        }
+
+        switch currentTier {
+        case .raw:
+            return projectedEntry(from: entry, preferred: .raw)
+        case .detailed:
+            return projectedEntry(from: entry, preferred: .detailed)
+        case .compressed:
+            return projectedEntry(from: entry, preferred: .compressed)
+        }
+    }
+
+    private func projectedEntry(
+        from entry: MemoryWorkingEntry,
+        preferred: MemoryLayer
+    ) -> MemoryWorkingEntry {
+        switch preferred {
+        case .raw:
+            return MemoryWorkingEntry(
+                id: entry.id,
+                sessionKey: entry.sessionKey,
+                parentAgentID: entry.parentAgentID,
+                createdAt: entry.createdAt,
+                rawPair: entry.rawPair,
+                scope: entry.scope
+            )
+        case .detailed:
+            return MemoryWorkingEntry(
+                id: entry.id,
+                sessionKey: entry.sessionKey,
+                parentAgentID: entry.parentAgentID,
+                createdAt: entry.createdAt,
+                rawPair: entry.detailedSummary == nil ? entry.rawPair : nil,
+                detailedSummary: entry.detailedSummary,
+                scope: entry.scope
+            )
+        case .compressed:
+            return MemoryWorkingEntry(
+                id: entry.id,
+                sessionKey: entry.sessionKey,
+                parentAgentID: entry.parentAgentID,
+                createdAt: entry.createdAt,
+                rawPair: entry.compressedSummary == nil && entry.detailedSummary == nil ? entry.rawPair : nil,
+                detailedSummary: entry.compressedSummary == nil ? entry.detailedSummary : nil,
+                compressedSummary: entry.compressedSummary,
+                scope: entry.scope
+            )
+        }
     }
 }

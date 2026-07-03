@@ -220,19 +220,25 @@ public struct MemoryRetrievalRequest: Hashable, Codable, Sendable {
     public let limit: Int
     public let includeShared: Bool
     public let includeParentLineage: Bool
+    public let idealTokenCount: Int
+    public let maxSupportedTokenCount: Int
 
     public init(
         sessionKey: MemorySessionKey,
         query: String? = nil,
         limit: Int = 10,
         includeShared: Bool = true,
-        includeParentLineage: Bool = true
+        includeParentLineage: Bool = true,
+        idealTokenCount: Int = MemoryBudget.defaultMaxTokenCount,
+        maxSupportedTokenCount: Int = MemoryBudget.defaultMaxTokenCount
     ) {
         self.sessionKey = sessionKey
         self.query = query
         self.limit = limit
         self.includeShared = includeShared
         self.includeParentLineage = includeParentLineage
+        self.idealTokenCount = idealTokenCount
+        self.maxSupportedTokenCount = maxSupportedTokenCount
     }
 }
 

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MemorySystem
 
@@ -77,7 +78,7 @@ import Testing
         let result = try await coordinator.retrieve(MemoryRetrievalRequest(sessionKey: sessionKey, limit: 10))
 
         #expect(result.entries.count == 1)
-        #expect(result.entries.first?.compressedSummary != nil)
+        #expect(result.entries.first?.rawPair != nil)
     }
 
     @Test func priorRetrievalReturnsNewestPastSessionsWithPaging() async throws {
@@ -118,7 +119,43 @@ import Testing
         )
 
         #expect(result.entries.count == 1)
-        #expect(result.entries.first?.pair.prompt == "older prompt")
+        #expect(result.entries.first?.rawPair?.prompt == "older prompt")
+    }
+
+    @Test func retrievalProjectsOlderEntriesToSummariesAsContextGrows() async throws {
+        let coordinator = MemoryCoordinator(
+            store: InMemoryMemoryStore(),
+            summarizer: StubMemorySummarizer(),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 1)
+        )
+        let sessionKey = MemorySessionKey(sessionID: "s", agentID: "a")
+
+        for _ in 0..<4 {
+            try await coordinator.ingest(
+                MemoryIngestInput(
+                    sessionKey: sessionKey,
+                    prompt: Array(repeating: "p", count: 12).joined(separator: " "),
+                    completion: Array(repeating: "c", count: 12).joined(separator: " ")
+                )
+            )
+        }
+
+        let result = try await coordinator.retrieve(
+            MemoryRetrievalRequest(
+                sessionKey: sessionKey,
+                limit: 4,
+                idealTokenCount: 100,
+                maxSupportedTokenCount: 120
+            )
+        )
+
+        #expect(result.entries.count == 4)
+        #expect(result.entries[0].rawPair != nil)
+        #expect(result.entries[1].rawPair != nil)
+        #expect(result.entries[2].rawPair != nil)
+        #expect(result.entries[3].rawPair == nil)
+        #expect(result.entries[3].detailedSummary != nil)
     }
 }
 
