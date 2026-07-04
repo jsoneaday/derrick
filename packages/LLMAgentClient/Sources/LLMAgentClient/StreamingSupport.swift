@@ -7,19 +7,10 @@ struct SSEDecoder {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var buffer: [String] = []
-
                     for try await line in bytes.lines {
-                        if line.isEmpty {
-                            emit(buffer: buffer, to: continuation)
-                            buffer.removeAll(keepingCapacity: true)
-                            continue
-                        }
-
-                        buffer.append(line)
+                        guard let payload = dataPayload(from: line) else { continue }
+                        continuation.yield(payload)
                     }
-
-                    emit(buffer: buffer, to: continuation)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -32,14 +23,13 @@ struct SSEDecoder {
         }
     }
 
-    private func emit(buffer: [String], to continuation: AsyncThrowingStream<String, Error>.Continuation) {
-        let event = buffer.compactMap { line -> String? in
-            line.hasPrefix("data:") ? line.dropFirst(5).trimmingCharacters(in: .whitespaces) : nil
-        }.joined(separator: "\n")
-
-        if !event.isEmpty {
-            continuation.yield(event)
+    private func dataPayload(from line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix(":"), trimmed.hasPrefix("data:") else {
+            return nil
         }
+
+        return String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
     }
 }
 

@@ -77,6 +77,8 @@ struct ContentView: View {
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .gemini
     @State private var selectedModel: LLMModelChoice = .gemini(.gemini31FlashLite)
+    @State private var promptFocusToken = 0
+    @State private var scrollToBottomToken = 0
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -152,13 +154,14 @@ struct ContentView: View {
             .overlay {
                 GeometryReader { proxy in
                     let inputHeight = promptInputHeight(for: proxy.size.height)
+                    let responsePanelWidth = proxy.size.width * 0.75
 
-                    panelContent(inputHeight: inputHeight)
+                    panelContent(inputHeight: inputHeight, responsePanelWidth: responsePanelWidth)
                 }
             }
     }
 
-    private func panelContent(inputHeight: CGFloat) -> some View {
+    private func panelContent(inputHeight: CGFloat, responsePanelWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             if turns.isEmpty {
                 Spacer()
@@ -166,7 +169,7 @@ struct ContentView: View {
                 emptyState
                     .padding(.bottom, 28)
 
-                composer(inputHeight: inputHeight)
+                promptComposer(inputHeight: inputHeight)
                     .frame(maxWidth: 700)
                     .padding(.horizontal, 24)
 
@@ -175,26 +178,43 @@ struct ContentView: View {
 
                 Spacer()
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if conversation == nil {
-                            ProgressView("Loading session store...")
-                                .padding(.top, 8)
-                        }
-                        LazyVStack(alignment: .leading, spacing: 16) {
-                            ForEach(turns) { turn in
-                                PromptCompletionCard(turn: turn, isStreaming: isStreaming) {
-                                    copyTurn(turn)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            if conversation == nil {
+                                ProgressView("Loading session store...")
+                                    .padding(.top, 8)
+                            }
+                            LazyVStack(alignment: .leading, spacing: 16) {
+                                ForEach(turns) { turn in
+                                    PromptCompletionCard(turn: turn, isStreaming: isStreaming) {
+                                        copyTurn(turn)
+                                    }
+                                    .transition(.opacity)
                                 }
                             }
+                            .frame(maxWidth: responsePanelWidth)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id("scroll-bottom")
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 5)
+                        .padding(.bottom, 40)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-                    .padding(.bottom, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 10)
+                    .onAppear {
+                        scrollToBottom(proxy, animated: false)
+                    }
+                    .onChange(of: scrollToBottomToken) { _, _ in
+                        scrollToBottom(proxy)
+                    }
                 }
 
-                composer(inputHeight: inputHeight)
+                promptComposer(inputHeight: inputHeight)
                     .frame(maxWidth: 700)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
@@ -251,7 +271,7 @@ struct ContentView: View {
         )
     }
 
-    private func composer(inputHeight: CGFloat) -> some View {
+    private func promptComposer(inputHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let errorMessage {
                 errorBanner(message: errorMessage)
@@ -259,10 +279,10 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                PromptInputView(text: $prompt) {
+                PromptInputView(text: $prompt, onSubmit: {
                     guard canSendPrompt else { return }
                     startStreaming()
-                }
+                }, focusToken: promptFocusToken)
                 .frame(height: inputHeight)
                 .disabled(conversation == nil || isStreaming)
                 .padding(.horizontal, 18)
@@ -367,7 +387,7 @@ struct ContentView: View {
     }
 
     private func promptInputHeight(for availableHeight: CGFloat) -> CGFloat {
-        min(max(availableHeight * 0.13, 130), 320)
+        min(max(availableHeight * 0.10, 100), 300)
     }
 
     private func errorBanner(message: String) -> some View {
@@ -407,35 +427,35 @@ struct ContentView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Debug")
-                    .font(.headline)
+                    .font(.system(size: 18, weight: .semibold))
 
                 Spacer()
 
                 Text("IS_DEBUG=true")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
 
             if let conversation {
                 HStack(spacing: 12) {
                     Text("DB")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(conversation.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3").path)
-                        .font(.caption.monospaced())
+                        .font(.system(size: 13, design: .monospaced))
                         .textSelection(.enabled)
                 }
 
                 HStack(spacing: 12) {
                     Text("Exists")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(fileExists ? "yes" : "no")
-                        .font(.caption.monospaced())
+                        .font(.system(size: 13, design: .monospaced))
                 }
             } else {
                 Text("Session store is loading.")
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
 
@@ -447,11 +467,11 @@ struct ContentView: View {
                         ForEach(debugLogStore.entries) { entry in
                             HStack(alignment: .bottom, spacing: 10) {
                                 Text(debugLogStore.formattedTimestamp(for: entry))
-                                    .font(.footnote.monospacedDigit())
+                                    .font(.system(size: 14, design: .monospaced).monospacedDigit())
                                     .foregroundStyle(.secondary)
                                 Text(entry.message)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .font(.footnote.monospacedDigit())
+                                    .font(.system(size: 14, design: .monospaced).monospacedDigit())
                                     .textSelection(.enabled)
                             }
                             .id(entry.id)
@@ -459,7 +479,7 @@ struct ContentView: View {
 
                         if debugLogStore.entries.isEmpty {
                             Text("No debug logs yet.")
-                                .font(.caption)
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -479,7 +499,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .font(.system(size: 17))
+        .font(.system(size: 18))
         .padding(15)
         .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
         .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
@@ -537,15 +557,21 @@ struct ContentView: View {
         let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         prompt = ""
         turns.append(ChatTurn(prompt: promptText, response: ""))
+        scrollToBottomToken += 1
 
         let turnIndex = turns.count - 1
 
         requestTask = Task {
             do {
-                let stream = await conversation.stream(prompt: promptText, apiKey: apiKey, model: selectedModel)
+                let stream = await conversation.stream(
+                    prompt: promptText,
+                    apiKey: apiKey,
+                    model: selectedModel
+                )
                 for try await chunk in stream {
                     await MainActor.run {
                         turns[turnIndex].response += chunk
+                        scrollToBottomToken += 1
                     }
                 }
             } catch {
@@ -560,8 +586,14 @@ struct ContentView: View {
             await MainActor.run {
                 isStreaming = false
                 requestTask = nil
+                promptFocusToken += 1
             }
         }
+    }
+
+    @MainActor
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        proxy.scrollTo("scroll-bottom", anchor: .bottom)
     }
 
     private func resolveAPIKey() -> String? {

@@ -16,10 +16,6 @@ enum PromptResources {
         try load(named: "mcp_tool_instructions", from: resourceRoot)
     }
 
-    static func mcpToolLoopInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
-        try load(named: "mcp_tool_loop_instructions", from: resourceRoot)
-    }
-
     private static func load(named name: String, from resourceRoot: URL, _ prefixTxt: String? = nil) throws -> String {
         let candidates = [
             resourceRoot.appendingPathComponent("\(name).md"),

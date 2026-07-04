@@ -225,52 +225,6 @@ import Testing
         #expect(capturedRequest?.messages.count == 1)
     }
 
-    @MainActor @Test func pipelineUsesMCPToolsWhenTheModelRequestsThem() async throws {
-        let sessionKey = MemorySessionKey(sessionID: "session-tool-loop", agentID: "agent-ui")
-        let store = InMemoryMemoryStore()
-        let coordinator = MemoryCoordinator(
-            store: store,
-            summarizer: RecordingSummarizer(
-                layer1: MemorySummary(
-                    text: "layer1",
-                    metadata: MemorySummaryMetadata(keywords: [], compressionRatio: 0.1, sourceTokenCount: 1, summaryTokenCount: 1)
-                ),
-                layer2: MemorySummary(
-                    text: "layer2",
-                    metadata: MemorySummaryMetadata(keywords: [], compressionRatio: 0.2, sourceTokenCount: 1, summaryTokenCount: 1)
-                )
-            ),
-            policy: TieredMemoryCompactionPolicy(),
-            budget: MemoryBudget(maxTokenCount: 10_000)
-        )
-        let toolClient = RecordingToolClient()
-        let client = ScriptedStreamingClient(responses: [
-            #"{"response_type":"tools","invocations":[{"name":"echo","arguments":{"text":"hello"}}]}"#,
-            #"{"response_type":"final","content":"done"}"#
-        ])
-
-        let pipeline = ConversationPipeline(
-            sessionKey: sessionKey,
-            memoryCoordinator: coordinator,
-            mcpClient: toolClient,
-            client: client,
-            model: FakeModel(),
-            ragInstructions: "rag",
-            mcpToolInstructions: "tool instructions",
-            mcpToolLoopInstructions: "loop instructions",
-            retrievalLimit: 5
-        )
-
-        let stream = await pipeline.stream(prompt: "Use the echo tool.")
-        let response = try await Self.collect(stream)
-
-        #expect(response == "done")
-        #expect(await toolClient.calledTools == ["echo"])
-        #expect(await toolClient.lastBatch?.invocations.first?.name == "echo")
-        #expect(client.lastRequest?.messages.first?.content.contains("tool_search") == true)
-        #expect(client.lastRequest?.messages.first?.content.contains("tool") == true)
-    }
-
     private static func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
         var output = ""
         for try await chunk in stream {

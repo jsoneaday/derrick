@@ -39,14 +39,8 @@ import Testing
             atomically: true,
             encoding: .utf8
         )
-        try "Tool loop instructions from file\n".write(
-            to: resources.appendingPathComponent("mcp_tool_loop_instructions.md"),
-            atomically: true,
-            encoding: .utf8
-        )
 
         #expect(try PromptResources.mcpToolInstructions(from: root) == "Tool instructions from file")
-        #expect(try PromptResources.mcpToolLoopInstructions(from: root) == "Tool loop instructions from file")
     }
 
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {
@@ -103,13 +97,7 @@ import Testing
             name: "mcp_tool_instructions",
             resourceRoot: root
         )
-        let loopError = PromptResourcesError.missingResource(
-            name: "mcp_tool_loop_instructions",
-            resourceRoot: root
-        )
-
         var matchedInstructionsError = false
-        var matchedLoopError = false
 
         do {
             _ = try PromptResources.mcpToolInstructions(from: root)
@@ -117,13 +105,6 @@ import Testing
             matchedInstructionsError = error == instructionsError
         }
 
-        do {
-            _ = try PromptResources.mcpToolLoopInstructions(from: root)
-        } catch let error as PromptResourcesError {
-            matchedLoopError = error == loopError
-        }
-
         #expect(matchedInstructionsError)
-        #expect(matchedLoopError)
     }
 }

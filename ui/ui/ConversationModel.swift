@@ -107,7 +107,6 @@ final class ConversationModel {
     let databaseDirectoryURL: URL
     let ragInstructions: String
     let mcpToolInstructions: String
-    let mcpToolLoopInstructions: String
 
     private init(
         sessionKey: MemorySessionKey,
@@ -115,8 +114,7 @@ final class ConversationModel {
         mcpBridge: MCPLocalBridge,
         databaseDirectoryURL: URL,
         ragInstructions: String,
-        mcpToolInstructions: String,
-        mcpToolLoopInstructions: String
+        mcpToolInstructions: String
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
@@ -124,7 +122,6 @@ final class ConversationModel {
         self.databaseDirectoryURL = databaseDirectoryURL
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
-        self.mcpToolLoopInstructions = mcpToolLoopInstructions
     }
 
     static func makeDefault() async throws -> ConversationModel {
@@ -134,7 +131,6 @@ final class ConversationModel {
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
-        let mcpToolLoopInstructions = try PromptResources.mcpToolLoopInstructions()
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
         let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)
@@ -162,8 +158,7 @@ final class ConversationModel {
                 mcpBridge: mcpBridge,
                 databaseDirectoryURL: await repository.databaseDirectoryURL,
                 ragInstructions: ragInstructions,
-                mcpToolInstructions: mcpToolInstructions,
-                mcpToolLoopInstructions: mcpToolLoopInstructions
+                mcpToolInstructions: mcpToolInstructions
             )
         } catch {
             debugLog("Memory bootstrap failed: \(error)")
@@ -183,8 +178,7 @@ final class ConversationModel {
             mcpBridge: mcpBridge,
             databaseDirectoryURL: databaseDirectoryURL,
             ragInstructions: ragInstructions,
-            mcpToolInstructions: mcpToolInstructions,
-            mcpToolLoopInstructions: mcpToolLoopInstructions
+            mcpToolInstructions: mcpToolInstructions
         )
     }
 
@@ -225,11 +219,18 @@ final class ConversationModel {
         return repository
     }
 
-    func stream(prompt: String, apiKey: String) async -> AsyncThrowingStream<String, Error> {
+    func stream(
+        prompt: String,
+        apiKey: String
+    ) async -> AsyncThrowingStream<String, Error> {
         await stream(prompt: prompt, apiKey: apiKey, model: .gemini(.gemini31FlashLite))
     }
 
-    func stream(prompt: String, apiKey: String, model: LLMModelChoice) async -> AsyncThrowingStream<String, Error> {
+    func stream(
+        prompt: String,
+        apiKey: String,
+        model: LLMModelChoice
+    ) async -> AsyncThrowingStream<String, Error> {
         switch model {
         case .gemini(let geminiModel):
             let provider = GeminiProvider(apiKey: apiKey)
@@ -242,7 +243,6 @@ final class ConversationModel {
                 model: geminiModel,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
-                mcpToolLoopInstructions: mcpToolLoopInstructions,
                 retrievalLimit: 5
             )
             return await pipeline.stream(prompt: prompt)
@@ -257,7 +257,6 @@ final class ConversationModel {
                 model: openAIModel,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
-                mcpToolLoopInstructions: mcpToolLoopInstructions,
                 retrievalLimit: 5
             )
             return await pipeline.stream(prompt: prompt)
