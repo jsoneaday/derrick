@@ -62,6 +62,32 @@ import Testing
         #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
     }
 
+    @Test func debugConfigurationReadsIsDebugFromEnvironment() {
+        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "true"]).isDebugEnabled)
+        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "TRUE"]).isDebugEnabled)
+        #expect(!AppDebugConfiguration(environment: ["IS_DEBUG": "false"]).isDebugEnabled)
+        #expect(!AppDebugConfiguration(environment: [:]).isDebugEnabled)
+    }
+
+    @MainActor @Test func debugConfigurationReadsIsDebugFromResourcesDotEnv() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try "IS_DEBUG=true\n".write(
+            to: resources.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = AppDebugConfiguration(
+            environment: [:],
+            currentDirectoryURL: root,
+            bundleURL: root
+        )
+
+        #expect(configuration.isDebugEnabled)
+    }
+
     @MainActor @Test func pipelineInjectsRelevantMemoryIntoTheNextPrompt() async throws {
         let sessionKey = MemorySessionKey(sessionID: "session-1", agentID: "agent-ui")
         let summarizer = RecordingSummarizer(
