@@ -91,6 +91,7 @@ struct MarkdownResponseView: View {
         switch block {
         case .paragraph(let text):
             Text(attributedMarkdown(text))
+                .padding(.horizontal, 15)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         case .code(let language, let code):
@@ -108,7 +109,7 @@ struct MarkdownResponseView: View {
                         .textSelection(.enabled)
                 }
             }
-            .padding(12)
+            .padding(15)
             .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
     }

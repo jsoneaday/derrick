@@ -124,6 +124,7 @@ struct PromptCompletionCard: View {
             }
 
             Text(turn.prompt)
+                .padding(.horizontal, 15)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
 
