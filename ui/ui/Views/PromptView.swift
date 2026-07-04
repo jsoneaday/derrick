@@ -102,6 +102,8 @@ struct PromptInputView: NSViewRepresentable {
 struct PromptCompletionCard: View {
     let turn: ChatTurn
     let isStreaming: Bool
+    let isActiveStreamingTurn: Bool
+    let completionStatus: String?
     let onCopy: () -> Void
     @State private var isCompletionVisible = false
 
@@ -125,15 +127,21 @@ struct PromptCompletionCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
 
-            if isCompletionVisible || !turn.response.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+            if isCompletionVisible || !turn.response.isEmpty || isActiveStreamingTurn {
+                VStack(alignment: .leading, spacing: 8) {
                     Divider()
 
-                    Text("Completion")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Completion")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
 
-                    MarkdownResponseView(text: turn.response)
+                        if let completionStatus {
+                            CompletionStatusView(status: completionStatus)
+                        }
+
+                        MarkdownResponseView(text: turn.response)
+                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -161,5 +169,47 @@ struct PromptCompletionCard: View {
                 }
             }
         }
+    }
+}
+
+private struct CompletionStatusView: View {
+    let status: String
+    @State private var isVisible = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.4)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let pulse = 0.35 + ((sin(t * 6) + 1) * 0.325) // 0.35...1.0
+
+            HStack(spacing: 8) {
+                Text("…")
+                    .font(.system(size: 15, weight: .semibold))
+                    .opacity(pulse)
+
+                ZStack(alignment: .leading) {
+                    Text(status)
+                        .id(status)
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(.black.opacity(0.06), lineWidth: 1)
+                        )
+                        .transition(.opacity.combined(with: .offset(y: -3)))
+                }
+            }
+            .foregroundStyle(.secondary)
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : 2)
+            .animation(.easeOut(duration: 0.18), value: status)
+            .animation(.easeOut(duration: 0.18), value: isVisible)
+            .onAppear {
+                isVisible = true
+            }
+        }
+        .padding(.top, 5)
+        .padding(.bottom, 6)
     }
 }

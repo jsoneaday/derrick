@@ -11,6 +11,117 @@ struct ChatTurn: Identifiable, Hashable {
     var response: String
 }
 
+private final class ScrollObserverToken: @unchecked Sendable {
+    private var notificationObserver: NSObjectProtocol?
+
+    func setNotificationObserver(_ observer: NSObjectProtocol?) {
+        notificationObserver = observer
+    }
+
+    func clear() {
+        if let notificationObserver {
+            NotificationCenter.default.removeObserver(notificationObserver)
+            self.notificationObserver = nil
+        }
+    }
+}
+
+private struct ScrollViewPositionObserver: NSViewRepresentable {
+    let onIsNearBottomChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onIsNearBottomChanged: onIsNearBottomChanged)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onIsNearBottomChanged = onIsNearBottomChanged
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: nsView)
+        }
+    }
+
+    final class Coordinator {
+        var onIsNearBottomChanged: (Bool) -> Void
+        private weak var scrollView: NSScrollView?
+        private let observerToken = ScrollObserverToken()
+        private var attachAttempts = 0
+
+        init(onIsNearBottomChanged: @escaping (Bool) -> Void) {
+            self.onIsNearBottomChanged = onIsNearBottomChanged
+        }
+
+        deinit {
+            let observerToken = observerToken
+            Task { @MainActor in
+                observerToken.clear()
+            }
+        }
+
+        func attach(from view: NSView) {
+            guard let scrollView = view.enclosingScrollView else {
+                guard attachAttempts < 10 else {
+                    return
+                }
+
+                attachAttempts += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
+                    guard let self, let view else {
+                        return
+                    }
+                    self.attach(from: view)
+                }
+                return
+            }
+
+            if self.scrollView === scrollView {
+                updateScrollState()
+                return
+            }
+
+            attachAttempts = 0
+
+            observerToken.clear()
+
+            self.scrollView = scrollView
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            observerToken.setNotificationObserver(NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateScrollState()
+            })
+            updateScrollState()
+        }
+
+        private func updateScrollState() {
+            guard let scrollView, let documentView = scrollView.documentView else {
+                return
+            }
+
+            let visibleRect = scrollView.contentView.documentVisibleRect
+            let documentBounds = documentView.bounds
+            let distanceFromBottom: CGFloat
+
+            if documentView.isFlipped {
+                distanceFromBottom = documentBounds.maxY - visibleRect.maxY
+            } else {
+                distanceFromBottom = visibleRect.minY - documentBounds.minY
+            }
+
+            onIsNearBottomChanged(distanceFromBottom <= 48)
+        }
+    }
+}
+
 private struct WindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -67,7 +178,7 @@ struct ContentView: View {
     }
 
     @State private var conversation: ConversationModel?
-    @State private var prompt = ""
+    @State private var prompt = "tell me a story"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -75,10 +186,11 @@ struct ContentView: View {
     @State private var isPresentingAPIKeyPrompt = false
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
-    @State private var selectedProvider: LLMProviderChoice = .gemini
-    @State private var selectedModel: LLMModelChoice = .gemini(.gemini31FlashLite)
+    @State private var selectedProvider: LLMProviderChoice = .openai
+    @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
+    @State private var shouldAutoScroll = true
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -154,7 +266,7 @@ struct ContentView: View {
             .overlay {
                 GeometryReader { proxy in
                     let inputHeight = promptInputHeight(for: proxy.size.height)
-                    let responsePanelWidth = proxy.size.width * 0.75
+                    let responsePanelWidth = proxy.size.width * 0.7
 
                     panelContent(inputHeight: inputHeight, responsePanelWidth: responsePanelWidth)
                 }
@@ -187,7 +299,12 @@ struct ContentView: View {
                             }
                             LazyVStack(alignment: .leading, spacing: 16) {
                                 ForEach(turns) { turn in
-                                    PromptCompletionCard(turn: turn, isStreaming: isStreaming) {
+                                    PromptCompletionCard(
+                                        turn: turn,
+                                        isStreaming: isStreaming,
+                                        isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
+                                        completionStatus: completionStatus(for: turn)
+                                    ) {
                                         copyTurn(turn)
                                     }
                                     .transition(.opacity)
@@ -203,14 +320,22 @@ struct ContentView: View {
                         .padding(.horizontal, 24)
                         .padding(.top, 5)
                         .padding(.bottom, 40)
+                        .background(
+                            ScrollViewPositionObserver(onIsNearBottomChanged: { isNearBottom in
+                                shouldAutoScroll = isNearBottom
+                            })
+                        )
                     }
                     .padding(.top, 20)
                     .padding(.bottom, 10)
                     .onAppear {
+                        shouldAutoScroll = true
                         scrollToBottom(proxy, animated: false)
                     }
                     .onChange(of: scrollToBottomToken) { _, _ in
-                        scrollToBottom(proxy)
+                        if shouldAutoScroll {
+                            scrollToBottom(proxy)
+                        }
                     }
                 }
 
@@ -279,12 +404,14 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                PromptInputView(text: $prompt, onSubmit: {
-                    guard canSendPrompt else { return }
-                    startStreaming()
-                }, focusToken: promptFocusToken)
-                .frame(height: inputHeight)
-                .disabled(conversation == nil || isStreaming)
+                ZStack(alignment: .topLeading) {
+                    PromptInputView(text: $prompt, onSubmit: {
+                        guard canSendPrompt else { return }
+                        startStreaming()
+                    }, focusToken: promptFocusToken)
+                    .frame(height: inputHeight)
+                    .disabled(conversation == nil || isStreaming)
+                }
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
                 .padding(.bottom, 12)
@@ -427,35 +554,35 @@ struct ContentView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Debug")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
 
                 Spacer()
 
                 Text("IS_DEBUG=true")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
 
             if let conversation {
                 HStack(spacing: 12) {
                     Text("DB")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(conversation.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3").path)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .textSelection(.enabled)
                 }
 
                 HStack(spacing: 12) {
                     Text("Exists")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(fileExists ? "yes" : "no")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                 }
             } else {
                 Text("Session store is loading.")
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
@@ -467,11 +594,11 @@ struct ContentView: View {
                         ForEach(debugLogStore.entries) { entry in
                             HStack(alignment: .bottom, spacing: 10) {
                                 Text(debugLogStore.formattedTimestamp(for: entry))
-                                    .font(.system(size: 14, design: .monospaced).monospacedDigit())
+                                    .font(.system(size: 13, design: .monospaced).monospacedDigit())
                                     .foregroundStyle(.secondary)
                                 Text(entry.message)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .font(.system(size: 14, design: .monospaced).monospacedDigit())
+                                    .font(.system(size: 13, design: .monospaced).monospacedDigit())
                                     .textSelection(.enabled)
                             }
                             .id(entry.id)
@@ -479,7 +606,7 @@ struct ContentView: View {
 
                         if debugLogStore.entries.isEmpty {
                             Text("No debug logs yet.")
-                                .font(.system(size: 13))
+                                .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -499,7 +626,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .font(.system(size: 18))
+        .font(.system(size: 17))
         .padding(15)
         .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
         .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
@@ -557,7 +684,9 @@ struct ContentView: View {
         let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         prompt = ""
         turns.append(ChatTurn(prompt: promptText, response: ""))
-        scrollToBottomToken += 1
+        if shouldAutoScroll {
+            scrollToBottomToken += 1
+        }
 
         let turnIndex = turns.count - 1
 
@@ -570,8 +699,13 @@ struct ContentView: View {
                 )
                 for try await chunk in stream {
                     await MainActor.run {
+                        if shouldAutoScroll {
+                            scrollToBottomToken += 1
+                        }
                         turns[turnIndex].response += chunk
-                        scrollToBottomToken += 1
+                        if shouldAutoScroll {
+                            scrollToBottomToken += 1
+                        }
                     }
                 }
             } catch {
@@ -624,6 +758,27 @@ struct ContentView: View {
                 debugLog("API key save failed: \(error)")
             }
         }
+    }
+
+    private func completionStatus(for turn: ChatTurn) -> String? {
+        guard isStreaming, turn.id == turns.last?.id else {
+            return nil
+        }
+
+        let latestLog = debugLogStore.entries.last?.message.lowercased() ?? ""
+        if latestLog.contains("tool") && (latestLog.contains("call") || latestLog.contains("search")) {
+            return "Requesting tool call"
+        }
+        if latestLog.contains("tool") && (latestLog.contains("result") || latestLog.contains("response")) {
+            return "Reading tool responses"
+        }
+        if latestLog.contains("mcp") {
+            return "Consulting tools"
+        }
+        if turn.response.isEmpty {
+            return "Thinking"
+        }
+        return "Streaming response"
     }
 
     private var apiKeyEnvironmentKeys: [String] {
