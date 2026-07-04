@@ -28,6 +28,14 @@ public extension DBRepository {
         }
     }
 
+    public func currentMemorySchemaVersion(username: String, password: String) throws -> Int {
+        try authenticate(username: username, password: password)
+        try Self.ensureDirectory(at: databaseDirectoryURL)
+        return try withDatabaseHandle { handle in
+            try Self.schemaVersion(on: handle)
+        }
+    }
+
     func upsertMemoryRecord(_ record: MemoryRecord, applicationName: String) throws {
         try withDatabaseHandle { handle in
             try Self.execute("PRAGMA foreign_keys = ON;", on: handle)

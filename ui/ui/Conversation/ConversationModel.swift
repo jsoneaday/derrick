@@ -103,6 +103,7 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
 final class ConversationModel {
     let sessionKey: MemorySessionKey
     let memoryCoordinator: MemoryCoordinator
+    let policyStore: (any PolicyStore)?
     let mcpBridge: MCPLocalBridge
     let databaseDirectoryURL: URL
     let ragInstructions: String
@@ -111,6 +112,7 @@ final class ConversationModel {
     private init(
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
+        policyStore: (any PolicyStore)?,
         mcpBridge: MCPLocalBridge,
         databaseDirectoryURL: URL,
         ragInstructions: String,
@@ -118,6 +120,7 @@ final class ConversationModel {
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
+        self.policyStore = policyStore
         self.mcpBridge = mcpBridge
         self.databaseDirectoryURL = databaseDirectoryURL
         self.ragInstructions = ragInstructions
@@ -155,6 +158,7 @@ final class ConversationModel {
             return ConversationModel(
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
+                policyStore: repository,
                 mcpBridge: mcpBridge,
                 databaseDirectoryURL: await repository.databaseDirectoryURL,
                 ragInstructions: ragInstructions,
@@ -175,6 +179,7 @@ final class ConversationModel {
         return ConversationModel(
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
+            policyStore: nil,
             mcpBridge: mcpBridge,
             databaseDirectoryURL: databaseDirectoryURL,
             ragInstructions: ragInstructions,
@@ -215,21 +220,30 @@ final class ConversationModel {
             )
         )
 
-        _ = try await repository.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
+        do {
+            _ = try await repository.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
+            let schemaVersion = try await repository.currentMemorySchemaVersion(username: "ui", password: "ui")
+            debugLog("Memory DB migrations completed (schema_version=\(schemaVersion)).")
+        } catch {
+            debugLog("Memory DB migrations failed: \(error.localizedDescription)")
+            throw error
+        }
         return repository
     }
 
     func stream(
         prompt: String,
-        apiKey: String
+        apiKey: String,
+        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async -> AsyncThrowingStream<String, Error> {
-        await stream(prompt: prompt, apiKey: apiKey, model: .gemini(.gemini31FlashLite))
+        await stream(prompt: prompt, apiKey: apiKey, model: .gemini(.gemini31FlashLite), approvalPresenter: approvalPresenter)
     }
 
     func stream(
         prompt: String,
         apiKey: String,
-        model: LLMModelChoice
+        model: LLMModelChoice,
+        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async -> AsyncThrowingStream<String, Error> {
         switch model {
         case .gemini(let geminiModel):
@@ -238,6 +252,8 @@ final class ConversationModel {
             let pipeline = ConversationPipeline(
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                applicationName: "ui",
                 mcpClient: mcpBridge.client,
                 client: client,
                 model: geminiModel,
@@ -245,6 +261,13 @@ final class ConversationModel {
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5
             )
+            if let approvalPresenter {
+                return await pipeline.streamWithPolicyInterception(
+                    prompt: prompt,
+                    sessionID: sessionKey.sessionID,
+                    approvalPresenter: approvalPresenter
+                )
+            }
             return await pipeline.stream(prompt: prompt)
         case .openai(let openAIModel):
             let provider = OpenAIProvider(apiKey: apiKey)
@@ -252,6 +275,8 @@ final class ConversationModel {
             let pipeline = ConversationPipeline(
                 sessionKey: sessionKey,
                 memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                applicationName: "ui",
                 mcpClient: mcpBridge.client,
                 client: client,
                 model: openAIModel,
@@ -259,6 +284,13 @@ final class ConversationModel {
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5
             )
+            if let approvalPresenter {
+                return await pipeline.streamWithPolicyInterception(
+                    prompt: prompt,
+                    sessionID: sessionKey.sessionID,
+                    approvalPresenter: approvalPresenter
+                )
+            }
             return await pipeline.stream(prompt: prompt)
         }
     }

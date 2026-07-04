@@ -21,6 +21,8 @@ extension MCPClient: ConversationToolClient {}
 struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sendable {
     let sessionKey: MemorySessionKey
     let memoryCoordinator: MemoryCoordinator
+    let policyStore: (any PolicyStore)?
+    let applicationName: String
     let mcpClient: (any ConversationToolClient)?
     let client: Client
     let model: Client.Model
@@ -31,6 +33,8 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
     init(
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
+        policyStore: (any PolicyStore)? = nil,
+        applicationName: String = "ui",
         mcpClient: (any ConversationToolClient)? = nil,
         client: Client,
         model: Client.Model,
@@ -40,6 +44,8 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
     ) {
         self.sessionKey = sessionKey
         self.memoryCoordinator = memoryCoordinator
+        self.policyStore = policyStore
+        self.applicationName = applicationName
         self.mcpClient = mcpClient
         self.client = client
         self.model = model
@@ -93,7 +99,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         }
     }
 
-    private func systemPrompt(from memoryContext: String) -> String {
+    func systemPrompt(from memoryContext: String) -> String {
         let trimmed = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let memoryBlock = trimmed.isEmpty
             ? "Retrieved session memory: none."
@@ -106,7 +112,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         .joined(separator: "\n\n")
     }
 
-    private func retrieveMemoryContext(for prompt: String) async throws -> String {
+    func retrieveMemoryContext(for prompt: String) async throws -> String {
         let retrieval = try await memoryCoordinator.retrieve(
             MemoryRetrievalRequest(
                 sessionKey: sessionKey,

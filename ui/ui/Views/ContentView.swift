@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import LLMAgentClient
 import SwiftUI
 
@@ -167,6 +168,53 @@ private struct WindowConfigurator: NSViewRepresentable {
     }
 }
 
+@MainActor
+private final class ApprovalPresentationModel: ObservableObject, ApprovalConfirmationPresenting {
+    @Published var pendingRequest: ApprovalConfirmationRequest?
+    @Published var editedArgumentsJSON = ""
+    @Published var actor = "ui-user"
+    @Published var validationError: String?
+
+    private var continuation: CheckedContinuation<ApprovalConfirmationDecision, Never>?
+
+    func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
+        editedArgumentsJSON = request.argumentsJSON
+        actor = "ui-user"
+        validationError = nil
+        pendingRequest = request
+
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func approve() {
+        guard let data = editedArgumentsJSON.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              json is [String: Any] else {
+            validationError = "Arguments must be a valid JSON object."
+            return
+        }
+
+        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
+        continuation?.resume(returning: .approved(
+            editedArgumentsJSON: editedArgumentsJSON,
+            actor: actorValue.isEmpty ? nil : actorValue
+        ))
+        continuation = nil
+        pendingRequest = nil
+        validationError = nil
+    }
+
+    func cancel() {
+        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
+        continuation?.resume(returning: .cancelled(actor: actorValue.isEmpty ? nil : actorValue))
+        continuation = nil
+        pendingRequest = nil
+        validationError = nil
+    }
+}
+
 struct ContentView: View {
     private let secretResolver = AppSecretResolver()
     private let debugConfiguration = AppDebugConfiguration()
@@ -191,6 +239,7 @@ struct ContentView: View {
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
+    @StateObject private var approvalPresentationModel = ApprovalPresentationModel()
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -216,6 +265,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt
+        }
+        .sheet(item: $approvalPresentationModel.pendingRequest) { request in
+            approvalPrompt(request: request)
         }
         .task {
             if isDebugEnabled {
@@ -663,6 +715,71 @@ struct ContentView: View {
         .frame(width: 460)
     }
 
+    private func approvalPrompt(request: ApprovalConfirmationRequest) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Confirm tool request")
+                .font(.title2.bold())
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tool")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(request.toolName)
+                    .font(.system(size: 13, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+
+            if !request.requiredFields.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Required policy fields")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(request.requiredFields.joined(separator: ", "))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Actor")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("Actor", text: $approvalPresentationModel.actor)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Arguments (editable JSON)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $approvalPresentationModel.editedArgumentsJSON)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 180, maxHeight: 240)
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if let validationError = approvalPresentationModel.validationError {
+                Text(validationError)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    approvalPresentationModel.cancel()
+                }
+                Button("Approve") {
+                    approvalPresentationModel.approve()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 640)
+    }
+
     private func startStreaming() {
         guard let conversation else {
             errorMessage = "Session store is still loading."
@@ -695,7 +812,8 @@ struct ContentView: View {
                 let stream = await conversation.stream(
                     prompt: promptText,
                     apiKey: apiKey,
-                    model: selectedModel
+                    model: selectedModel,
+                    approvalPresenter: approvalPresentationModel
                 )
                 for try await chunk in stream {
                     await MainActor.run {
