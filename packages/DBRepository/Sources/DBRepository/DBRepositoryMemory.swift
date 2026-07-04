@@ -263,7 +263,7 @@ extension DBRepository: MemoryStore {
     }
 }
 
-private extension DBRepository {
+extension DBRepository {
     static func iso8601Formatter() -> ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MemoryDatabaseSchema {
-    public static let latestVersion = 2
+    public static let latestVersion = 5
 
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
@@ -26,6 +26,12 @@ public enum MemoryDatabaseSchema {
             return "memory_sessions"
         case 2:
             return "memory_records"
+        case 3:
+            return "policy_rules"
+        case 4:
+            return "policy_approvals"
+        case 5:
+            return "policy_audit_log"
         default:
             return "unknown"
         }
