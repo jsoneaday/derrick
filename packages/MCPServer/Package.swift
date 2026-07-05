@@ -13,14 +13,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
-        .package(path: "../MCPClient")
+        .package(path: "../MCPClient"),
+        .package(path: "../LLMAgentClient")
     ],
     targets: [
         .target(
             name: "MCPServer",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
-                "MCPClient"
+                "MCPClient",
+                "LLMAgentClient"
             ],
             path: "Sources/MCPServer"
         ),

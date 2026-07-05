@@ -105,11 +105,12 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
             ? "Retrieved session memory: none."
             : ["Retrieved session memory:", trimmed].joined(separator: "\n\n")
 
-        return [
-            ragInstructions,
-            memoryBlock
-        ]
-        .joined(separator: "\n\n")
+        var sections: [String] = [ragInstructions, memoryBlock]
+        let toolInstructions = mcpToolInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !toolInstructions.isEmpty {
+            sections.append(toolInstructions)
+        }
+        return sections.joined(separator: "\n\n")
     }
 
     func retrieveMemoryContext(for prompt: String) async throws -> String {

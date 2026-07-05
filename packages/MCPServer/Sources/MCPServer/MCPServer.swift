@@ -107,8 +107,13 @@ public final class MCPServerHost: @unchecked Sendable {
         )
     }
 
-    public func registerTool(name: String, description: String, handler: @escaping MCPToolRegistry.Handler) async {
-        await registry.register(name: name, description: description, handler: handler)
+    public func registerTool(
+        name: String,
+        description: String,
+        inputSchema: Value = .object([:]),
+        handler: @escaping MCPToolRegistry.Handler
+    ) async {
+        await registry.register(name: name, description: description, inputSchema: inputSchema, handler: handler)
     }
 
     public func searchRegisteredTools(matching query: String) async -> [MCPToolDescriptor] {
@@ -273,7 +278,7 @@ public final class MCPServerHost: @unchecked Sendable {
         return request
     }
 
-    private static func encodeJSON<T: Encodable>(_ value: T) -> String {
+    static func encodeJSON<T: Encodable>(_ value: T) -> String {
         guard let data = try? JSONEncoder().encode(value) else {
             return "[]"
         }

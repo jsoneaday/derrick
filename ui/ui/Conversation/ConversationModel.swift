@@ -194,6 +194,7 @@ final class ConversationModel {
         sessionKey: MemorySessionKey
     ) async throws -> MCPLocalBridge {
         try await MCPLocalBridge.make { server in
+            await server.registerPythonScriptExecutionTool()
             await server.registerSessionMemorySearchTool { arguments in
                 let retrieval = try await memoryCoordinator.retrievePrior(
                     MemoryPriorRetrievalRequest(
