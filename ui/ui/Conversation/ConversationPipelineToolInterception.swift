@@ -8,7 +8,7 @@ extension ConversationPipeline {
         named name: String,
         arguments: [String: Value],
         sessionID: String,
-        interceptor: ToolRequestInterceptor = DefaultToolRequestInterceptor(),
+        interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolResult {
         let event = ToolInvocationEvent(
@@ -17,8 +17,10 @@ extension ConversationPipeline {
             argumentsJSON: try toolArgumentsToJSON(arguments)
         )
 
+        let effectiveInterceptor = makeToolInterceptor(override: interceptor)
+
         let interceptedEvent: ToolInvocationEvent
-        switch try await interceptor.evaluateToolInvocation(event) {
+        switch try await effectiveInterceptor.evaluateToolInvocation(event) {
         case .allow(let allowedEvent):
             interceptedEvent = allowedEvent
         case .deny(let reason):
@@ -124,7 +126,7 @@ extension ConversationPipeline {
     func batchCallToolsWithPolicyInterception(
         _ request: MCPToolBatchRequest,
         sessionID: String,
-        interceptor: ToolRequestInterceptor = DefaultToolRequestInterceptor(),
+        interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolBatchResult {
         var results: [MCPToolResult] = []
@@ -150,6 +152,17 @@ extension ConversationPipeline {
             combinedContent: results.map(\.content).joined(separator: "\n"),
             isError: hasErrors
         )
+    }
+
+    private func makeToolInterceptor(override: ToolRequestInterceptor?) -> ToolRequestInterceptor {
+        if let override {
+            return override
+        }
+        if let policyStore {
+            let policy = OnDemandToolGovernancePolicy(store: policyStore, applicationName: applicationName)
+            return DefaultToolRequestInterceptor(policy: policy)
+        }
+        return DefaultToolRequestInterceptor()
     }
 
     private func persistPolicyDecision(

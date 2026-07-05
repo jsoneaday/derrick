@@ -261,14 +261,13 @@ final class ConversationModel {
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5
             )
-            if let approvalPresenter {
-                return await pipeline.streamWithPolicyInterception(
-                    prompt: prompt,
-                    sessionID: sessionKey.sessionID,
-                    approvalPresenter: approvalPresenter
-                )
-            }
-            return await pipeline.stream(prompt: prompt)
+            let contentInterceptor = makeContentPolicyInterceptor()
+            return await pipeline.streamWithPolicyInterception(
+                prompt: prompt,
+                sessionID: sessionKey.sessionID,
+                interceptor: contentInterceptor,
+                approvalPresenter: approvalPresenter
+            )
         case .openai(let openAIModel):
             let provider = OpenAIProvider(apiKey: apiKey)
             let client = OpenAIAgentClient(provider: provider)
@@ -284,14 +283,21 @@ final class ConversationModel {
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5
             )
-            if let approvalPresenter {
-                return await pipeline.streamWithPolicyInterception(
-                    prompt: prompt,
-                    sessionID: sessionKey.sessionID,
-                    approvalPresenter: approvalPresenter
-                )
-            }
-            return await pipeline.stream(prompt: prompt)
+            let contentInterceptor = makeContentPolicyInterceptor()
+            return await pipeline.streamWithPolicyInterception(
+                prompt: prompt,
+                sessionID: sessionKey.sessionID,
+                interceptor: contentInterceptor,
+                approvalPresenter: approvalPresenter
+            )
         }
+    }
+
+    private func makeContentPolicyInterceptor() -> PolicyInterceptor {
+        guard let policyStore else {
+            return DefaultPolicyInterceptor()
+        }
+        let policy = OnDemandCompletionContentPolicy(store: policyStore, applicationName: "ui")
+        return DefaultPolicyInterceptor(policy: policy)
     }
 }
