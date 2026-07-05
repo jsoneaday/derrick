@@ -4,8 +4,16 @@ import MCPClient
 
 @Suite struct MCPServerTests {
     private struct StubPythonRunner: PythonScriptRunner {
-        func run(script: String, timeoutSeconds: Int, allowNetwork: Bool) async throws -> PythonScriptExecutionResult {
-            PythonScriptExecutionResult(
+        func run(
+            script: String,
+            timeoutSeconds: Int,
+            allowNetwork: Bool,
+            pythonPackages: [String],
+            allowDependencyInstall: Bool
+        ) async throws -> PythonScriptExecutionResult {
+            _ = pythonPackages
+            _ = allowDependencyInstall
+            return PythonScriptExecutionResult(
                 status: "completed",
                 decision: "allow",
                 verifier: "stub",

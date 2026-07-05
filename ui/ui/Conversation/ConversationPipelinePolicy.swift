@@ -27,6 +27,7 @@ extension ConversationPipeline {
                         let upstream = client.stream(request, model: model)
                         var completion = ""
                         var chunkIndex = 0
+                        var suppressStreaming = false
 
                         for try await chunk in upstream {
                             let event = AssistantChunkEvent(
@@ -38,6 +39,13 @@ extension ConversationPipeline {
                             if let interceptedContent = try await interceptor.interceptAssistantChunk(event) {
                                 completion += interceptedContent
                                 chunkIndex += 1
+                                if suppressStreaming {
+                                    continue
+                                }
+                                if Self.isToolRequestPrefix(completion) {
+                                    suppressStreaming = true
+                                    continue
+                                }
                                 continuation.yield(interceptedContent)
                             }
                         }
@@ -63,21 +71,16 @@ extension ConversationPipeline {
                             )
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
 
-                            let resultBlock = """
-
-
-                            [Tool results]
-                            \(toolExecution.summary)
-
-                            """
-                            continuation.yield(resultBlock)
-
                             workingPrompt = Self.buildFollowUpPrompt(
                                 originalPrompt: prompt,
                                 assistantToolRequest: interceptedCompletion,
                                 toolResultSummary: toolExecution.summary
                             )
                             continue
+                        }
+
+                        if suppressStreaming {
+                            continuation.yield(interceptedCompletion)
                         }
 
                         try? await memoryCoordinator.ingest(
@@ -162,6 +165,19 @@ extension ConversationPipeline {
         }
 
         return nil
+    }
+
+    private static func isToolRequestPrefix(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{\"name\"") || trimmed.hasPrefix("{\"tool\"") || trimmed.hasPrefix("{\"invocations\"") {
+            return true
+        }
+        if trimmed.hasPrefix("{"),
+           trimmed.contains("\"name\""),
+           (trimmed.contains("\"arguments\"") || trimmed.contains("\"invocations\"")) {
+            return true
+        }
+        return false
     }
 
     private static func normalizeJSONPayload(_ text: String) -> String {

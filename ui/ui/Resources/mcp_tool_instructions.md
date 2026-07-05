@@ -8,3 +8,5 @@
 8. If `python_script_exec` is available, always include `mode`, `description`, `reason`, and `script`.
 9. Prefer `mode=readonly`; only request `write` with explicit `expected_effects` tied to the user request.
 10. Keep script behavior narrowly scoped to the user request and avoid unrelated actions.
+11. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
+12. If Python dependencies are needed, include `python_packages` and set `allow_network=true`; set `allow_dependency_install=true` only when using non-baseline packages.

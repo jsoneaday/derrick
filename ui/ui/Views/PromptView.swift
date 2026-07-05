@@ -123,10 +123,7 @@ struct PromptCompletionCard: View {
                 .controlSize(.small)
             }
 
-            Text(turn.prompt)
-                .padding(.horizontal, 15)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            MarkdownResponseView(text: turn.prompt, allowsCSVExport: false)
 
             if isCompletionVisible || !turn.response.isEmpty || isActiveStreamingTurn {
                 VStack(alignment: .leading, spacing: 8) {
@@ -141,7 +138,7 @@ struct PromptCompletionCard: View {
                             CompletionStatusView(status: completionStatus)
                         }
 
-                        MarkdownResponseView(text: turn.response)
+                        MarkdownResponseView(text: turn.response, allowsCSVExport: true)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

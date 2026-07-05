@@ -14,6 +14,8 @@ public struct PythonScriptExecutionArguments: Sendable {
     public let script: String
     public let userPrompt: String?
     public let expectedEffects: [String]
+    public let pythonPackages: [String]
+    public let allowDependencyInstall: Bool
     public let timeoutSeconds: Int
     public let allowNetwork: Bool
 
@@ -24,6 +26,8 @@ public struct PythonScriptExecutionArguments: Sendable {
         script: String,
         userPrompt: String?,
         expectedEffects: [String],
+        pythonPackages: [String],
+        allowDependencyInstall: Bool,
         timeoutSeconds: Int,
         allowNetwork: Bool
     ) {
@@ -33,6 +37,8 @@ public struct PythonScriptExecutionArguments: Sendable {
         self.script = script
         self.userPrompt = userPrompt
         self.expectedEffects = expectedEffects
+        self.pythonPackages = pythonPackages
+        self.allowDependencyInstall = allowDependencyInstall
         self.timeoutSeconds = timeoutSeconds
         self.allowNetwork = allowNetwork
     }
@@ -73,7 +79,13 @@ public struct PythonScriptReviewAssessment: Codable, Sendable {
 }
 
 public protocol PythonScriptRunner: Sendable {
-    func run(script: String, timeoutSeconds: Int, allowNetwork: Bool) async throws -> PythonScriptExecutionResult
+    func run(
+        script: String,
+        timeoutSeconds: Int,
+        allowNetwork: Bool,
+        pythonPackages: [String],
+        allowDependencyInstall: Bool
+    ) async throws -> PythonScriptExecutionResult
 }
 
 public protocol PythonScriptReviewer: Sendable {
@@ -139,6 +151,8 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
             "script": args.script,
             "user_prompt": args.userPrompt ?? "",
             "expected_effects": args.expectedEffects,
+            "python_packages": args.pythonPackages,
+            "allow_dependency_install": args.allowDependencyInstall,
             "allow_network": args.allowNetwork,
             "timeout_seconds": args.timeoutSeconds
         ]
@@ -169,17 +183,43 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
 
 public struct DockerPythonScriptRunner: PythonScriptRunner {
     private let dockerImage: String
+    static let baselinePackages: Set<String> = [
+        "requests",
+        "beautifulsoup4",
+        "lxml",
+        "pandas"
+    ]
 
     public init(dockerImage: String = "python:3.12-alpine") {
         self.dockerImage = dockerImage
     }
 
-    public func run(script: String, timeoutSeconds: Int, allowNetwork: Bool) async throws -> PythonScriptExecutionResult {
+    public func run(
+        script: String,
+        timeoutSeconds: Int,
+        allowNetwork: Bool,
+        pythonPackages: [String],
+        allowDependencyInstall: Bool
+    ) async throws -> PythonScriptExecutionResult {
         let started = Date()
+        let normalizedPackages = Self.normalizePackages(pythonPackages)
+        let installPackages = normalizedPackages
+        let nonBaselinePackages = normalizedPackages.filter { !Self.baselinePackages.contains($0) }
+        let effectiveAllowNetwork = allowNetwork
+        let executionScript = Self.makeExecutionScript(
+            script: script,
+            installPackages: installPackages,
+            allowDependencyInstall: allowDependencyInstall,
+            nonBaselinePackages: nonBaselinePackages
+        )
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = dockerRunArguments(image: dockerImage, timeoutSeconds: timeoutSeconds, allowNetwork: allowNetwork)
+        process.arguments = dockerRunArguments(
+            image: dockerImage,
+            timeoutSeconds: timeoutSeconds,
+            allowNetwork: effectiveAllowNetwork
+        )
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -190,7 +230,7 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
 
         try process.run()
 
-        if let data = script.data(using: .utf8) {
+        if let data = executionScript.data(using: .utf8) {
             stdinPipe.fileHandleForWriting.write(data)
         }
         stdinPipe.fileHandleForWriting.closeFile()
@@ -217,6 +257,53 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
             timedOut: timedOut,
             durationMS: elapsed
         )
+    }
+
+    private static func normalizePackages(_ packages: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for package in packages {
+            let normalized = package.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            output.append(normalized)
+        }
+        return output
+    }
+
+    private static func makeExecutionScript(
+        script: String,
+        installPackages: [String],
+        allowDependencyInstall: Bool,
+        nonBaselinePackages: [String]
+    ) -> String {
+        let encodedScript = Data(script.utf8).base64EncodedString()
+        let packagesData = (try? JSONSerialization.data(withJSONObject: installPackages, options: [.sortedKeys])) ?? Data("[]".utf8)
+        let packagesJSON = String(decoding: packagesData, as: UTF8.self)
+        let nonBaselineData = (try? JSONSerialization.data(withJSONObject: nonBaselinePackages, options: [.sortedKeys])) ?? Data("[]".utf8)
+        let nonBaselineJSON = String(decoding: nonBaselineData, as: UTF8.self)
+        let installEnabled = allowDependencyInstall ? "True" : "False"
+        return """
+        import base64
+        import json
+        import subprocess
+        import sys
+
+        install_packages = json.loads('''\(packagesJSON)''')
+        non_baseline_packages = json.loads('''\(nonBaselineJSON)''')
+        allow_dependency_install = \(installEnabled)
+        if non_baseline_packages and not allow_dependency_install:
+            raise RuntimeError("Requested non-baseline python_packages require allow_dependency_install=true.")
+        if install_packages:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", *install_packages],
+                check=True
+            )
+
+        script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
+        globals_dict = {"__name__": "__main__"}
+        exec(compile(script_source, "<python_script_exec>", "exec"), globals_dict, globals_dict)
+        """
     }
 
     private func dockerRunArguments(image: String, timeoutSeconds: Int, allowNetwork: Bool) -> [String] {
@@ -285,6 +372,18 @@ public enum PythonScriptExecutionVerifier {
         if args.mode == .write && args.expectedEffects.isEmpty {
             findings.append("Write mode requires expected_effects.")
         }
+        let normalizedPackages = normalizePackages(args.pythonPackages)
+        let invalidPackageNames = normalizedPackages.filter { !isValidPackageName($0) }
+        if !invalidPackageNames.isEmpty {
+            findings.append("Invalid python_packages values: \(invalidPackageNames.joined(separator: ", ")).")
+        }
+        let installPackages = normalizedPackages.filter { !DockerPythonScriptRunner.baselinePackages.contains($0) }
+        if !installPackages.isEmpty && !args.allowDependencyInstall {
+            findings.append("Requested python_packages require allow_dependency_install=true: \(installPackages.joined(separator: ", ")).")
+        }
+        if !normalizedPackages.isEmpty && !args.allowNetwork {
+            findings.append("Installing python_packages requires allow_network=true.")
+        }
 
         if args.mode == .readonly {
             let readonlyViolations = readonlyViolations(in: args.script)
@@ -328,6 +427,22 @@ public enum PythonScriptExecutionVerifier {
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
             .map(String.init)
             .filter { $0.count > 2 }
+    }
+
+    private static func normalizePackages(_ packages: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for package in packages {
+            let normalized = package.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            output.append(normalized)
+        }
+        return output
+    }
+
+    private static func isValidPackageName(_ package: String) -> Bool {
+        package.range(of: #"^[a-z0-9][a-z0-9._-]{0,63}$"#, options: .regularExpression) != nil
     }
 }
 
@@ -375,6 +490,15 @@ public extension MCPServerHost {
                     "type": .string("array"),
                     "items": .object(["type": .string("string")]),
                     "description": .string("Declared intended effects (required for write mode).")
+                ]),
+                "python_packages": .object([
+                    "type": .string("array"),
+                    "items": .object(["type": .string("string")]),
+                    "description": .string("Optional dependency names (PyPI packages). Baseline packages are curated and can be installed without allow_dependency_install.")
+                ]),
+                "allow_dependency_install": .object([
+                    "type": .string("boolean"),
+                    "description": .string("Allow per-run pip install of non-baseline packages. Requires allow_network=true.")
                 ]),
                 "timeout_seconds": .object([
                     "type": .string("number"),
@@ -453,7 +577,9 @@ public extension MCPServerHost {
             var result = try await runner.run(
                 script: parsed.script,
                 timeoutSeconds: parsed.timeoutSeconds,
-                allowNetwork: parsed.allowNetwork
+                allowNetwork: parsed.allowNetwork,
+                pythonPackages: parsed.pythonPackages,
+                allowDependencyInstall: parsed.allowDependencyInstall
             )
             result = PythonScriptExecutionResult(
                 status: result.status,
@@ -487,6 +613,8 @@ public extension MCPServerHost {
 
         let userPrompt = arguments["user_prompt"]?.stringValue
         let expectedEffects = (arguments["expected_effects"]?.arrayValue ?? []).compactMap { $0.stringValue }
+        let pythonPackages = (arguments["python_packages"]?.arrayValue ?? []).compactMap { $0.stringValue }
+        let allowDependencyInstall = arguments["allow_dependency_install"]?.boolValue ?? false
         let timeoutSeconds = arguments["timeout_seconds"]?.intValue ?? 30
         let allowNetwork = arguments["allow_network"]?.boolValue ?? false
 
@@ -497,6 +625,8 @@ public extension MCPServerHost {
             script: script,
             userPrompt: userPrompt,
             expectedEffects: expectedEffects,
+            pythonPackages: pythonPackages,
+            allowDependencyInstall: allowDependencyInstall,
             timeoutSeconds: timeoutSeconds,
             allowNetwork: allowNetwork
         )
