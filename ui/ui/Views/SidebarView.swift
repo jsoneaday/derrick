@@ -36,8 +36,13 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("derrick")
-                    .font(.system(size: 28, weight: .regular, design: .serif))
+                HStack(spacing: 8) {
+                    Image(systemName: "building.columns")
+                        .font(.system(size: 16, weight: .semibold, design: .serif))
+                        .foregroundStyle(Color(red: 0.176, green: 0.286, blue: 0.576))
+                    Text("derrick")
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                }
 
                 Spacer()
 

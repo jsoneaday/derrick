@@ -168,53 +168,6 @@ private struct WindowConfigurator: NSViewRepresentable {
     }
 }
 
-@MainActor
-private final class ApprovalPresentationModel: ObservableObject, ApprovalConfirmationPresenting {
-    @Published var pendingRequest: ApprovalConfirmationRequest?
-    @Published var editedArgumentsJSON = ""
-    @Published var actor = "ui-user"
-    @Published var validationError: String?
-
-    private var continuation: CheckedContinuation<ApprovalConfirmationDecision, Never>?
-
-    func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
-        editedArgumentsJSON = request.argumentsJSON
-        actor = "ui-user"
-        validationError = nil
-        pendingRequest = request
-
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
-        }
-    }
-
-    func approve() {
-        guard let data = editedArgumentsJSON.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data),
-              json is [String: Any] else {
-            validationError = "Arguments must be a valid JSON object."
-            return
-        }
-
-        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
-        continuation?.resume(returning: .approved(
-            editedArgumentsJSON: editedArgumentsJSON,
-            actor: actorValue.isEmpty ? nil : actorValue
-        ))
-        continuation = nil
-        pendingRequest = nil
-        validationError = nil
-    }
-
-    func cancel() {
-        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
-        continuation?.resume(returning: .cancelled(actor: actorValue.isEmpty ? nil : actorValue))
-        continuation = nil
-        pendingRequest = nil
-        validationError = nil
-    }
-}
-
 struct ContentView: View {
     private let secretResolver = AppSecretResolver()
     private let debugConfiguration = AppDebugConfiguration()
@@ -409,12 +362,8 @@ struct ContentView: View {
 
     private var emptyState: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "asterisk")
-                .font(.system(size: 36, weight: .semibold))
-                .foregroundStyle(Color(red: 0.796, green: 0.424, blue: 0.298))
-
             Text("dave returns!")
-                .font(.system(size: 36, weight: .regular, design: .serif))
+                .font(.system(size: 36, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color(nsColor: .labelColor))
         }
         .frame(maxWidth: .infinity, alignment: .center)
@@ -426,7 +375,7 @@ struct ContentView: View {
             chipButton("book.closed", label: "Learn")
             chipButton("chevron.left.forwardslash.chevron.right", label: "Code")
             chipButton("cup.and.saucer", label: "Life stuff")
-            chipButton("lightbulb", label: "Claude's choice")
+            chipButton("lightbulb", label: "Derrick's choice")
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -907,8 +856,4 @@ struct ContentView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
-}
-
-#Preview {
-    ContentView()
 }
