@@ -271,7 +271,7 @@ struct ContentView: View {
             .overlay {
                 GeometryReader { proxy in
                     let inputHeight = promptInputHeight(for: proxy.size.height)
-                    let responsePanelWidth = proxy.size.width * 0.7
+                    let responsePanelWidth = max(proxy.size.width * 0.7, 700)
 
                     panelContent(inputHeight: inputHeight, responsePanelWidth: responsePanelWidth)
                 }
@@ -315,7 +315,7 @@ struct ContentView: View {
                                     .transition(.opacity)
                                 }
                             }
-                            .frame(maxWidth: responsePanelWidth)
+                            .frame(minWidth: 700, maxWidth: responsePanelWidth)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                             Color.clear

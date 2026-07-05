@@ -131,6 +131,7 @@ final class ConversationModel {
         let sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
         let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
+        let debugConfiguration = AppDebugConfiguration()
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
@@ -143,7 +144,8 @@ final class ConversationModel {
         do {
             let repository = try await makeMemoryStore(
                 applicationName: "ui",
-                databaseDirectoryURL: databaseDirectoryURL
+                databaseDirectoryURL: databaseDirectoryURL,
+                seedRules: debugConfiguration.isDebugEnabled
             )
             let repositoryURL = await repository.databaseURL
             debugLog("Memory store ready: \(repositoryURL.path)")
@@ -208,7 +210,8 @@ final class ConversationModel {
 
     private static func makeMemoryStore(
         applicationName: String,
-        databaseDirectoryURL: URL
+        databaseDirectoryURL: URL,
+        seedRules: Bool
     ) async throws -> DBRepository {
         let repository = DBRepository(
             configuration: DBRepositoryConfiguration(
@@ -228,7 +231,78 @@ final class ConversationModel {
             debugLog("Memory DB migrations failed: \(error.localizedDescription)")
             throw error
         }
+
+        if seedRules {
+            do {
+                let inserted = try await seedPolicyRulesIfNeeded(repository: repository, applicationName: applicationName)
+                if inserted > 0 {
+                    debugLog("Policy seed inserted \(inserted) default rule(s).")
+                } else {
+                    debugLog("Policy seed skipped (rules already present).")
+                }
+            } catch {
+                debugLog("Policy seed failed: \(error.localizedDescription)")
+                throw error
+            }
+        }
         return repository
+    }
+
+    private static func seedPolicyRulesIfNeeded(repository: DBRepository, applicationName: String) async throws -> Int {
+        let defaultRules: [PolicyRule] = [
+            PolicyRule(
+                applicationName: applicationName,
+                name: "deny-shell-exec",
+                scope: "tool_invocation",
+                matcherJSON: #"{"tool_name":"shell_exec"}"#,
+                outcomeJSON: #"{"action":"deny","reason":"shell_exec is blocked by default testing policy."}"#,
+                priority: 1000
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "confirm-write-tools",
+                scope: "tool_invocation",
+                matcherJSON: #"{"tool_name_contains":"write"}"#,
+                outcomeJSON: #"{"action":"confirm","required_fields":["change_ticket","justification"]}"#,
+                priority: 900
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "redact-api-key-chunks",
+                scope: "assistant_chunk",
+                matcherJSON: #"{"content_pattern":"(?i)api[_ -]?key\\s*[:=]\\s*\\S+"}"#,
+                outcomeJSON: #"{"action":"redact","pattern":"(?i)api[_ -]?key\\s*[:=]\\s*\\S+","replacement":"api_key: [REDACTED]"}"#,
+                priority: 850
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "confirm-email-completions",
+                scope: "assistant_completion_content",
+                matcherJSON: #"{"detected_patterns_any":["email"]}"#,
+                outcomeJSON: #"{"action":"confirm","required_fields":["privacy_review"]}"#,
+                priority: 800
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "deny-ssn-completions",
+                scope: "assistant_completion_content",
+                matcherJSON: #"{"detected_patterns_any":["ssn"]}"#,
+                outcomeJSON: #"{"action":"deny","reason":"SSN-like patterns are blocked."}"#,
+                priority: 950
+            )
+        ]
+
+        var inserted = 0
+        for rule in defaultRules {
+            let existing = try await repository.loadRules(applicationName: applicationName, scope: rule.scope)
+            guard existing.contains(where: { $0.name == rule.name }) == false else {
+                continue
+            }
+            try await repository.saveRule(rule)
+            inserted += 1
+        }
+
+        return inserted
     }
 
     func stream(
