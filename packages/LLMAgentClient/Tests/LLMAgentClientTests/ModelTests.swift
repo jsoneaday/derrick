@@ -25,6 +25,15 @@ struct ModelTests {
         #expect(OpenAIModel.gpt5Mini.maxSupportedContextTokens > OpenAIModel.gpt5Mini.maxIdealContextTokens)
     }
 
+    @Test func openAIAdditionalModelsAreAvailable() {
+        #expect(OpenAIModel.allCases.contains(.gpt54Mini))
+        #expect(OpenAIModel.allCases.contains(.gpt54))
+        #expect(OpenAIModel.allCases.contains(.gpt55))
+        #expect(OpenAIModel.gpt54Mini.rawValue == "gpt-5.4-mini")
+        #expect(OpenAIModel.gpt54.rawValue == "gpt-5.4")
+        #expect(OpenAIModel.gpt55.rawValue == "gpt-5.5")
+    }
+
     @Test func openAIStreamDecoderHandlesMultipleDataPayloads() throws {
         let event = """
         data: {"choices":[{"delta":{"content":"Hel"}}]}
