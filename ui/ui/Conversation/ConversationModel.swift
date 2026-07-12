@@ -12,12 +12,12 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var displayName: String { rawValue.capitalized }
 
-    var keychainAccount: String {
+    var apiKeyName: String {
         switch self {
         case .gemini:
-            return "gemini-api-key"
+            return "Gemini API Key"
         case .openai:
-            return "openai-api-key"
+            return "OpenAI API Key"
         }
     }
 
@@ -193,8 +193,23 @@ final class ConversationModel {
         memoryCoordinator: MemoryCoordinator,
         sessionKey: MemorySessionKey
     ) async throws -> MCPLocalBridge {
-        try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool()
+        let geminiKey = AppSecretResolver().resolve(
+            account: "gemini-api-key",
+            environmentKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+        )
+        let reviewer: (any PythonScriptReviewer)?
+        if let geminiKey, !geminiKey.isEmpty {
+            reviewer = GeminiPythonScriptReviewer(apiKey: geminiKey)
+        } else {
+            reviewer = nil
+        }
+
+        return try await MCPLocalBridge.make { server in
+            await server.registerPythonScriptExecutionTool(
+                runner: XPCDockerRunner(),
+                reviewer: reviewer,
+                logger: { message in debugLog(message) }
+            )
             await server.registerSessionMemorySearchTool { arguments in
                 let retrieval = try await memoryCoordinator.retrievePrior(
                     MemoryPriorRetrievalRequest(

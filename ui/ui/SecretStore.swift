@@ -25,27 +25,10 @@ struct SecretStore {
     }
 
     func load() throws -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data else {
-                throw SecretStoreError.invalidData
-            }
-            return String(data: data, encoding: .utf8)
-        case errSecItemNotFound:
-            return nil
-        default:
-            throw SecretStoreError.unexpectedStatus(status)
-        }
+        print("SecretStore load() called for account: \(account)")
+        let result = try readKeychainSecret(service: service, account: account)
+        print("SecretStore load() result: found=\(result != nil)")
+        return result
     }
 
     func save(_ value: String) throws {
@@ -77,5 +60,37 @@ struct SecretStore {
         guard addStatus == errSecSuccess else {
             throw SecretStoreError.unexpectedStatus(addStatus)
         }
+    }
+}
+
+func readKeychainSecret(service: String, account: String) throws -> String? {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    switch status {
+    case errSecSuccess:
+        guard let data = item as? Data else {
+            print("SecretStore load() failed: invalid keychain data for account \(account)")
+            throw SecretStoreError.invalidData
+        }
+
+        guard let value = String(data: data, encoding: .utf8) else {
+            print("SecretStore load() failed: unable to decode keychain data for account \(account)")
+            throw SecretStoreError.invalidData
+        }
+
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    case errSecItemNotFound:
+        return nil
+    default:
+        print("SecretStore load() failed: unexpected status \(status) for account \(account)")
+        throw SecretStoreError.unexpectedStatus(status)
     }
 }

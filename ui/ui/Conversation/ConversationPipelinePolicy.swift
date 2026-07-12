@@ -20,14 +20,23 @@ extension ConversationPipeline {
                     var workingPrompt = prompt
                     var aggregatedToolCalls = toolCalls
                     let maxToolRounds = 3
+                    let requiresCurrentInfoTool = Self.requiresCurrentInfoTool(prompt)
 
                     for round in 0...maxToolRounds {
+                        await MainActor.run {
+                            debugLog("Prompt sent (round \(round + 1)): \(workingPrompt.prefix(120))")
+                        }
                         let retrieval = (try? await retrieveMemoryContext(for: workingPrompt)) ?? ""
-                        let request = AgentRequest.prompt(workingPrompt, system: systemPrompt(from: retrieval))
+                        let toolCatalog = await toolCatalogContext()
+                        let request = AgentRequest.prompt(workingPrompt, system: systemPrompt(from: retrieval, toolCatalog: toolCatalog))
+                        await MainActor.run {
+                            debugLog(Self.formatLLMRequest(request, round: round + 1))
+                        }
                         let upstream = client.stream(request, model: model)
                         var completion = ""
                         var chunkIndex = 0
-                        var suppressStreaming = false
+                        var streamingState = ToolProbeStreamingState.undecided(buffer: "")
+                        var streamedVisibleContent = false
 
                         for try await chunk in upstream {
                             let event = AssistantChunkEvent(
@@ -39,19 +48,38 @@ extension ConversationPipeline {
                             if let interceptedContent = try await interceptor.interceptAssistantChunk(event) {
                                 completion += interceptedContent
                                 chunkIndex += 1
-                                if suppressStreaming {
-                                    continue
+                                switch streamingState {
+                                case .toolRequest:
+                                    break
+                                case .prose:
+                                    if !requiresCurrentInfoTool || !aggregatedToolCalls.isEmpty {
+                                        streamedVisibleContent = true
+                                        continuation.yield(interceptedContent)
+                                    }
+                                case .undecided(let buffer):
+                                    let merged = buffer + interceptedContent
+                                    switch Self.classifyStreamingPrefix(merged) {
+                                    case .toolRequest:
+                                        streamingState = .toolRequest
+                                    case .prose(let prefix):
+                                        streamingState = .prose(prefix: "")
+                                        if (!requiresCurrentInfoTool || !aggregatedToolCalls.isEmpty), !prefix.isEmpty {
+                                            streamedVisibleContent = true
+                                            continuation.yield(prefix)
+                                        }
+                                    case .undecided:
+                                        streamingState = .undecided(buffer: merged)
+                                    }
                                 }
-                                if Self.isToolRequestPrefix(completion) {
-                                    suppressStreaming = true
-                                    continue
-                                }
-                                continuation.yield(interceptedContent)
                             }
                         }
 
                         guard !completion.isEmpty else {
                             break
+                        }
+                        await MainActor.run {
+                            debugLog("LLM completion received (round \(round + 1), chunks=\(chunkIndex))")
+                            debugLog(Self.formatLLMResponse(completion, round: round + 1))
                         }
 
                         let completionEvent = AssistantCompletionEvent(
@@ -60,27 +88,61 @@ extension ConversationPipeline {
                             chunkCount: chunkIndex
                         )
                         guard let interceptedCompletion = try await interceptor.interceptAssistantCompletion(completionEvent) else {
+                            await MainActor.run {
+                                debugLog("Completion blocked by policy engine")
+                            }
                             break
                         }
+                        await MainActor.run {
+                            debugLog("Completion validated by policy engine")
+                        }
+                        let typedCompletion = Self.typedCompletion(from: interceptedCompletion)
+                        await MainActor.run {
+                            debugLog("Declared message type: \(typedCompletion.debugName)")
+                        }
 
-                        if let parsedToolRequest = Self.parseToolRequest(from: interceptedCompletion), round < maxToolRounds {
+                        if case .toolRequest(let payload) = typedCompletion,
+                           let parsedToolRequest = Self.parseToolPayload(payload),
+                           round < maxToolRounds {
+                            await MainActor.run {
+                                debugLog("Tool request detected; forwarding to policy engine")
+                            }
                             let toolExecution = try await executeToolRequest(
                                 parsedToolRequest,
                                 sessionID: sessionID,
                                 approvalPresenter: approvalPresenter
                             )
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
+                            await MainActor.run {
+                                debugLog("Tool result received")
+                            }
 
                             workingPrompt = Self.buildFollowUpPrompt(
                                 originalPrompt: prompt,
-                                assistantToolRequest: interceptedCompletion,
+                                assistantToolRequest: payload,
                                 toolResultSummary: toolExecution.summary
                             )
                             continue
                         }
 
-                        if suppressStreaming {
-                            continuation.yield(interceptedCompletion)
+                        if case .toolRequest = typedCompletion {
+                            await MainActor.run {
+                                debugLog("Tool request payload failed strict schema validation")
+                            }
+                            continue
+                        }
+
+                        if requiresCurrentInfoTool, aggregatedToolCalls.isEmpty, round < maxToolRounds {
+                            await MainActor.run {
+                                debugLog("Current-info request answered without tool; forcing tool_request retry")
+                            }
+                            workingPrompt = Self.buildForcedToolPrompt(originalPrompt: prompt)
+                            continue
+                        }
+
+                        let displayCompletion = typedCompletion.displayContent
+                        if !streamedVisibleContent {
+                            continuation.yield(displayCompletion)
                         }
 
                         try? await memoryCoordinator.ingest(
@@ -88,7 +150,7 @@ extension ConversationPipeline {
                                 sessionKey: sessionKey,
                                 parentAgentID: parentAgentID,
                                 prompt: prompt,
-                                completion: interceptedCompletion,
+                                completion: displayCompletion,
                                 toolCalls: aggregatedToolCalls,
                                 scope: scope
                             )
@@ -106,6 +168,24 @@ extension ConversationPipeline {
                 task.cancel()
             }
         }
+    }
+
+    private static func formatLLMRequest(_ request: AgentRequest, round: Int) -> String {
+        let messages = request.messages.enumerated().map { index, message in
+            "[\(index)] \(message.role.rawValue):\n\(preview(message.content))"
+        }
+        return "LLM request (round \(round)):\n" + messages.joined(separator: "\n\n")
+    }
+
+    private static func preview(_ content: String) -> String {
+        guard content.count > 40 else {
+            return content
+        }
+        return String(content.prefix(37)) + "..."
+    }
+
+    private static func formatLLMResponse(_ completion: String, round: Int) -> String {
+        "LLM response (round \(round)):\n\(completion)"
     }
 
     private func executeToolRequest(
@@ -145,18 +225,31 @@ extension ConversationPipeline {
         }
     }
 
-    private static func parseToolRequest(from text: String) -> ParsedToolRequest? {
-        let normalized = normalizeJSONPayload(text)
-        guard let data = normalized.data(using: .utf8) else {
+    private static func classifyStreamingPrefix(_ text: String) -> ToolProbeStreamingState {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .undecided(buffer: text)
+        }
+
+        if let envelope = typedCompletionIfHeaderComplete(from: text) {
+            switch envelope {
+            case .toolRequest:
+                return .toolRequest
+            case .assistantResponse(let content), .untyped(let content):
+                return .prose(prefix: content)
+            }
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if "message_type:".hasPrefix(trimmed.lowercased()) || trimmed.lowercased().hasPrefix("message_type:") {
+            return .undecided(buffer: text)
+        }
+
+        return .prose(prefix: text)
+    }
+
+    private static func parseToolPayload(_ payload: String) -> ParsedToolRequest? {
+        guard let data = payload.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8) else {
             return nil
-        }
-
-        if let single = try? JSONDecoder().decode(SingleToolRequest.self, from: data) {
-            return .single(name: single.name, arguments: single.arguments ?? [:])
-        }
-
-        if let wrapped = try? JSONDecoder().decode(WrappedSingleToolRequest.self, from: data) {
-            return .single(name: wrapped.tool.name, arguments: wrapped.tool.arguments ?? [:])
         }
 
         if let batch = try? JSONDecoder().decode(MCPToolBatchRequest.self, from: data),
@@ -164,28 +257,44 @@ extension ConversationPipeline {
             return .batch(batch)
         }
 
+        if let single = try? JSONDecoder().decode(SingleToolRequest.self, from: data),
+           !single.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .single(name: single.name, arguments: single.arguments ?? [:])
+        }
+
         return nil
     }
 
-    private static func isToolRequestPrefix(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("{\"name\"") || trimmed.hasPrefix("{\"tool\"") || trimmed.hasPrefix("{\"invocations\"") {
-            return true
-        }
-        if trimmed.hasPrefix("{"),
-           trimmed.contains("\"name\""),
-           (trimmed.contains("\"arguments\"") || trimmed.contains("\"invocations\"")) {
-            return true
-        }
-        return false
+    private static func typedCompletion(from text: String) -> TypedCompletion {
+        typedCompletionIfHeaderComplete(from: text) ?? .untyped(text)
     }
 
-    private static func normalizeJSONPayload(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("```"), let start = trimmed.range(of: "{"), let end = trimmed.range(of: "}", options: .backwards), start.lowerBound < end.upperBound {
-            return String(trimmed[start.lowerBound..<end.upperBound])
+    private static func typedCompletionIfHeaderComplete(from text: String) -> TypedCompletion? {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        guard let firstLineEnd = normalized.firstIndex(of: "\n") else {
+            return nil
         }
-        return trimmed
+
+        let firstLine = normalized[..<firstLineEnd].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard firstLine.hasPrefix("message_type:") else {
+            return .untyped(text)
+        }
+
+        let rawType = firstLine.dropFirst("message_type:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        var contentStart = normalized.index(after: firstLineEnd)
+        if contentStart < normalized.endIndex, normalized[contentStart] == "\n" {
+            contentStart = normalized.index(after: contentStart)
+        }
+        let content = String(normalized[contentStart...])
+
+        switch rawType {
+        case "tool_request":
+            return .toolRequest(payload: content)
+        case "assistant_response":
+            return .assistantResponse(content)
+        default:
+            return .untyped(text)
+        }
     }
 
     private static func buildFollowUpPrompt(
@@ -203,8 +312,44 @@ extension ConversationPipeline {
         Tool execution result:
         \(toolResultSummary)
 
-        Continue and produce the final user-facing response.
+        Produce the final user-facing response using the tool execution result as authoritative.
+        Do not say you cannot fetch live data if the tool result contains live data.
+        Do not ask the user whether to run a command that has already run.
+        Start with `message_type: assistant_response`, followed by a blank line, then the answer.
         """
+    }
+
+    private static func buildForcedToolPrompt(originalPrompt: String) -> String {
+        """
+        The user asked for current/latest information:
+        \(originalPrompt)
+
+        You must not answer from model memory. Emit exactly:
+        message_type: tool_request
+
+        followed by a strict JSON tool payload using python_script_exec:
+        {"name":"python_script_exec","arguments":{...}}
+
+        Use readonly mode, allow_network=true, and fetch authoritative current sources relevant to the request.
+        """
+    }
+
+    private static func requiresCurrentInfoTool(_ prompt: String) -> Bool {
+        let lowered = prompt.lowercased()
+        let triggers = [
+            "latest",
+            "current",
+            "recent",
+            "up-to-date",
+            "up to date",
+            "live",
+            "release notes",
+            "changelog",
+            "new features",
+            "what are the new",
+            "production"
+        ]
+        return triggers.contains { lowered.contains($0) }
     }
 
     private static func toolCallRecordArguments(from arguments: [String: Value]) -> [String: String] {
@@ -250,6 +395,34 @@ private struct SingleToolRequest: Decodable {
     let arguments: [String: Value]?
 }
 
-private struct WrappedSingleToolRequest: Decodable {
-    let tool: SingleToolRequest
+private enum TypedCompletion {
+    case assistantResponse(String)
+    case toolRequest(payload: String)
+    case untyped(String)
+
+    var debugName: String {
+        switch self {
+        case .assistantResponse:
+            return "assistant_response"
+        case .toolRequest:
+            return "tool_request"
+        case .untyped:
+            return "untyped"
+        }
+    }
+
+    var displayContent: String {
+        switch self {
+        case .assistantResponse(let content), .untyped(let content):
+            return content
+        case .toolRequest:
+            return ""
+        }
+    }
+}
+
+private enum ToolProbeStreamingState {
+    case undecided(buffer: String)
+    case toolRequest
+    case prose(prefix: String)
 }

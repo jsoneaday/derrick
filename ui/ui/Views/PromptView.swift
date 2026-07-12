@@ -100,56 +100,79 @@ struct PromptInputView: NSViewRepresentable {
 
 
 struct PromptCompletionCard: View {
+    enum CompletionStatus {
+        case streaming
+        case error
+        case completed
+
+        var displayString: String? {
+            switch self {
+            case .streaming: return "Thinking..."
+            case .error: return "Error"
+            case .completed: return nil
+            }
+        }
+    }
+
     let turn: ChatTurn
     let isStreaming: Bool
     let isActiveStreamingTurn: Bool
-    let completionStatus: String?
+    let completionStatus: CompletionStatus
     let onCopy: () -> Void
     @State private var isCompletionVisible = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Prompt")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button("Copy") {
-                    onCopy()
+        VStack(alignment: .leading, spacing: 10) {
+            if !turn.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack {
+                    Spacer(minLength: 0)
+                    Text(turn.prompt)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                        .frame(maxWidth: 720, alignment: .trailing)
+                        .textSelection(.enabled)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
-
-            MarkdownResponseView(text: turn.prompt, allowsCSVExport: false)
 
             if isCompletionVisible || !turn.response.isEmpty || isActiveStreamingTurn {
                 VStack(alignment: .leading, spacing: 8) {
-                    Divider()
-
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Completion")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        if let completionStatus {
-                            CompletionStatusView(status: completionStatus)
+                        if let statusString = completionStatus.displayString {
+                            CompletionStatusView(status: statusString)
                         }
 
                         MarkdownResponseView(text: turn.response, allowsCSVExport: true)
+                            .font(.system(size: 15))
+
+                        if !isActiveStreamingTurn, !turn.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            HStack {
+                                Button {
+                                    onCopy()
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                        .labelStyle(.titleAndIcon)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.black.opacity(0.04))
+                                )
+
+                                Spacer()
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(.black.opacity(0.08), lineWidth: 1)
-        )
-        .transition(.opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.985, anchor: .top)))
+        .padding(.vertical, 8)
+        .transition(.opacity.combined(with: .move(edge: .top)))
         .animation(.easeInOut(duration: 0.45), value: isCompletionVisible)
         .onAppear {
             isCompletionVisible = !turn.response.isEmpty

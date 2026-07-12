@@ -55,6 +55,15 @@ import Testing
         )
     }
 
+    @MainActor @Test func secretStoreLoadReturnsNilForMissingItem() throws {
+        let store = SecretStore(
+            service: "ui-tests-\(UUID().uuidString)",
+            account: "missing-\(UUID().uuidString)"
+        )
+
+        #expect(try store.load() == nil)
+    }
+
     @Test func llmProviderDefaultsToExpectedModels() {
         #expect(LLMProviderChoice.gemini.defaultModel.displayName == "gemini-3.1-flash-lite")
         #expect(LLMProviderChoice.openai.defaultModel.displayName == "gpt-5-mini")

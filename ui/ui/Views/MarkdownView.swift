@@ -174,7 +174,7 @@ struct MarkdownResponseView: View {
             markdownView(text: normalized)
         case .plain:
             Text(verbatim: normalized)
-                .padding(.horizontal, 15)
+                .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
@@ -196,7 +196,7 @@ struct MarkdownResponseView: View {
         case .paragraph(let text):
             Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
                 .lineSpacing(2)
-                .padding(.horizontal, 15)
+                .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         case .code(let language, let code):

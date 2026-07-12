@@ -257,7 +257,8 @@ public final class MCPServerHost: @unchecked Sendable {
                     let result = try await registry.call(name: params.name, arguments: params.arguments ?? [:])
                     return .init(content: [.text(text: result, annotations: nil, _meta: nil)], isError: false)
                 } catch {
-                    return .init(content: [.text(text: "Unknown tool \(params.name).", annotations: nil, _meta: nil)], isError: true)
+                    print("[MCPServer] tool call failed for \(params.name): \(error)")
+                    return .init(content: [.text(text: error.localizedDescription, annotations: nil, _meta: nil)], isError: true)
                 }
             }
         }

@@ -31,7 +31,8 @@ enum ApprovalConfirmationDecision: Equatable, Sendable {
     case cancelled(actor: String?)
 }
 
-protocol ApprovalConfirmationPresenting {
+@MainActor
+protocol ApprovalConfirmationPresenting: Sendable {
     func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision
 }
 

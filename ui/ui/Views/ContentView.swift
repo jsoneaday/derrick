@@ -12,6 +12,40 @@ struct ChatTurn: Identifiable, Hashable {
     var response: String
 }
 
+private struct SelectableDebugLogView: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.textColor = .labelColor
+        textView.backgroundColor = .textBackgroundColor
+        textView.drawsBackground = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        textView.string = text
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView,
+              textView.string != text else {
+            return
+        }
+        textView.string = text
+    }
+}
+
 private final class ScrollObserverToken: @unchecked Sendable {
     private var notificationObserver: NSObjectProtocol?
 
@@ -49,6 +83,7 @@ private struct ScrollViewPositionObserver: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator {
         var onIsNearBottomChanged: (Bool) -> Void
         private weak var scrollView: NSScrollView?
@@ -98,7 +133,9 @@ private struct ScrollViewPositionObserver: NSViewRepresentable {
                 object: scrollView.contentView,
                 queue: .main
             ) { [weak self] _ in
-                self?.updateScrollState()
+                Task { @MainActor [weak self] in
+                    self?.updateScrollState()
+                }
             })
             updateScrollState()
         }
@@ -175,16 +212,18 @@ struct ContentView: View {
     @ObservedObject private var debugLogStore = DebugLogStore.shared
 
     private var secretStore: SecretStore {
-        SecretStore(account: selectedProvider.keychainAccount)
+        SecretStore(account: "\(selectedProvider.rawValue)-api-key")
     }
 
     @State private var conversation: ConversationModel?
-    @State private var prompt = "tell me a story"
+    @State private var prompt = "tell me about the latest version of reactjs"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
     @State private var requestTask: Task<Void, Never>?
     @State private var isPresentingAPIKeyPrompt = false
+    @State private var isPresentingDockerRequiredAlert = false
+    @State private var dockerRequiredMessage = ""
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .openai
@@ -217,7 +256,12 @@ struct ContentView: View {
             mainPanel
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
-            apiKeyPrompt
+            apiKeyPrompt()
+        }
+        .alert("Docker Desktop required", isPresented: $isPresentingDockerRequiredAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dockerRequiredMessage)
         }
         .sheet(item: $approvalPresentationModel.pendingRequest) { request in
             approvalPrompt(request: request)
@@ -271,14 +315,14 @@ struct ContentView: View {
             .overlay {
                 GeometryReader { proxy in
                     let inputHeight = promptInputHeight(for: proxy.size.height)
-                    let responsePanelWidth = max(proxy.size.width * 0.7, 700)
+                    let panelWidth = min(max(520, min(proxy.size.width - 48, 805)), 805)
 
-                    panelContent(inputHeight: inputHeight, responsePanelWidth: responsePanelWidth)
+                    panelContent(inputHeight: inputHeight, panelWidth: panelWidth)
                 }
             }
     }
 
-    private func panelContent(inputHeight: CGFloat, responsePanelWidth: CGFloat) -> some View {
+    private func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             if turns.isEmpty {
                 Spacer()
@@ -287,7 +331,7 @@ struct ContentView: View {
                     .padding(.bottom, 28)
 
                 promptComposer(inputHeight: inputHeight)
-                    .frame(maxWidth: 700)
+                    .frame(maxWidth: panelWidth)
                     .padding(.horizontal, 24)
 
                 quickActionChips
@@ -315,7 +359,7 @@ struct ContentView: View {
                                     .transition(.opacity)
                                 }
                             }
-                            .frame(minWidth: 700, maxWidth: responsePanelWidth)
+                            .frame(minWidth: panelWidth, maxWidth: panelWidth)
                             .frame(maxWidth: .infinity, alignment: .center)
 
                             Color.clear
@@ -345,7 +389,7 @@ struct ContentView: View {
                 }
 
                 promptComposer(inputHeight: inputHeight)
-                    .frame(maxWidth: 700)
+                    .frame(maxWidth: panelWidth)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
             }
@@ -535,16 +579,9 @@ struct ContentView: View {
     }
 
     private func copyTurn(_ turn: ChatTurn) {
-        let clipboardText = [
-            "Prompt:",
-            turn.prompt,
-            "",
-            "Completion:",
-            turn.response
-        ]
-        .joined(separator: "\n")
-
-        copyToPasteboard(clipboardText)
+        let completion = turn.response.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = completion.isEmpty ? turn.prompt : completion
+        copyToPasteboard(text)
     }
 
     private var debugLogPanel: some View {
@@ -558,6 +595,15 @@ struct ContentView: View {
                     .font(.system(size: 17, weight: .semibold))
 
                 Spacer()
+
+                Button {
+                    copyDebugLogs()
+                } label: {
+                    Label("Copy logs", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(debugLogStore.entries.isEmpty)
 
                 Text("IS_DEBUG=true")
                     .font(.system(size: 12, weight: .semibold))
@@ -589,271 +635,171 @@ struct ContentView: View {
 
             Divider()
 
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(debugLogStore.entries) { entry in
-                            HStack(alignment: .bottom, spacing: 10) {
-                                Text(debugLogStore.formattedTimestamp(for: entry))
-                                    .font(.system(size: 13, design: .monospaced).monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                Text(entry.message)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .font(.system(size: 13, design: .monospaced).monospacedDigit())
-                                    .textSelection(.enabled)
-                            }
-                            .id(entry.id)
-                        }
-
-                        if debugLogStore.entries.isEmpty {
-                            Text("No debug logs yet.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 2)
-                }
-                .onChange(of: debugLogStore.entries.count) { _, _ in
-                    guard let lastID = debugLogStore.entries.last?.id else {
-                        return
-                    }
-
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
+            SelectableDebugLogView(text: formattedDebugLogs)
+            .frame(maxHeight: maxHeight)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
         }
-        .font(.system(size: 17))
-        .padding(15)
-        .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
-        .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private var apiKeyPrompt: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Enter API Key")
-                .font(.title2.bold())
+    private func apiKeyPrompt(redacted: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(redacted ? "Invalid API Key" : "Enter your API key")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(redacted ? .red : .primary)
 
-            Text("Store the \(selectedProvider.displayName) API key in Keychain. This stays on your machine and is not bundled into the app.")
+            Text("An API key is required to use Derrick. Your key is stored securely in the system keychain.")
                 .foregroundStyle(.secondary)
 
-            SecureField("API Key", text: $apiKeyDraft)
+            SecureField(selectedProvider.apiKeyName, text: $apiKeyDraft)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                Spacer()
-
-                Button("Cancel") {
+                Button("Cancel", role: .cancel) {
                     apiKeyDraft = ""
-                    shouldResumeAfterSavingKey = false
                     isPresentingAPIKeyPrompt = false
                 }
 
+                Spacer()
+
                 Button("Save") {
-                    saveAPIKey()
+                    saveAPIKey(apiKeyDraft)
+                    if resolveAPIKey() != nil {
+                        apiKeyDraft = ""
+                        isPresentingAPIKeyPrompt = false
+                        if shouldResumeAfterSavingKey {
+                            startStreaming()
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
-        .frame(width: 460)
+        .frame(width: 440)
     }
 
     private func approvalPrompt(request: ApprovalConfirmationRequest) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Confirm tool request")
-                .font(.title2.bold())
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Tool")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(request.toolName)
-                    .font(.system(size: 13, design: .monospaced))
-                    .textSelection(.enabled)
-            }
-
-            if !request.requiredFields.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Required policy fields")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(request.requiredFields.joined(separator: ", "))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Actor")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField("Actor", text: $approvalPresentationModel.actor)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Arguments (editable JSON)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $approvalPresentationModel.editedArgumentsJSON)
-                    .font(.system(size: 12, design: .monospaced))
-                    .frame(minHeight: 180, maxHeight: 240)
-                    .padding(8)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-            }
-
-            if let validationError = approvalPresentationModel.validationError {
-                Text(validationError)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    approvalPresentationModel.cancel()
-                }
-                Button("Approve") {
-                    approvalPresentationModel.approve()
-                }
-                .buttonStyle(.borderedProminent)
-            }
+        ApprovalConfirmation(request: request, model: approvalPresentationModel) {
+            approvalPresentationModel.cancel()
+        } onApprove: {
+            approvalPresentationModel.approve()
         }
-        .padding(20)
-        .frame(width: 640)
+    }
+
+    private func resolveAPIKey() -> String? {
+        let account = "\(selectedProvider.rawValue)-api-key"
+        let key = secretResolver.resolve(account: account, environmentKeys: selectedProvider.apiKeyEnvironmentKeys)
+        print("API Key resolution: found=\(key != nil)")
+        return key
+    }
+
+    private func saveAPIKey(_ value: String) {
+        do {
+            try secretStore.save(value)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func startStreaming() {
         guard let conversation else {
-            errorMessage = "Session store is still loading."
             return
         }
 
-        guard let apiKey = resolveAPIKey() else {
-            errorMessage = "API key is missing. Enter it for \(selectedProvider.displayName)."
+        if resolveAPIKey() == nil {
             shouldResumeAfterSavingKey = true
-            apiKeyDraft = ""
             isPresentingAPIKeyPrompt = true
             return
         }
 
-        requestTask?.cancel()
+        shouldResumeAfterSavingKey = false
+
+        let capturedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !capturedPrompt.isEmpty else { return }
+
         errorMessage = nil
         isStreaming = true
+        let turn = ChatTurn(prompt: capturedPrompt, response: "")
+        turns.append(turn)
 
-        let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        prompt = ""
-        turns.append(ChatTurn(prompt: promptText, response: ""))
-        if shouldAutoScroll {
-            scrollToBottomToken += 1
-        }
+        requestTask = Task { @MainActor in
+            guard let apiKey = resolveAPIKey() else { return }
 
-        let turnIndex = turns.count - 1
-
-        requestTask = Task {
             do {
                 let stream = await conversation.stream(
-                    prompt: promptText,
+                    prompt: capturedPrompt,
                     apiKey: apiKey,
                     model: selectedModel,
                     approvalPresenter: approvalPresentationModel
                 )
+                
+                var accumulated = ""
                 for try await chunk in stream {
-                    await MainActor.run {
-                        if shouldAutoScroll {
-                            scrollToBottomToken += 1
-                        }
-                        turns[turnIndex].response += chunk
-                        if shouldAutoScroll {
-                            scrollToBottomToken += 1
-                        }
+                    accumulated += chunk
+                    if let lastTurn = turns.last, lastTurn.id == turn.id {
+                        var current = lastTurn
+                        current.response = accumulated
+                        turns[turns.count - 1] = current
                     }
                 }
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    if isDebugEnabled {
-                        debugLog("Streaming failed: \(error)")
-                    }
+                errorMessage = error.localizedDescription
+                if isDebugEnabled {
+                    debugLog("Streaming error: \(error)")
                 }
             }
-
-            await MainActor.run {
-                isStreaming = false
-                requestTask = nil
-                promptFocusToken += 1
-            }
+            
+            isStreaming = false
+            prompt = ""
+            scrollToBottomToken += 1
         }
+        
+        promptFocusToken += 1
+        scrollToBottomToken += 1
     }
 
-    @MainActor
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        proxy.scrollTo("scroll-bottom", anchor: .bottom)
-    }
-
-    private func resolveAPIKey() -> String? {
-        secretResolver.resolve(
-            account: selectedProvider.keychainAccount,
-            environmentKeys: apiKeyEnvironmentKeys
-        )
-    }
-
-    private func saveAPIKey() {
-        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return
-        }
-
-        do {
-            try secretStore.save(trimmed)
-            apiKeyDraft = ""
-            isPresentingAPIKeyPrompt = false
-
-            if shouldResumeAfterSavingKey {
-                shouldResumeAfterSavingKey = false
-                startStreaming()
+        if animated {
+            withAnimation(.easeOut(duration: 0.24)) {
+                proxy.scrollTo("scroll-bottom", anchor: .bottom)
             }
-        } catch {
-            errorMessage = error.localizedDescription
-            if isDebugEnabled {
-                debugLog("API key save failed: \(error)")
-            }
+        } else {
+            proxy.scrollTo("scroll-bottom", anchor: .bottom)
         }
-    }
-
-    private func completionStatus(for turn: ChatTurn) -> String? {
-        guard isStreaming, turn.id == turns.last?.id else {
-            return nil
-        }
-
-        let latestLog = debugLogStore.entries.last?.message.lowercased() ?? ""
-        if latestLog.contains("tool") && (latestLog.contains("call") || latestLog.contains("search")) {
-            return "Requesting tool call"
-        }
-        if latestLog.contains("tool") && (latestLog.contains("result") || latestLog.contains("response")) {
-            return "Reading tool responses"
-        }
-        if latestLog.contains("mcp") {
-            return "Consulting tools"
-        }
-        if turn.response.isEmpty {
-            return "Thinking"
-        }
-        return "Streaming response"
-    }
-
-    private var apiKeyEnvironmentKeys: [String] {
-        selectedProvider.apiKeyEnvironmentKeys
     }
 
     private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
+
+    private func copyDebugLogs() {
+        copyToPasteboard(formattedDebugLogs)
+    }
+
+    private var formattedDebugLogs: String {
+        debugLogStore.entries.map { entry in
+            "\(debugLogStore.formattedTimestamp(for: entry)): \(entry.message)"
+        }.joined(separator: "\n")
+    }
+
+    private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
+        if let lastTurn = turns.last, lastTurn.id == turn.id {
+            if isStreaming {
+                return .streaming
+            } else if errorMessage != nil {
+                return .error
+            }
+        }
+        return .completed
+    }
+}
+
+#Preview {
+    ContentView()
 }

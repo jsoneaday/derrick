@@ -65,7 +65,8 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = AgentRequest.prompt(prompt, system: systemPrompt(from: retrieval))
+                    let toolCatalog = await toolCatalogContext()
+                    let request = AgentRequest.prompt(prompt, system: systemPrompt(from: retrieval, toolCatalog: toolCatalog))
                     let upstream = client.stream(request, model: model)
                     var completion = ""
 
@@ -99,13 +100,17 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         }
     }
 
-    func systemPrompt(from memoryContext: String) -> String {
+    func systemPrompt(from memoryContext: String, toolCatalog: String = "") -> String {
         let trimmed = memoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let memoryBlock = trimmed.isEmpty
             ? "Retrieved session memory: none."
             : ["Retrieved session memory:", trimmed].joined(separator: "\n\n")
 
         var sections: [String] = [ragInstructions, memoryBlock]
+        let toolCatalog = toolCatalog.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !toolCatalog.isEmpty {
+            sections.append(toolCatalog)
+        }
         let toolInstructions = mcpToolInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !toolInstructions.isEmpty {
             sections.append(toolInstructions)
@@ -124,5 +129,57 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
             )
         )
         return retrieval.context
+    }
+
+    func toolCatalogContext() async -> String {
+        guard let mcpClient else {
+            return "Available MCP tools: none."
+        }
+
+        do {
+            let tools = try await mcpClient.searchTools(matching: "")
+            guard !tools.isEmpty else {
+                return "Available MCP tools: none."
+            }
+            await MainActor.run {
+                debugLog("Tool catalog loaded: \(tools.map(\.name).joined(separator: ", "))")
+            }
+
+            let lines = tools.map { tool in
+                let description = tool.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "No description."
+                let schema = tool.inputSchema.map { Self.describe(value: $0) } ?? "{}"
+                return "- \(tool.name): \(description)\n  input_schema: \(schema)"
+            }
+            return "Available MCP tools:\n" + lines.joined(separator: "\n")
+        } catch {
+            await MainActor.run {
+                debugLog("Tool catalog load failed: \(error)")
+            }
+            return "Available MCP tools: unavailable."
+        }
+    }
+
+    private static func describe(value: Value) -> String {
+        switch value {
+        case .null:
+            return "null"
+        case .bool(let bool):
+            return bool ? "true" : "false"
+        case .int(let int):
+            return String(int)
+        case .double(let double):
+            return String(double)
+        case .string(let string):
+            return "\"\(string)\""
+        case .data(_, let data):
+            return "\"\(data.base64EncodedString())\""
+        case .array(let array):
+            return "[" + array.map(describe(value:)).joined(separator: ", ") + "]"
+        case .object(let object):
+            let pairs = object.keys.sorted().map { key in
+                "\"\(key)\": \(describe(value: object[key] ?? .null))"
+            }
+            return "{\(pairs.joined(separator: ", "))}"
+        }
     }
 }

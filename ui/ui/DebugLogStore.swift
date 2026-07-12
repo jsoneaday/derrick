@@ -8,6 +8,7 @@ struct DebugLogEntry: Identifiable, Hashable {
 }
 
 /// Stores logs in memory in order to display in UI
+@MainActor
 final class DebugLogStore: ObservableObject {
     static let shared = DebugLogStore()
 
@@ -35,7 +36,8 @@ final class DebugLogStore: ObservableObject {
     }
 }
 
-@MainActor
-func debugLog(_ message: String) {
-    DebugLogStore.shared.log(message)
+nonisolated func debugLog(_ message: String) {
+    Task { @MainActor in
+        DebugLogStore.shared.log(message)
+    }
 }

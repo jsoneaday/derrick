@@ -29,14 +29,19 @@ struct AppSecretResolver: Sendable {
     }
 
     func resolve(account: String, environmentKeys: [String]) -> String? {
+        print("AppSecretResolver: resolving account=\(account)")
         switch mode {
         case .keychain:
-            return keychainValue(for: account)
+            let val = keychainValue(for: account)
                 ?? environmentValue(for: environmentKeys)
                 ?? dotEnvValue(for: environmentKeys)
+            print("AppSecretResolver (keychain mode): found=\(val != nil)")
+            return val
         case .dotenv:
-            return dotEnvValue(for: environmentKeys)
+            let val = dotEnvValue(for: environmentKeys)
                 ?? environmentValue(for: environmentKeys)
+            print("AppSecretResolver (dotenv mode): found=\(val != nil)")
+            return val
         }
     }
 
@@ -78,7 +83,8 @@ struct AppSecretResolver: Sendable {
     }
 
     private func parseDotEnv(at url: URL) -> [String: String]? {
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let contents = try? String(contentsOf: url, encoding: .utf8) else {
             return nil
         }
 
@@ -104,7 +110,7 @@ struct AppSecretResolver: Sendable {
         for _ in 0..<12 {
             urls.append(candidate.appendingPathComponent(".env"))
             urls.append(candidate.appendingPathComponent("ui/.env"))
-            urls.append(candidate.appendingPathComponent("ui/ui/.env"))
+            urls.append(candidate.appendingPathComponent("ui/ui/Resources/.env"))
             candidate.deleteLastPathComponent()
         }
 
@@ -138,7 +144,13 @@ struct AppSecretResolver: Sendable {
 
     @MainActor
     private static func defaultKeychainLoader(_ account: String) -> String? {
-        try? SecretStore(account: account).load()
+        do {
+            let service = Bundle.main.bundleIdentifier ?? "ui"
+            return try readKeychainSecret(service: service, account: account)
+        } catch {
+            print("AppSecretResolver keychain lookup failed for account=\(account): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private static func dotEnvValue(
@@ -152,6 +164,7 @@ struct AppSecretResolver: Sendable {
         for _ in 0..<4 {
             urls.append(candidate.appendingPathComponent(".env"))
             urls.append(candidate.appendingPathComponent("ui/.env"))
+            urls.append(candidate.appendingPathComponent("ui/ui/Resources/.env"))
             candidate.deleteLastPathComponent()
         }
 
@@ -159,7 +172,8 @@ struct AppSecretResolver: Sendable {
         urls.append(bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env"))
 
         for url in urls {
-            guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let contents = try? String(contentsOf: url, encoding: .utf8) else {
                 continue
             }
 

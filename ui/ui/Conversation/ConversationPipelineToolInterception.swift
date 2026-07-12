@@ -11,19 +11,35 @@ extension ConversationPipeline {
         interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolResult {
+        await MainActor.run {
+            debugLog("Tool request given: \(name)")
+        }
         let event = ToolInvocationEvent(
             sessionID: sessionID,
             toolName: name,
             argumentsJSON: try toolArgumentsToJSON(arguments)
         )
+        await MainActor.run {
+            debugLog("Tool request JSON: \(Self.debugPayload(event.argumentsJSON))")
+        }
 
         let effectiveInterceptor = makeToolInterceptor(override: interceptor)
 
         let interceptedEvent: ToolInvocationEvent
-        switch try await effectiveInterceptor.evaluateToolInvocation(event) {
+        let decision = try await effectiveInterceptor.evaluateToolInvocation(event)
+        await MainActor.run {
+            debugLog("Policy rule processing: evaluating \(name)")
+        }
+        switch decision {
         case .allow(let allowedEvent):
             interceptedEvent = allowedEvent
+            await MainActor.run {
+                debugLog("Policy decision: allow \(name)")
+            }
         case .deny(let reason):
+            await MainActor.run {
+                debugLog("Policy decision: deny \(name)")
+            }
             try await policyStore?.saveApproval(
                 PolicyApproval(
                     applicationName: applicationName,
@@ -46,6 +62,9 @@ extension ConversationPipeline {
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
         case .confirm(let confirmEvent, let requiredFields):
+            await MainActor.run {
+                debugLog("Policy decision: confirm \(name)")
+            }
             guard let approvalPresenter else {
                 try await policyStore?.saveApproval(
                     PolicyApproval(
@@ -80,6 +99,9 @@ extension ConversationPipeline {
                 requiredFields: requiredFields
             )
             let confirmation = await approvalPresenter.confirm(confirmationRequest)
+            await MainActor.run {
+                debugLog("Approval response received for \(name)")
+            }
             let approvalRecord = PolicyApproval.fromApprovalDecision(
                 applicationName: applicationName,
                 sessionID: sessionID,
@@ -90,6 +112,9 @@ extension ConversationPipeline {
 
             switch confirmation {
             case .approved(let editedArgumentsJSON, let actor):
+                await MainActor.run {
+                    debugLog("Approval granted for \(name) by \(actor)")
+                }
                 try await persistPolicyDecision(
                     sessionID: sessionID,
                     requestPayloadJSON: confirmEvent.argumentsJSON,
@@ -103,6 +128,9 @@ extension ConversationPipeline {
                     timestamp: confirmEvent.timestamp
                 )
             case .cancelled(let actor):
+                await MainActor.run {
+                    debugLog("Approval cancelled for \(name) by \(actor)")
+                }
                 try await persistPolicyDecision(
                     sessionID: sessionID,
                     requestPayloadJSON: confirmEvent.argumentsJSON,
@@ -120,7 +148,27 @@ extension ConversationPipeline {
         guard let mcpClient else {
             return MCPToolResult(content: "Tool client unavailable.", isError: true)
         }
-        return try await mcpClient.callTool(named: interceptedEvent.toolName, arguments: interceptedArguments)
+        if interceptedEvent.toolName == "python_script_exec" {
+            await MainActor.run {
+                debugLog("Python reviewer validating request")
+            }
+        }
+        await MainActor.run {
+            debugLog("Executing tool: \(interceptedEvent.toolName)")
+        }
+        let result = try await mcpClient.callTool(named: interceptedEvent.toolName, arguments: interceptedArguments)
+        await MainActor.run {
+            debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
+            debugLog("Tool result content: \(Self.debugPayload(result.content))")
+        }
+        if interceptedEvent.toolName == "python_script_exec",
+           result.isError,
+           Self.isDockerDesktopMissingError(result.content) {
+            throw MCPClientError.dockerDesktopRequired(
+                message: "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."
+            )
+        }
+        return result
     }
 
     func batchCallToolsWithPolicyInterception(
@@ -242,8 +290,35 @@ extension ConversationPipeline {
         }
         return .null
     }
+
+    private static func isDockerDesktopMissingError(_ content: String) -> Bool {
+        let lowered = content.lowercased()
+        return lowered.contains("docker desktop is required")
+            || lowered.contains("docker desktop appears unavailable")
+            || lowered.contains("xpc: failed to launch docker")
+            || lowered.contains("xpc service proxy unavailable")
+    }
+
+    private static func debugPayload(_ payload: String, limit: Int = 12_000) -> String {
+        guard payload.count > limit else {
+            return payload
+        }
+        return String(payload.prefix(limit)) + "\n... [truncated \(payload.count - limit) chars]"
+    }
 }
 
 public enum MCPClientError: Error, Sendable {
     case toolExecutionDenied(toolName: String, reason: String)
+    case dockerDesktopRequired(message: String)
+}
+
+extension MCPClientError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .toolExecutionDenied(let toolName, let reason):
+            return "\(toolName) \(reason)"
+        case .dockerDesktopRequired(let message):
+            return message
+        }
+    }
 }

@@ -54,6 +54,28 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
     public let exitCode: Int32
     public let timedOut: Bool
     public let durationMS: Int
+
+    public init(
+        status: String,
+        decision: String,
+        verifier: String,
+        findings: [String],
+        stdout: String,
+        stderr: String,
+        exitCode: Int32,
+        timedOut: Bool,
+        durationMS: Int
+    ) {
+        self.status = status
+        self.decision = decision
+        self.verifier = verifier
+        self.findings = findings
+        self.stdout = stdout
+        self.stderr = stderr
+        self.exitCode = exitCode
+        self.timedOut = timedOut
+        self.durationMS = durationMS
+    }
 }
 
 public struct PythonScriptReviewAssessment: Codable, Sendable {
@@ -115,6 +137,7 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
     }
 
     public func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewAssessment {
+        print("[PythonScriptExecutionTool] Reviewer request started: model=\(model.rawValue), mode=\(args.mode.rawValue), packages=\(args.pythonPackages.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds)")
         let request = AgentRequest(
             messages: [
                 .init(role: .system, content: Self.systemPrompt),
@@ -127,7 +150,9 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
         for try await chunk in stream {
             completion += chunk
         }
-        return try Self.decodeAssessment(from: completion)
+        let assessment = try Self.decodeAssessment(from: completion)
+        print("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(assessment.confidence), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
+        return assessment
     }
 
     private static let systemPrompt = """
@@ -181,85 +206,119 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
     }
 }
 
-public struct DockerPythonScriptRunner: PythonScriptRunner {
-    private let dockerImage: String
-    static let baselinePackages: Set<String> = [
+public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
+    public let name: String
+    private let model: GeminiModel
+    private let client: GeminiAgentClient
+
+    public init(apiKey: String, model: GeminiModel = .gemini25FlashLite) {
+        self.name = "gemini-\(model.rawValue)"
+        self.model = model
+        self.client = GeminiAgentClient(provider: GeminiProvider(apiKey: apiKey))
+    }
+
+    public static func fromEnvironment(
+        variable: String = "GEMINI_API_KEY",
+        model: GeminiModel = .gemini25FlashLite
+    ) -> GeminiPythonScriptReviewer? {
+        guard let apiKey = ProcessInfo.processInfo.environment[variable], !apiKey.isEmpty else {
+            return nil
+        }
+        return GeminiPythonScriptReviewer(apiKey: apiKey, model: model)
+    }
+
+    public func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewAssessment {
+        print("[PythonScriptExecutionTool] Reviewer request started: model=\(model.rawValue), mode=\(args.mode.rawValue), packages=\(args.pythonPackages.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds)")
+        let request = AgentRequest(
+            messages: [
+                .init(role: .system, content: Self.systemPrompt),
+                .init(role: .user, content: Self.reviewInput(from: args))
+            ],
+            temperature: 0
+        )
+        let stream = client.stream(request, model: model)
+        var completion = ""
+        for try await chunk in stream {
+            completion += chunk
+        }
+        let assessment = try Self.decodeAssessment(from: completion)
+        print("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(assessment.confidence), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
+        return assessment
+    }
+
+    private static let systemPrompt = """
+    You are a strict security reviewer for Python tool declarations.
+    Evaluate whether script, mode, description, reason, expected effects, and user prompt align.
+    Return only valid JSON with this exact schema:
+    {
+      "alignedWithRequest": true|false,
+      "confidence": 0.0-1.0,
+      "suggestedAction": "allow"|"confirm"|"deny",
+      "concerns": ["..."],
+      "summary": "short explanation"
+    }
+    """
+
+    private static func reviewInput(from args: PythonScriptExecutionArguments) -> String {
+        let payload: [String: Any] = [
+            "mode": args.mode.rawValue,
+            "description": args.description,
+            "reason": args.reason,
+            "script": args.script,
+            "user_prompt": args.userPrompt ?? "",
+            "expected_effects": args.expectedEffects,
+            "python_packages": args.pythonPackages,
+            "allow_dependency_install": args.allowDependencyInstall,
+            "allow_network": args.allowNetwork,
+            "timeout_seconds": args.timeoutSeconds
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data()
+        let json = String(decoding: data, as: UTF8.self)
+        return "Review this declared python script tool call payload:\n\(json)"
+    }
+
+    private static func decodeAssessment(from response: String) throws -> PythonScriptReviewAssessment {
+        let normalized = normalizeJSONPayload(response)
+        guard let data = normalized.data(using: .utf8) else {
+            throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Reviewer returned invalid UTF-8."])
+        }
+        return try JSONDecoder().decode(PythonScriptReviewAssessment.self, from: data)
+    }
+
+    private static func normalizeJSONPayload(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("```"),
+           let start = trimmed.range(of: "{"),
+           let end = trimmed.range(of: "}", options: .backwards),
+           start.lowerBound < end.upperBound {
+            return String(trimmed[start.lowerBound..<end.upperBound])
+        }
+        return trimmed
+    }
+}
+
+/// Utilities for preparing docker run arguments and Python execution scripts.
+/// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
+public enum DockerScriptPreparer {
+    public static let defaultImage = "python:3.12-alpine"
+
+    public static let baselinePackages: Set<String> = [
         "requests",
         "beautifulsoup4",
         "lxml",
         "pandas"
     ]
 
-    public init(dockerImage: String = "python:3.12-alpine") {
-        self.dockerImage = dockerImage
+    /// Minimal environment for docker CLI to locate daemon and config.
+    public static func processEnvironment() -> [String: String] {
+        [
+            "HOME": NSHomeDirectory(),
+            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": NSTemporaryDirectory()
+        ]
     }
 
-    public func run(
-        script: String,
-        timeoutSeconds: Int,
-        allowNetwork: Bool,
-        pythonPackages: [String],
-        allowDependencyInstall: Bool
-    ) async throws -> PythonScriptExecutionResult {
-        let started = Date()
-        let normalizedPackages = Self.normalizePackages(pythonPackages)
-        let installPackages = normalizedPackages
-        let nonBaselinePackages = normalizedPackages.filter { !Self.baselinePackages.contains($0) }
-        let effectiveAllowNetwork = allowNetwork
-        let executionScript = Self.makeExecutionScript(
-            script: script,
-            installPackages: installPackages,
-            allowDependencyInstall: allowDependencyInstall,
-            nonBaselinePackages: nonBaselinePackages
-        )
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = dockerRunArguments(
-            image: dockerImage,
-            timeoutSeconds: timeoutSeconds,
-            allowNetwork: effectiveAllowNetwork
-        )
-
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-
-        if let data = executionScript.data(using: .utf8) {
-            stdinPipe.fileHandleForWriting.write(data)
-        }
-        stdinPipe.fileHandleForWriting.closeFile()
-
-        let timedOut = await waitForExit(process: process, timeoutSeconds: timeoutSeconds)
-        if timedOut {
-            process.terminate()
-        }
-
-        let stdoutData = try stdoutPipe.fileHandleForReading.readToEnd() ?? Data()
-        let stderrData = try stderrPipe.fileHandleForReading.readToEnd() ?? Data()
-        let stdout = String(decoding: stdoutData, as: UTF8.self)
-        let stderr = String(decoding: stderrData, as: UTF8.self)
-        let elapsed = Int(Date().timeIntervalSince(started) * 1000.0)
-
-        return PythonScriptExecutionResult(
-            status: timedOut ? "timeout" : "completed",
-            decision: timedOut ? "deny" : "allow",
-            verifier: "static-check-v1",
-            findings: [],
-            stdout: stdout,
-            stderr: stderr,
-            exitCode: timedOut ? -1 : process.terminationStatus,
-            timedOut: timedOut,
-            durationMS: elapsed
-        )
-    }
-
-    private static func normalizePackages(_ packages: [String]) -> [String] {
+    public static func normalizePackages(_ packages: [String]) -> [String] {
         var seen = Set<String>()
         var output: [String] = []
         for package in packages {
@@ -271,7 +330,8 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         return output
     }
 
-    private static func makeExecutionScript(
+    /// Builds the Python wrapper script that installs packages and executes user code.
+    public static func makeExecutionScript(
         script: String,
         installPackages: [String],
         allowDependencyInstall: Bool,
@@ -295,10 +355,14 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         if non_baseline_packages and not allow_dependency_install:
             raise RuntimeError("Requested non-baseline python_packages require allow_dependency_install=true.")
         if install_packages:
+            # Install to /tmp/packages (writable tmpfs) because the container runs --read-only
+            # and cannot write to the system site-packages directory.
             subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", *install_packages],
+                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                 "--no-cache-dir", "--quiet", "--target", "/tmp/packages", *install_packages],
                 check=True
             )
+            sys.path.insert(0, "/tmp/packages")
 
         script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
         globals_dict = {"__name__": "__main__"}
@@ -306,9 +370,9 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         """
     }
 
-    private func dockerRunArguments(image: String, timeoutSeconds: Int, allowNetwork: Bool) -> [String] {
+    /// Arguments to pass to the `docker` command (everything after `docker`).
+    public static func dockerRunArguments(image: String, allowNetwork: Bool) -> [String] {
         var args = [
-            "docker",
             "run",
             "--rm",
             "--init",
@@ -323,26 +387,111 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
             "--ulimit", "nofile=128:128",
             "-i",
             image,
-            "python3",
-            "-I",
-            "-u",
-            "-"
+            "python3", "-I", "-u", "-"
         ]
-
-        if allowNetwork {
-            args.insert(contentsOf: ["--network", "bridge"], at: 3)
-        } else {
-            args.insert(contentsOf: ["--network", "none"], at: 3)
-        }
-
-        _ = timeoutSeconds
+        args.insert(contentsOf: allowNetwork ? ["--network", "bridge"] : ["--network", "none"], at: 1)
         return args
     }
 
-    private func waitForExit(process: Process, timeoutSeconds: Int) async -> Bool {
-        let timeout = max(timeoutSeconds, 1)
-        let deadline = Date().addingTimeInterval(TimeInterval(timeout))
+    /// Detects a docker-unavailable condition from stderr and exit code.
+    /// Returns a human-readable message, or nil if docker ran normally.
+    public static func dockerUnavailableMessage(stderr: String, exitCode: Int32) -> String? {
+        let lowered = stderr.lowercased()
+        if exitCode == 127 {
+            return "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."
+        }
+        if lowered.contains("permission denied") || lowered.contains("operation not permitted") {
+            return "Docker Desktop appears unavailable — socket access denied. Ensure Docker Desktop is running."
+        }
+        if lowered.contains("connect to the docker daemon") || lowered.contains("docker daemon") {
+            return "Docker Desktop appears unavailable. Start Docker Desktop and retry python_script_exec."
+        }
+        return nil
+    }
+}
 
+/// Direct-process docker runner. Used in tests and non-sandboxed contexts.
+/// In the sandboxed app, use `XPCDockerRunner` from the main target instead.
+public struct DockerPythonScriptRunner: PythonScriptRunner {
+    private let dockerImage: String
+
+    public init(dockerImage: String = DockerScriptPreparer.defaultImage) {
+        self.dockerImage = dockerImage
+    }
+
+    public func run(
+        script: String,
+        timeoutSeconds: Int,
+        allowNetwork: Bool,
+        pythonPackages: [String],
+        allowDependencyInstall: Bool
+    ) async throws -> PythonScriptExecutionResult {
+        let started = Date()
+        let normalizedPackages = DockerScriptPreparer.normalizePackages(pythonPackages)
+        let nonBaselinePackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
+        let executionScript = DockerScriptPreparer.makeExecutionScript(
+            script: script,
+            installPackages: normalizedPackages,
+            allowDependencyInstall: allowDependencyInstall,
+            nonBaselinePackages: nonBaselinePackages
+        )
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["docker"] + DockerScriptPreparer.dockerRunArguments(image: dockerImage, allowNetwork: allowNetwork)
+        process.environment = DockerScriptPreparer.processEnvironment()
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            throw NSError(
+                domain: "MCPServer",
+                code: 503,
+                userInfo: [NSLocalizedDescriptionKey: "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."]
+            )
+        }
+
+        if let data = executionScript.data(using: .utf8) {
+            stdinPipe.fileHandleForWriting.write(data)
+        }
+        stdinPipe.fileHandleForWriting.closeFile()
+
+        let timedOut = await waitForExit(process: process, timeoutSeconds: timeoutSeconds)
+        if timedOut { process.terminate() }
+
+        let stdoutData = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let stderrData = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let stdout = String(decoding: stdoutData, as: UTF8.self)
+        let stderr = String(decoding: stderrData, as: UTF8.self)
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000.0)
+        let exitCode = timedOut ? -1 : process.terminationStatus
+
+        if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: exitCode) {
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: dockerMessage])
+        }
+
+        return PythonScriptExecutionResult(
+            status: timedOut ? "timeout" : (exitCode == 0 ? "completed" : "failed"),
+            decision: (timedOut || exitCode != 0) ? "deny" : "allow",
+            verifier: "static-check-v1",
+            findings: [],
+            stdout: stdout,
+            stderr: stderr,
+            exitCode: exitCode,
+            timedOut: timedOut,
+            durationMS: elapsed
+        )
+    }
+
+    private func waitForExit(process: Process, timeoutSeconds: Int) async -> Bool {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutSeconds, 1)))
         while process.isRunning && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
@@ -366,9 +515,6 @@ public enum PythonScriptExecutionVerifier {
         if args.timeoutSeconds <= 0 || args.timeoutSeconds > 300 {
             findings.append("timeout_seconds must be between 1 and 300.")
         }
-        if args.allowNetwork {
-            findings.append("Network-enabled execution is disallowed by default policy.")
-        }
         if args.mode == .write && args.expectedEffects.isEmpty {
             findings.append("Write mode requires expected_effects.")
         }
@@ -377,7 +523,7 @@ public enum PythonScriptExecutionVerifier {
         if !invalidPackageNames.isEmpty {
             findings.append("Invalid python_packages values: \(invalidPackageNames.joined(separator: ", ")).")
         }
-        let installPackages = normalizedPackages.filter { !DockerPythonScriptRunner.baselinePackages.contains($0) }
+        let installPackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
         if !installPackages.isEmpty && !args.allowDependencyInstall {
             findings.append("Requested python_packages require allow_dependency_install=true: \(installPackages.joined(separator: ", ")).")
         }
@@ -388,6 +534,10 @@ public enum PythonScriptExecutionVerifier {
         if args.mode == .readonly {
             let readonlyViolations = readonlyViolations(in: args.script)
             findings.append(contentsOf: readonlyViolations)
+        }
+        if !args.allowNetwork {
+            let networkViolations = networkViolations(in: args.script)
+            findings.append(contentsOf: networkViolations)
         }
 
         if let prompt = args.userPrompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -404,8 +554,17 @@ public enum PythonScriptExecutionVerifier {
         let patterns: [(String, String)] = [
             (#"(?m)\b(open|Path)\s*\(.+,\s*["'][wa\+]"# , "Readonly mode cannot open files for writing."),
             (#"(?m)\b(os\.remove|os\.rename|os\.rmdir|os\.mkdir|os\.makedirs|shutil\.)\b"#, "Readonly mode cannot mutate filesystem."),
-            (#"(?m)\b(subprocess\.|os\.system|exec\(|eval\()"#, "Readonly mode cannot execute nested commands."),
-            (#"(?m)\b(requests\.|httpx\.|urllib\.|socket\.)"#, "Readonly mode cannot access network.")
+            (#"(?m)\b(subprocess\.|os\.system|exec\(|eval\()"#, "Readonly mode cannot execute nested commands.")
+        ]
+
+        return patterns.compactMap { pattern, message in
+            script.range(of: pattern, options: .regularExpression) != nil ? message : nil
+        }
+    }
+
+    private static func networkViolations(in script: String) -> [String] {
+        let patterns: [(String, String)] = [
+            (#"(?m)\b(requests\.|httpx\.|urllib\.|socket\.)"#, "Network access in script requires allow_network=true.")
         ]
 
         return patterns.compactMap { pattern, message in
@@ -451,16 +610,24 @@ public extension MCPServerHost {
         name: String = "python_script_exec",
         description: String = "Run declared Python script in a constrained Docker container after verification.",
         runner: any PythonScriptRunner = DockerPythonScriptRunner(),
-        reviewer: (any PythonScriptReviewer)? = OpenAIPythonScriptReviewer.fromEnvironment()
+        reviewer: (any PythonScriptReviewer)? = OpenAIPythonScriptReviewer.fromEnvironment(),
+        logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async {
-        await registryRegisterPythonTool(name: name, description: description, runner: runner, reviewer: reviewer)
+        await registryRegisterPythonTool(
+            name: name,
+            description: description,
+            runner: runner,
+            reviewer: reviewer,
+            logger: logger
+        )
     }
 
     private func registryRegisterPythonTool(
         name: String,
         description: String,
         runner: any PythonScriptRunner,
-        reviewer: (any PythonScriptReviewer)?
+        reviewer: (any PythonScriptReviewer)?,
+        logger: @escaping @Sendable (String) -> Void
     ) async {
         let inputSchema: Value = .object([
             "type": .string("object"),
@@ -506,7 +673,7 @@ public extension MCPServerHost {
                 ]),
                 "allow_network": .object([
                     "type": .string("boolean"),
-                    "description": .string("Must be false by default policy.")
+                    "description": .string("Enable container network access when the user request requires fetching live/current web data or installing packages.")
                 ])
             ]),
             "required": .array([.string("mode"), .string("description"), .string("reason"), .string("script")])
@@ -526,10 +693,13 @@ public extension MCPServerHost {
 
             if let reviewer {
                 do {
+                    logger("[PythonScriptExecutionTool] Reviewer request started: \(reviewer.name)")
                     let assessment = try await reviewer.review(parsed)
                     verifierName += "+\(reviewer.name)"
                     findings.append(contentsOf: assessment.concerns)
                     findings.append("Reviewer summary: \(assessment.summary)")
+                    findings.append("Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(String(format: "%.2f", assessment.confidence)), suggestedAction=\(assessment.suggestedAction)")
+                    logger("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(String(format: "%.2f", assessment.confidence)), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
 
                     if assessment.suggestedAction.lowercased() == "deny", assessment.confidence >= 0.55 {
                         blockingFindings.append("Reviewer denied with confidence \(String(format: "%.2f", assessment.confidence)).")
@@ -546,6 +716,7 @@ public extension MCPServerHost {
                         }
                     }
                 } catch {
+                    logger("[PythonScriptExecutionTool] Reviewer failed: \(error.localizedDescription)")
                     print("[PythonScriptExecutionTool] reviewer failed: \(error)")
                     let message = "Reviewer failed: \(error.localizedDescription)"
                     findings.append(message)
