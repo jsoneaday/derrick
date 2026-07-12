@@ -67,7 +67,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         let started = Date()
         debugLog("XPC run request started for docker runner helper.")
 
-        let normalizedPackages = DockerScriptPreparer.normalizePackages(pythonPackages)
+        let allPackages = pythonPackages + Array(DockerScriptPreparer.baselinePackages)
+        let normalizedPackages = DockerScriptPreparer.normalizePackages(allPackages)
         let nonBaselinePackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
         debugLog("Normalized python packages: \(normalizedPackages.joined(separator: ", "))")
         debugLog("Non-baseline python packages: \(nonBaselinePackages.joined(separator: ", "))")

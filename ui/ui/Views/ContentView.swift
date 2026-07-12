@@ -352,7 +352,8 @@ struct ContentView: View {
                                         turn: turn,
                                         isStreaming: isStreaming,
                                         isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
-                                        completionStatus: completionStatus(for: turn)
+                                        completionStatus: completionStatus(for: turn),
+                                        statusMessage: debugLogStore.currentStatus
                                     ) {
                                         copyTurn(turn)
                                     }
@@ -744,6 +745,8 @@ struct ContentView: View {
                         var current = lastTurn
                         current.response = accumulated
                         turns[turns.count - 1] = current
+                        
+                        scrollToBottomToken += 1
                     }
                 }
             } catch {

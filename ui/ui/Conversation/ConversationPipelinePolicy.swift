@@ -48,6 +48,33 @@ extension ConversationPipeline {
                             if let interceptedContent = try await interceptor.interceptAssistantChunk(event) {
                                 completion += interceptedContent
                                 chunkIndex += 1
+                                
+                                if round == 0 {
+                                    if chunkIndex == 1 {
+                                        let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        await MainActor.run {
+                                            debugLog("Model started formulating plan to: \(currentPrompt)")
+                                        }
+                                    } else if chunkIndex % 150 == 0 {
+                                        let currentChunks = chunkIndex
+                                        let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        await MainActor.run {
+                                            debugLog("Model is formulating plan (chunk \(currentChunks)) to: \(currentPrompt)")
+                                        }
+                                    }
+                                } else {
+                                    if chunkIndex == 1 {
+                                        await MainActor.run {
+                                            debugLog("Model started generating final response...")
+                                        }
+                                    } else if chunkIndex % 150 == 0 {
+                                        let currentChunks = chunkIndex
+                                        await MainActor.run {
+                                            debugLog("Model is generating final response (chunk \(currentChunks))...")
+                                        }
+                                    }
+                                }
+
                                 switch streamingState {
                                 case .toolRequest:
                                     break

@@ -100,6 +100,7 @@ struct PromptInputView: NSViewRepresentable {
 
 
 struct PromptCompletionCard: View {
+    @MainActor
     enum CompletionStatus {
         case streaming
         case error
@@ -118,8 +119,25 @@ struct PromptCompletionCard: View {
     let isStreaming: Bool
     let isActiveStreamingTurn: Bool
     let completionStatus: CompletionStatus
+    let statusMessage: String?
     let onCopy: () -> Void
     @State private var isCompletionVisible = false
+
+    init(
+        turn: ChatTurn,
+        isStreaming: Bool,
+        isActiveStreamingTurn: Bool,
+        completionStatus: CompletionStatus,
+        statusMessage: String? = nil,
+        onCopy: @escaping () -> Void
+    ) {
+        self.turn = turn
+        self.isStreaming = isStreaming
+        self.isActiveStreamingTurn = isActiveStreamingTurn
+        self.completionStatus = completionStatus
+        self.statusMessage = statusMessage
+        self.onCopy = onCopy
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -138,7 +156,9 @@ struct PromptCompletionCard: View {
             if isCompletionVisible || !turn.response.isEmpty || isActiveStreamingTurn {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 10) {
-                        if let statusString = completionStatus.displayString {
+                        if completionStatus == .streaming {
+                            CompletionStatusView(status: statusMessage ?? "Thinking...")
+                        } else if let statusString = completionStatus.displayString {
                             CompletionStatusView(status: statusString)
                         }
 

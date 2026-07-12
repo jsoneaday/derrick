@@ -300,23 +300,13 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
 /// Utilities for preparing docker run arguments and Python execution scripts.
 /// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
 public enum DockerScriptPreparer {
-    public static let defaultImage = "python:3.12-alpine"
+    public static let defaultImage = "ghcr.io/astral-sh/uv:python3.12-alpine"
 
     public static let baselinePackages: Set<String> = [
         "requests",
         "beautifulsoup4",
-        "lxml",
-        "pandas"
+        "lxml"
     ]
-
-    /// Minimal environment for docker CLI to locate daemon and config.
-    public static func processEnvironment() -> [String: String] {
-        [
-            "HOME": NSHomeDirectory(),
-            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            "TMPDIR": NSTemporaryDirectory()
-        ]
-    }
 
     public static func normalizePackages(_ packages: [String]) -> [String] {
         var seen = Set<String>()
@@ -328,6 +318,15 @@ public enum DockerScriptPreparer {
             output.append(normalized)
         }
         return output
+    }
+
+    /// Minimal environment for docker CLI to locate daemon and config.
+    public static func processEnvironment() -> [String: String] {
+        [
+            "HOME": NSHomeDirectory(),
+            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": NSTemporaryDirectory()
+        ]
     }
 
     /// Builds the Python wrapper script that installs packages and executes user code.
@@ -357,11 +356,25 @@ public enum DockerScriptPreparer {
         if install_packages:
             # Install to /tmp/packages (writable tmpfs) because the container runs --read-only
             # and cannot write to the system site-packages directory.
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                 "--no-cache-dir", "--quiet", "--target", "/tmp/packages", *install_packages],
-                check=True
-            )
+            # Try to use 'uv' first for lightning-fast Rust-powered installations, fall back to pip
+            use_uv = False
+            try:
+                subprocess.run(["uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                use_uv = True
+            except Exception:
+                pass
+
+            if use_uv:
+                subprocess.run(
+                    ["uv", "pip", "install", "--quiet", "--target", "/tmp/packages", *install_packages],
+                    check=True
+                )
+            else:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                     "--quiet", "--target", "/tmp/packages", *install_packages],
+                    check=True
+                )
             sys.path.insert(0, "/tmp/packages")
 
         script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
@@ -377,7 +390,7 @@ public enum DockerScriptPreparer {
             "--rm",
             "--init",
             "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
             "--pids-limit", "64",
             "--cpus", "1.0",
@@ -385,6 +398,7 @@ public enum DockerScriptPreparer {
             "--security-opt", "no-new-privileges",
             "--cap-drop", "ALL",
             "--ulimit", "nofile=128:128",
+            "-v", "derrick-pip-cache:/root/.cache",
             "-i",
             image,
             "python3", "-I", "-u", "-"
@@ -427,7 +441,8 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         allowDependencyInstall: Bool
     ) async throws -> PythonScriptExecutionResult {
         let started = Date()
-        let normalizedPackages = DockerScriptPreparer.normalizePackages(pythonPackages)
+        let allPackages = pythonPackages + Array(DockerScriptPreparer.baselinePackages)
+        let normalizedPackages = DockerScriptPreparer.normalizePackages(allPackages)
         let nonBaselinePackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
         let executionScript = DockerScriptPreparer.makeExecutionScript(
             script: script,
