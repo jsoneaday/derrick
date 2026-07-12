@@ -216,7 +216,7 @@ struct ContentView: View {
     }
 
     @State private var conversation: ConversationModel?
-    @State private var prompt = "tell me about the latest version of reactjs"
+    @State private var prompt = ""
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
