@@ -12,6 +12,26 @@ private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPCProtocol, @un
     }
 }
 
+public final class XPCDockerRunnerState: @unchecked Sendable {
+    public static let shared = XPCDockerRunnerState()
+    
+    private let lock = NSLock()
+    private var _isCreating = false
+    
+    public var isCreating: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _isCreating
+        }
+        set {
+            lock.lock()
+            _isCreating = newValue
+            lock.unlock()
+        }
+    }
+}
+
 /// PythonScriptRunner that delegates docker execution to the DockerRunnerHelper XPC service.
 /// The XPC service runs outside the app sandbox and has full access to the Docker socket.
 public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
@@ -51,6 +71,89 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         self.connection = conn
         debugLog("NSXPCConnection resumed for service \(Self.serviceName).")
         debugLog("XPCDockerRunner initialized for service \(Self.serviceName).")
+
+        Task {
+            // Wait 1 second before pre-warming to let the app fully initialize
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await prewarmEnvironment()
+        }
+    }
+
+    private func runXPCCommand(arguments: [String], timeoutSeconds: Int) async throws -> DockerRunResponse {
+        let request = DockerRunRequest(
+            executablePath: "/usr/bin/env",
+            arguments: arguments,
+            environment: DockerScriptPreparer.processEnvironment(),
+            stdinData: Data(),
+            timeoutSeconds: timeoutSeconds
+        )
+        let requestData = try JSONEncoder().encode(request)
+        let responseData: Data = try await withCheckedThrowingContinuation { continuation in
+            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                continuation.resume(throwing: error)
+            }
+            guard let service = proxy as? any DockerProcessRunnerXPCProtocol else {
+                continuation.resume(throwing: NSError(domain: "XPCDockerRunner", code: 2, userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]))
+                return
+            }
+            Task { @MainActor in
+                service.runProcess(requestData: requestData as NSData) { replyNSData in
+                    continuation.resume(returning: replyNSData as Data)
+                }
+            }
+        }
+        return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
+    }
+
+    private func prewarmEnvironment() async {
+        debugLog("Checking if Docker environment needs pre-warming...")
+        do {
+            // 1. Check if the image exists
+            let inspectImage = try await runXPCCommand(
+                arguments: ["docker", "image", "inspect", DockerScriptPreparer.defaultImage],
+                timeoutSeconds: 15
+            )
+            
+            // 2. Check if the volume exists
+            let inspectVolume = try await runXPCCommand(
+                arguments: ["docker", "volume", "inspect", "derrick-pip-cache"],
+                timeoutSeconds: 15
+            )
+            
+            let imageExists = (inspectImage.exitCode == 0)
+            let volumeExists = (inspectVolume.exitCode == 0)
+            
+            if imageExists && volumeExists {
+                debugLog("Docker environment is already warm (image and volume exist).")
+                return
+            }
+            
+            // Set state to creating
+            XPCDockerRunnerState.shared.isCreating = true
+            debugLog("Docker environment requires pre-warming. imageExists=\(imageExists), volumeExists=\(volumeExists)")
+            
+            if !volumeExists {
+                debugLog("Pre-warming: Creating volume 'derrick-pip-cache'...")
+                _ = try await runXPCCommand(
+                    arguments: ["docker", "volume", "create", "derrick-pip-cache"],
+                    timeoutSeconds: 15
+                )
+            }
+            
+            if !imageExists {
+                debugLog("Pre-warming: Pulling image '\(DockerScriptPreparer.defaultImage)' in background...")
+                _ = try await runXPCCommand(
+                    arguments: ["docker", "pull", DockerScriptPreparer.defaultImage],
+                    timeoutSeconds: 300 // Pull can take a while, allow up to 5 mins
+                )
+            }
+            
+            debugLog("Docker environment pre-warming completed successfully.")
+        } catch {
+            debugLog("Docker environment pre-warming failed or was skipped: \(error.localizedDescription)")
+        }
+        
+        XPCDockerRunnerState.shared.isCreating = false
     }
 
     deinit {
@@ -65,7 +168,11 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         allowDependencyInstall: Bool
     ) async throws -> PythonScriptExecutionResult {
         let started = Date()
-        debugLog("XPC run request started for docker runner helper.")
+        if XPCDockerRunnerState.shared.isCreating {
+            debugLog("XPC run request received while script environment is being created.")
+        } else {
+            debugLog("XPC run request started for docker runner helper.")
+        }
 
         let allPackages = pythonPackages + Array(DockerScriptPreparer.baselinePackages)
         let normalizedPackages = DockerScriptPreparer.normalizePackages(allPackages)

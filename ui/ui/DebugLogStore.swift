@@ -34,7 +34,11 @@ final class DebugLogStore: ObservableObject {
     var currentStatus: String {
         for entry in entries.reversed().prefix(8) {
             let msg = entry.message.lowercased()
-            if msg.contains("reviewer request started") {
+            if msg.contains("received while script environment is being created") || msg.contains("pre-warming: pulling image") {
+                return "Setting up container environment (pulling Docker image)..."
+            } else if msg.contains("pre-warming: creating volume") {
+                return "Setting up container environment..."
+            } else if msg.contains("reviewer request started") {
                 return "Reviewing script safety..."
             } else if msg.contains("sending request to xpc helper service") || msg.contains("xpc run request started") || msg.contains("running process inside") {
                 return "Agent running containerized environment..."

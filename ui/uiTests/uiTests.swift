@@ -234,6 +234,22 @@ import Testing
         #expect(capturedRequest?.messages.count == 1)
     }
 
+    @MainActor @Test func debugLogStoreCorrectlyParsesPrewarmingAndCreatingStatus() {
+        let store = DebugLogStore.shared
+        
+        store.log("checking if docker environment needs pre-warming...")
+        #expect(store.currentStatus == "Thinking...")
+        
+        store.log("pre-warming: creating volume 'derrick-pip-cache'...")
+        #expect(store.currentStatus == "Setting up container environment...")
+        
+        store.log("pre-warming: pulling image 'ghcr.io/astral-sh/uv:python3.12-alpine' in background...")
+        #expect(store.currentStatus == "Setting up container environment (pulling Docker image)...")
+        
+        store.log("xpc run request received while script environment is being created.")
+        #expect(store.currentStatus == "Setting up container environment (pulling Docker image)...")
+    }
+
     private static func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
         var output = ""
         for try await chunk in stream {
