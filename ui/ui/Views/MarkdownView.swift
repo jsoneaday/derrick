@@ -3,12 +3,21 @@ import SwiftUI
 
 enum MarkdownBlock: Identifiable {
     case paragraph(String)
+    case bullet(String)
+    case numbered(number: Int, text: String)
+    case blockquote(String)
     case code(language: String?, code: String)
 
     var id: String {
         switch self {
         case .paragraph(let text):
             return "p-\(text.hashValue)"
+        case .bullet(let text):
+            return "b-\(text.hashValue)"
+        case .numbered(let number, let text):
+            return "n-\(number)-\(text.hashValue)"
+        case .blockquote(let text):
+            return "bq-\(text.hashValue)"
         case .code(let language, let code):
             return "c-\(language ?? "")-\(code.hashValue)"
         }
@@ -23,7 +32,7 @@ enum MarkdownBlock: Identifiable {
         var inCodeBlock = false
 
         func flushParagraph() {
-            let paragraph = paragraphLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            let paragraph = paragraphLines.joined(separator: "  \n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !paragraph.isEmpty {
                 blocks.append(.paragraph(paragraph))
             }
@@ -49,20 +58,56 @@ enum MarkdownBlock: Identifiable {
 
             if inCodeBlock {
                 codeLines.append(line)
-            } else if trimmed.isEmpty {
-                flushParagraph()
-            } else {
-                paragraphLines.append(line)
+                continue
             }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                continue
+            }
+
+            // Check bullet
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                flushParagraph()
+                let bulletText = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                blocks.append(.bullet(bulletText))
+                continue
+            }
+
+            // Check blockquote
+            if trimmed.hasPrefix("> ") {
+                flushParagraph()
+                let quoteText = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                blocks.append(.blockquote(quoteText))
+                continue
+            }
+
+            // Check numbered list
+            var parsedNumberedItem: (number: Int, text: String)? = nil
+            if let dotIndex = trimmed.firstIndex(of: "."), dotIndex > trimmed.startIndex {
+                let numberPart = trimmed[..<dotIndex]
+                if numberPart.allSatisfy(\.isNumber), let number = Int(numberPart) {
+                    let textIndex = trimmed.index(after: dotIndex)
+                    if textIndex < trimmed.endIndex && trimmed[textIndex] == " " {
+                        let textPart = trimmed[trimmed.index(after: textIndex)...].trimmingCharacters(in: .whitespaces)
+                        parsedNumberedItem = (number, textPart)
+                    }
+                }
+            }
+
+            if let parsedNumberedItem {
+                flushParagraph()
+                blocks.append(.numbered(number: parsedNumberedItem.number, text: parsedNumberedItem.text))
+                continue
+            }
+
+            // Otherwise, it's a paragraph line
+            paragraphLines.append(line)
         }
 
-        if inCodeBlock {
-            blocks.append(.code(language: codeLanguage, code: codeLines.joined(separator: "\n")))
-        } else {
-            flushParagraph()
-        }
+        flushParagraph()
 
-        return blocks.isEmpty ? [.paragraph(text)] : blocks
+        return blocks
     }
 }
 
@@ -79,12 +124,13 @@ private enum RichTextFormat {
 
 private enum RichTextClassifier {
     static func normalize(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let escapedNewlineCount = trimmed.components(separatedBy: "\\n").count - 1
-        if escapedNewlineCount >= 3, !trimmed.contains("\n") {
-            return trimmed.replacingOccurrences(of: "\\n", with: "\n")
+        var normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        let escapedNewlineCount = normalized.components(separatedBy: "\\n").count - 1
+        if escapedNewlineCount >= 3, !normalized.contains("\n") {
+            return normalized.replacingOccurrences(of: "\\n", with: "\n")
         }
-        return trimmed
+        return normalized
     }
 
     static func classify(_ text: String) -> RichTextFormat {
@@ -99,12 +145,37 @@ private enum RichTextClassifier {
 
     private static func looksLikeMarkdown(_ text: String) -> Bool {
         let sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return sample.contains("```")
-            || sample.contains("|")
-            || sample.contains("**")
-            || sample.contains("\n- ")
-            || sample.contains("\n1. ")
-            || sample.hasPrefix("#")
+        
+        if sample.contains("```") || sample.contains("|") || sample.contains("**") {
+            return true
+        }
+        
+        if sample.contains("[") && sample.contains("](") && sample.contains(")") {
+            return true
+        }
+        
+        let lines = sample.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            if trimmedLine.hasPrefix("- ") 
+                || trimmedLine.hasPrefix("* ") 
+                || trimmedLine.hasPrefix("#") 
+                || trimmedLine.hasPrefix(">") {
+                return true
+            }
+            
+            if let firstDot = trimmedLine.firstIndex(of: "."),
+               firstDot > trimmedLine.startIndex {
+                let prefix = trimmedLine[..<firstDot]
+                if prefix.allSatisfy(\.isNumber), 
+                   trimmedLine.index(after: firstDot) < trimmedLine.endIndex,
+                   trimmedLine[trimmedLine.index(after: firstDot)] == " " {
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
 
     private static func parseCSV(_ text: String) -> CSVTable? {
@@ -199,6 +270,41 @@ struct MarkdownResponseView: View {
                 .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
+        case .bullet(let text):
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                    .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .padding(.leading, 12)
+        case .numbered(let number, let text):
+            HStack(alignment: .top, spacing: 6) {
+                Text("\(number).")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                    .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .padding(.leading, 12)
+        case .blockquote(let text):
+            HStack(spacing: 12) {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 4)
+                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                    .lineSpacing(2)
+                    .font(.system(.body).italic())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
         case .code(let language, let code):
             VStack(alignment: .leading, spacing: 8) {
                 if let language, !language.isEmpty {

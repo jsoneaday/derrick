@@ -315,6 +315,7 @@ extension ConversationPipeline {
         Produce the final user-facing response using the tool execution result as authoritative.
         Do not say you cannot fetch live data if the tool result contains live data.
         Do not ask the user whether to run a command that has already run.
+        When presenting a list of choices, options, steps, items, or alternative paths to the user, ALWAYS format them as a clean Markdown bulleted list (using `-` or `*`) or a numbered list (using `1.`, `2.`), instead of writing them as plain paragraphs.
         Start with `message_type: assistant_response`, followed by a blank line, then the answer.
         """
     }
