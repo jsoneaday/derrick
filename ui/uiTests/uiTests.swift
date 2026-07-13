@@ -1,6 +1,7 @@
 import Foundation
 import LLMAgentClient
 import MCP
+import MCPClient
 import Testing
 @testable import ui
 
@@ -71,11 +72,44 @@ import Testing
         #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
     }
 
-    @Test func debugConfigurationReadsIsDebugFromEnvironment() {
-        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "true"]).isDebugEnabled)
-        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "TRUE"]).isDebugEnabled)
-        #expect(!AppDebugConfiguration(environment: ["IS_DEBUG": "false"]).isDebugEnabled)
-        #expect(!AppDebugConfiguration(environment: [:]).isDebugEnabled)
+    @MainActor @Test func helperModelSettingsDefaultsToGeminiFlashLiteAndPersistsSelection() {
+        let suiteName = "ui-tests-helper-models-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let settings = HelperModelSettings(userDefaults: defaults)
+
+        #expect(settings.summarizerModel == .defaultHelperModel)
+        #expect(settings.pythonScriptReviewerModel == .defaultHelperModel)
+
+        settings.summarizerModel = .openai(.gpt54)
+        settings.pythonScriptReviewerModel = .gemini(.gemini31FlashLite)
+
+        let reloaded = HelperModelSettings(userDefaults: defaults)
+
+        #expect(reloaded.summarizerModel == .openai(.gpt54))
+        #expect(reloaded.pythonScriptReviewerModel == .gemini(.gemini31FlashLite))
+    }
+
+    @Test func helperModelChoicesExposeEverySupportedModel() {
+        #expect(LLMModelChoice.allCases.count == 6)
+        #expect(LLMModelChoice.allCases.contains(.gemini(.gemini25FlashLite)))
+        #expect(LLMModelChoice.allCases.contains(.openai(.gpt55)))
+    }
+
+    @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {
+        let root = URL(fileURLWithPath: "/tmp/a/b/c/d/e/f/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let dummyBundle = root.appendingPathComponent("bundle", isDirectory: true)
+        
+        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "true"], currentDirectoryURL: root, bundleURL: dummyBundle).isDebugEnabled)
+        #expect(AppDebugConfiguration(environment: ["IS_DEBUG": "TRUE"], currentDirectoryURL: root, bundleURL: dummyBundle).isDebugEnabled)
+        #expect(!AppDebugConfiguration(environment: ["IS_DEBUG": "false"], currentDirectoryURL: root, bundleURL: dummyBundle).isDebugEnabled)
+        #expect(!AppDebugConfiguration(environment: [:], currentDirectoryURL: root, bundleURL: dummyBundle).isDebugEnabled)
     }
 
     @MainActor @Test func debugConfigurationReadsIsDebugFromResourcesDotEnv() throws {
@@ -124,7 +158,7 @@ import Testing
             store: store,
             summarizer: summarizer,
             policy: TieredMemoryCompactionPolicy(),
-            budget: MemoryBudget(maxTokenCount: 1)
+            budget: MemoryBudget(maxTokenCount: 10_000)
         )
         let coordinator = MemoryCoordinator(
             store: store,
@@ -148,6 +182,7 @@ import Testing
             memoryCoordinator: coordinator,
             client: client,
             model: FakeModel(),
+            ragInstructions: "",
             retrievalLimit: 5
         )
 
@@ -223,6 +258,7 @@ import Testing
             memoryCoordinator: secondCoordinator,
             client: client,
             model: FakeModel(),
+            ragInstructions: "",
             retrievalLimit: 5
         )
 
@@ -243,11 +279,33 @@ import Testing
         store.log("pre-warming: creating volume 'derrick-pip-cache'...")
         #expect(store.currentStatus == "Setting up container environment...")
         
-        store.log("pre-warming: pulling image 'ghcr.io/astral-sh/uv:python3.12-alpine' in background...")
+        store.log("pre-warming: pulling image 'ghcr.io/astral-sh/uv:debian' in background...")
         #expect(store.currentStatus == "Setting up container environment (pulling Docker image)...")
         
         store.log("xpc run request received while script environment is being created.")
         #expect(store.currentStatus == "Setting up container environment (pulling Docker image)...")
+    }
+
+    @MainActor @Test func helperModelSettingsPersistsModelSelection() {
+        let suiteName = "ui-tests-helper-models-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = HelperModelSettings(userDefaults: defaults)
+        settings.summarizerModel = .openai(.gpt54)
+        settings.pythonScriptReviewerModel = .gemini(.gemini31FlashLite)
+
+        let reloaded = HelperModelSettings(userDefaults: defaults)
+        #expect(reloaded.summarizerModel == .openai(.gpt54))
+        #expect(reloaded.pythonScriptReviewerModel == .gemini(.gemini31FlashLite))
+    }
+
+    @MainActor @Test func helperModelSettingsDefaultsAreCorrect() {
+        let settings = HelperModelSettings(userDefaults: UserDefaults(suiteName: "empty-\(UUID().uuidString)")!)
+        #expect(settings.summarizerModel == .defaultHelperModel)
+        #expect(settings.pythonScriptReviewerModel == .defaultHelperModel)
     }
 
     private static func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
@@ -385,8 +443,9 @@ private actor RecordingToolClient: ConversationToolClient {
 
     func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
         lastBatch = request
-        let results = try await request.invocations.map { invocation in
-            try await callTool(named: invocation.name, arguments: invocation.arguments)
+        var results: [MCPToolResult] = []
+        for invocation in request.invocations {
+            results.append(try await callTool(named: invocation.name, arguments: invocation.arguments))
         }
         return MCPToolBatchResult(
             results: results,

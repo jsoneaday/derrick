@@ -109,6 +109,33 @@ import MCPClient
         #expect(tools.map(\.name).contains("python_script_exec"))
     }
 
+    @Test func baselinePackagesIncludeLxml() {
+        #expect(DockerScriptPreparer.baselinePackages.contains("requests"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("beautifulsoup4"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("chardet"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("lxml"))
+    }
+
+    @Test func executionScriptVerifiesBaselinePackagesBeforeRunningUserCode() {
+        let script = DockerScriptPreparer.makeExecutionScript(
+            script: "print('hello')",
+            installPackages: ["requests", "beautifulsoup4", "chardet", "lxml"],
+            allowDependencyInstall: false,
+            nonBaselinePackages: []
+        )
+
+        #expect(script.contains("verified baseline package"))
+        #expect(script.contains("baseline package verification failed"))
+        #expect(script.contains("lxml"))
+    }
+
+    @Test func dockerUnavailableMessageIgnoresPackageLoadFailures() {
+        let stderr = "[python_script_exec] baseline package verification failed: charset_normalizer -> charset_normalizer: Error loading shared library /packages/charset_normalizer/cd.cpython-312-aarch64-linux-musl.so: Operation not permitted"
+
+        #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 1) == nil)
+        #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 127) != nil)
+    }
+
     @Test func pythonScriptToolBlocksReadonlyViolations() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(

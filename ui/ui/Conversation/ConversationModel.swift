@@ -30,6 +30,10 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
+    var secretAccount: String {
+        "\(rawValue)-api-key"
+    }
+
     var models: [LLMModelChoice] {
         switch self {
         case .gemini:
@@ -52,6 +56,17 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
     case gemini(GeminiModel)
     case openai(OpenAIModel)
+
+    static let allCases: [LLMModelChoice] = [
+        .gemini(.gemini25FlashLite),
+        .gemini(.gemini31FlashLite),
+        .openai(.gpt5Mini),
+        .openai(.gpt54Mini),
+        .openai(.gpt54),
+        .openai(.gpt55)
+    ]
+
+    static let defaultHelperModel: LLMModelChoice = .gemini(.gemini25FlashLite)
 
     var id: String {
         switch self {
@@ -78,6 +93,10 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         case .openai(let model):
             return model.rawValue
         }
+    }
+
+    var helperDisplayName: String {
+        "\(provider.displayName) · \(displayName)"
     }
 
     var maxSupportedContextTokens: Int {
@@ -127,7 +146,7 @@ final class ConversationModel {
         self.mcpToolInstructions = mcpToolInstructions
     }
 
-    static func makeDefault() async throws -> ConversationModel {
+    static func makeDefault(helperModelSettings: HelperModelSettings) async throws -> ConversationModel {
         let sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
         let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
         let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
@@ -137,7 +156,10 @@ final class ConversationModel {
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
-        let summarizer = GeminiMemorySummarizer(systemPrompt: summarizerInstructions)
+        let summarizer = ConfiguredMemorySummarizer(
+            settings: helperModelSettings,
+            systemPrompt: summarizerInstructions
+        )
         debugLog("Memory bootstrap started")
         debugLog("Database directory: \(databaseDirectoryURL.path)")
 
@@ -155,7 +177,11 @@ final class ConversationModel {
                 policy: TieredMemoryCompactionPolicy(),
                 budget: budget
             )
-            let mcpBridge = try await makeLocalBridge(memoryCoordinator: memoryCoordinator, sessionKey: sessionKey)
+            let mcpBridge = try await makeLocalBridge(
+                memoryCoordinator: memoryCoordinator,
+                sessionKey: sessionKey,
+                helperModelSettings: helperModelSettings
+            )
             debugLog("MCP Bridge started")
             return ConversationModel(
                 sessionKey: sessionKey,
@@ -177,7 +203,11 @@ final class ConversationModel {
             policy: TieredMemoryCompactionPolicy(),
             budget: budget
         )
-        let mcpBridge = try await makeLocalBridge(memoryCoordinator: memoryCoordinator, sessionKey: sessionKey)
+        let mcpBridge = try await makeLocalBridge(
+            memoryCoordinator: memoryCoordinator,
+            sessionKey: sessionKey,
+            helperModelSettings: helperModelSettings
+        )
         return ConversationModel(
             sessionKey: sessionKey,
             memoryCoordinator: memoryCoordinator,
@@ -191,23 +221,13 @@ final class ConversationModel {
 
     private static func makeLocalBridge(
         memoryCoordinator: MemoryCoordinator,
-        sessionKey: MemorySessionKey
+        sessionKey: MemorySessionKey,
+        helperModelSettings: HelperModelSettings
     ) async throws -> MCPLocalBridge {
-        let geminiKey = AppSecretResolver().resolve(
-            account: "gemini-api-key",
-            environmentKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
-        )
-        let reviewer: (any PythonScriptReviewer)?
-        if let geminiKey, !geminiKey.isEmpty {
-            reviewer = GeminiPythonScriptReviewer(apiKey: geminiKey)
-        } else {
-            reviewer = nil
-        }
-
         return try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
                 runner: XPCDockerRunner(),
-                reviewer: reviewer,
+                reviewer: ConfiguredPythonScriptReviewer(settings: helperModelSettings),
                 logger: { message in debugLog(message) }
             )
             await server.registerSessionMemorySearchTool { arguments in

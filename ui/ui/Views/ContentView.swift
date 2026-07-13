@@ -228,6 +228,7 @@ struct ContentView: View {
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
+    @StateObject private var helperModelSettings = HelperModelSettings()
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
@@ -249,7 +250,7 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView()
+            SidebarView(helperModelSettings: helperModelSettings)
                 .frame(width: 296)
                 .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
 
@@ -275,7 +276,9 @@ struct ContentView: View {
 
             if conversation == nil {
                 do {
-                    conversation = try await ConversationModel.makeDefault()
+                    conversation = try await ConversationModel.makeDefault(
+                        helperModelSettings: helperModelSettings
+                    )
                 } catch {
                     errorMessage = error.localizedDescription
                     if isDebugEnabled {

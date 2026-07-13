@@ -10,6 +10,9 @@ import SwiftUI
 private let sideMenuRecentsFontSize = CGFloat(12)
 
 struct SidebarView: View {
+    @ObservedObject var helperModelSettings: HelperModelSettings
+    @State private var helperModelSettingsPanelController = HelperModelSettingsPanelController()
+
     private let topActions = [
         SidebarRow(icon: "plus.circle.fill", title: "New chat", isProminent: true),
         SidebarRow(icon: "message.fill", title: "Chats"),
@@ -105,21 +108,27 @@ struct SidebarView: View {
 
             Spacer()
 
-            HStack {
-                Circle()
-                    .fill(.black.opacity(0.8))
-                    .frame(width: 40, height: 40)
-                    .overlay(Text("D").foregroundStyle(.white))
+            Button {
+                helperModelSettingsPanelController.show(helperModelSettings: helperModelSettings)
+            } label: {
+                HStack {
+                    Circle()
+                        .fill(.black.opacity(0.8))
+                        .frame(width: 40, height: 40)
+                        .overlay(Text("D").foregroundStyle(.white))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("dave")
-                    Text("Free plan")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("dave")
+                        Text("Free plan")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
                 }
-
-                Spacer()
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 18)
@@ -130,6 +139,10 @@ struct SidebarView: View {
                 .frame(width: 1)
         }
     }
+}
+
+#Preview {
+    SidebarView(helperModelSettings: HelperModelSettings())
 }
 
 struct SidebarRow: Identifiable, Hashable {

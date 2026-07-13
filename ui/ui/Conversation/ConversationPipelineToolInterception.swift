@@ -161,13 +161,6 @@ extension ConversationPipeline {
             debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
             debugLog("Tool result content: \(Self.debugPayload(result.content))")
         }
-        if interceptedEvent.toolName == "python_script_exec",
-           result.isError,
-           Self.isDockerDesktopMissingError(result.content) {
-            throw MCPClientError.dockerDesktopRequired(
-                message: "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."
-            )
-        }
         return result
     }
 
@@ -291,14 +284,6 @@ extension ConversationPipeline {
         return .null
     }
 
-    private static func isDockerDesktopMissingError(_ content: String) -> Bool {
-        let lowered = content.lowercased()
-        return lowered.contains("docker desktop is required")
-            || lowered.contains("docker desktop appears unavailable")
-            || lowered.contains("xpc: failed to launch docker")
-            || lowered.contains("xpc service proxy unavailable")
-    }
-
     private static func debugPayload(_ payload: String, limit: Int = 12_000) -> String {
         guard payload.count > limit else {
             return payload
@@ -309,7 +294,6 @@ extension ConversationPipeline {
 
 public enum MCPClientError: Error, Sendable {
     case toolExecutionDenied(toolName: String, reason: String)
-    case dockerDesktopRequired(message: String)
 }
 
 extension MCPClientError: LocalizedError {
@@ -317,8 +301,6 @@ extension MCPClientError: LocalizedError {
         switch self {
         case .toolExecutionDenied(let toolName, let reason):
             return "\(toolName) \(reason)"
-        case .dockerDesktopRequired(let message):
-            return message
         }
     }
 }

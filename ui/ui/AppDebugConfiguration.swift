@@ -8,9 +8,8 @@ struct AppDebugConfiguration {
         currentDirectoryURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
         bundleURL: URL = Bundle.main.bundleURL
     ) {
-        if let value = environment["IS_DEBUG"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           value == "true" {
-            isDebugEnabled = true
+        if let value = environment["IS_DEBUG"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            isDebugEnabled = value == "true"
             return
         }
 

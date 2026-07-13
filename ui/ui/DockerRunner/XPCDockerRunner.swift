@@ -79,12 +79,12 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
     }
 
-    private func runXPCCommand(arguments: [String], timeoutSeconds: Int) async throws -> DockerRunResponse {
+    private func runXPCCommand(arguments: [String], stdinData: Data = Data(), timeoutSeconds: Int) async throws -> DockerRunResponse {
         let request = DockerRunRequest(
             executablePath: "/usr/bin/env",
             arguments: arguments,
             environment: DockerScriptPreparer.processEnvironment(),
-            stdinData: Data(),
+            stdinData: stdinData,
             timeoutSeconds: timeoutSeconds
         )
         let requestData = try JSONEncoder().encode(request)
@@ -105,6 +105,25 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
     }
 
+    private func warmBaselinePackages() async throws -> DockerRunResponse {
+        let warmupScript = DockerScriptPreparer.makeExecutionScript(
+            script: "print('baseline package warmup complete')",
+            installPackages: Array(DockerScriptPreparer.baselinePackages).sorted(),
+            allowDependencyInstall: false,
+            nonBaselinePackages: []
+        )
+        guard let stdinData = warmupScript.data(using: .utf8) else {
+            throw NSError(domain: "XPCDockerRunner", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to encode baseline warmup script."])
+        }
+
+        let dockerArgs = DockerScriptPreparer.dockerRunArguments(image: DockerScriptPreparer.defaultImage, allowNetwork: true)
+        return try await runXPCCommand(
+            arguments: ["docker"] + dockerArgs,
+            stdinData: stdinData,
+            timeoutSeconds: 300
+        )
+    }
+
     private func prewarmEnvironment() async {
         debugLog("Checking if Docker environment needs pre-warming...")
         do {
@@ -123,37 +142,53 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             let imageExists = (inspectImage.exitCode == 0)
             let volumeExists = (inspectVolume.exitCode == 0)
             
+            XPCDockerRunnerState.shared.isCreating = true
+            defer { XPCDockerRunnerState.shared.isCreating = false }
+
             if imageExists && volumeExists {
                 debugLog("Docker environment is already warm (image and volume exist).")
-                return
+            } else {
+                debugLog("Docker environment requires pre-warming. imageExists=\(imageExists), volumeExists=\(volumeExists)")
+                
+                if !volumeExists {
+                    debugLog("Pre-warming: Creating volume 'derrick-pip-cache'...")
+                    _ = try await runXPCCommand(
+                        arguments: ["docker", "volume", "create", "derrick-pip-cache"],
+                        timeoutSeconds: 15
+                    )
+                }
+                
+                if !imageExists {
+                    debugLog("Pre-warming: Pulling image '\(DockerScriptPreparer.defaultImage)' in background...")
+                    _ = try await runXPCCommand(
+                        arguments: ["docker", "pull", DockerScriptPreparer.defaultImage],
+                        timeoutSeconds: 300 // Pull can take a while, allow up to 5 mins
+                    )
+                }
             }
-            
-            // Set state to creating
-            XPCDockerRunnerState.shared.isCreating = true
-            debugLog("Docker environment requires pre-warming. imageExists=\(imageExists), volumeExists=\(volumeExists)")
-            
-            if !volumeExists {
-                debugLog("Pre-warming: Creating volume 'derrick-pip-cache'...")
-                _ = try await runXPCCommand(
-                    arguments: ["docker", "volume", "create", "derrick-pip-cache"],
-                    timeoutSeconds: 15
-                )
+
+            debugLog("Pre-warming: Installing and verifying baseline python packages in /packages...")
+            let baselineWarmup = try await warmBaselinePackages()
+            let baselineStdout = String(decoding: baselineWarmup.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let baselineStderr = String(decoding: baselineWarmup.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !baselineStdout.isEmpty {
+                debugLog("[baseline warmup stdout] \(baselineStdout)")
             }
-            
-            if !imageExists {
-                debugLog("Pre-warming: Pulling image '\(DockerScriptPreparer.defaultImage)' in background...")
-                _ = try await runXPCCommand(
-                    arguments: ["docker", "pull", DockerScriptPreparer.defaultImage],
-                    timeoutSeconds: 300 // Pull can take a while, allow up to 5 mins
-                )
+            if !baselineStderr.isEmpty {
+                debugLog("[baseline warmup stderr] \(baselineStderr)")
             }
-            
+            if let launchError = baselineWarmup.launchError {
+                debugLog("Baseline package warmup launch error: \(launchError)")
+                throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: launchError])
+            }
+            if baselineWarmup.exitCode != 0 {
+                throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Baseline package warmup failed with exit code \(baselineWarmup.exitCode)."])
+            }
+            debugLog("Pre-warming: Baseline python packages verified successfully.")
             debugLog("Docker environment pre-warming completed successfully.")
         } catch {
             debugLog("Docker environment pre-warming failed or was skipped: \(error.localizedDescription)")
         }
-        
-        XPCDockerRunnerState.shared.isCreating = false
     }
 
     deinit {

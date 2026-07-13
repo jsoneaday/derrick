@@ -300,11 +300,12 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
 /// Utilities for preparing docker run arguments and Python execution scripts.
 /// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
 public enum DockerScriptPreparer {
-    public static let defaultImage = "ghcr.io/astral-sh/uv:python3.12-alpine"
+    public static let defaultImage = "ghcr.io/astral-sh/uv:debian"
 
     public static let baselinePackages: Set<String> = [
         "requests",
         "beautifulsoup4",
+        "chardet",
         "lxml"
     ]
 
@@ -343,7 +344,9 @@ public enum DockerScriptPreparer {
         let nonBaselineJSON = String(decoding: nonBaselineData, as: UTF8.self)
         let installEnabled = allowDependencyInstall ? "True" : "False"
         return """
+        import ast
         import base64
+        import importlib
         import json
         import subprocess
         import sys
@@ -351,11 +354,21 @@ public enum DockerScriptPreparer {
         install_packages = json.loads('''\(packagesJSON)''')
         non_baseline_packages = json.loads('''\(nonBaselineJSON)''')
         allow_dependency_install = \(installEnabled)
+
+        # Pre-execution Syntax Check
+        script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
+        try:
+            ast.parse(script_source)
+        except SyntaxError as e:
+            print(f"[python_script_exec] Syntax error: {e}", file=sys.stderr)
+            sys.exit(1)
+
         if non_baseline_packages and not allow_dependency_install:
             raise RuntimeError("Requested non-baseline python_packages require allow_dependency_install=true.")
         if install_packages:
-            # Install to /tmp/packages (writable tmpfs) because the container runs --read-only
-            # and cannot write to the system site-packages directory.
+            print(f"[python_script_exec] installing packages: {', '.join(install_packages)}")
+            # Install to /packages (an executable tmpfs) because the container runs --read-only
+            # and native Python extensions must be loaded from an executable filesystem.
             # Try to use 'uv' first for lightning-fast Rust-powered installations, fall back to pip
             use_uv = False
             try:
@@ -366,18 +379,37 @@ public enum DockerScriptPreparer {
 
             if use_uv:
                 subprocess.run(
-                    ["uv", "pip", "install", "--quiet", "--target", "/tmp/packages", *install_packages],
+                    ["uv", "pip", "install", "--quiet", "--target", "/packages", *install_packages],
                     check=True
                 )
             else:
                 subprocess.run(
                     [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                     "--quiet", "--target", "/tmp/packages", *install_packages],
+                     "--quiet", "--target", "/packages", *install_packages],
                     check=True
                 )
-            sys.path.insert(0, "/tmp/packages")
+            sys.path.insert(0, "/packages")
+            print(f"[python_script_exec] installed packages to /packages: {', '.join(install_packages)}")
 
-        script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
+        baseline_imports = {
+            "requests": "requests",
+            "beautifulsoup4": "bs4",
+            "chardet": "chardet",
+            "lxml": "lxml",
+        }
+        for package_name, module_name in baseline_imports.items():
+            try:
+                importlib.import_module(module_name)
+                print(f"[python_script_exec] verified baseline package: {package_name} -> {module_name}")
+            except Exception as error:
+                print(
+                    f"[python_script_exec] baseline package verification failed: {package_name} -> {module_name}: {error}",
+                    file=sys.stderr,
+                )
+                raise RuntimeError(
+                    f"Baseline package verification failed for {package_name} ({module_name})."
+                ) from error
+
         globals_dict = {"__name__": "__main__"}
         exec(compile(script_source, "<python_script_exec>", "exec"), globals_dict, globals_dict)
         """
@@ -392,6 +424,7 @@ public enum DockerScriptPreparer {
             "--read-only",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
+            "--tmpfs", "/packages:rw,nosuid,exec,size=256m",
             "--pids-limit", "64",
             "--cpus", "1.0",
             "--memory", "512m",
@@ -414,10 +447,11 @@ public enum DockerScriptPreparer {
         if exitCode == 127 {
             return "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."
         }
-        if lowered.contains("permission denied") || lowered.contains("operation not permitted") {
-            return "Docker Desktop appears unavailable — socket access denied. Ensure Docker Desktop is running."
-        }
-        if lowered.contains("connect to the docker daemon") || lowered.contains("docker daemon") {
+        if lowered.contains("connect to the docker daemon") ||
+            lowered.contains("cannot connect to the docker daemon") ||
+            lowered.contains("error during connect") ||
+            lowered.contains("docker.sock") ||
+            lowered.contains("/var/run/docker.sock") {
             return "Docker Desktop appears unavailable. Start Docker Desktop and retry python_script_exec."
         }
         return nil
@@ -625,7 +659,7 @@ public extension MCPServerHost {
         name: String = "python_script_exec",
         description: String = "Run declared Python script in a constrained Docker container after verification.",
         runner: any PythonScriptRunner = DockerPythonScriptRunner(),
-        reviewer: (any PythonScriptReviewer)? = OpenAIPythonScriptReviewer.fromEnvironment(),
+        reviewer: (any PythonScriptReviewer)? = GeminiPythonScriptReviewer.fromEnvironment(),
         logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async {
         await registryRegisterPythonTool(
