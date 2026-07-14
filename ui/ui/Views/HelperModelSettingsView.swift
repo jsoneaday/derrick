@@ -1,4 +1,5 @@
 import SwiftUI
+import DBRepository
 
 private enum HelperModelSettingsSidebarItem: String, CaseIterable, Identifiable {
     case helperModels
@@ -81,5 +82,12 @@ struct HelperModelSettingsView: View {
 }
 
 #Preview {
-    HelperModelSettingsView(helperModelSettings: HelperModelSettings())
+    let config = DBRepositoryConfiguration(
+        applicationName: "preview",
+        databaseName: "preview",
+        databaseDirectoryURL: FileManager.default.temporaryDirectory,
+        username: "ui",
+        password: "ui"
+    )
+    HelperModelSettingsView(helperModelSettings: HelperModelSettings(repository: DBRepository(configuration: config)))
 }

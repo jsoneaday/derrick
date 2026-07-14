@@ -36,7 +36,7 @@ struct AppDebugConfiguration {
             candidate.deleteLastPathComponent()
         }
 
-        if let resourceURL = Bundle.main.resourceURL {
+        if let resourceURL = Bundle(url: bundleURL)?.resourceURL {
             urls.append(resourceURL.appendingPathComponent(".env"))
             urls.append(resourceURL.appendingPathComponent("Resources/.env"))
         }

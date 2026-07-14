@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "PolicyEngine",
+    platforms: [.macOS(.v14)],
     products: [
         .library(
             name: "PolicyEngine",

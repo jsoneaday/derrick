@@ -3,6 +3,7 @@ import DBRepository
 import LLMAgentClient
 import MCPClient
 import MCPServer
+import MemorySystem
 
 enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
     case gemini
@@ -146,11 +147,9 @@ final class ConversationModel {
         self.mcpToolInstructions = mcpToolInstructions
     }
 
-    static func makeDefault(helperModelSettings: HelperModelSettings) async throws -> ConversationModel {
+    static func makeDefault(repository: DBRepository, helperModelSettings: HelperModelSettings) async throws -> ConversationModel {
         let sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
-        let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
-        let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
-        let debugConfiguration = AppDebugConfiguration()
+        let databaseDirectoryURL = await repository.databaseDirectoryURL
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
@@ -163,60 +162,91 @@ final class ConversationModel {
         debugLog("Memory bootstrap started")
         debugLog("Database directory: \(databaseDirectoryURL.path)")
 
-        do {
-            let repository = try await makeMemoryStore(
-                applicationName: "ui",
-                databaseDirectoryURL: databaseDirectoryURL,
-                seedRules: debugConfiguration.isDebugEnabled
-            )
-            let repositoryURL = await repository.databaseURL
-            debugLog("Memory store ready: \(repositoryURL.path)")
-            let memoryCoordinator = MemoryCoordinator(
+        let mcpBridge = try await makeLocalBridge(
+            memoryCoordinator: MemoryCoordinator(
                 store: repository,
                 summarizer: summarizer,
                 policy: TieredMemoryCompactionPolicy(),
                 budget: budget
-            )
-            let mcpBridge = try await makeLocalBridge(
-                memoryCoordinator: memoryCoordinator,
-                sessionKey: sessionKey,
-                helperModelSettings: helperModelSettings
-            )
-            debugLog("MCP Bridge started")
-            return ConversationModel(
-                sessionKey: sessionKey,
-                memoryCoordinator: memoryCoordinator,
-                policyStore: repository,
-                mcpBridge: mcpBridge,
-                databaseDirectoryURL: await repository.databaseDirectoryURL,
-                ragInstructions: ragInstructions,
-                mcpToolInstructions: mcpToolInstructions
-            )
-        } catch {
-            debugLog("Memory bootstrap failed: \(error)")
-        }
-
-        debugLog("Falling back to in-memory session store")
-        let memoryCoordinator = MemoryCoordinator(
-            store: InMemoryMemoryStore(),
-            summarizer: summarizer,
-            policy: TieredMemoryCompactionPolicy(),
-            budget: budget
-        )
-        let mcpBridge = try await makeLocalBridge(
-            memoryCoordinator: memoryCoordinator,
+            ),
             sessionKey: sessionKey,
             helperModelSettings: helperModelSettings
         )
+        debugLog("MCP Bridge started")
         return ConversationModel(
             sessionKey: sessionKey,
-            memoryCoordinator: memoryCoordinator,
-            policyStore: nil,
+            memoryCoordinator: MemoryCoordinator(
+                store: repository,
+                summarizer: summarizer,
+                policy: TieredMemoryCompactionPolicy(),
+                budget: budget
+            ),
+            policyStore: repository,
             mcpBridge: mcpBridge,
             databaseDirectoryURL: databaseDirectoryURL,
             ragInstructions: ragInstructions,
             mcpToolInstructions: mcpToolInstructions
         )
+    }
+
+    func stream(
+        prompt: String,
+        apiKey: String,
+        model: LLMModelChoice,
+        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
+    ) async -> AsyncThrowingStream<String, Error> {
+        switch model {
+        case .gemini(let geminiModel):
+            let provider = GeminiProvider(apiKey: apiKey)
+            let client = GeminiAgentClient(provider: provider)
+            let pipeline = ConversationPipeline(
+                sessionKey: sessionKey,
+                memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                applicationName: "ui",
+                mcpClient: mcpBridge.client,
+                client: client,
+                model: geminiModel,
+                ragInstructions: ragInstructions,
+                mcpToolInstructions: mcpToolInstructions,
+                retrievalLimit: 5
+            )
+            return await pipeline.streamWithPolicyInterception(
+                prompt: prompt,
+                sessionID: sessionKey.sessionID,
+                interceptor: makeContentPolicyInterceptor(),
+                approvalPresenter: approvalPresenter
+            )
+        case .openai(let openAIModel):
+            let provider = OpenAIProvider(apiKey: apiKey)
+            let client = OpenAIAgentClient(provider: provider)
+            let pipeline = ConversationPipeline(
+                sessionKey: sessionKey,
+                memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                applicationName: "ui",
+                mcpClient: mcpBridge.client,
+                client: client,
+                model: openAIModel,
+                ragInstructions: ragInstructions,
+                mcpToolInstructions: mcpToolInstructions,
+                retrievalLimit: 5
+            )
+            return await pipeline.streamWithPolicyInterception(
+                prompt: prompt,
+                sessionID: sessionKey.sessionID,
+                interceptor: makeContentPolicyInterceptor(),
+                approvalPresenter: approvalPresenter
+            )
+        }
+    }
+
+    private func makeContentPolicyInterceptor() -> PolicyInterceptor {
+        guard let policyStore else {
+            return DefaultPolicyInterceptor()
+        }
+        let policy = OnDemandCompletionContentPolicy(store: policyStore, applicationName: "ui")
+        return DefaultPolicyInterceptor(policy: policy)
     }
 
     private static func makeLocalBridge(
@@ -244,7 +274,7 @@ final class ConversationModel {
         }
     }
 
-    private static func makeMemoryStore(
+    static func makeMemoryStore(
         applicationName: String,
         databaseDirectoryURL: URL,
         seedRules: Bool
@@ -306,8 +336,8 @@ final class ConversationModel {
                 applicationName: applicationName,
                 name: "redact-api-key-chunks",
                 scope: "assistant_chunk",
-                matcherJSON: #"{"content_pattern":"(?i)api[_ -]?key\\s*[:=]\\s*\\S+"}"#,
-                outcomeJSON: #"{"action":"redact","pattern":"(?i)api[_ -]?key\\s*[:=]\\s*\\S+","replacement":"api_key: [REDACTED]"}"#,
+                matcherJSON: #"{"content_pattern":"(?i)api[_ -]?key\s*[:=]\s*\S+"}"#,
+                outcomeJSON: #"{"action":"redact","pattern":"(?i)api[_ -]?key\s*[:=]\s*\S+","replacement":"api_key: [REDACTED]"}"#,
                 priority: 850
             ),
             PolicyRule(
@@ -339,75 +369,5 @@ final class ConversationModel {
         }
 
         return inserted
-    }
-
-    func stream(
-        prompt: String,
-        apiKey: String,
-        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
-    ) async -> AsyncThrowingStream<String, Error> {
-        await stream(prompt: prompt, apiKey: apiKey, model: .gemini(.gemini31FlashLite), approvalPresenter: approvalPresenter)
-    }
-
-    func stream(
-        prompt: String,
-        apiKey: String,
-        model: LLMModelChoice,
-        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
-    ) async -> AsyncThrowingStream<String, Error> {
-        switch model {
-        case .gemini(let geminiModel):
-            let provider = GeminiProvider(apiKey: apiKey)
-            let client = GeminiAgentClient(provider: provider)
-            let pipeline = ConversationPipeline(
-                sessionKey: sessionKey,
-                memoryCoordinator: memoryCoordinator,
-                policyStore: policyStore,
-                applicationName: "ui",
-                mcpClient: mcpBridge.client,
-                client: client,
-                model: geminiModel,
-                ragInstructions: ragInstructions,
-                mcpToolInstructions: mcpToolInstructions,
-                retrievalLimit: 5
-            )
-            let contentInterceptor = makeContentPolicyInterceptor()
-            return await pipeline.streamWithPolicyInterception(
-                prompt: prompt,
-                sessionID: sessionKey.sessionID,
-                interceptor: contentInterceptor,
-                approvalPresenter: approvalPresenter
-            )
-        case .openai(let openAIModel):
-            let provider = OpenAIProvider(apiKey: apiKey)
-            let client = OpenAIAgentClient(provider: provider)
-            let pipeline = ConversationPipeline(
-                sessionKey: sessionKey,
-                memoryCoordinator: memoryCoordinator,
-                policyStore: policyStore,
-                applicationName: "ui",
-                mcpClient: mcpBridge.client,
-                client: client,
-                model: openAIModel,
-                ragInstructions: ragInstructions,
-                mcpToolInstructions: mcpToolInstructions,
-                retrievalLimit: 5
-            )
-            let contentInterceptor = makeContentPolicyInterceptor()
-            return await pipeline.streamWithPolicyInterception(
-                prompt: prompt,
-                sessionID: sessionKey.sessionID,
-                interceptor: contentInterceptor,
-                approvalPresenter: approvalPresenter
-            )
-        }
-    }
-
-    private func makeContentPolicyInterceptor() -> PolicyInterceptor {
-        guard let policyStore else {
-            return DefaultPolicyInterceptor()
-        }
-        let policy = OnDemandCompletionContentPolicy(store: policyStore, applicationName: "ui")
-        return DefaultPolicyInterceptor(policy: policy)
     }
 }

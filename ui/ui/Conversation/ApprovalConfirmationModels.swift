@@ -1,15 +1,15 @@
 import Foundation
 import MemorySystem
 
-struct ApprovalConfirmationRequest: Identifiable, Hashable, Sendable {
-    let id: String
-    let sessionID: String
-    let toolName: String
-    let argumentsJSON: String
-    let requiredFields: [String]
-    let createdAt: Date
+public struct ApprovalConfirmationRequest: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let sessionID: String
+    public let toolName: String
+    public let argumentsJSON: String
+    public let requiredFields: [String]
+    public let createdAt: Date
 
-    init(
+    public init(
         id: String = UUID().uuidString,
         sessionID: String,
         toolName: String,
@@ -26,30 +26,30 @@ struct ApprovalConfirmationRequest: Identifiable, Hashable, Sendable {
     }
 }
 
-enum ApprovalConfirmationDecision: Equatable, Sendable {
+public enum ApprovalConfirmationDecision: Equatable, Sendable {
     case approved(editedArgumentsJSON: String, actor: String?)
     case cancelled(actor: String?)
 }
 
 @MainActor
-protocol ApprovalConfirmationPresenting: Sendable {
+public protocol ApprovalConfirmationPresenting: Sendable {
     func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision
 }
 
-struct ClosureApprovalConfirmationPresenter: ApprovalConfirmationPresenting {
+public struct ClosureApprovalConfirmationPresenter: ApprovalConfirmationPresenting {
     private let handler: @Sendable (ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision
 
-    init(handler: @escaping @Sendable (ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision) {
+    public init(handler: @escaping @Sendable (ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision) {
         self.handler = handler
     }
 
-    func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
+    public func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
         await handler(request)
     }
 }
 
 extension PolicyApproval {
-    static func fromApprovalDecision(
+    public static func fromApprovalDecision(
         applicationName: String,
         sessionID: String,
         ruleID: String = "runtime-confirmation",

@@ -2,54 +2,57 @@ import Combine
 import Foundation
 import LLMAgentClient
 import MCPServer
-
-private enum HelperModelSettingsKey {
-    static let summarizerModel = "helperModelSettings.summarizerModel"
-    static let pythonScriptReviewerModel = "helperModelSettings.pythonScriptReviewerModel"
-}
+import DBRepository
+import MemorySystem
 
 @MainActor
 final class HelperModelSettings: ObservableObject {
-    @Published var summarizerModel: LLMModelChoice {
+    @Published var summarizerModel: LLMModelChoice = .defaultHelperModel {
         didSet {
-            persist(summarizerModel, forKey: HelperModelSettingsKey.summarizerModel)
+            Task { await save(summarizerModel, forKey: "summarizerModel") }
         }
     }
 
-    @Published var pythonScriptReviewerModel: LLMModelChoice {
+    @Published var pythonScriptReviewerModel: LLMModelChoice = .defaultHelperModel {
         didSet {
-            persist(pythonScriptReviewerModel, forKey: HelperModelSettingsKey.pythonScriptReviewerModel)
+            Task { await save(pythonScriptReviewerModel, forKey: "pythonScriptReviewerModel") }
         }
     }
 
-    private let userDefaults: UserDefaults
+    private let repository: DBRepository
+    private let username: String
+    private let password: String
 
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-        summarizerModel = Self.loadModel(
-            forKey: HelperModelSettingsKey.summarizerModel,
-            userDefaults: userDefaults
-        )
-        pythonScriptReviewerModel = Self.loadModel(
-            forKey: HelperModelSettingsKey.pythonScriptReviewerModel,
-            userDefaults: userDefaults
-        )
+    init(repository: DBRepository, username: String = "ui", password: String = "ui") {
+        self.repository = repository
+        self.username = username
+        self.password = password
     }
 
-    private static func loadModel(forKey key: String, userDefaults: UserDefaults) -> LLMModelChoice {
-        guard
-            let data = userDefaults.data(forKey: key),
-            let model = try? JSONDecoder().decode(LLMModelChoice.self, from: data)
-        else {
-            return .defaultHelperModel
+    func loadSettings() async {
+        if let model = await Self.load(repository: repository, key: "summarizerModel", username: username, password: password) {
+            summarizerModel = model
+        }
+        if let model = await Self.load(repository: repository, key: "pythonScriptReviewerModel", username: username, password: password) {
+            pythonScriptReviewerModel = model
+        }
+    }
+
+    private static func load(repository: DBRepository, key: String, username: String, password: String) async -> LLMModelChoice? {
+        guard let value = try? await repository.loadConfig(key: key, username: username, password: password),
+              let data = value.data(using: .utf8),
+              let model = try? JSONDecoder().decode(LLMModelChoice.self, from: data) else {
+            return nil
         }
         return model
     }
 
-    private func persist(_ model: LLMModelChoice, forKey key: String) {
+    private func save(_ model: LLMModelChoice, forKey key: String) async {
         do {
             let data = try JSONEncoder().encode(model)
-            userDefaults.set(data, forKey: key)
+            if let jsonString = String(data: data, encoding: .utf8) {
+                try await repository.saveConfig(key: key, value: jsonString, username: username, password: password)
+            }
         } catch {
             debugLog("Failed to persist helper model selection for \(key): \(error.localizedDescription)")
         }
@@ -95,6 +98,9 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
             await MainActor.run {
                 debugLog(
                     "Helper summarizer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription)"
+                )
+                LLMFailureReporter.shared.report(
+                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
                 )
             }
             return try await fallback.summarize(pair)
@@ -261,6 +267,9 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
                 debugLog(
                     "Helper reviewer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription)"
                 )
+                LLMFailureReporter.shared.report(
+                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
+                )
             }
             if let defaultReview = await defaultReviewerAssessment(for: args) {
                 return defaultReview
@@ -279,6 +288,9 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         } catch {
             await MainActor.run {
                 debugLog("Default helper reviewer failed: \(error.localizedDescription)")
+                LLMFailureReporter.shared.report(
+                    LLMFailureClassifier.classify(error, provider: LLMModelChoice.defaultHelperModel.provider)
+                )
             }
             return nil
         }

@@ -28,8 +28,5 @@ CREATE TABLE IF NOT EXISTS memory_records (
         ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_memory_records_lookup
+CREATE INDEX IF NOT EXISTS idx_memory_records_session_created_at
     ON memory_records(application_name, session_id, agent_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_memory_records_search
-    ON memory_records(application_name, session_id, created_at DESC);

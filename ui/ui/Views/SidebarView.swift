@@ -1,11 +1,5 @@
-//
-//  SidebarView.swift
-//  ui
-//
-//  Created by David Choi on 7/4/26.
-//
-
 import SwiftUI
+import DBRepository
 
 private let sideMenuRecentsFontSize = CGFloat(12)
 
@@ -142,7 +136,14 @@ struct SidebarView: View {
 }
 
 #Preview {
-    SidebarView(helperModelSettings: HelperModelSettings())
+    let config = DBRepositoryConfiguration(
+        applicationName: "preview",
+        databaseName: "preview",
+        databaseDirectoryURL: FileManager.default.temporaryDirectory,
+        username: "ui",
+        password: "ui"
+    )
+    SidebarView(helperModelSettings: HelperModelSettings(repository: DBRepository(configuration: config)))
 }
 
 struct SidebarRow: Identifiable, Hashable {

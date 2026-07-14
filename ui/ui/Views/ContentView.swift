@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import LLMAgentClient
 import SwiftUI
+import DBRepository
 
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
@@ -123,7 +124,6 @@ private struct ScrollViewPositionObserver: NSViewRepresentable {
             }
 
             attachAttempts = 0
-
             observerToken.clear()
 
             self.scrollView = scrollView
@@ -215,6 +215,7 @@ struct ContentView: View {
         SecretStore(account: "\(selectedProvider.rawValue)-api-key")
     }
 
+    @State private var repository: DBRepository?
     @State private var conversation: ConversationModel?
     @State private var prompt = ""
     @State private var turns: [ChatTurn] = []
@@ -226,13 +227,15 @@ struct ContentView: View {
     @State private var dockerRequiredMessage = ""
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
+    @State private var llmFailureContext: LLMFailureContext?
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
-    @StateObject private var helperModelSettings = HelperModelSettings()
+    @State private var helperModelSettings: HelperModelSettings?
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
     @StateObject private var approvalPresentationModel = ApprovalPresentationModel()
+    @StateObject private var llmFailureReporter = LLMFailureReporter.shared
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -250,9 +253,14 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView(helperModelSettings: helperModelSettings)
-                .frame(width: 296)
-                .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
+            if let helperModelSettings = helperModelSettings {
+                SidebarView(helperModelSettings: helperModelSettings)
+                    .frame(width: 296)
+                    .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
+            } else {
+                Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
+                    .frame(width: 296)
+            }
 
             mainPanel
         }
@@ -267,6 +275,19 @@ struct ContentView: View {
         .sheet(item: $approvalPresentationModel.pendingRequest) { request in
             approvalPrompt(request: request)
         }
+        .overlay {
+            if let failureContext = llmFailureContext ?? llmFailureReporter.latest {
+                ErrorModalView(
+                    title: failureContext.title,
+                    message: failureContext.message,
+                    onDismiss: {
+                        llmFailureContext = nil
+                        llmFailureReporter.clear()
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             if isDebugEnabled {
                 await MainActor.run {
@@ -274,17 +295,28 @@ struct ContentView: View {
                 }
             }
 
-            if conversation == nil {
-                do {
-                    conversation = try await ConversationModel.makeDefault(
-                        helperModelSettings: helperModelSettings
-                    )
-                } catch {
-                    errorMessage = error.localizedDescription
-                    if isDebugEnabled {
-                        await MainActor.run {
-                            debugLog("Session store load failed: \(error)")
-                        }
+            let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
+            let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
+            
+            do {
+                let repo = try await ConversationModel.makeMemoryStore(
+                    applicationName: "ui",
+                    databaseDirectoryURL: databaseDirectoryURL,
+                    seedRules: debugConfiguration.isDebugEnabled
+                )
+                repository = repo
+                helperModelSettings = HelperModelSettings(repository: repo)
+                await helperModelSettings?.loadSettings()
+                
+                conversation = try await ConversationModel.makeDefault(
+                    repository: repo,
+                    helperModelSettings: helperModelSettings!
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+                if isDebugEnabled {
+                    await MainActor.run {
+                        debugLog("Session store load failed: \(error)")
                     }
                 }
             }
@@ -312,7 +344,7 @@ struct ContentView: View {
         .background(WindowConfigurator())
     }
 
-    private var mainPanel: some View {
+    var mainPanel: some View {
         Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
             .ignoresSafeArea()
             .overlay {
@@ -325,7 +357,7 @@ struct ContentView: View {
             }
     }
 
-    private func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
+    func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             if turns.isEmpty {
                 Spacer()
@@ -406,8 +438,6 @@ struct ContentView: View {
         }
     }
 
-    // topBar removed — "Free plan · Upgrade" moved to sidebar footer
-
     private var emptyState: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("dave returns!")
@@ -468,7 +498,6 @@ struct ContentView: View {
                 Divider()
 
                 HStack(spacing: 12) {
-                    // Attachment button
                     Button {
                     } label: {
                         Image(systemName: "plus")
@@ -521,7 +550,6 @@ struct ContentView: View {
                     .fixedSize()
                     .disabled(isStreaming)
 
-                    // Mic (send) icon
                     Button {
                         startStreaming()
                     } label: {
@@ -536,7 +564,6 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .disabled(!canSendPrompt && !isStreaming)
 
-                    // Waveform / clear icon
                     Button {
                         if isStreaming {
                             requestTask?.cancel()
@@ -597,180 +624,55 @@ struct ContentView: View {
             HStack {
                 Text("Debug")
                     .font(.system(size: 17, weight: .semibold))
-
                 Spacer()
-
-                Button {
-                    copyDebugLogs()
-                } label: {
-                    Label("Copy logs", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(debugLogStore.entries.isEmpty)
-
-                Text("IS_DEBUG=true")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                Text("DB Exists: \(fileExists ? "yes" : "no")")
             }
-
-            if let conversation {
-                HStack(spacing: 12) {
-                    Text("DB")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(conversation.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3").path)
-                        .font(.system(size: 12, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-
-                HStack(spacing: 12) {
-                    Text("Exists")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(fileExists ? "yes" : "no")
-                        .font(.system(size: 12, design: .monospaced))
-                }
-            } else {
-                Text("Session store is loading.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            SelectableDebugLogView(text: formattedDebugLogs)
-            .frame(maxHeight: maxHeight)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            )
+            SelectableDebugLogView(text: debugLogStore.entries.map { $0.message }.joined(separator: "\n"))
+                .frame(maxHeight: maxHeight)
         }
+        .padding(16)
+        .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func apiKeyPrompt(redacted: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(redacted ? "Invalid API Key" : "Enter your API key")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(redacted ? .red : .primary)
-
-            Text("An API key is required to use Derrick. Your key is stored securely in the system keychain.")
-                .foregroundStyle(.secondary)
-
-            SecureField(selectedProvider.apiKeyName, text: $apiKeyDraft)
-                .textFieldStyle(.roundedBorder)
-
-            HStack {
-                Button("Cancel", role: .cancel) {
-                    apiKeyDraft = ""
-                    isPresentingAPIKeyPrompt = false
-                }
-
-                Spacer()
-
-                Button("Save") {
-                    saveAPIKey(apiKeyDraft)
-                    if resolveAPIKey() != nil {
-                        apiKeyDraft = ""
-                        isPresentingAPIKeyPrompt = false
-                        if shouldResumeAfterSavingKey {
-                            startStreaming()
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-        .frame(width: 440)
-    }
-
-    private func approvalPrompt(request: ApprovalConfirmationRequest) -> some View {
-        ApprovalConfirmation(request: request, model: approvalPresentationModel) {
-            approvalPresentationModel.cancel()
-        } onApprove: {
-            approvalPresentationModel.approve()
-        }
-    }
-
-    private func resolveAPIKey() -> String? {
-        let account = "\(selectedProvider.rawValue)-api-key"
-        let key = secretResolver.resolve(account: account, environmentKeys: selectedProvider.apiKeyEnvironmentKeys)
-        print("API Key resolution: found=\(key != nil)")
-        return key
-    }
-
-    private func saveAPIKey(_ value: String) {
-        do {
-            try secretStore.save(value)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
+        .completed
     }
 
     private func startStreaming() {
-        guard let conversation else {
-            return
-        }
+        guard let conversation = conversation, !prompt.isEmpty else { return }
 
-        if resolveAPIKey() == nil {
-            shouldResumeAfterSavingKey = true
-            isPresentingAPIKeyPrompt = true
-            return
-        }
-
-        shouldResumeAfterSavingKey = false
-
-        let capturedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !capturedPrompt.isEmpty else { return }
-
-        errorMessage = nil
         isStreaming = true
-        let turn = ChatTurn(prompt: capturedPrompt, response: "")
-        turns.append(turn)
+        let currentPrompt = prompt
+        let currentModel = selectedModel
+        prompt = ""
+        turns.append(ChatTurn(prompt: currentPrompt, response: ""))
+        scrollToBottomToken += 1
+        promptFocusToken += 1
 
-        requestTask = Task { @MainActor in
-            guard let apiKey = resolveAPIKey() else { return }
-
+        requestTask = Task {
             do {
                 let stream = await conversation.stream(
-                    prompt: capturedPrompt,
-                    apiKey: apiKey,
-                    model: selectedModel,
-                    approvalPresenter: approvalPresentationModel
+                    prompt: currentPrompt,
+                    apiKey: resolveAPIKey() ?? "",
+                    model: currentModel
                 )
-                
-                var accumulated = ""
                 for try await chunk in stream {
-                    accumulated += chunk
-                    if let lastTurn = turns.last, lastTurn.id == turn.id {
-                        var current = lastTurn
-                        current.response = accumulated
-                        turns[turns.count - 1] = current
-                        
+                    if let lastIndex = turns.indices.last {
+                        turns[lastIndex].response += chunk
                         scrollToBottomToken += 1
                     }
                 }
             } catch {
                 errorMessage = error.localizedDescription
-                if isDebugEnabled {
-                    debugLog("Streaming error: \(error)")
-                }
+                llmFailureContext = LLMFailureClassifier.classify(error, provider: currentModel.provider)
             }
-            
             isStreaming = false
-            prompt = ""
-            scrollToBottomToken += 1
         }
-        
-        promptFocusToken += 1
-        scrollToBottomToken += 1
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
         if animated {
-            withAnimation(.easeOut(duration: 0.24)) {
+            withAnimation(.easeInOut(duration: 0.2)) {
                 proxy.scrollTo("scroll-bottom", anchor: .bottom)
             }
         } else {
@@ -784,28 +686,46 @@ struct ContentView: View {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func copyDebugLogs() {
-        copyToPasteboard(formattedDebugLogs)
+    private func resolveAPIKey() -> String? {
+        secretResolver.resolve(
+            account: selectedModel.provider.secretAccount,
+            environmentKeys: selectedModel.provider.apiKeyEnvironmentKeys
+        )
     }
 
-    private var formattedDebugLogs: String {
-        debugLogStore.entries.map { entry in
-            "\(debugLogStore.formattedTimestamp(for: entry)): \(entry.message)"
-        }.joined(separator: "\n")
-    }
-
-    private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
-        if let lastTurn = turns.last, lastTurn.id == turn.id {
-            if isStreaming {
-                return .streaming
-            } else if errorMessage != nil {
-                return .error
+    @ViewBuilder
+    private func apiKeyPrompt() -> some View {
+        VStack(spacing: 20) {
+            Text("API Key Required")
+                .font(.headline)
+            Text("Please enter your \(selectedProvider.apiKeyName) to continue.")
+                .font(.subheadline)
+            TextField("API Key", text: $apiKeyDraft)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Cancel") {
+                    isPresentingAPIKeyPrompt = false
+                }
+                Spacer()
+                Button("Save") {
+                    if let store = try? secretStore {
+                        try? store.save(apiKeyDraft)
+                        apiKeyDraft = ""
+                        isPresentingAPIKeyPrompt = false
+                    }
+                }
             }
         }
-        return .completed
+        .padding()
+        .frame(width: 300)
     }
-}
 
-#Preview {
-    ContentView()
+    @ViewBuilder
+    private func approvalPrompt(request: ApprovalConfirmationRequest) -> some View {
+        ApprovalConfirmation(request: request, model: approvalPresentationModel) {
+            approvalPresentationModel.pendingRequest = nil
+        } onApprove: {
+            approvalPresentationModel.approve()
+        }
+    }
 }

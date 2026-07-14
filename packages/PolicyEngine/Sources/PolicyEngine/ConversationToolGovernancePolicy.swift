@@ -2,7 +2,7 @@ import Foundation
 import MemorySystem
 import PolicyEngine
 
-public class ConversationToolGovernancePolicy: ToolGovernancePolicy {
+public final class ConversationToolGovernancePolicy: ToolGovernancePolicy {
     private let policyEngine: PolicyEngine
     private let applicationName: String
 
@@ -13,15 +13,16 @@ public class ConversationToolGovernancePolicy: ToolGovernancePolicy {
 
     public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
         let request = PolicyRequest(
-            scope: "tool_invocation",
-            matcher: ToolInvocationMatcher(
-                toolName: event.toolName,
-                argumentsLength: event.argumentsJSON.count
+            call: ToolCall(
+                name: event.toolName,
+                arguments: ["argumentsLength": String(event.argumentsJSON.count)],
+                effects: .externalSideEffects,
+                risk: .medium
             ),
-            actor: "assistant"
+            context: PolicyContext(agentID: applicationName, caller: "assistant")
         )
 
-        let decision = try await policyEngine.decision(for: request)
+        let decision = policyEngine.decision(for: request)
 
         switch decision {
         case .allow:
@@ -32,9 +33,4 @@ public class ConversationToolGovernancePolicy: ToolGovernancePolicy {
             return .confirm(requiredFields: ["user_approval"])
         }
     }
-}
-
-private struct ToolInvocationMatcher: Codable, Sendable {
-    let toolName: String
-    let argumentsLength: Int
 }

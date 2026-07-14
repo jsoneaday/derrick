@@ -2,7 +2,7 @@ import Foundation
 import MemorySystem
 import PolicyEngine
 
-public class ConversationCompletionContentPolicy: ResponseContentPolicy {
+public final class ConversationCompletionContentPolicy: ResponseContentPolicy {
     private let policyEngine: PolicyEngine
     private let applicationName: String
 
@@ -13,15 +13,19 @@ public class ConversationCompletionContentPolicy: ResponseContentPolicy {
 
     public func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome {
         let request = PolicyRequest(
-            scope: "assistant_chunk",
-            matcher: ChunkMatcher(
-                contentLength: event.content.count,
-                contentPreview: String(event.content.prefix(100))
+            call: ToolCall(
+                name: "assistant_chunk",
+                arguments: [
+                    "contentLength": String(event.content.count),
+                    "contentPreview": String(event.content.prefix(100))
+                ],
+                effects: .readsState,
+                risk: .low
             ),
-            actor: "assistant"
+            context: PolicyContext(agentID: applicationName, caller: "assistant")
         )
 
-        let decision = try await policyEngine.decision(for: request)
+        let decision = policyEngine.decision(for: request)
 
         switch decision {
         case .allow:
@@ -38,15 +42,19 @@ public class ConversationCompletionContentPolicy: ResponseContentPolicy {
 
         if let foundPatterns = patterns, !foundPatterns.isEmpty {
             let request = PolicyRequest(
-                scope: "assistant_completion_content",
-                matcher: CompletionContentMatcher(
-                    patterns: foundPatterns,
-                    completionLength: event.fullCompletion.count
+                call: ToolCall(
+                    name: "assistant_completion_content",
+                    arguments: [
+                        "patterns": foundPatterns.joined(separator: ","),
+                        "completionLength": String(event.fullCompletion.count)
+                    ],
+                    effects: .readsState,
+                    risk: .low
                 ),
-                actor: "assistant"
+                context: PolicyContext(agentID: applicationName, caller: "assistant")
             )
 
-            let decision = try await policyEngine.decision(for: request)
+            let decision = policyEngine.decision(for: request)
 
             switch decision {
             case .allow:
@@ -83,12 +91,3 @@ public class ConversationCompletionContentPolicy: ResponseContentPolicy {
     }
 }
 
-private struct ChunkMatcher: Codable, Sendable {
-    let contentLength: Int
-    let contentPreview: String
-}
-
-private struct CompletionContentMatcher: Codable, Sendable {
-    let patterns: [String]
-    let completionLength: Int
-}

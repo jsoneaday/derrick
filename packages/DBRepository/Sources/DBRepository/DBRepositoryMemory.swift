@@ -7,8 +7,8 @@ public extension DBRepository {
         try authenticate(username: username, password: password)
         try Self.ensureDirectory(at: databaseDirectoryURL)
 
-        let target = targetVersion ?? MemoryDatabaseSchema.latestVersion
-        guard target >= 0, target <= MemoryDatabaseSchema.latestVersion else {
+        let target = targetVersion ?? DatabaseSchema.latestVersion
+        guard target >= 0, target <= DatabaseSchema.latestVersion else {
             throw DBRepositoryError.unsupportedMigrationVersion(target)
         }
 
@@ -314,7 +314,7 @@ extension DBRepository {
     }
 
     static func applyMemoryMigration(version: Int, isUp: Bool, on handle: OpaquePointer) throws {
-        let sql = try MemoryDatabaseSchema.migrationSQL(version: version, isUp: isUp)
+        let sql = try DatabaseSchema.migrationSQL(version: version, isUp: isUp)
         let appliedVersion = isUp ? version : version - 1
 
         do {
