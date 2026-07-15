@@ -381,6 +381,7 @@ struct ContentView: View {
                                 ProgressView("Loading session store...")
                                     .padding(.top, 8)
                             }
+                            
                             LazyVStack(alignment: .leading, spacing: 16) {
                                 ForEach(turns) { turn in
                                     PromptCompletionCard(
