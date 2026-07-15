@@ -1,7 +1,7 @@
 import SwiftUI
 import DBRepository
 
-private enum HelperModelSettingsSidebarItem: String, CaseIterable, Identifiable {
+private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable {
     case helperModels
 
     var id: String { rawValue }
@@ -21,13 +21,13 @@ private enum HelperModelSettingsSidebarItem: String, CaseIterable, Identifiable 
     }
 }
 
-struct HelperModelSettingsView: View {
-    @ObservedObject var helperModelSettings: HelperModelSettings
-    @State private var selectedItem: HelperModelSettingsSidebarItem = .helperModels
+struct LLMModelSettingsView: View {
+    @ObservedObject var helperModelSettings: LLMModelSettings
+    @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
 
     var body: some View {
         NavigationSplitView {
-            List(HelperModelSettingsSidebarItem.allCases, selection: $selectedItem) { item in
+            List(LLMModelSettingsSidebarItem.allCases, selection: $selectedItem) { item in
                 Label(item.title, systemImage: item.systemImage)
                     .tag(item)
             }
@@ -89,5 +89,5 @@ struct HelperModelSettingsView: View {
         username: "ui",
         password: "ui"
     )
-    HelperModelSettingsView(helperModelSettings: HelperModelSettings(repository: DBRepository(configuration: config)))
+    LLMModelSettingsView(helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)))
 }

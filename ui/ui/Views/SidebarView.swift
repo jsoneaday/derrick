@@ -4,8 +4,8 @@ import DBRepository
 private let sideMenuRecentsFontSize = CGFloat(12)
 
 struct SidebarView: View {
-    @ObservedObject var helperModelSettings: HelperModelSettings
-    @State private var helperModelSettingsPanelController = HelperModelSettingsPanelController()
+    @ObservedObject var helperModelSettings: LLMModelSettings
+    @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
 
     private let topActions = [
         SidebarRow(icon: "plus.circle.fill", title: "New chat", isProminent: true),
@@ -143,7 +143,7 @@ struct SidebarView: View {
         username: "ui",
         password: "ui"
     )
-    SidebarView(helperModelSettings: HelperModelSettings(repository: DBRepository(configuration: config)))
+    SidebarView(helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)))
 }
 
 struct SidebarRow: Identifiable, Hashable {

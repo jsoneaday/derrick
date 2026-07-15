@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class HelperModelSettingsPanelController: NSObject, NSWindowDelegate {
+final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
     private weak var window: NSWindow?
 
-    func show(helperModelSettings: HelperModelSettings) {
+    func show(helperModelSettings: LLMModelSettings) {
         if let window {
             window.center()
             window.makeKeyAndOrderFront(nil)
@@ -14,7 +14,7 @@ final class HelperModelSettingsPanelController: NSObject, NSWindowDelegate {
         }
 
         let hostingController = NSHostingController(
-            rootView: HelperModelSettingsView(helperModelSettings: helperModelSettings)
+            rootView: LLMModelSettingsView(helperModelSettings: helperModelSettings)
         )
         let panel = NSWindow(
             contentViewController: hostingController

@@ -138,14 +138,14 @@ import DBRepository
     @MainActor @Test func helperModelSettingsPersistsModelSelection() async {
         let repo = createTestRepository()
         _ = try! await repo.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
-        let settings = HelperModelSettings(repository: repo)
+        let settings = LLMModelSettings(repository: repo)
         settings.summarizerModel = .openai(.gpt54)
         settings.pythonScriptReviewerModel = .gemini(.gemini31FlashLite)
 
         // Wait for asynchronous saving tasks to complete before reloading
         try? await Task.sleep(nanoseconds: 100_000_000)
 
-        let reloaded = HelperModelSettings(repository: repo)
+        let reloaded = LLMModelSettings(repository: repo)
         await reloaded.loadSettings()
         #expect(reloaded.summarizerModel == .openai(.gpt54))
         #expect(reloaded.pythonScriptReviewerModel == .gemini(.gemini31FlashLite))
@@ -154,7 +154,7 @@ import DBRepository
     @MainActor @Test func helperModelSettingsDefaultsAreCorrect() async {
         let repo = createTestRepository()
         _ = try! await repo.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
-        let settings = HelperModelSettings(repository: repo)
+        let settings = LLMModelSettings(repository: repo)
         await settings.loadSettings()
         #expect(settings.summarizerModel == .defaultHelperModel)
         #expect(settings.pythonScriptReviewerModel == .defaultHelperModel)

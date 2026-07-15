@@ -6,7 +6,7 @@ import DBRepository
 import MemorySystem
 
 @MainActor
-final class HelperModelSettings: ObservableObject {
+final class LLMModelSettings: ObservableObject {
     @Published var summarizerModel: LLMModelChoice = .defaultHelperModel {
         didSet {
             Task { await save(summarizerModel, forKey: "summarizerModel") }
@@ -66,13 +66,13 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
         let keywords: [String]
     }
 
-    private let settings: HelperModelSettings
+    private let settings: LLMModelSettings
     private let fallback: any MemorySummarizer
     private let systemPrompt: String
     private let keywordFilter = MemoryKeywordFilter()
 
     init(
-        settings: HelperModelSettings,
+        settings: LLMModelSettings,
         systemPrompt: String,
         fallback: any MemorySummarizer = DefaultMemorySummarizer()
     ) {
@@ -234,9 +234,9 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
 actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
     nonisolated let name: String = "configured-python-script-reviewer"
 
-    private let settings: HelperModelSettings
+    private let settings: LLMModelSettings
 
-    init(settings: HelperModelSettings) {
+    init(settings: LLMModelSettings) {
         self.settings = settings
     }
 

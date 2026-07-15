@@ -230,7 +230,7 @@ struct ContentView: View {
     @State private var llmFailureContext: LLMFailureContext?
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .gemini(.gemini31FlashLite)
-    @State private var helperModelSettings: HelperModelSettings?
+    @State private var helperModelSettings: LLMModelSettings?
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
@@ -305,7 +305,7 @@ struct ContentView: View {
                     seedRules: debugConfiguration.isDebugEnabled
                 )
                 repository = repo
-                helperModelSettings = HelperModelSettings(repository: repo)
+                helperModelSettings = LLMModelSettings(repository: repo)
                 await helperModelSettings?.loadSettings()
                 
                 conversation = try await ConversationModel.makeDefault(
