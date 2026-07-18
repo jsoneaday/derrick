@@ -657,7 +657,10 @@ struct ContentView: View {
     }
 
     private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
-        .completed
+        if turn.response.isEmpty {
+            return .streaming
+        }
+        return .completed
     }
 
     private func startStreaming() {
