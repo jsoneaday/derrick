@@ -17,7 +17,7 @@ final class ConversationModel {
     let responseSchema: AgentSchema = AgentSchema(
         type: .object,
         properties: [
-            "status": AgentSchema(type: .string, description: "One of: '\(AgentResponseStatus.thinking.rawValue)', '\(AgentResponseStatus.toolCall.rawValue)', '\(AgentResponseStatus.toolBatch.rawValue)', '\(AgentResponseStatus.complete.rawValue)'"),
+            "status": AgentSchema(type: .string, description: "One of: '\(AgentResponseStatus.thinking.rawValue)', '\(AgentResponseStatus.toolCall.rawValue)', '\(AgentResponseStatus.toolBatch.rawValue)', '\(AgentResponseStatus.complete.rawValue)'. CacheBust: \(UUID().uuidString)"),
             "thought": AgentSchema(type: .string, description: "Your internal plan or reasoning steps"),
             "assistant_response": AgentSchema(type: .string, description: "The markdown, json or csv message content meant for user."),
             "tool_call": AgentSchema(
@@ -25,7 +25,8 @@ final class ConversationModel {
                 properties: [
                     "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
                     "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
-                ]
+                ],
+                required: ["tool_name", "arguments"]
             ),
             "tool_batch": AgentSchema(
                 type: .object,
@@ -37,11 +38,13 @@ final class ConversationModel {
                             properties: [
                                 "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
                                 "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
-                            ]
+                            ],
+                            required: ["tool_name", "arguments"]
                         ),
                         description: "Array of tool invocation objects"
                     ),
-               ]
+               ],
+               required: ["invocations"]
             )
         ],
         required: ["status"],

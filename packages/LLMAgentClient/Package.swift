@@ -12,12 +12,16 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../MemorySystem")
+        .package(path: "../MemorySystem"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0")
     ],
     targets: [
         .target(
             name: "LLMAgentClient",
-            dependencies: ["MemorySystem"],
+            dependencies: [
+                "MemorySystem",
+                .product(name: "MCP", package: "swift-sdk")
+            ],
             path: "Sources/LLMAgentClient"
         ),
         .testTarget(

@@ -24,8 +24,9 @@ You are a careful and methodocial Swift and SwiftUI developer. Your job is to he
 - Verify all changes are actually working before claiming success.
 
 ## Workflow
-- This project is on xcode 27 and the app will eventually support MacOS 27.
+- This project is on Xcode 27 and the app will eventually support MacOS 27.
 - Always review existing code and reuse existing code when starting a new task. Do not reinvent the wheel.
+- Some situations require knowledge of how that environment, sdk, framework, etc work. Make sure you call that relevant context before making a determination and writing code.
 - When given a task always create an internal todo list of items to finish and when complete review the list and make certain you've done them all!
 - App configurations are tricky. 
   - Always implement app configs that will work on user machines without needing manual intervention.

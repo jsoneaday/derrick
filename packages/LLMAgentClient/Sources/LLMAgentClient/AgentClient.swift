@@ -1,5 +1,6 @@
 import Foundation
 @_exported import MemorySystem
+import MCP
 
 public struct AgentMessage: Codable, Hashable, Sendable {
     public enum Role: String, Codable, Sendable {
@@ -94,6 +95,8 @@ public enum AgentResponseStatus: String, Decodable, Encodable, Sendable {
     case complete = "complete"
 }
 
+/// Notice most of the fields and subfields are nillable, except for status.
+/// This is done deliberately to allow downstream deserialization to complete in chunks.
 public struct AgentResponse: Decodable, Encodable, Sendable {
     public let status: AgentResponseStatus
     public let thought: String?
@@ -110,8 +113,8 @@ public struct AgentResponse: Decodable, Encodable, Sendable {
     }
     
     public struct ToolCall: Decodable, Encodable, Sendable {
-        public let toolName: String
-        public let arguments: String
+        public let toolName: String?
+        public let arguments: String?
         
         enum CodingKeys: String, Encodable, CodingKey {
             case toolName = "tool_name"
@@ -120,7 +123,7 @@ public struct AgentResponse: Decodable, Encodable, Sendable {
     }
     
     public struct ToolBatch: Decodable, Encodable, Sendable {
-        public let tools: [ToolCall]
+        public let tools: [ToolCall]?
     }
 }
 

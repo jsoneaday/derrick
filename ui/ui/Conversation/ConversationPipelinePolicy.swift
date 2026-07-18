@@ -23,7 +23,7 @@ extension ConversationPipeline {
                     var workingPrompt = prompt
                     var aggregatedToolCalls = toolCalls
                     let maxToolRounds = 3
-                    let requiresCurrentInfoTool = Self.requiresCurrentInfoTool(prompt)
+                    let requiresCurrentInformation = Self.promptAskingForCurrentInfo(prompt)
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
 
@@ -36,6 +36,7 @@ extension ConversationPipeline {
                         let request = AgentRequest.prompt(
                             workingPrompt,
                             system: systemPrompt(from: retrieval, toolCatalog: toolCatalog),
+                            temperature: 0.1,
                             responseSchema: responseSchema
                         )
                         await MainActor.run {
@@ -46,8 +47,10 @@ extension ConversationPipeline {
                         var agentResponse: AgentResponse?
                         var chunkIndex = 0
                         var streamedVisibleContent = false
+                        var lastYieldedCompletionLength = 0
+                        var lastYieldedThoughtLength = 0
 
-                        for try await chunk in upstream {
+                        upstreamLoop: for try await chunk in upstream {
                             let event = AssistantChunkEvent(
                                 sessionID: sessionID,
                                 chunkIndex: chunkIndex,
@@ -90,18 +93,47 @@ extension ConversationPipeline {
 
                                     switch agentResponse?.status {
                                     case .toolCall:
+                                        debugLog("Chunk is a partial tool call \(agentResponse?.toolCall?.toolName ?? "")")
+                                        if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
+                                            continuation.yield(thought)
+                                        }
                                         break
                                     case .toolBatch:
+                                        debugLog("Chunk is a partial tool batch \(agentResponse?.toolBatch?.tools?.map{ tool in tool.toolName ?? ""}.joined(separator: ", ") ?? "")")
+                                        if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
+                                            continuation.yield(thought)
+                                        }
                                         break
                                     case .complete:
-                                        if !requiresCurrentInfoTool || !aggregatedToolCalls.isEmpty {
-                                            streamedVisibleContent = true
-                                            continuation.yield(agentResponse?.assistantResponse ?? interceptedContent)
+                                        if !requiresCurrentInformation || !aggregatedToolCalls.isEmpty {
+                                            if let assistantResponse = agentResponse?.assistantResponse {
+                                                let newLength = assistantResponse.count
+                                                if newLength > lastYieldedCompletionLength {
+                                                    let index = assistantResponse.index(assistantResponse.startIndex, offsetBy: lastYieldedCompletionLength)
+                                                    let delta = String(assistantResponse[index...])
+                                                    
+                                                    streamedVisibleContent = true
+                                                    continuation.yield(delta)
+                                                    lastYieldedCompletionLength = newLength
+                                                    debugLog("Yielded completion \(delta)")
+                                                }
+                                            }
                                         }
                                     case .thinking:
-                                        streamedVisibleContent = true
-                                        continuation.yield(agentResponse?.thought ?? interceptedContent)
-                                    case .none:
+                                        if let thought = agentResponse?.thought, !thought.isEmpty {
+                                            let newLength = thought.count
+                                            if newLength > lastYieldedThoughtLength {
+                                                let index = thought.index(thought.startIndex, offsetBy: lastYieldedThoughtLength)
+                                                let delta = String(thought[index...])
+                                                
+                                                streamedVisibleContent = true
+                                                continuation.yield(delta)
+                                                lastYieldedThoughtLength = newLength
+                                                debugLog("Yielded thought \(delta)")
+                                            }
+                                        }
+                                    default:
+                                        debugLog("Received unrecognized agent response status: '\(completion)'. Breaking out of streaming loop.")
                                         break
                                     }
                                 }
@@ -109,6 +141,7 @@ extension ConversationPipeline {
                         }
 
                         guard !completion.isEmpty else {
+                            debugLog("Completion is empty")
                             break
                         }
                         await MainActor.run {
@@ -116,7 +149,7 @@ extension ConversationPipeline {
                             debugLog(Self.formatLLMResponse(completion, round: round + 1))
                         }
 
-                        debugLog("**hello 123**")
+                        debugLog("**Start Completion**")
                         let fullCompletion = Self.getFullCompletion(agentResponse, jsonEncoder: jsonEncoder)
                         let completionEvent = AssistantCompletionEvent(
                             sessionID: sessionID,
@@ -164,7 +197,7 @@ extension ConversationPipeline {
                             continue
                         }
 
-                        if requiresCurrentInfoTool, aggregatedToolCalls.isEmpty, round < maxToolRounds {
+                        if requiresCurrentInformation, aggregatedToolCalls.isEmpty, round < maxToolRounds {
                             await MainActor.run {
                                 debugLog("Current-info request answered without tool; forcing tool_request retry")
                             }
@@ -311,7 +344,7 @@ extension ConversationPipeline {
                 
         var mcpToolInvocations: [MCPToolInvocation] = []
         for tool in agentResponse.toolBatch?.tools ?? [] {
-            mcpToolInvocations.append(MCPToolInvocation(name: tool.toolName, arguments: try toolArgumentsFromJSON(tool.arguments)))
+            mcpToolInvocations.append(MCPToolInvocation(name: tool.toolName ?? "", arguments: try toolArgumentsFromJSON(tool.arguments ?? "")))
         }
         
         return MCPToolBatchRequest(invocations: mcpToolInvocations, filterQuery: nil)
@@ -326,6 +359,35 @@ extension ConversationPipeline {
             toolName: agentResponse.toolCall?.toolName ?? "",
             arguments: try toolArgumentsFromJSON(agentResponse.toolCall?.arguments ?? "")
         )
+    }
+
+    private static func toolArgumentsFromJSON(_ json: String) throws -> [String: Value] {
+        guard let data = json.data(using: .utf8),
+              let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj.mapValues { jsonToToolValue($0) }
+    }
+
+    private static func jsonToToolValue(_ obj: Any) -> Value {
+        if let str = obj as? String {
+            return .string(str)
+        } else if let num = obj as? NSNumber {
+            if CFGetTypeID(num) == CFBooleanGetTypeID() {
+                return .bool(num.boolValue)
+            } else if num.doubleValue.truncatingRemainder(dividingBy: 1) == 0 {
+                return .int(num.intValue)
+            } else {
+                return .double(num.doubleValue)
+            }
+        } else if let bool = obj as? Bool {
+            return .bool(bool)
+        } else if let arr = obj as? [Any] {
+            return .array(arr.map { jsonToToolValue($0) })
+        } else if let dict = obj as? [String: Any] {
+            return .object(dict.mapValues { jsonToToolValue($0) })
+        }
+        return .null
     }
 
     private static func parseToolPayload(_ agentResponse: AgentResponse?) -> ParsedToolRequest? {
@@ -397,7 +459,7 @@ extension ConversationPipeline {
         Do not say you cannot fetch live data if the tool result contains live data.
         Do not ask the user whether to run a command that has already run.
         When presenting a list of choices, options, steps, items, or alternative paths to the user, ALWAYS format them as a clean Markdown bulleted list (using `-` or `*`) or a numbered list (using `1.`, `2.`), instead of writing them as plain paragraphs.
-        Start with `message_type: assistant_response`, followed by a blank line, then the answer.
+        Use the JSON schema to respond. Set status to "complete" and populate the assistant_response field.
         """
     }
 
@@ -406,18 +468,15 @@ extension ConversationPipeline {
         The user asked for current/latest information:
         \(originalPrompt)
 
-        You must not answer from model memory. Emit exactly:
-        message_type: tool_request
-
-        followed by a strict JSON tool payload using python_script_exec:
-        {"name":"python_script_exec","arguments":{...}}
+        You must not answer from model memory. Use the JSON schema to execute a tool:
+        Set status to "tool_call", tool_name to "python_script_exec", and populate the arguments object.
 
         Use readonly mode, allow_network=true, and fetch authoritative current sources relevant to the request.
         """
     }
 
-    /// Is the prompt asking for current information?
-    private static func requiresCurrentInfoTool(_ prompt: String) -> Bool {
+    /// Is the prompt asking for current or newest information?
+    private static func promptAskingForCurrentInfo(_ prompt: String) -> Bool {
         let lowered = prompt.lowercased()
         let triggers = [
             "latest",
