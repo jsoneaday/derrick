@@ -140,7 +140,7 @@ final class PolicyInterceptionTests: XCTestCase {
     }
 }
 
-struct MockResponseContentPolicy: ResponseContentPolicy {
+struct MockResponseContentPolicy: PolicyEvaluator {
     var shouldAllow = true
     var shouldDeny = false
     var denyReason = "Policy rejected"

@@ -42,10 +42,10 @@ public actor MCPToolRegistry {
 
         for invocation in request.invocations {
             do {
-                let content = try await call(name: invocation.name, arguments: invocation.arguments)
+                let content = try await call(name: invocation.toolName, arguments: invocation.arguments)
                 results.append(MCPToolResult(content: content))
             } catch {
-                print("[MCPServer] batch call failed for \(invocation.name): \(error)")
+                print("[MCPServer] batch call failed for \(invocation.toolName): \(error)")
                 results.append(MCPToolResult(content: error.localizedDescription, isError: true))
             }
         }

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import LLMAgentClient
 
@@ -44,5 +45,37 @@ struct ModelTests {
         """
         let chunks = try openAITextChunks(from: event)
         #expect(chunks == ["Hel", "lo"])
+    }
+
+    @Test func geminiJSONStreamRequestSerialization() throws {
+        let schema = AgentSchema(
+            type: .object,
+            properties: [
+                "message_type": AgentSchema(type: .string, description: "Type of message"),
+                "status": AgentSchema(type: .string, description: "System status")
+            ],
+            required: ["message_type"]
+        )
+
+        let request = GeminiJSONStreamRequest(
+            messages: [
+                .init(role: .system, content: "You are a concise JSON generator."),
+                .init(role: .user, content: "Update status")
+            ],
+            temperature: 0.7,
+            responseSchema: schema
+        )
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(request)
+        let jsonString = String(decoding: data, as: UTF8.self)
+
+        #expect(jsonString.contains("application\\/json"))
+        #expect(jsonString.contains("OBJECT"))
+        #expect(jsonString.contains("message_type"))
+        #expect(jsonString.contains("status"))
+        #expect(jsonString.contains("STRING"))
+        #expect(jsonString.contains("Type of message"))
+        #expect(jsonString.contains("System status"))
     }
 }

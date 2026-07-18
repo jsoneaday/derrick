@@ -17,22 +17,110 @@ public struct AgentMessage: Codable, Hashable, Sendable {
     }
 }
 
+public final class AgentSchema: Codable, Sendable {
+    public enum SchemaType: String, Codable, Sendable {
+        case object = "OBJECT"
+        case array = "ARRAY"
+        case string = "STRING"
+        case number = "NUMBER"
+        case integer = "INTEGER"
+        case boolean = "BOOLEAN"
+    }
+
+    public let type: SchemaType
+    public let properties: [String: AgentSchema]?
+    public let required: [String]?
+    public let items: AgentSchema?
+    public let description: String?
+
+    public init(
+        type: SchemaType,
+        properties: [String: AgentSchema]? = nil,
+        required: [String]? = nil,
+        items: AgentSchema? = nil,
+        description: String? = nil
+    ) {
+        self.type = type
+        self.properties = properties
+        self.required = required
+        self.items = items
+        self.description = description
+    }
+}
+
+extension AgentSchema: Hashable {
+    public static func == (lhs: AgentSchema, rhs: AgentSchema) -> Bool {
+        lhs.type == rhs.type &&
+        lhs.properties == rhs.properties &&
+        lhs.required == rhs.required &&
+        lhs.items == rhs.items &&
+        lhs.description == rhs.description
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(type)
+        hasher.combine(properties)
+        hasher.combine(required)
+        hasher.combine(items)
+        hasher.combine(description)
+    }
+}
+
 public struct AgentRequest: Hashable, Sendable {
     public let messages: [AgentMessage]
     public let temperature: Double?
+    public let responseSchema: AgentSchema?
 
-    public init(messages: [AgentMessage], temperature: Double? = nil) {
+    public init(messages: [AgentMessage], temperature: Double? = nil, responseSchema: AgentSchema? = nil) {
         self.messages = messages
         self.temperature = temperature
+        self.responseSchema = responseSchema
     }
 
-    public static func prompt(_ content: String, system: String? = nil, temperature: Double? = nil) -> Self {
+    public static func prompt(_ content: String, system: String? = nil, temperature: Double? = nil, responseSchema: AgentSchema? = nil) -> Self {
         var messages: [AgentMessage] = []
         if let system {
             messages.append(.init(role: .system, content: system))
         }
         messages.append(.init(role: .user, content: content))
-        return Self(messages: messages, temperature: temperature)
+        return Self(messages: messages, temperature: temperature, responseSchema: responseSchema)
+    }
+}
+
+public enum AgentResponseStatus: String, Decodable, Encodable, Sendable {
+    case thinking = "thinking"
+    case toolCall = "tool_call"
+    case toolBatch = "tool_batch"
+    case complete = "complete"
+}
+
+public struct AgentResponse: Decodable, Encodable, Sendable {
+    public let status: AgentResponseStatus
+    public let thought: String?
+    public let assistantResponse: String?
+    public let toolCall: ToolCall?
+    public let toolBatch: ToolBatch?
+    
+    enum CodingKeys: String, Encodable, CodingKey {
+        case status
+        case thought = "thought"
+        case assistantResponse = "assistant_response"
+        case toolCall = "tool_call"
+        case toolBatch = "tool_batch"
+    }
+    
+    public struct ToolCall: Decodable, Encodable, Sendable {
+        public let toolName: String
+        public let arguments: String
+        
+        enum CodingKeys: String, Encodable, CodingKey {
+            case toolName = "tool_name"
+            case arguments
+        }
+    }
+    
+    public struct ToolBatch: Decodable, Encodable, Sendable {
+        public let tools: [ToolCall]
     }
 }
 

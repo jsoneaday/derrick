@@ -37,7 +37,11 @@ public struct GeminiProvider: AgentProvider {
     }
 
     public func stream(_ request: AgentRequest, model: GeminiModel) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        if let responseSchema = request.responseSchema {
+            return streamJSON(request, model: model, responseSchema: responseSchema)
+        }
+
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let url = try geminiURL(for: model)
@@ -46,6 +50,54 @@ public struct GeminiProvider: AgentProvider {
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     urlRequest.httpBody = try encode(GeminiStreamRequest(messages: request.messages, temperature: request.temperature))
+
+                    let (bytes, response) = try await transport.bytes(for: urlRequest)
+                    try validate(response: response)
+
+                    var didYieldText = false
+                    for try await event in SSEDecoder(bytes: bytes).events {
+                        for chunk in try decodeGeminiChunks(from: event) {
+                            if let text = chunk.candidates.first?.content.text, !text.isEmpty {
+                                didYieldText = true
+                                continuation.yield(text)
+                            }
+                        }
+                    }
+
+                    guard didYieldText else {
+                        throw AgentError.emptyResponse
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    public func streamJSON(
+        _ request: AgentRequest,
+        model: GeminiModel,
+        responseSchema: AgentSchema? = nil
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let url = try geminiURL(for: model)
+                    var urlRequest = URLRequest(url: url)
+                    urlRequest.httpMethod = "POST"
+                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    urlRequest.httpBody = try encode(GeminiJSONStreamRequest(
+                        messages: request.messages,
+                        temperature: request.temperature,
+                        responseSchema: responseSchema
+                    ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
                     try validate(response: response)
@@ -127,7 +179,40 @@ private struct GeminiStreamRequest: Encodable {
     }
 }
 
-private struct GeminiSystemInstruction: Encodable {
+struct GeminiJSONStreamRequest: Encodable {
+    let systemInstruction: GeminiSystemInstruction?
+    let contents: [GeminiContent]
+    let generationConfig: GeminiJSONGenerationConfig
+
+    init(messages: [AgentMessage], temperature: Double?, responseSchema: AgentSchema?) {
+        let systemMessages = messages.filter { $0.role == .system }
+        let chatMessages = messages.filter { $0.role != .system }
+
+        let systemText = systemMessages.map(\.content).joined(separator: "\n")
+        if !systemText.isEmpty {
+            systemInstruction = GeminiSystemInstruction(parts: [GeminiPart(text: systemText)])
+        } else {
+            systemInstruction = nil
+        }
+
+        contents = chatMessages.map(GeminiContent.init)
+        generationConfig = GeminiJSONGenerationConfig(temperature: temperature, responseSchema: responseSchema)
+    }
+}
+
+struct GeminiJSONGenerationConfig: Encodable {
+    let temperature: Double?
+    let responseMimeType: String
+    let responseSchema: AgentSchema?
+
+    init(temperature: Double?, responseSchema: AgentSchema?) {
+        self.temperature = temperature
+        self.responseMimeType = "application/json"
+        self.responseSchema = responseSchema
+    }
+}
+
+struct GeminiSystemInstruction: Encodable {
     let parts: [GeminiPart]
 }
 
@@ -135,7 +220,7 @@ private struct GeminiGenerationConfig: Encodable {
     let temperature: Double
 }
 
-private struct GeminiContent: Encodable {
+struct GeminiContent: Encodable {
     let role: String
     let parts: [GeminiPart]
 
@@ -145,7 +230,7 @@ private struct GeminiContent: Encodable {
     }
 }
 
-private struct GeminiPart: Codable, Sendable {
+struct GeminiPart: Codable, Sendable {
     let text: String?
 }
 

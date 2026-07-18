@@ -42,7 +42,7 @@ public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
     }
 }
 
-public struct OnDemandCompletionContentPolicy: ResponseContentPolicy {
+public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
     private let store: any PolicyStore
     private let applicationName: String
 

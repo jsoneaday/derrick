@@ -23,12 +23,22 @@ public struct MCPToolResult: Hashable, Codable, Sendable {
     }
 }
 
+public struct MCPSingleToolRequest: Decodable {
+    public let toolName: String
+    public let arguments: [String: Value]?
+    
+    public init(toolName: String, arguments: [String: Value]? = nil) {
+        self.toolName = toolName
+        self.arguments = arguments
+    }
+}
+
 public struct MCPToolInvocation: Hashable, Codable, Sendable {
-    public let name: String
+    public let toolName: String
     public let arguments: [String: Value]
 
     public init(name: String, arguments: [String: Value] = [:]) {
-        self.name = name
+        self.toolName = name
         self.arguments = arguments
     }
 }
@@ -156,7 +166,7 @@ public actor MCPOfficialBackend: MCPBackend {
 
         var results: [MCPToolResult] = []
         for invocation in request.invocations {
-            results.append(try await callTool(named: invocation.name, arguments: invocation.arguments))
+            results.append(try await callTool(named: invocation.toolName, arguments: invocation.arguments))
         }
 
         return MCPToolBatchResult(
@@ -249,7 +259,7 @@ public actor MCPStdioBackend: MCPBackend {
         try await connectIfNeeded()
         var results: [MCPToolResult] = []
         for invocation in request.invocations {
-            results.append(try await callTool(named: invocation.name, arguments: invocation.arguments))
+            results.append(try await callTool(named: invocation.toolName, arguments: invocation.arguments))
         }
         return MCPToolBatchResult(
             results: results,

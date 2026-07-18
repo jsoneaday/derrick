@@ -50,7 +50,7 @@ private struct InMemoryBackend: MCPBackend {
 
     func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
         let results = request.invocations.map { invocation in
-            MCPToolResult(content: "\(invocation.name): \(invocation.arguments.count)")
+            MCPToolResult(content: "\(invocation.toolName): \(invocation.arguments.count)")
         }
         return MCPToolBatchResult(
             results: results,

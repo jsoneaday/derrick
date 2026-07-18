@@ -1,5 +1,5 @@
 {
-  "originHash" : "8b749eb30a3c89a810aa29a5f07fb2893bf126a889e82769c8257e07c2aab438",
+  "originHash" : "b86aea21ae6381b9184bede25b87a4eb94e24ec74a1632c6fd076653c590e352",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "a3a85a85214caf642abaa96ae664e4c772a59f6e",
         "version" : "1.4.1"
+      }
+    },
+    {
+      "identity" : "partialjson",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/itruf/PartialJSON.git",
+      "state" : {
+        "revision" : "051f51d551026c056c5ee7ddd0310f7813484a8f",
+        "version" : "0.0.2"
       }
     },
     {

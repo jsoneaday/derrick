@@ -623,10 +623,11 @@ struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Debug")
-                    .font(.system(size: 17, weight: .semibold))
+                Text("Debug").font(.system(size: 17, weight: .semibold))
                 Spacer()
-                Text("DB Exists: \(fileExists ? "yes" : "no")")
+                Button("Copy Log") {
+                    copyToPasteboard(debugLogStore.entries.map { $0.message }.joined(separator: "\n"))
+                }
             }
             SelectableDebugLogView(text: debugLogStore.entries.map { $0.message }.joined(separator: "\n"))
                 .frame(maxHeight: maxHeight)

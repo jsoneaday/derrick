@@ -14,6 +14,38 @@ final class ConversationModel {
     let databaseDirectoryURL: URL
     let ragInstructions: String
     let mcpToolInstructions: String
+    let responseSchema: AgentSchema = AgentSchema(
+        type: .object,
+        properties: [
+            "status": AgentSchema(type: .string, description: "One of: '\(AgentResponseStatus.thinking.rawValue)', '\(AgentResponseStatus.toolCall.rawValue)', '\(AgentResponseStatus.toolBatch.rawValue)', '\(AgentResponseStatus.complete.rawValue)'"),
+            "thought": AgentSchema(type: .string, description: "Your internal plan or reasoning steps"),
+            "assistant_response": AgentSchema(type: .string, description: "The markdown, json or csv message content meant for user."),
+            "tool_call": AgentSchema(
+                type: .object,
+                properties: [
+                    "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
+                    "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                ]
+            ),
+            "tool_batch": AgentSchema(
+                type: .object,
+                properties: [
+                    "invocations": AgentSchema(
+                        type: .array,
+                        items: AgentSchema(
+                            type: .object,
+                            properties: [
+                                "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
+                                "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                            ]
+                        ),
+                        description: "Array of tool invocation objects"
+                    ),
+               ]
+            )
+        ],
+        required: ["status"],
+    )
 
     private init(
         sessionKey: MemorySessionKey,
@@ -101,7 +133,8 @@ final class ConversationModel {
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
                 interceptor: makeContentPolicyInterceptor(),
-                approvalPresenter: approvalPresenter
+                approvalPresenter: approvalPresenter,
+                responseSchema: responseSchema
             )
         case .openai(let openAIModel):
             let provider = OpenAIProvider(apiKey: apiKey)

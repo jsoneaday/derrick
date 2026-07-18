@@ -157,6 +157,7 @@ struct PromptCompletionCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 10) {
                         if completionStatus == .streaming {
+                            Text("streaming")
                             CompletionStatusView(status: statusMessage ?? "Thinking...")
                         } else if let statusString = completionStatus.displayString {
                             CompletionStatusView(status: statusString)

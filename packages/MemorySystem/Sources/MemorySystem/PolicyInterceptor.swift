@@ -7,7 +7,7 @@ public enum PolicyDecisionOutcome: Equatable, Sendable {
     case redact(pattern: String, replacement: String)
 }
 
-public protocol ResponseContentPolicy: Sendable {
+public protocol PolicyEvaluator: Sendable {
     func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome
     func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome
 }
@@ -18,9 +18,9 @@ public protocol PolicyInterceptor: Sendable {
 }
 
 public struct DefaultPolicyInterceptor: PolicyInterceptor {
-    private let policy: ResponseContentPolicy?
+    private let policy: PolicyEvaluator?
 
-    public init(policy: ResponseContentPolicy? = nil) {
+    public init(policy: PolicyEvaluator? = nil) {
         self.policy = policy
     }
 

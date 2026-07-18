@@ -1,8 +1,7 @@
 import Foundation
 import MemorySystem
-import PolicyEngine
 
-public final class ConversationCompletionContentPolicy: ResponseContentPolicy {
+public final class ConversationCompletionContentPolicy: PolicyEvaluator {
     private let policyEngine: PolicyEngine
     private let applicationName: String
 
