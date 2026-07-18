@@ -116,6 +116,7 @@ extension ConversationPipeline {
                             debugLog(Self.formatLLMResponse(completion, round: round + 1))
                         }
 
+                        debugLog("**hello 123**")
                         let fullCompletion = Self.getFullCompletion(agentResponse, jsonEncoder: jsonEncoder)
                         let completionEvent = AssistantCompletionEvent(
                             sessionID: sessionID,

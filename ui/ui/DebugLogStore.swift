@@ -19,7 +19,7 @@ final class DebugLogStore: ObservableObject {
 
     private init() {
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
+        formatter.dateFormat = "hh:mm:ss a"
         self.formatter = formatter
     }
 

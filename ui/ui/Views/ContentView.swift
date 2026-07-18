@@ -16,13 +16,28 @@ struct ChatTurn: Identifiable, Hashable {
 private struct SelectableDebugLogView: NSViewRepresentable {
     let text: String
 
+    private func makeAttributedString() -> NSAttributedString {
+        let lines = text.components(separatedBy: .newlines)
+        var combined = AttributedString()
+        
+        for (index, line) in lines.enumerated() {
+            var lineAttr = (try? AttributedString(markdown: line)) ?? AttributedString(line)
+            if index < lines.count - 1 {
+                lineAttr.append(AttributedString("\n"))
+            }
+            combined.append(lineAttr)
+        }
+        
+        combined.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        combined.foregroundColor = Color(NSColor.labelColor)
+        return NSAttributedString(combined)
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let textView = NSTextView()
         textView.isEditable = false
         textView.isSelectable = true
-        textView.isRichText = false
-        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textColor = .labelColor
+        textView.isRichText = true
         textView.backgroundColor = .textBackgroundColor
         textView.drawsBackground = true
         textView.autoresizingMask = [.width]
@@ -34,16 +49,21 @@ private struct SelectableDebugLogView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
-        textView.string = text
+        
+        let nsAttributed = makeAttributedString()
+        textView.textStorage?.setAttributedString(nsAttributed)
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView,
-              textView.string != text else {
+        guard let textView = nsView.documentView as? NSTextView else {
             return
         }
-        textView.string = text
+        
+        let nsAttributed = makeAttributedString()
+        if textView.attributedString() != nsAttributed {
+            textView.textStorage?.setAttributedString(nsAttributed)
+        }
     }
 }
 
@@ -626,10 +646,10 @@ struct ContentView: View {
                 Text("Debug").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Button("Copy Log") {
-                    copyToPasteboard(debugLogStore.entries.map { $0.message }.joined(separator: "\n"))
+                    copyToPasteboard(debugLogStore.entries.map { "[\(debugLogStore.formattedTimestamp(for: $0))] \($0.message)" }.joined(separator: "\n"))
                 }
             }
-            SelectableDebugLogView(text: debugLogStore.entries.map { $0.message }.joined(separator: "\n"))
+            SelectableDebugLogView(text: debugLogStore.entries.map { "[\(debugLogStore.formattedTimestamp(for: $0))] \($0.message)" }.joined(separator: "\n"))
                 .frame(maxHeight: maxHeight)
         }
         .padding(16)
