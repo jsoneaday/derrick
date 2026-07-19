@@ -317,28 +317,6 @@ extension ConversationPipeline {
             return (batchResult.combinedContent, records)
         }
     }
-
-    private static func classifyStreamingPrefix(_ text: String) -> ToolProbeStreamingState {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .undecided(buffer: text)
-        }
-
-        if let envelope = typedCompletionIfHeaderComplete(from: text) {
-            switch envelope {
-            case .toolRequest:
-                return .toolRequest
-            case .assistantResponse(let content), .untyped(let content):
-                return .prose(prefix: content)
-            }
-        }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if "message_type:".hasPrefix(trimmed.lowercased()) || trimmed.lowercased().hasPrefix("message_type:") {
-            return .undecided(buffer: text)
-        }
-
-        return .prose(prefix: text)
-    }
     
     private static func mcpToolBatchRequest(_ agentResponse: AgentResponse?) throws -> MCPToolBatchRequest? {
         guard let agentResponse = agentResponse else {
@@ -409,38 +387,6 @@ extension ConversationPipeline {
         }
 
         return nil
-    }
-
-    private static func typedCompletion(from text: String) -> TypedCompletion {
-        typedCompletionIfHeaderComplete(from: text) ?? .untyped(text)
-    }
-
-    private static func typedCompletionIfHeaderComplete(from text: String) -> TypedCompletion? {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-        guard let firstLineEnd = normalized.firstIndex(of: "\n") else {
-            return nil
-        }
-
-        let firstLine = normalized[..<firstLineEnd].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard firstLine.hasPrefix("message_type:") else {
-            return .untyped(text)
-        }
-
-        let rawType = firstLine.dropFirst("message_type:".count).trimmingCharacters(in: .whitespacesAndNewlines)
-        var contentStart = normalized.index(after: firstLineEnd)
-        if contentStart < normalized.endIndex, normalized[contentStart] == "\n" {
-            contentStart = normalized.index(after: contentStart)
-        }
-        let content = String(normalized[contentStart...])
-
-        switch rawType {
-        case "tool_request":
-            return .toolRequest(payload: content)
-        case "assistant_response":
-            return .assistantResponse(content)
-        default:
-            return .untyped(text)
-        }
     }
 
     private static func buildFollowUpPrompt(
@@ -533,32 +479,6 @@ extension ConversationPipeline {
 private enum ParsedToolRequest {
     case single(MCPSingleToolRequest)
     case batch(MCPToolBatchRequest)
-}
-
-private enum TypedCompletion {
-    case assistantResponse(String)
-    case toolRequest(payload: String)
-    case untyped(String)
-
-    var debugName: String {
-        switch self {
-        case .assistantResponse:
-            return "assistant_response"
-        case .toolRequest:
-            return "tool_request"
-        case .untyped:
-            return "untyped"
-        }
-    }
-
-    var displayContent: String {
-        switch self {
-        case .assistantResponse(let content), .untyped(let content):
-            return content
-        case .toolRequest:
-            return ""
-        }
-    }
 }
 
 private enum ToolProbeStreamingState {
