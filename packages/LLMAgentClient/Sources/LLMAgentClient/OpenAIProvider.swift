@@ -38,9 +38,22 @@ public struct OpenAIProvider: AgentProvider {
                     urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    urlRequest.httpBody = try encode(OpenAIStreamRequest(model: model.rawValue, messages: request.messages, temperature: request.temperature))
+                    urlRequest.httpBody = try encode(OpenAIStreamRequest(
+                        model: model.rawValue,
+                        messages: request.messages,
+                        temperature: request.temperature,
+                        responseSchema: request.responseSchema
+                    ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
+                    if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                        var errorData = Data()
+                        for try await byte in bytes {
+                            errorData.append(byte)
+                        }
+                        let errorString = String(decoding: errorData, as: UTF8.self)
+                        throw AgentError.httpStatus(httpResponse.statusCode, errorString)
+                    }
                     try validate(response: response)
 
                     for try await event in SSEDecoder(bytes: bytes).events {
@@ -62,21 +75,213 @@ public struct OpenAIProvider: AgentProvider {
     }
 }
 
-private struct OpenAIStreamRequest: Encodable {
+struct OpenAIStreamRequest: Encodable {
     let model: String
     let messages: [OpenAIMessage]
     let stream: Bool
     let temperature: Double?
+    let responseFormat: OpenAIResponseFormat?
 
-    init(model: String, messages: [AgentMessage], temperature: Double?) {
+    enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case stream
+        case temperature
+        case responseFormat = "response_format"
+    }
+
+    init(model: String, messages: [AgentMessage], temperature: Double?, responseSchema: AgentSchema?) {
         self.model = model
         self.messages = messages.map(OpenAIMessage.init)
         self.stream = true
-        self.temperature = temperature
+        
+        // OpenAI's reasoning-class models (GPT-5 series) lock temperature internally and reject manual settings with HTTP 400.
+        if model.contains("gpt-5") {
+            self.temperature = nil
+        } else {
+            self.temperature = temperature
+        }
+        
+        if let responseSchema {
+            self.responseFormat = OpenAIResponseFormat(
+                type: "json_schema",
+                jsonSchema: OpenAIJSONSchemaWrapper(
+                    name: "agent_response",
+                    strict: true,
+                    schema: OpenAISchema(from: responseSchema)
+                )
+            )
+        } else {
+            self.responseFormat = nil
+        }
     }
 }
 
-private struct OpenAIMessage: Encodable {
+struct OpenAIResponseFormat: Encodable {
+    let type: String
+    let jsonSchema: OpenAIJSONSchemaWrapper?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case jsonSchema = "json_schema"
+    }
+}
+
+struct OpenAIJSONSchemaWrapper: Encodable {
+    let name: String
+    let strict: Bool
+    let schema: OpenAISchema
+}
+
+enum OpenAISchemaType: Encodable, Equatable {
+    case single(String)
+    case union([String])
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .single(let type):
+            try container.encode(type)
+        case .union(let types):
+            try container.encode(types)
+        }
+    }
+}
+
+final class OpenAISchema: Encodable, Equatable {
+    let type: OpenAISchemaType
+    let properties: [String: OpenAISchema]?
+    let required: [String]?
+    let items: OpenAISchema?
+    let description: String?
+    let additionalProperties: Bool?
+    
+    let isNullable: Bool
+    let baseType: String
+
+    static func == (lhs: OpenAISchema, rhs: OpenAISchema) -> Bool {
+        lhs.type == rhs.type &&
+        lhs.properties == rhs.properties &&
+        lhs.required == rhs.required &&
+        lhs.items == rhs.items &&
+        lhs.description == rhs.description &&
+        lhs.additionalProperties == rhs.additionalProperties &&
+        lhs.isNullable == rhs.isNullable &&
+        lhs.baseType == rhs.baseType
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case properties
+        case required
+        case items
+        case description
+        case additionalProperties = "additionalProperties"
+        case anyOf = "anyOf"
+    }
+
+    init(from agentSchema: AgentSchema, isNullable: Bool = false) {
+        self.isNullable = isNullable
+        
+        switch agentSchema.type {
+        case .object:
+            self.baseType = "object"
+        case .array:
+            self.baseType = "array"
+        case .string:
+            self.baseType = "string"
+        case .number:
+            self.baseType = "number"
+        case .integer:
+            self.baseType = "integer"
+        case .boolean:
+            self.baseType = "boolean"
+        }
+
+        self.type = .single(self.baseType)
+
+        if let properties = agentSchema.properties {
+            var mapped: [String: OpenAISchema] = [:]
+            for (key, childSchema) in properties {
+                let nullable = (key != "status" && key != "invocations")
+                mapped[key] = OpenAISchema(from: childSchema, isNullable: nullable)
+            }
+            self.properties = mapped
+            self.required = Array(properties.keys).sorted()
+            self.additionalProperties = false
+        } else {
+            self.properties = nil
+            self.required = nil
+            self.additionalProperties = nil
+        }
+
+        if let items = agentSchema.items {
+            self.items = OpenAISchema(from: items, isNullable: false)
+        } else {
+            self.items = nil
+        }
+
+        self.description = agentSchema.description
+    }
+
+    func encode(to encoder: Encoder) throws {
+        if isNullable {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            let valueSchema = OpenAIValueSchema(
+                type: type,
+                properties: properties,
+                required: required,
+                items: items,
+                description: description,
+                additionalProperties: additionalProperties
+            )
+            let nullSchema = OpenAINullSchema()
+            let subSchemas: [OpenAISubSchema] = [
+                .value(valueSchema),
+                .null(nullSchema)
+            ]
+            try container.encode(subSchemas, forKey: .anyOf)
+        } else {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(type, forKey: .type)
+            try container.encodeIfPresent(properties, forKey: .properties)
+            try container.encodeIfPresent(required, forKey: .required)
+            try container.encodeIfPresent(items, forKey: .items)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(additionalProperties, forKey: .additionalProperties)
+        }
+    }
+}
+
+private enum OpenAISubSchema: Encodable {
+    case value(OpenAIValueSchema)
+    case null(OpenAINullSchema)
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .value(let schema):
+            try container.encode(schema)
+        case .null(let schema):
+            try container.encode(schema)
+        }
+    }
+}
+
+private struct OpenAIValueSchema: Encodable {
+    let type: OpenAISchemaType
+    let properties: [String: OpenAISchema]?
+    let required: [String]?
+    let items: OpenAISchema?
+    let description: String?
+    let additionalProperties: Bool?
+}
+
+private struct OpenAINullSchema: Encodable {
+    let type: String = "null"
+}
+
+struct OpenAIMessage: Encodable {
     let role: String
     let content: String
 

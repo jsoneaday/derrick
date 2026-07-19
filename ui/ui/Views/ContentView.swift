@@ -637,8 +637,6 @@ struct ContentView: View {
     }
 
     private var debugLogPanel: some View {
-        let databaseURL = conversation?.databaseDirectoryURL.appendingPathComponent("derrick.sqlite3")
-        let fileExists = databaseURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
         let maxHeight = (NSScreen.main?.visibleFrame.height ?? 800) * 0.25
 
         return VStack(alignment: .leading, spacing: 10) {

@@ -224,6 +224,9 @@ extension ConversationPipeline {
 
                     continuation.finish()
                 } catch {
+                    await MainActor.run {
+                        debugLog("Error occurred during streaming: \(error)")
+                    }
                     continuation.finish(throwing: error)
                 }
             }

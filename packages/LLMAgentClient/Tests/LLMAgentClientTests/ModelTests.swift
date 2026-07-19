@@ -78,4 +78,92 @@ struct ModelTests {
         #expect(jsonString.contains("Type of message"))
         #expect(jsonString.contains("System status"))
     }
+
+    @Test func openAIJSONStreamRequestSerialization() throws {
+        let schema = AgentSchema(
+            type: .object,
+            properties: [
+                "status": AgentSchema(type: .string, description: "System status"),
+                "thought": AgentSchema(type: .string, description: "System thoughts")
+            ],
+            required: ["status"]
+        )
+
+        let request = OpenAIStreamRequest(
+            model: "gpt-5-mini",
+            messages: [
+                .init(role: .system, content: "You are a concise JSON generator."),
+                .init(role: .user, content: "Update status")
+            ],
+            temperature: 0.1,
+            responseSchema: schema
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(request)
+        let jsonString = String(decoding: data, as: UTF8.self)
+        
+        print("\n=== DIAGNOSTIC TEST SCHEMA OUTPUT ===\n\(jsonString)\n=====================================\n")
+
+        #expect(jsonString.contains("json_schema"))
+        #expect(jsonString.contains("strict"))
+        #expect(jsonString.contains("additionalProperties"))
+        #expect(jsonString.contains("false"))
+        #expect(jsonString.contains("null"))
+        #expect(jsonString.contains("status"))
+        #expect(jsonString.contains("thought"))
+    }
+
+    @Test func realAgentSchemaSerialization() throws {
+        let schema = AgentSchema(
+            type: .object,
+            properties: [
+                "status": AgentSchema(type: .string, description: "System status"),
+                "thought": AgentSchema(type: .string, description: "Your internal plan or reasoning steps"),
+                "assistant_response": AgentSchema(type: .string, description: "The markdown, json or csv message content meant for user."),
+                "tool_call": AgentSchema(
+                    type: .object,
+                    properties: [
+                        "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
+                        "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                    ],
+                    required: ["tool_name", "arguments"]
+                ),
+                "tool_batch": AgentSchema(
+                    type: .object,
+                    properties: [
+                        "invocations": AgentSchema(
+                            type: .array,
+                            items: AgentSchema(
+                                type: .object,
+                                properties: [
+                                    "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
+                                    "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                                ],
+                                required: ["tool_name", "arguments"]
+                            ),
+                            description: "Array of tool invocation objects"
+                        ),
+                   ],
+                   required: ["invocations"]
+                )
+            ],
+            required: ["status"],
+        )
+
+        let request = OpenAIStreamRequest(
+            model: "gpt-5-mini",
+            messages: [.init(role: .user, content: "test")],
+            temperature: 0.1,
+            responseSchema: schema
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(request)
+        let jsonString = String(decoding: data, as: UTF8.self)
+        
+        print("\n=== DIAGNOSTIC REAL SCHEMA OUTPUT ===\n\(jsonString)\n=====================================\n")
+    }
 }
