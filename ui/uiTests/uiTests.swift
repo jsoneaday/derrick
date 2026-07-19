@@ -81,9 +81,9 @@ import DBRepository
     }
 
     @Test func llmProviderDefaultsToExpectedModels() {
-        #expect(LLMProviderChoice.gemini.defaultModel.displayName == "gemini-3.1-flash-lite")
+        #expect(LLMProviderChoice..google.defaultModel.displayName == "gemini-3.1-flash-lite")
         #expect(LLMProviderChoice.openai.defaultModel.displayName == "gpt-5-mini")
-        #expect(LLMProviderChoice.gemini.apiKeyEnvironmentKeys.contains("GEMINI_API_KEY"))
+        #expect(LLMProviderChoice..google.apiKeyEnvironmentKeys.contains("GEMINI_API_KEY"))
         #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
     }
 
@@ -106,7 +106,7 @@ import DBRepository
 
     @Test func llmFailureClassifierFallsBackToGeneric() {
         let error = NSError(domain: "test", code: 500, userInfo: [NSLocalizedDescriptionKey: "Internal server error"])
-        let context = LLMFailureClassifier.classify(error, provider: .gemini)
+        let context = LLMFailureClassifier.classify(error, provider: ..google)
         #expect(context == .generic(provider: "Gemini", message: "Internal server error"))
     }
 

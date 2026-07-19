@@ -96,7 +96,7 @@ public enum AgentResponseStatus: String, Decodable, Encodable, Sendable {
 }
 
 /// Notice most of the fields and subfields are nillable, except for status.
-/// This is done deliberately to allow downstream deserialization to complete in chunks.
+/// This is done deliberately to allow downstream partial deserialization in chunks.
 public struct AgentResponse: Decodable, Encodable, Sendable {
     public let status: AgentResponseStatus
     public let thought: String?

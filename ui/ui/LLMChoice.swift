@@ -2,7 +2,7 @@ import Foundation
 import LLMAgentClient
 
 enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
-    case gemini
+    case google
     case openai
 
     var id: String { rawValue }
@@ -11,7 +11,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var apiKeyName: String {
         switch self {
-        case .gemini:
+        case .google:
             return "Gemini API Key"
         case .openai:
             return "OpenAI API Key"
@@ -20,7 +20,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var apiKeyEnvironmentKeys: [String] {
         switch self {
-        case .gemini:
+        case .google:
             return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
         case .openai:
             return ["OPENAI_API_KEY"]
@@ -33,7 +33,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var models: [LLMModelChoice] {
         switch self {
-        case .gemini:
+        case .google:
             return GeminiModel.allCases.map { .gemini($0) }
         case .openai:
             return OpenAIModel.allCases.map { .openai($0) }
@@ -42,7 +42,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var defaultModel: LLMModelChoice {
         switch self {
-        case .gemini:
+        case .google:
             return .gemini(.gemini31FlashLite)
         case .openai:
             return .openai(.gpt5Mini)
@@ -77,7 +77,7 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
     var provider: LLMProviderChoice {
         switch self {
         case .gemini:
-            return .gemini
+            return .google
         case .openai:
             return .openai
         }
