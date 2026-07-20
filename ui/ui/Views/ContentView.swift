@@ -248,8 +248,8 @@ struct ContentView: View {
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
     @State private var llmFailureContext: LLMFailureContext?
-    @State private var selectedProvider: LLMProviderChoice = .google
-    @State private var selectedModel: LLMModelChoice = .gemini(.gemini31FlashLite)
+    @State private var selectedProvider: LLMProviderChoice = .openai
+    @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
     @State private var helperModelSettings: LLMModelSettings?
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0

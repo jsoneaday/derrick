@@ -26,12 +26,15 @@
       location = "group:packages/Lib">
    </FileRef>
    <FileRef
-      location = "group:.gitignore">
+      location = "group:packages/Plugin">
    </FileRef>
    <FileRef
       location = "group:AGENTS.md">
    </FileRef>
    <FileRef
       location = "group:readme.md">
+   </FileRef>
+   <FileRef
+      location = "group:.gitignore">
    </FileRef>
 </Workspace>

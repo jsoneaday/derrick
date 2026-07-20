@@ -12,6 +12,8 @@
 		DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */ = {isa = PBXBuildFile; productRef = DE5073382FF6FCA600D95676 /* MCPClient */; };
 		DE50733C2FF6FCAF00D95676 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DE50733B2FF6FCAF00D95676 /* MCPServer */; };
 		DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
+		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 /* End PBXBuildFile section */
@@ -88,8 +90,10 @@
 			files = (
 				DEF68601300A71F600165A82 /* Lib in Frameworks */,
 				DE50733C2FF6FCAF00D95676 /* MCPServer in Frameworks */,
+				DECF6281300ED94C00E1757D /* Plugin in Frameworks */,
 				DE1B9F362FEB7AE80042F227 /* LLMAgentClient in Frameworks */,
 				DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */,
+				DECF6284300ED9AC00E1757D /* Plugin in Frameworks */,
 				DE1B9F382FEB7AE80042F227 /* DBRepository in Frameworks */,
 				DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */,
 			);
@@ -178,6 +182,8 @@
 				DE50733B2FF6FCAF00D95676 /* MCPServer */,
 				DEF685FD30096EB600165A82 /* PartialJSON */,
 				DEF68600300A71F600165A82 /* Lib */,
+				DECF6280300ED94C00E1757D /* Plugin */,
+				DECF6283300ED9AC00E1757D /* Plugin */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -768,6 +774,14 @@
 		DE50733B2FF6FCAF00D95676 /* MCPServer */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MCPServer;
+		};
+		DECF6280300ED94C00E1757D /* Plugin */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Plugin;
+		};
+		DECF6283300ED9AC00E1757D /* Plugin */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Plugin;
 		};
 		DEF685FD30096EB600165A82 /* PartialJSON */ = {
 			isa = XCSwiftPackageProductDependency;

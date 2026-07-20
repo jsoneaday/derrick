@@ -63,7 +63,7 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         .openai(.gpt55)
     ]
 
-    static let defaultHelperModel: LLMModelChoice = .gemini(.gemini31FlashLite)
+    static let defaultHelperModel: LLMModelChoice = .openai(.gpt5Mini)
 
     var id: String {
         switch self {

@@ -93,13 +93,11 @@ extension ConversationPipeline {
 
                                     switch agentResponse?.status {
                                     case .toolCall:
-                                        debugLog("Chunk is a partial tool call \(agentResponse?.toolCall?.toolName ?? "")")
                                         if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
                                             continuation.yield(thought)
                                         }
                                         break
                                     case .toolBatch:
-                                        debugLog("Chunk is a partial tool batch \(agentResponse?.toolBatch?.tools?.map{ tool in tool.toolName ?? ""}.joined(separator: ", ") ?? "")")
                                         if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
                                             continuation.yield(thought)
                                         }
