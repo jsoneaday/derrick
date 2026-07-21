@@ -1,4 +1,5 @@
 import Foundation
+import DockerRunnerXPC
 import os.log
 
 /// Implements the XPC protocol. Spawns a docker process and returns stdout/stderr/exitCode.

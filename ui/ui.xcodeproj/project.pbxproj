@@ -16,6 +16,8 @@
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
+		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
+		DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -96,6 +98,7 @@
 				DECF6284300ED9AC00E1757D /* Plugin in Frameworks */,
 				DE1B9F382FEB7AE80042F227 /* DBRepository in Frameworks */,
 				DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */,
+				DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -111,6 +114,7 @@
 		DEAA10042FFF00000042F228 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -120,11 +124,10 @@
 			isa = PBXGroup;
 			children = (
 				DE1B9F082FEB74250042F227 /* ui */,
+				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
 				DE1B9F162FEB74260042F227 /* uiTests */,
 				DE1B9F202FEB74260042F227 /* uiUITests */,
 				DE1B9F072FEB74250042F227 /* Products */,
-				DE6342012FFDD7B000D19F0D /* Recovered References */,
-				DE6342DE2FFF375000D19F0D /* DockerRunnerHelper 2 */,
 			);
 			sourceTree = "<group>";
 		};
@@ -137,21 +140,6 @@
 				DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		DE6342012FFDD7B000D19F0D /* Recovered References */ = {
-			isa = PBXGroup;
-			children = (
-				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
-			);
-			name = "Recovered References";
-			sourceTree = "<group>";
-		};
-		DE6342DE2FFF375000D19F0D /* DockerRunnerHelper 2 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = "DockerRunnerHelper 2";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -184,6 +172,7 @@
 				DEF68600300A71F600165A82 /* Lib */,
 				DECF6280300ED94C00E1757D /* Plugin */,
 				DECF6283300ED9AC00E1757D /* Plugin */,
+				DED0C0022A0000000042F230 /* DockerRunnerXPC */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -245,6 +234,9 @@
 				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
 			);
 			name = DockerRunnerHelper;
+			packageProductDependencies = (
+				DED0C0032A0000000042F230 /* DockerRunnerXPC */,
+			);
 			productName = DockerRunnerHelper;
 			productReference = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */;
 			productType = "com.apple.product-type.xpc-service";
@@ -288,6 +280,7 @@
 				DE50733A2FF6FCAF00D95676 /* XCLocalSwiftPackageReference "../packages/MCPServer" */,
 				DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */,
 				DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */,
+				DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -745,6 +738,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Lib;
 		};
+		DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/DockerRunnerXPC;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -791,6 +788,14 @@
 		DEF68600300A71F600165A82 /* Lib */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
+		};
+		DED0C0022A0000000042F230 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
+		};
+		DED0C0032A0000000042F230 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

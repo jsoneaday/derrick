@@ -1,4 +1,5 @@
 import Foundation
+import DockerRunnerXPC
 import MCPServer
 
 extension NSData: @unchecked Sendable {}

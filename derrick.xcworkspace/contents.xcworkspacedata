@@ -26,6 +26,9 @@
       location = "group:packages/Lib">
    </FileRef>
    <FileRef
+      location = "group:packages/DockerRunnerXPC">
+   </FileRef>
+   <FileRef
       location = "group:packages/Plugin">
    </FileRef>
    <FileRef

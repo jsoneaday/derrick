@@ -1,4 +1,5 @@
 import Foundation
+import DockerRunnerXPC
 import os.log
 
 private let logger = Logger(subsystem: "derrick.ui.DockerRunnerHelper", category: "DockerRunnerHelperDelegate")
