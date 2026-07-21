@@ -113,7 +113,6 @@ extension ConversationPipeline {
                                                     streamedVisibleContent = true
                                                     continuation.yield(delta)
                                                     lastYieldedCompletionLength = newLength
-                                                    debugLog("Yielded completion \(delta)")
                                                 }
                                             }
                                         }
@@ -127,7 +126,6 @@ extension ConversationPipeline {
                                                 streamedVisibleContent = true
                                                 continuation.yield(delta)
                                                 lastYieldedThoughtLength = newLength
-                                                debugLog("Yielded thought \(delta)")
                                             }
                                         }
                                     default:

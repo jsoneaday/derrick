@@ -2,6 +2,21 @@ import Foundation
 import LLMAgentClient
 import MCP
 
+private let ReviewerSystemPrompt = """
+You are a security reviewer for Python script tool declarations.
+Evaluate whether script, mode, description, reason, and user prompt align.
+expected_effects is only needed if the request mode is write.
+Baseline packages include `requests`, `beautifulsoup4`, `chardet`, and `lxml`.
+Return only valid JSON with this exact schema:
+{
+  "alignedWithRequest": true|false,
+  "confidence": 0.0-1.0,
+  "suggestedAction": "allow"|"confirm"|"deny",
+  "concerns": ["..."],
+  "summary": "short explanation"
+}
+"""
+
 public struct PythonScriptExecutionArguments: Sendable {
     public enum Mode: String, Sendable {
         case readonly
@@ -140,7 +155,7 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
         print("[PythonScriptExecutionTool] Reviewer request started: model=\(model.rawValue), mode=\(args.mode.rawValue), packages=\(args.pythonPackages.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds)")
         let request = AgentRequest(
             messages: [
-                .init(role: .system, content: Self.systemPrompt),
+                .init(role: .system, content: ReviewerSystemPrompt),
                 .init(role: .user, content: Self.reviewInput(from: args))
             ],
             temperature: 0
@@ -154,19 +169,6 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
         print("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(assessment.confidence), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
         return assessment
     }
-
-    private static let systemPrompt = """
-    You are a strict security reviewer for Python tool declarations.
-    Evaluate whether script, mode, description, reason, expected effects, and user prompt align.
-    Return only valid JSON with this exact schema:
-    {
-      "alignedWithRequest": true|false,
-      "confidence": 0.0-1.0,
-      "suggestedAction": "allow"|"confirm"|"deny",
-      "concerns": ["..."],
-      "summary": "short explanation"
-    }
-    """
 
     private static func reviewInput(from args: PythonScriptExecutionArguments) -> String {
         let payload: [String: Any] = [
@@ -231,7 +233,7 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
         print("[PythonScriptExecutionTool] Reviewer request started: model=\(model.rawValue), mode=\(args.mode.rawValue), packages=\(args.pythonPackages.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds)")
         let request = AgentRequest(
             messages: [
-                .init(role: .system, content: Self.systemPrompt),
+                .init(role: .system, content: ReviewerSystemPrompt),
                 .init(role: .user, content: Self.reviewInput(from: args))
             ],
             temperature: 0
@@ -245,19 +247,6 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
         print("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(assessment.confidence), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
         return assessment
     }
-
-    private static let systemPrompt = """
-    You are a strict security reviewer for Python tool declarations.
-    Evaluate whether script, mode, description, reason, expected effects, and user prompt align.
-    Return only valid JSON with this exact schema:
-    {
-      "alignedWithRequest": true|false,
-      "confidence": 0.0-1.0,
-      "suggestedAction": "allow"|"confirm"|"deny",
-      "concerns": ["..."],
-      "summary": "short explanation"
-    }
-    """
 
     private static func reviewInput(from args: PythonScriptExecutionArguments) -> String {
         let payload: [String: Any] = [
@@ -725,17 +714,17 @@ public extension MCPServerHost {
                     "description": .string("Enable container network access when the user request requires fetching live/current web data or installing packages.")
                 ])
             ]),
-            "required": .array([.string("mode"), .string("description"), .string("reason"), .string("script")])
+            "required": .array([.string("mode"), .string("allow_network"), .string("description"), .string("reason"), .string("script")])
         ])
 
         await registerTool(
             name: name,
-            description: description
-            ,
+            description: description,
             inputSchema: inputSchema
         ) { arguments in
             let parsed = try Self.parsePythonScriptExecutionArguments(arguments)
             let staticFindings = PythonScriptExecutionVerifier.validate(parsed)
+            logger("staticFindings \(staticFindings.map(\.debugDescription).joined(separator: "\n"))")
             var findings = staticFindings
             var blockingFindings = staticFindings
             var verifierName = "static-check-v1"
