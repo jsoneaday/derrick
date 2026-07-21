@@ -14,10 +14,10 @@
 		DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
-		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
-		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
 		DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
+		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
+		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -734,13 +734,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/MCPServer;
 		};
-		DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../packages/Lib;
-		};
 		DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/DockerRunnerXPC;
+		};
+		DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/Lib;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -780,6 +780,14 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Plugin;
 		};
+		DED0C0022A0000000042F230 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
+		};
+		DED0C0032A0000000042F230 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
+		};
 		DEF685FD30096EB600165A82 /* PartialJSON */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */;
@@ -788,14 +796,6 @@
 		DEF68600300A71F600165A82 /* Lib */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
-		};
-		DED0C0022A0000000042F230 /* DockerRunnerXPC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = DockerRunnerXPC;
-		};
-		DED0C0032A0000000042F230 /* DockerRunnerXPC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = DockerRunnerXPC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
