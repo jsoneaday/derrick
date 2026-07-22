@@ -29,3 +29,26 @@ public func jsonToToolValue(_ obj: Any) -> Value {
     }
     return .null
 }
+
+public func isJSONObjectOrArray(_ string: String) -> Bool {
+    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.first == "{" || trimmed.first == "[" else { return false }
+    guard let data = trimmed.data(using: .utf8),
+          let value = try? JSONSerialization.jsonObject(with: data, options: [])
+    else { return false }
+    return value is [String: Any] || value is [Any]
+}
+
+public func prettifyJSON(_ jsonString: String) -> String? {
+    guard let data = jsonString.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data),
+          let prettyData = try? JSONSerialization.data(
+              withJSONObject: object,
+              options: [.prettyPrinted]
+          ),
+          let pretty = String(data: prettyData, encoding: .utf8)
+    else {
+        return nil
+    }
+    return pretty
+}

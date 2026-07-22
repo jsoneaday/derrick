@@ -43,10 +43,10 @@ public actor MCPToolRegistry {
         for invocation in request.invocations {
             do {
                 let content = try await call(name: invocation.toolName, arguments: invocation.arguments)
-                results.append(MCPToolResult(content: content))
+                results.append(MCPToolResult(content: [MCPToolContent.text(content)], isError: false))
             } catch {
                 print("[MCPServer] batch call failed for \(invocation.toolName): \(error)")
-                results.append(MCPToolResult(content: error.localizedDescription, isError: true))
+                results.append(MCPToolResult(content: [MCPToolContent.text(error.localizedDescription)], isError: true))
             }
         }
 
@@ -58,7 +58,7 @@ public actor MCPToolRegistry {
     }
 
     private static func combine(results: [MCPToolResult], filterQuery: String?) -> String {
-        let joined = results.map(\.content).joined(separator: "\n\n")
+        let joined = results.map(\.text).joined(separator: "\n\n")
         let trimmedQuery = filterQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmedQuery.isEmpty else {
             return joined

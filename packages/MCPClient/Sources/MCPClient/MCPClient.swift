@@ -13,13 +13,38 @@ public struct MCPToolDescriptor: Hashable, Codable, Sendable {
     }
 }
 
-public struct MCPToolResult: Hashable, Codable, Sendable {
-    public let content: String
-    public let isError: Bool
+public enum MCPToolContent: Hashable, Codable, Sendable {
+    case text(String)
+    case image(data: String, mimeType: String)
+    case audio(data: String, mimeType: String)
+    case resource(uri: String, mimeType: String?, text: String?, blob: String?)
+    case resourceLink(uri: String, name: String, title: String?, description: String?, mimeType: String?)
+}
 
-    public init(content: String, isError: Bool = false) {
+public struct MCPToolResult: Hashable, Codable, Sendable {
+    public let content: [MCPToolContent]
+    public let isError: Bool
+    
+    public init(content: [MCPToolContent], isError: Bool) {
         self.content = content
         self.isError = isError
+    }
+
+    public var text: String {
+        content.compactMap {
+            switch $0 {
+            case .text(let s):
+                return s
+            case .image:
+                return "image (todo: add image support)"
+            case .audio:
+                return "audio (todo: add audio support)"
+            case .resource(uri: let uri, mimeType: _, text: _, blob: _):
+                return uri
+            case .resourceLink(uri: _, name: let name, title: _, description: _, mimeType: _):
+                return name
+            }
+        }.joined(separator: "\n")
     }
 }
 
@@ -109,112 +134,6 @@ public struct MCPServerProfile: Hashable, Sendable {
     }
 }
 
-public actor MCPOfficialBackend: MCPBackend {
-    public nonisolated let identifier: String
-    private let client: Client
-    private let transport: MCPServerProfile.Transport
-
-    public init(profile: MCPServerProfile) {
-        identifier = profile.name
-        client = Client(name: profile.name, version: profile.version)
-        transport = profile.transport
-    }
-
-    public func connect() async throws {
-        switch transport {
-        case .stdio:
-            _ = try await client.connect(transport: StdioTransport())
-        case .http(let endpoint):
-            _ = try await client.connect(transport: HTTPClientTransport(endpoint: endpoint, streaming: true))
-        }
-    }
-
-    public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
-        if let descriptors = try? await searchViaTool(query: query) {
-            return descriptors
-        }
-
-        let (tools, _) = try await client.listTools()
-        let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return tools.compactMap { tool in
-            let description = tool.description
-            if lowered.isEmpty || tool.name.lowercased().contains(lowered) || description?.lowercased().contains(lowered) == true {
-                return MCPToolDescriptor(name: tool.name, description: description, inputSchema: tool.inputSchema)
-            }
-            return nil
-        }
-    }
-
-    public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
-        let (content, isError) = try await client.callTool(name: name, arguments: arguments)
-        var pieces: [String] = []
-        for item in content {
-            switch item {
-            case .text(text: let text, annotations: _, _meta: _):
-                pieces.append(text)
-            default:
-                pieces.append(String(describing: item))
-            }
-        }
-        return MCPToolResult(content: pieces.joined(separator: "\n"), isError: isError ?? false)
-    }
-
-    public func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
-        if let batch = try? await batchViaTool(request) {
-            return batch
-        }
-
-        var results: [MCPToolResult] = []
-        for invocation in request.invocations {
-            results.append(try await callTool(named: invocation.toolName, arguments: invocation.arguments))
-        }
-
-        return MCPToolBatchResult(
-            results: results,
-            combinedContent: Self.combine(results: results, filterQuery: request.filterQuery),
-            isError: results.contains(where: \.isError)
-        )
-    }
-
-    private func searchViaTool(query: String) async throws -> [MCPToolDescriptor] {
-        let result = try await callTool(named: "tool_search", arguments: ["query": .string(query)])
-        let data = Data(result.content.utf8)
-        return try JSONDecoder().decode([MCPToolDescriptor].self, from: data)
-    }
-
-    private func batchViaTool(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
-        let payload = try JSONEncoder().encode(request)
-        let result = try await callTool(
-            named: "tool_batch",
-            arguments: [
-                "request_json": .string(String(decoding: payload, as: UTF8.self))
-            ]
-        )
-        let data = Data(result.content.utf8)
-        return try JSONDecoder().decode(MCPToolBatchResult.self, from: data)
-    }
-
-    private static func combine(results: [MCPToolResult], filterQuery: String?) -> String {
-        let joined = results.map(\.content).joined(separator: "\n\n")
-        let trimmedQuery = filterQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmedQuery.isEmpty else {
-            return joined
-        }
-
-        let tokens = trimmedQuery.lowercased().split(whereSeparator: \.isWhitespace).map(String.init).filter { !$0.isEmpty }
-        guard !tokens.isEmpty else {
-            return joined
-        }
-
-        let lines = joined.components(separatedBy: .newlines)
-        let filtered = lines.filter { line in
-            let lowered = line.lowercased()
-            return tokens.allSatisfy { lowered.contains($0) }
-        }
-        return filtered.joined(separator: "\n")
-    }
-}
-
 public actor MCPStdioBackend: MCPBackend {
     public nonisolated let identifier: String
     private let client: Client
@@ -241,18 +160,23 @@ public actor MCPStdioBackend: MCPBackend {
     }
 
     public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
-        try await connectIfNeeded()
         let (content, isError) = try await client.callTool(name: name, arguments: arguments)
-        var pieces: [String] = []
+        var pieces: [MCPToolContent] = []
         for item in content {
             switch item {
             case .text(text: let text, annotations: _, _meta: _):
-                pieces.append(text)
-            default:
-                pieces.append(String(describing: item))
+                pieces.append(MCPToolContent.text(text))
+            case .image(data: let data, mimeType: let mimeType, annotations: _, _meta: _):
+                pieces.append(MCPToolContent.image(data: data, mimeType: mimeType))
+            case .audio(data: let data, mimeType: let mimeType, annotations: _, _meta: _):
+                pieces.append(MCPToolContent.audio(data: data, mimeType: mimeType))
+            case .resource(resource: let content, annotations: _, _meta: _):
+                pieces.append(MCPToolContent.resource(uri: content.uri, mimeType: content.mimeType, text: content.text, blob: content.blob))
+            case .resourceLink(uri: let uri, name: let name, title: let title, description: let description, mimeType: let mimeType, annotations: _):
+                pieces.append(MCPToolContent.resourceLink(uri: uri, name: name, title: title, description: description, mimeType: mimeType))
             }
         }
-        return MCPToolResult(content: pieces.joined(separator: "\n"), isError: isError ?? false)
+        return MCPToolResult(content: pieces, isError: isError ?? false)
     }
 
     public func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
@@ -263,7 +187,7 @@ public actor MCPStdioBackend: MCPBackend {
         }
         return MCPToolBatchResult(
             results: results,
-            combinedContent: results.map(\.content).joined(separator: "\n\n"),
+            combinedContent: results.map(\.text).joined(separator: "\n\n"),
             isError: results.contains(where: \.isError)
         )
     }

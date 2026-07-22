@@ -114,7 +114,7 @@ extension ConversationPipeline {
             switch confirmation {
             case .approved(let editedArgumentsJSON, let actor):
                 await MainActor.run {
-                    debugLog("Approval granted for \(name) by \(actor)")
+                    debugLog("Approval granted for \(name) by \(actor ?? "unknown")")
                 }
                 try await persistPolicyDecision(
                     sessionID: sessionID,
@@ -130,7 +130,7 @@ extension ConversationPipeline {
                 )
             case .cancelled(let actor):
                 await MainActor.run {
-                    debugLog("Approval cancelled for \(name) by \(actor)")
+                    debugLog("Approval cancelled for \(name) by \(actor ?? "unknown")")
                 }
                 try await persistPolicyDecision(
                     sessionID: sessionID,
@@ -147,7 +147,7 @@ extension ConversationPipeline {
 
         let interceptedArguments = try toolArgumentsFromJSON(interceptedEvent.argumentsJSON)
         guard let mcpClient else {
-            return MCPToolResult(content: "Tool client unavailable.", isError: true)
+            return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
         }
         if interceptedEvent.toolName == "python_script_exec" {
             await MainActor.run {
@@ -160,7 +160,7 @@ extension ConversationPipeline {
         let result = try await mcpClient.callTool(named: interceptedEvent.toolName, arguments: interceptedArguments)
         await MainActor.run {
             debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
-            debugLog("Tool result content: \(Self.debugPayload(result.content))")
+            debugLog("Tool result content: \(Self.debugPayload(result.text))")
         }
         return result
     }
@@ -184,14 +184,14 @@ extension ConversationPipeline {
                 )
                 results.append(result)
             } catch MCPClientError.toolExecutionDenied(let toolName, let reason) {
-                results.append(MCPToolResult(content: "\(toolName) \(reason)", isError: true))
+                results.append(MCPToolResult(content: [MCPToolContent.text("\(toolName) \(reason)")], isError: true))
             }
         }
 
         let hasErrors = results.contains(where: \.isError)
         return MCPToolBatchResult(
             results: results,
-            combinedContent: results.map(\.content).joined(separator: "\n"),
+            combinedContent: results.map(\.text).joined(separator: "\n"),
             isError: hasErrors
         )
     }
@@ -257,6 +257,10 @@ extension ConversationPipeline {
     }
     
     private static func debugPayload(_ payload: String, limit: Int = 12_000) -> String {
+        if isJSONObjectOrArray(payload) {
+            return prettifyJSON(payload) ?? payload
+        }
+        
         guard payload.count > limit else {
             return payload
         }

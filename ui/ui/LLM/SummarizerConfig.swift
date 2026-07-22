@@ -1,63 +1,13 @@
-import Combine
+//
+//  SummarizerInit.swift
+//  ui
+//
+//  Created by David Choi on 7/21/26.
+//
+
 import Foundation
-import LLMAgentClient
-import MCPServer
-import DBRepository
 import MemorySystem
-
-@MainActor
-final class LLMModelSettings: ObservableObject {
-    @Published var summarizerModel: LLMModelChoice = .defaultHelperModel {
-        didSet {
-            Task { await save(summarizerModel, forKey: "summarizerModel") }
-        }
-    }
-
-    @Published var pythonScriptReviewerModel: LLMModelChoice = .defaultHelperModel {
-        didSet {
-            Task { await save(pythonScriptReviewerModel, forKey: "pythonScriptReviewerModel") }
-        }
-    }
-
-    private let repository: DBRepository
-    private let username: String
-    private let password: String
-
-    init(repository: DBRepository, username: String = "ui", password: String = "ui") {
-        self.repository = repository
-        self.username = username
-        self.password = password
-    }
-
-    func loadSettings() async {
-        if let model = await Self.load(repository: repository, key: "summarizerModel", username: username, password: password) {
-            summarizerModel = model
-        }
-        if let model = await Self.load(repository: repository, key: "pythonScriptReviewerModel", username: username, password: password) {
-            pythonScriptReviewerModel = model
-        }
-    }
-
-    private static func load(repository: DBRepository, key: String, username: String, password: String) async -> LLMModelChoice? {
-        guard let value = try? await repository.loadConfig(key: key, username: username, password: password),
-              let data = value.data(using: .utf8),
-              let model = try? JSONDecoder().decode(LLMModelChoice.self, from: data) else {
-            return nil
-        }
-        return model
-    }
-
-    private func save(_ model: LLMModelChoice, forKey key: String) async {
-        do {
-            let data = try JSONEncoder().encode(model)
-            if let jsonString = String(data: data, encoding: .utf8) {
-                try await repository.saveConfig(key: key, value: jsonString, username: username, password: password)
-            }
-        } catch {
-            debugLog("Failed to persist helper model selection for \(key): \(error.localizedDescription)")
-        }
-    }
-}
+import LLMAgentClient
 
 actor ConfiguredMemorySummarizer: MemorySummarizer {
     private struct Payload: Decodable {
@@ -227,96 +177,6 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
             return try JSONDecoder().decode(Payload.self, from: data)
         } catch {
             throw AgentError.responseDecodingFailed(String(describing: error))
-        }
-    }
-}
-
-actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
-    nonisolated let name: String = "configured-python-script-reviewer"
-
-    private let settings: LLMModelSettings
-
-    init(settings: LLMModelSettings) {
-        self.settings = settings
-    }
-
-    func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewAssessment {
-        let selectedModel = await MainActor.run { settings.pythonScriptReviewerModel }
-        guard let apiKey = await resolveAPIKey(for: selectedModel) else {
-            await MainActor.run {
-                debugLog(
-                    "Helper reviewer model \(selectedModel.helperDisplayName) unavailable; using default Gemini reviewer."
-                )
-            }
-
-            if let defaultReview = await defaultReviewerAssessment(for: args) {
-                return defaultReview
-            }
-
-            throw NSError(
-                domain: "ui",
-                code: 404,
-                userInfo: [NSLocalizedDescriptionKey: "No API key available for helper reviewer."]
-            )
-        }
-
-        do {
-            return try await review(args, model: selectedModel, apiKey: apiKey)
-        } catch {
-            await MainActor.run {
-                debugLog(
-                    "Helper reviewer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription)"
-                )
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
-                )
-            }
-            if let defaultReview = await defaultReviewerAssessment(for: args) {
-                return defaultReview
-            }
-            throw error
-        }
-    }
-
-    private func defaultReviewerAssessment(for args: PythonScriptExecutionArguments) async -> PythonScriptReviewAssessment? {
-        guard let apiKey = await resolveAPIKey(for: .defaultHelperModel) else {
-            return nil
-        }
-
-        do {
-            return try await review(args, model: .defaultHelperModel, apiKey: apiKey)
-        } catch {
-            await MainActor.run {
-                debugLog("Default helper reviewer failed: \(error.localizedDescription)")
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: LLMModelChoice.defaultHelperModel.provider)
-                )
-            }
-            return nil
-        }
-    }
-
-    private func review(
-        _ args: PythonScriptExecutionArguments,
-        model: LLMModelChoice,
-        apiKey: String
-    ) async throws -> PythonScriptReviewAssessment {
-        switch model {
-        case .gemini(let geminiModel):
-            let reviewer = GeminiPythonScriptReviewer(apiKey: apiKey, model: geminiModel)
-            return try await reviewer.review(args)
-        case .openai(let openAIModel):
-            let reviewer = OpenAIPythonScriptReviewer(apiKey: apiKey, model: openAIModel)
-            return try await reviewer.review(args)
-        }
-    }
-
-    private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        await MainActor.run {
-            AppSecretResolver().resolve(
-                account: model.provider.secretAccount,
-                environmentKeys: model.provider.apiKeyEnvironmentKeys
-            )
         }
     }
 }

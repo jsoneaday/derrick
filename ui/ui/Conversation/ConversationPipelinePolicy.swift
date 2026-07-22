@@ -290,10 +290,11 @@ extension ConversationPipeline {
                 sessionID: sessionID,
                 approvalPresenter: approvalPresenter
             )
+            
             let record = ToolCallRecord(
                 name: single.toolName,
                 arguments: Self.toolCallRecordArguments(from: single.arguments ?? [:]),
-                result: result.content
+                result: result.text
             )
             let summary = "\(single.toolName): \(result.content)"
             return (summary, [record])
@@ -307,7 +308,7 @@ extension ConversationPipeline {
                 ToolCallRecord(
                     name: invocation.toolName,
                     arguments: Self.toolCallRecordArguments(from: invocation.arguments),
-                    result: result.content
+                    result: result.text
                 )
             }
             return (batchResult.combinedContent, records)
