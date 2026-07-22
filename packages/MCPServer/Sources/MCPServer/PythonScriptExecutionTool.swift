@@ -59,11 +59,25 @@ public struct PythonScriptExecutionArguments: Sendable {
     }
 }
 
+public enum PythonScriptExecutionStatus: String, Codable, Sendable {
+    case completed
+    case failed
+    case timeout
+    case blocked
+}
+
+public enum PythonScriptExecutionDecision: String, Codable, Sendable {
+    case allow
+    case deny
+    case confirm
+}
+
 public struct PythonScriptExecutionResult: Codable, Sendable {
-    public let status: String
-    public let decision: String
+    public let status: PythonScriptExecutionStatus
+    public let decision: PythonScriptExecutionDecision
     public let verifier: String
-    public let findings: [String]
+    public let validationFindings: [String]
+    public let reviewerAssessment: PythonScriptReviewAssessment?
     public let stdout: String
     public let stderr: String
     public let exitCode: Int32
@@ -71,10 +85,11 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
     public let durationMS: Int
 
     public init(
-        status: String,
-        decision: String,
+        status: PythonScriptExecutionStatus,
+        decision: PythonScriptExecutionDecision,
         verifier: String,
-        findings: [String],
+        validationFindings: [String],
+        reviewerAssessment: PythonScriptReviewAssessment?,
         stdout: String,
         stderr: String,
         exitCode: Int32,
@@ -84,7 +99,8 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
         self.status = status
         self.decision = decision
         self.verifier = verifier
-        self.findings = findings
+        self.validationFindings = validationFindings
+        self.reviewerAssessment = reviewerAssessment
         self.stdout = stdout
         self.stderr = stderr
         self.exitCode = exitCode
@@ -516,10 +532,11 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         }
 
         return PythonScriptExecutionResult(
-            status: timedOut ? "timeout" : (exitCode == 0 ? "completed" : "failed"),
-            decision: (timedOut || exitCode != 0) ? "deny" : "allow",
+            status: timedOut ? .timeout : (exitCode == 0 ? .completed : .failed),
+            decision: (timedOut || exitCode != 0) ? .deny : .allow,
             verifier: "static-check-v1",
-            findings: [],
+            validationFindings: [],
+            reviewerAssessment: nil,
             stdout: stdout,
             stderr: stderr,
             exitCode: exitCode,
@@ -726,54 +743,32 @@ public extension MCPServerHost {
             let staticFindings = PythonScriptExecutionVerifier.validate(parsed)
             logger("staticFindings \(staticFindings.map(\.debugDescription).joined(separator: "\n"))")
             var findings = staticFindings
-            var blockingFindings = staticFindings
             var verifierName = "static-check-v1"
+            var assessment: PythonScriptReviewAssessment?
 
             if let reviewer {
                 do {
                     logger("[PythonScriptExecutionTool] Reviewer request started: \(reviewer.name)")
-                    let assessment = try await reviewer.review(parsed)
+                    assessment = try await reviewer.review(parsed)
                     verifierName += "+\(reviewer.name)"
-                    findings.append(contentsOf: assessment.concerns)
-                    findings.append("Reviewer summary: \(assessment.summary)")
-                    findings.append("Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(String(format: "%.2f", assessment.confidence)), suggestedAction=\(assessment.suggestedAction)")
-                    logger("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(String(format: "%.2f", assessment.confidence)), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
-
-                    if assessment.suggestedAction.lowercased() == "deny", assessment.confidence >= 0.55 {
-                        blockingFindings.append("Reviewer denied with confidence \(String(format: "%.2f", assessment.confidence)).")
-                    }
-                    if !assessment.alignedWithRequest, assessment.confidence >= 0.60 {
-                        blockingFindings.append("Reviewer marked declaration misaligned with user request.")
-                    }
-                    if parsed.mode == .write {
-                        if assessment.confidence < 0.55 {
-                            blockingFindings.append("Reviewer confidence too low for write mode.")
-                        }
-                        if assessment.suggestedAction.lowercased() == "confirm" {
-                            blockingFindings.append("Reviewer requires manual confirmation for write mode.")
-                        }
-                    }
                 } catch {
                     logger("[PythonScriptExecutionTool] Reviewer failed: \(error.localizedDescription)")
                     print("[PythonScriptExecutionTool] reviewer failed: \(error)")
                     let message = "Reviewer failed: \(error.localizedDescription)"
                     findings.append(message)
-                    if parsed.mode == .write {
-                        blockingFindings.append("Write mode requires reviewer success.")
-                    }
                 }
             } else if parsed.mode == .write {
                 let message = "Write mode requires configured reviewer."
                 findings.append(message)
-                blockingFindings.append(message)
             }
 
-            if !blockingFindings.isEmpty {
+            if !findings.isEmpty || assessment?.alignedWithRequest == false {
                 let denied = PythonScriptExecutionResult(
-                    status: "blocked",
-                    decision: "deny",
+                    status: .blocked,
+                    decision: .deny,
                     verifier: verifierName,
-                    findings: findings,
+                    validationFindings: findings,
+                    reviewerAssessment: assessment,
                     stdout: "",
                     stderr: "",
                     exitCode: -1,
@@ -794,7 +789,8 @@ public extension MCPServerHost {
                 status: result.status,
                 decision: result.decision,
                 verifier: verifierName,
-                findings: findings,
+                validationFindings: findings,
+                reviewerAssessment: assessment,
                 stdout: result.stdout,
                 stderr: result.stderr,
                 exitCode: result.exitCode,

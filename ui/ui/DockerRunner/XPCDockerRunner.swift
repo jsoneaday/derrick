@@ -288,10 +288,11 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("XPC run request finished successfully.")
 
         return PythonScriptExecutionResult(
-            status: response.timedOut ? "timeout" : (response.exitCode == 0 ? "completed" : "failed"),
-            decision: (response.timedOut || response.exitCode != 0) ? "deny" : "allow",
+            status: response.timedOut ? .timeout : (response.exitCode == 0 ? .completed : .failed),
+            decision: (response.timedOut || response.exitCode != 0) ? .deny : .allow,
             verifier: "static-check-v1",
-            findings: [],
+            validationFindings: [],
+            reviewerAssessment: nil,
             stdout: stdout,
             stderr: stderr,
             exitCode: response.exitCode,
