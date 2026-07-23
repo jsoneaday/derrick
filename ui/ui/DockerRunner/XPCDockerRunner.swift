@@ -92,6 +92,12 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("NSXPCConnection resumed for service \(Self.serviceName).")
         debugLog("XPCDockerRunner initialized for service \(Self.serviceName).")
 
+        Task { @MainActor in
+            AppBootstrapStatus.shared.update(
+                phase: .connectingHelper,
+                message: "Connecting to Docker helper…"
+            )
+        }
         Task {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             await prewarmEnvironment()
@@ -292,18 +298,94 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         XPCDockerRunnerState.shared.isCreating = true
         defer { XPCDockerRunnerState.shared.isCreating = false }
         do {
+            await reportBootstrap(phase: .checkingDocker, message: "Checking Docker Desktop…")
+            try await probeDockerAvailable()
+
+            await reportBootstrap(phase: .preparingVolumes, message: "Preparing Docker volumes…")
             try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
             try await ensureVolume(DockerScriptPreparer.packagesVolume)
+
+            await reportBootstrap(phase: .preparingImage, message: "Preparing Python runtime image…")
             try await ensureBaselineImage()
+
+            await reportBootstrap(phase: .startingContainers, message: "Starting secure runtime containers…")
             try await ensureWarmContainer(allowNetwork: true)
             try await ensureWarmContainer(allowNetwork: false)
+
+            await reportBootstrap(phase: .verifyingEnvironment, message: "Verifying runtime environment…")
             try await smokeTestBaseline()
 
             prewarmState.markCompleted()
-
             debugLog("Docker environment pre-warming completed successfully.")
+            await MainActor.run {
+                AppBootstrapStatus.shared.markReady()
+            }
         } catch {
-            debugLog("Docker environment pre-warming failed or was skipped: \(error.localizedDescription)")
+            let detail = error.localizedDescription
+            debugLog("Docker environment pre-warming failed or was skipped: \(detail)")
+            let classified = await MainActor.run {
+                AppBootstrapStatus.classifyError(error)
+            }
+            await MainActor.run {
+                AppBootstrapStatus.shared.markFailed(
+                    title: classified.title,
+                    message: classified.message,
+                    technicalDetail: detail
+                )
+            }
+        }
+    }
+
+    private func reportBootstrap(phase: AppBootstrapStatus.Phase, message: String) async {
+        await MainActor.run {
+            AppBootstrapStatus.shared.update(phase: phase, message: message)
+        }
+    }
+
+    /// Cheap Docker CLI probe so we can surface install/daemon issues before volume/image work.
+    private func probeDockerAvailable() async throws {
+        let version = try await runXPCCommand(
+            arguments: ["docker", "version", "--format", "{{.Server.Version}}"],
+            timeoutSeconds: 20
+        )
+        let stderr = String(decoding: version.stderr, as: UTF8.self)
+        if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(
+            stderr: stderr,
+            exitCode: version.exitCode
+        ) {
+            throw NSError(
+                domain: "XPCDockerRunner",
+                code: 503,
+                userInfo: [NSLocalizedDescriptionKey: dockerMessage]
+            )
+        }
+        if version.exitCode != 0 {
+            let stdout = String(decoding: version.stdout, as: UTF8.self)
+            let combined = [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+            if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(
+                stderr: combined,
+                exitCode: version.exitCode
+            ) {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 503,
+                    userInfo: [NSLocalizedDescriptionKey: dockerMessage]
+                )
+            }
+            throw NSError(
+                domain: "XPCDockerRunner",
+                code: 503,
+                userInfo: [NSLocalizedDescriptionKey: combined.isEmpty
+                    ? "Docker is not available (exit \(version.exitCode))."
+                    : combined]
+            )
+        }
+        let serverVersion = String(decoding: version.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !serverVersion.isEmpty {
+            debugLog("Docker engine available (server version \(serverVersion)).")
+        } else {
+            debugLog("Docker engine available.")
         }
     }
 

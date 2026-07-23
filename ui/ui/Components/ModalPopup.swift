@@ -4,6 +4,9 @@ import SwiftUI
 enum ModalPopupDefaults {
     static let minWidth: CGFloat = 320
     static let minHeight: CGFloat = 180
+    /// Caps growth so the card stays a centered popup, not a full-window panel.
+    static let maxWidth: CGFloat = 480
+    static let maxHeight: CGFloat = 360
     static let cornerRadius: CGFloat = 16
     static let backdropOpacity: Double = 0.35
     /// Keeps the modal above ordinary overlays and sheets content hosts.
@@ -19,6 +22,8 @@ enum ModalPopupDefaults {
 struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
     private let minWidth: CGFloat
     private let minHeight: CGFloat
+    private let maxWidth: CGFloat
+    private let maxHeight: CGFloat
     private let onBackdropDismiss: (() -> Void)?
     private let header: Header
     private let bodyContent: BodyContent
@@ -27,6 +32,8 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
     init(
         minWidth: CGFloat = ModalPopupDefaults.minWidth,
         minHeight: CGFloat = ModalPopupDefaults.minHeight,
+        maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
+        maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
         @ViewBuilder header: () -> Header = { EmptyView() },
         @ViewBuilder body: () -> BodyContent,
@@ -34,6 +41,8 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
     ) {
         self.minWidth = minWidth
         self.minHeight = minHeight
+        self.maxWidth = maxWidth
+        self.maxHeight = maxHeight
         self.onBackdropDismiss = onBackdropDismiss
         self.header = header()
         self.bodyContent = body()
@@ -53,10 +62,12 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
             VStack(spacing: 0) {
                 header
                 bodyContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 footer
             }
-            .frame(minWidth: minWidth, minHeight: minHeight)
+            .frame(minWidth: minWidth, idealWidth: minWidth, maxWidth: maxWidth)
+            .frame(minHeight: minHeight, maxHeight: maxHeight)
+            .fixedSize(horizontal: false, vertical: true)
             .background(
                 RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius)
                     .fill(Color(nsColor: .windowBackgroundColor))
@@ -77,12 +88,16 @@ extension ModalPopup where Header == EmptyView, Footer == EmptyView {
     init(
         minWidth: CGFloat = ModalPopupDefaults.minWidth,
         minHeight: CGFloat = ModalPopupDefaults.minHeight,
+        maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
+        maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
         @ViewBuilder body: () -> BodyContent
     ) {
         self.init(
             minWidth: minWidth,
             minHeight: minHeight,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
             onBackdropDismiss: onBackdropDismiss,
             header: { EmptyView() },
             body: body,
@@ -99,6 +114,8 @@ extension View {
         isPresented: Bool,
         minWidth: CGFloat = ModalPopupDefaults.minWidth,
         minHeight: CGFloat = ModalPopupDefaults.minHeight,
+        maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
+        maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
         @ViewBuilder header: () -> Header = { EmptyView() },
         @ViewBuilder body: () -> BodyContent,
@@ -109,6 +126,8 @@ extension View {
                 ModalPopup(
                     minWidth: minWidth,
                     minHeight: minHeight,
+                    maxWidth: maxWidth,
+                    maxHeight: maxHeight,
                     onBackdropDismiss: onBackdropDismiss,
                     header: header,
                     body: body,

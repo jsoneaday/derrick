@@ -7,6 +7,8 @@ import Testing
     @Test func defaultsMatchDocumentedGeometry() {
         #expect(ModalPopupDefaults.minWidth == 320)
         #expect(ModalPopupDefaults.minHeight == 180)
+        #expect(ModalPopupDefaults.maxWidth == 480)
+        #expect(ModalPopupDefaults.maxHeight == 360)
         #expect(ModalPopupDefaults.cornerRadius == 16)
         #expect(ModalPopupDefaults.backdropOpacity == 0.35)
         #expect(ModalPopupDefaults.zIndex == 10_000)
@@ -15,6 +17,8 @@ import Testing
     @Test func defaultsArePositiveAndUsable() {
         #expect(ModalPopupDefaults.minWidth > 0)
         #expect(ModalPopupDefaults.minHeight > 0)
+        #expect(ModalPopupDefaults.maxWidth >= ModalPopupDefaults.minWidth)
+        #expect(ModalPopupDefaults.maxHeight >= ModalPopupDefaults.minHeight)
         #expect(ModalPopupDefaults.cornerRadius > 0)
         #expect(ModalPopupDefaults.backdropOpacity > 0 && ModalPopupDefaults.backdropOpacity < 1)
         #expect(ModalPopupDefaults.zIndex > 0)

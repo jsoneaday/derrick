@@ -232,6 +232,7 @@ struct ContentView: View {
     private let debugConfiguration = AppDebugConfiguration()
     
     @ObservedObject private var debugLogStore = DebugLogStore.shared
+    @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
 
     private var secretStore: SecretStore {
         SecretStore(account: "\(selectedProvider.rawValue)-api-key")
@@ -309,8 +310,77 @@ struct ContentView: View {
                 )
             }
         }
+        .modalPopup(
+            isPresented: bootstrapStatus.isModalPresented,
+            minWidth: 380,
+            minHeight: 160,
+            maxWidth: 440,
+            maxHeight: 280,
+            onBackdropDismiss: bootstrapStatus.phase == .failed
+                ? { bootstrapStatus.dismissFailure() }
+                : nil,
+            header: {
+                HStack(spacing: 10) {
+                    if bootstrapStatus.showsProgressIndicator {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if bootstrapStatus.phase == .failed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    Text(bootstrapStatus.phase == .failed
+                         ? (bootstrapStatus.failureTitle ?? "Initialization Failed")
+                         : "Initializing Derrick")
+                        .font(.headline)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 8)
+            },
+            body: {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(bootstrapStatus.statusMessage)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if bootstrapStatus.phase == .failed, let detail = bootstrapStatus.failureMessage,
+                       detail != bootstrapStatus.statusMessage {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if bootstrapStatus.isInitializing {
+                        Text("This may take a minute the first time while Docker images and containers are prepared.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+            },
+            footer: {
+                HStack {
+                    Spacer()
+                    if bootstrapStatus.phase == .failed {
+                        Button("OK") {
+                            bootstrapStatus.dismissFailure()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+            }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
+            await MainActor.run {
+                bootstrapStatus.beginLoadingSession()
+            }
             if isDebugEnabled {
                 await MainActor.run {
                     debugLogStore.log("Loading session store")
@@ -334,16 +404,26 @@ struct ContentView: View {
                     repository: repo,
                     helperModelSettings: helperModelSettings!
                 )
+                // XPCDockerRunner starts Docker prewarm; bootstrap modal continues until that finishes.
+                await MainActor.run {
+                    bootstrapStatus.update(
+                        phase: .connectingHelper,
+                        message: "Starting Docker environment setup…"
+                    )
+                }
             } catch {
                 errorMessage = error.localizedDescription
-                if isDebugEnabled {
-                    await MainActor.run {
-                        debugLog("Session store load failed: \(error)")
-                    }
+                await MainActor.run {
+                    debugLog("Session store load failed: \(error)")
+                    bootstrapStatus.markFailed(
+                        title: "Session Store Failed",
+                        message: "Derrick could not open its local database.\n\n\(error.localizedDescription)",
+                        technicalDetail: String(describing: error)
+                    )
                 }
             }
 
-            if isDebugEnabled {
+            if isDebugEnabled, conversation != nil {
                 await MainActor.run {
                     debugLogStore.log("Session store ready")
                 }
