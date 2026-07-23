@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import LLMAgentClient
 
 private final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
@@ -120,6 +121,7 @@ struct PromptCompletionCard: View {
     let isActiveStreamingTurn: Bool
     let completionStatus: CompletionStatus
     let statusMessage: String?
+    let toolName: String?
     let onCopy: () -> Void
     @State private var isCompletionVisible = false
 
@@ -129,6 +131,7 @@ struct PromptCompletionCard: View {
         isActiveStreamingTurn: Bool,
         completionStatus: CompletionStatus,
         statusMessage: String? = nil,
+        toolName: String? = nil,
         onCopy: @escaping () -> Void
     ) {
         self.turn = turn
@@ -136,6 +139,7 @@ struct PromptCompletionCard: View {
         self.isActiveStreamingTurn = isActiveStreamingTurn
         self.completionStatus = completionStatus
         self.statusMessage = statusMessage
+        self.toolName = toolName
         self.onCopy = onCopy
     }
 
@@ -158,9 +162,9 @@ struct PromptCompletionCard: View {
                     VStack(alignment: .leading, spacing: 10) {
                         if completionStatus == .streaming {
                             Text("streaming")
-                            CompletionStatusView(status: statusMessage ?? "Thinking...")
+                            CompletionStatusView(status: statusMessage ?? "Thinking...", toolName: toolName)
                         } else if let statusString = completionStatus.displayString {
-                            CompletionStatusView(status: statusString)
+                            CompletionStatusView(status: statusString, toolName: nil)
                         }
 
                         MarkdownResponseView(text: turn.response, allowsCSVExport: true)
@@ -215,6 +219,7 @@ struct PromptCompletionCard: View {
 
 private struct CompletionStatusView: View {
     let status: String
+    let toolName: String?
     @State private var isVisible = false
 
     var body: some View {
@@ -228,7 +233,7 @@ private struct CompletionStatusView: View {
                     .opacity(pulse)
 
                 ZStack(alignment: .leading) {
-                    Text(status)
+                    Text(agentResponseStatusLabel(status: status) + (" \(toolName ?? "")"))
                         .id(status)
                         .font(.system(size: 13))
                         .padding(.horizontal, 10)

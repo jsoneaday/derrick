@@ -115,7 +115,7 @@ final class ConversationModel {
         apiKey: String,
         model: LLMModelChoice,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
-    ) async -> AsyncThrowingStream<String, Error> {
+    ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
         switch model {
         case .gemini(let geminiModel):
             let provider = GeminiProvider(apiKey: apiKey)

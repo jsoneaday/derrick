@@ -95,6 +95,31 @@ public enum AgentResponseStatus: String, Decodable, Encodable, Sendable {
     case complete = "complete"
 }
 
+public func agentResponseStatusLabel(status: String) -> String {
+    if status == "complete" {
+        return "Complete"
+    } else if status == "tool_call" {
+        return "Tool Call"
+    } else if status == "tool_batch" {
+        return "Tool Batch"
+    } else {
+        return "Thinking"
+    }
+}
+
+/// During streaming provides the next status (e.g. thinking, tool_call, etc) and the next chunk of text from llm
+public struct AgentResponseNextChunk: Decodable, Encodable, Sendable {
+    public let status: AgentResponseStatus
+    public let toolName: String?
+    public let chunk: String?
+    
+    public init(status: AgentResponseStatus, chunk: String? = nil, toolName: String? = nil) {
+        self.status = status
+        self.toolName = toolName
+        self.chunk = chunk
+    }
+}
+
 /// Notice most of the fields and subfields are nillable, except for status.
 /// This is done deliberately to allow downstream partial deserialization in chunks.
 public struct AgentResponse: Decodable, Encodable, Sendable {

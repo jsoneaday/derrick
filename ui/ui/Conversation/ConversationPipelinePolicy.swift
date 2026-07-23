@@ -16,8 +16,8 @@ extension ConversationPipeline {
         interceptor: PolicyInterceptor = DefaultPolicyInterceptor(),
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         responseSchema: AgentSchema? = nil
-    ) async -> AsyncThrowingStream<String, Error> {
-        return AsyncThrowingStream { continuation in
+    ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
+        return AsyncThrowingStream(AgentResponseNextChunk.self, bufferingPolicy: .unbounded) { continuation in
             let task = Task {
                 do {
                     var workingPrompt = prompt
@@ -94,12 +94,45 @@ extension ConversationPipeline {
                                     switch agentResponse?.status {
                                     case .toolCall:
                                         if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
-                                            continuation.yield(thought)
+                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                        } else {
+                                            var toolName: String?
+                                            if let toolCall = agentResponse?.toolCall {
+                                                toolName = toolCall.toolName
+                                            } else {
+                                                let singleToolCall = Self.parseToolPayload(agentResponse)
+                                                
+                                                switch singleToolCall {
+                                                case .single(let toolRequest):
+                                                    toolName = toolRequest.toolName
+                                                default:
+                                                    toolName = nil
+                                                }
+                                            }
+                                            continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolName))
                                         }
                                         break
                                     case .toolBatch:
                                         if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
-                                            continuation.yield(thought)
+                                            debugLog("Chunk thinking \(thought)")
+                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                        } else {
+                                            var toolNames: String?
+                                            if let toolCall = agentResponse?.toolBatch {
+                                                let tools = toolCall.tools
+                                                let count = tools?.count ?? 0
+                                                toolNames = count > 0 ? tools?.map{ tool in tool.toolName ?? "batch tool name error" }.joined(separator: ", "): "batch tool name error"
+                                            } else {
+                                                let batchToolCall = Self.parseToolPayload(agentResponse)
+                                                
+                                                switch batchToolCall {
+                                                case .batch(let toolRequest):
+                                                    toolNames = toolRequest.invocations.map { $0.toolName } .joined(separator: ", ")
+                                                default:
+                                                    toolNames = nil
+                                                }
+                                            }
+                                            continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolNames))
                                         }
                                         break
                                     case .complete:
@@ -111,7 +144,7 @@ extension ConversationPipeline {
                                                     let delta = String(assistantResponse[index...])
                                                     
                                                     streamedVisibleContent = true
-                                                    continuation.yield(delta)
+                                                    continuation.yield(AgentResponseNextChunk(status: .complete, chunk: delta))
                                                     lastYieldedCompletionLength = newLength
                                                 }
                                             }
@@ -124,7 +157,8 @@ extension ConversationPipeline {
                                                 let delta = String(thought[index...])
                                                 
                                                 streamedVisibleContent = true
-                                                continuation.yield(delta)
+                                                debugLog("Chunk thinking \(delta)")
+                                                continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: delta))
                                                 lastYieldedThoughtLength = newLength
                                             }
                                         }
@@ -202,7 +236,8 @@ extension ConversationPipeline {
                         }
 
                         if !streamedVisibleContent {
-                            continuation.yield(interceptedCompletion)
+                            debugLog("Chunk final complete \(interceptedCompletion)")
+                            continuation.yield(AgentResponseNextChunk(status: .complete, chunk: interceptedCompletion))
                         }
 
                         try? await memoryCoordinator.ingest(

@@ -11,6 +11,8 @@ struct ChatTurn: Identifiable, Hashable {
     let id = UUID()
     let prompt: String
     var response: String
+    var status: AgentResponseStatus?
+    var toolName: String?
 }
 
 private struct SelectableDebugLogView: NSViewRepresentable {
@@ -409,7 +411,8 @@ struct ContentView: View {
                                         isStreaming: isStreaming,
                                         isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
                                         completionStatus: completionStatus(for: turn),
-                                        statusMessage: debugLogStore.currentStatus
+                                        statusMessage: turn.status?.rawValue,
+                                        toolName: turn.toolName
                                     ) {
                                         copyTurn(turn)
                                     }
@@ -655,10 +658,12 @@ struct ContentView: View {
     }
 
     private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
-        if turn.response.isEmpty {
+        switch turn.status {
+        case .complete:
+            return .completed
+        default:
             return .streaming
         }
-        return .completed
     }
 
     private func startStreaming() {
@@ -681,7 +686,10 @@ struct ContentView: View {
                 )
                 for try await chunk in stream {
                     if let lastIndex = turns.indices.last {
-                        turns[lastIndex].response += chunk
+                        turns[lastIndex].response = turns[lastIndex].response.isEmpty ? chunk.chunk ?? "" : turns[lastIndex].response + (chunk.chunk ?? "")
+                        turns[lastIndex].status = chunk.status
+                        turns[lastIndex].toolName = chunk.toolName
+                        //debugLog("Last turn \(turns[lastIndex])")
                         scrollToBottomToken += 1
                     }
                 }
