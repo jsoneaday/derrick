@@ -16,6 +16,7 @@
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
 		DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
+		DEE6B0013010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0023010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 /* End PBXBuildFile section */
@@ -115,6 +116,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */,
+				DEE6B0013010000000E6B001 /* EgressProxy in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -236,6 +238,7 @@
 			name = DockerRunnerHelper;
 			packageProductDependencies = (
 				DED0C0032A0000000042F230 /* DockerRunnerXPC */,
+				DEE6B0023010000000E6B001 /* EgressProxy */,
 			);
 			productName = DockerRunnerHelper;
 			productReference = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */;
@@ -281,6 +284,7 @@
 				DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */,
 				DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */,
 				DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */,
+				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -738,6 +742,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/DockerRunnerXPC;
 		};
+		DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/EgressProxy;
+		};
 		DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Lib;
@@ -787,6 +795,10 @@
 		DED0C0032A0000000042F230 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DockerRunnerXPC;
+		};
+		DEE6B0023010000000E6B001 /* EgressProxy */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EgressProxy;
 		};
 		DEF685FD30096EB600165A82 /* PartialJSON */ = {
 			isa = XCSwiftPackageProductDependency;

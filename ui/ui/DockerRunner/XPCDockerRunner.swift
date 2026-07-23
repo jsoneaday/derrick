@@ -201,7 +201,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         let needsRecreate =
             imageInspect.exitCode != 0
             || imageName != DockerScriptPreparer.defaultImage
-            || path != DockerScriptPreparer.warmContainerHoldBinary
+            || path != DockerScriptPreparer.warmContainerHoldPath(allowNetwork: allowNetwork)
 
         if needsRecreate {
             debugLog("Pre-warming: Recreating warm container '\(name)' (image=\(imageName), path=\(path))...")
@@ -332,14 +332,17 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         pythonPackages: [String],
         allowDependencyInstall: Bool
     ) async throws -> PythonScriptExecutionResult {
-        let started = Date()
+        let totalStarted = Date()
         if XPCDockerRunnerState.shared.isCreating {
             debugLog("XPC run request received while script environment is being created.")
         } else {
             debugLog("XPC run request started for docker runner helper.")
         }
 
+        let ensureStarted = Date()
         try await ensureReadyForRun(allowNetwork: allowNetwork)
+        let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
+        debugLog("[python_script_exec timing] ensure_ms=\(ensureMS)")
 
         let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
         debugLog("Extra (non-baseline) python packages: \(extras.isEmpty ? "(none)" : extras.joined(separator: ", "))")
@@ -349,6 +352,10 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             installPackages: extras,
             allowDependencyInstall: allowDependencyInstall,
             nonBaselinePackages: extras
+        )
+        let scriptMetrics = PythonScriptPhaseTiming.scriptMetrics(script)
+        debugLog(
+            "[python_script_exec] wrapper size: chars=\(executionScript.utf8.count) script_chars=\(scriptMetrics.chars) script_lines=\(scriptMetrics.lines)"
         )
         let dockerArgs = DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
 
@@ -366,6 +373,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         let requestData = try JSONEncoder().encode(request)
         debugLog("Prepared XPC payload for helper: bytes=\(requestData.count)")
 
+        let execStarted = Date()
         debugLog("Sending request to XPC helper service.")
         let responseData: Data = try await withCheckedThrowingContinuation { continuation in
             let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
@@ -390,6 +398,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("Received response from XPC helper.")
 
         let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
+        let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
+        debugLog("[python_script_exec timing] exec_ms=\(execMS)")
 
         await MainActor.run {
             debugLog("--- Helper Logs ---")
@@ -406,13 +416,22 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         let stdout = String(decoding: response.stdout, as: UTF8.self)
         let stderr = String(decoding: response.stderr, as: UTF8.self)
-        let elapsed = Int(Date().timeIntervalSince(started) * 1000.0)
+        let totalMS = PythonScriptPhaseTiming.elapsedMS(from: totalStarted)
 
         if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: response.exitCode) {
             debugLog("Docker unavailable message detected: \(dockerMessage)")
             throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: dockerMessage])
         }
 
+        let phaseTiming = PythonScriptPhaseTiming(
+            ensureMS: ensureMS,
+            execMS: execMS,
+            totalMS: totalMS,
+            scriptCharCount: scriptMetrics.chars,
+            scriptLineCount: scriptMetrics.lines,
+            wrapperCharCount: executionScript.utf8.count
+        )
+        debugLog("[python_script_exec timing] runner \(phaseTiming.summaryLine)")
         debugLog("XPC run request finished successfully.")
 
         return PythonScriptExecutionResult(
@@ -425,7 +444,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             stderr: stderr,
             exitCode: response.exitCode,
             timedOut: response.timedOut,
-            durationMS: elapsed
+            durationMS: totalMS,
+            phaseTiming: phaseTiming
         )
     }
 }

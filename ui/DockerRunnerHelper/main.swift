@@ -5,6 +5,7 @@ let processInfo = ProcessInfo.processInfo
 HelperLogRelay.shared.log("DockerRunnerHelper main starting. pid=\(processInfo.processIdentifier)")
 HelperLogRelay.shared.log("Helper bundle path=\(Bundle.main.bundleURL.path)")
 HelperLogRelay.shared.log("Helper executable path=\(processInfo.arguments.first ?? "<unknown>")")
+EgressProxyBootstrap.startIfNeeded()
 let listener = NSXPCListener.service()
 HelperLogRelay.shared.log("Created NSXPCListener.service().")
 listener.delegate = delegate

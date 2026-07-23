@@ -18,19 +18,23 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         self.settings = settings
     }
 
-    func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewAssessment {
+    func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
         let selectedModel = await MainActor.run { settings.pythonScriptReviewerModel }
         guard let apiKey = await resolveAPIKey(for: selectedModel) else {
             await MainActor.run {
                 debugLog(
-                    "Helper reviewer model \(selectedModel.helperDisplayName) unavailable; using default Gemini reviewer."
+                    "Helper reviewer model \(selectedModel.helperDisplayName) unavailable; trying default helper reviewer."
                 )
             }
 
             if let defaultReview = await defaultReviewerAssessment(for: args) {
+                await MainActor.run {
+                    debugLog("Default helper reviewer succeeded after primary model was unavailable. \(defaultReview.timing.summaryLine)")
+                }
                 return defaultReview
             }
 
+            // Fail closed: no assessment means tool layer must deny execution.
             throw NSError(
                 domain: "ui",
                 code: 404,
@@ -39,36 +43,52 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         }
 
         do {
-            return try await review(args, model: selectedModel, apiKey: apiKey)
+            let outcome = try await review(args, model: selectedModel, apiKey: apiKey)
+            await MainActor.run {
+                debugLog("[python_script_exec timing] \(outcome.timing.summaryLine)")
+            }
+            return outcome
         } catch {
+            // Primary failed (e.g. timeout). Try fallback quietly; only surface a user-facing
+            // failure if fallback also fails. Otherwise the script can still run after a
+            // successful fallback review, and a "Model Request Failed" modal is misleading.
             await MainActor.run {
                 debugLog(
-                    "Helper reviewer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription)"
-                )
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
+                    "Helper reviewer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription). Trying default helper reviewer."
                 )
             }
             if let defaultReview = await defaultReviewerAssessment(for: args) {
+                await MainActor.run {
+                    debugLog("Default helper reviewer succeeded after primary failure. \(defaultReview.timing.summaryLine)")
+                }
                 return defaultReview
+            }
+            await MainActor.run {
+                debugLog("Default helper reviewer also failed; denying review.")
+                LLMFailureReporter.shared.report(
+                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
+                )
             }
             throw error
         }
     }
 
-    private func defaultReviewerAssessment(for args: PythonScriptExecutionArguments) async -> PythonScriptReviewAssessment? {
-        guard let apiKey = await resolveAPIKey(for: .defaultHelperModel) else {
+    private func defaultReviewerAssessment(for args: PythonScriptExecutionArguments) async -> PythonScriptReviewOutcome? {
+        let defaultModel = LLMModelChoice.defaultHelperModel
+        // Avoid a useless second call if primary is already the default helper.
+        let selectedModel = await MainActor.run { settings.pythonScriptReviewerModel }
+        if selectedModel == defaultModel {
+            return nil
+        }
+        guard let apiKey = await resolveAPIKey(for: defaultModel) else {
             return nil
         }
 
         do {
-            return try await review(args, model: .defaultHelperModel, apiKey: apiKey)
+            return try await review(args, model: defaultModel, apiKey: apiKey)
         } catch {
             await MainActor.run {
                 debugLog("Default helper reviewer failed: \(error.localizedDescription)")
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: LLMModelChoice.defaultHelperModel.provider)
-                )
             }
             return nil
         }
@@ -78,7 +98,7 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         _ args: PythonScriptExecutionArguments,
         model: LLMModelChoice,
         apiKey: String
-    ) async throws -> PythonScriptReviewAssessment {
+    ) async throws -> PythonScriptReviewOutcome {
         switch model {
         case .gemini(let geminiModel):
             let reviewer = GeminiPythonScriptReviewer(apiKey: apiKey, model: geminiModel)

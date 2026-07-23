@@ -23,7 +23,15 @@ import MCPClient
                 stderr: "",
                 exitCode: 0,
                 timedOut: false,
-                durationMS: 1
+                durationMS: 1,
+                phaseTiming: PythonScriptPhaseTiming(
+                    ensureMS: 1,
+                    execMS: 1,
+                    totalMS: 1,
+                    scriptCharCount: script.utf8.count,
+                    scriptLineCount: 1,
+                    wrapperCharCount: 0
+                )
             )
         }
     }
@@ -32,9 +40,21 @@ import MCPClient
         let name: String = "stub-reviewer"
         let assessment: PythonScriptReviewAssessment
 
-        func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewAssessment {
+        func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
             _ = args
-            return assessment
+            return PythonScriptReviewOutcome(
+                assessment: assessment,
+                timing: PythonScriptReviewerTiming(
+                    ttfbMS: 1,
+                    streamMS: 1,
+                    decodeMS: 0,
+                    totalMS: 2,
+                    requestChars: 10,
+                    responseChars: 10,
+                    chunkCount: 1,
+                    model: "stub"
+                )
+            )
         }
     }
 
@@ -175,6 +195,42 @@ import MCPClient
         #expect(Set(extras) == Set(["pandas", "numpy"]))
     }
 
+    @Test func phaseTimingScriptMetricsCountLinesAndChars() {
+        let script = "import json\nprint(1)\n"
+        let metrics = PythonScriptPhaseTiming.scriptMetrics(script)
+        #expect(metrics.chars == script.utf8.count)
+        #expect(metrics.lines == 3)
+        var phase = PythonScriptPhaseTiming(
+            staticValidateMS: 1,
+            reviewerMS: 10,
+            ensureMS: 2,
+            execMS: 3,
+            totalMS: 16,
+            scriptCharCount: metrics.chars,
+            scriptLineCount: metrics.lines,
+            wrapperCharCount: 100
+        )
+        phase.applyReviewerTiming(
+            PythonScriptReviewerTiming(
+                ttfbMS: 4,
+                streamMS: 5,
+                decodeMS: 1,
+                totalMS: 10,
+                requestChars: 100,
+                responseChars: 200,
+                chunkCount: 3,
+                model: "gpt-5-mini"
+            )
+        )
+        let summary = phase.summaryLine
+        #expect(summary.contains("reviewer_ms=10"))
+        #expect(summary.contains("exec_ms=3"))
+        #expect(summary.contains("reviewer_ttfb_ms=4"))
+        #expect(summary.contains("reviewer_stream_ms=5"))
+        #expect(summary.contains("reviewer_response_chars=200"))
+        #expect(summary.contains("reviewer_model=gpt-5-mini"))
+    }
+
     @Test func dockerExecUsesWarmContainer() {
         let args = DockerScriptPreparer.dockerExecArguments(allowNetwork: true)
         #expect(args.contains("exec"))
@@ -183,13 +239,37 @@ import MCPClient
     }
 
     @Test func warmContainerCreateMountsPackagesVolume() {
-        let args = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: false)
-        #expect(args.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
-                args.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
-        #expect(args.contains(DockerScriptPreparer.warmContainerNoNetwork))
-        #expect(args.contains("--entrypoint"))
-        #expect(args.contains(DockerScriptPreparer.warmContainerHoldBinary))
-        #expect(args.contains(DockerScriptPreparer.warmContainerHoldArg))
+        let offline = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: false)
+        #expect(offline.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
+                offline.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
+        #expect(offline.contains(DockerScriptPreparer.warmContainerNoNetwork))
+        #expect(offline.contains("--entrypoint"))
+        #expect(offline.contains(DockerScriptPreparer.offlineHoldBinary))
+        #expect(offline.contains(DockerScriptPreparer.offlineHoldArg))
+        #expect(offline.contains("--network"))
+        #expect(offline.contains("none"))
+
+        let online = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: true)
+        #expect(online.contains(DockerScriptPreparer.forcedEgressHoldPath))
+        #expect(online.contains("NET_ADMIN"))
+        #expect(online.contains { $0.contains("HTTPS_PROXY=") })
+        #expect(online.contains(DockerScriptPreparer.warmContainerNetwork))
+        // Image must be last so Docker does not treat an -e value as the image ref.
+        #expect(online.last == DockerScriptPreparer.defaultImage)
+        if let imageIndex = online.lastIndex(of: DockerScriptPreparer.defaultImage) {
+            #expect(online[..<imageIndex].allSatisfy { !$0.hasPrefix("derrick-python:") || $0 == DockerScriptPreparer.defaultImage })
+            #expect(!online[..<imageIndex].contains { $0.contains("://") && !$0.hasPrefix("-") && !$0.contains("=") })
+        }
+    }
+
+    @Test func baselineDockerfileIncludesForcedEgressHold() {
+        let dockerfile = DockerScriptPreparer.baselineDockerfile
+        #expect(dockerfile.contains("iptables"))
+        #expect(dockerfile.contains(DockerScriptPreparer.forcedEgressHoldPath))
+        #expect(dockerfile.contains("base64 -d"))
+        #expect(DockerScriptPreparer.forcedEgressHoldScript.contains("OUTPUT DROP"))
+        #expect(DockerScriptPreparer.forcedEgressHoldScript.contains("exec /bin/sleep infinity"))
+        #expect(!DockerScriptPreparer.forcedEgressHoldScript.contains("awk \"{print"))
     }
 
     @Test func baselineDockerfileInstallsBaselinePackages() {
