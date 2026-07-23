@@ -40,6 +40,25 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     private let connection: NSXPCConnection
     private let appLogSink: XPCAppLogSink
 
+    private final class PrewarmState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completed = false
+
+        func isCompleted() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return completed
+        }
+
+        func markCompleted() {
+            lock.lock()
+            defer { lock.unlock() }
+            completed = true
+        }
+    }
+
+    private let prewarmState = PrewarmState()
+
     public init() {
         let expectedBundlePath = Bundle.main.bundleURL
             .appendingPathComponent("Contents", isDirectory: true)
@@ -74,7 +93,6 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("XPCDockerRunner initialized for service \(Self.serviceName).")
 
         Task {
-            // Wait 1 second before pre-warming to let the app fully initialize
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             await prewarmEnvironment()
         }
@@ -106,89 +124,200 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
     }
 
-    private func warmBaselinePackages() async throws -> DockerRunResponse {
-        let warmupScript = DockerScriptPreparer.makeExecutionScript(
-            script: "print('baseline package warmup complete')",
-            installPackages: Array(DockerScriptPreparer.baselinePackages).sorted(),
-            allowDependencyInstall: false,
-            nonBaselinePackages: []
+    private func ensureVolume(_ name: String) async throws {
+        let inspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerVolumeInspectArguments(name),
+            timeoutSeconds: 15
         )
-        guard let stdinData = warmupScript.data(using: .utf8) else {
-            throw NSError(domain: "XPCDockerRunner", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to encode baseline warmup script."])
+        if inspect.exitCode == 0 { return }
+        debugLog("Pre-warming: Creating volume '\(name)'...")
+        let create = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerVolumeCreateArguments(name),
+            timeoutSeconds: 15
+        )
+        if create.exitCode != 0 {
+            let stderr = String(decoding: create.stderr, as: UTF8.self)
+            throw NSError(domain: "XPCDockerRunner", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to create volume \(name): \(stderr)"])
+        }
+    }
+
+    private func ensureBaselineImage() async throws {
+        let inspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerImageInspectArguments(DockerScriptPreparer.defaultImage),
+            timeoutSeconds: 15
+        )
+        if inspect.exitCode == 0 {
+            debugLog("Baseline image present: \(DockerScriptPreparer.defaultImage)")
+            return
         }
 
-        let dockerArgs = DockerScriptPreparer.dockerRunArguments(image: DockerScriptPreparer.defaultImage, allowNetwork: true)
-        return try await runXPCCommand(
-            arguments: ["docker"] + dockerArgs,
-            stdinData: stdinData,
+        let parentInspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerImageInspectArguments(DockerScriptPreparer.parentImage),
+            timeoutSeconds: 15
+        )
+        if parentInspect.exitCode != 0 {
+            debugLog("Pre-warming: Pulling parent image '\(DockerScriptPreparer.parentImage)'...")
+            let pull = try await runXPCCommand(
+                arguments: ["docker"] + DockerScriptPreparer.dockerPullArguments(DockerScriptPreparer.parentImage),
+                timeoutSeconds: 300
+            )
+            if pull.exitCode != 0 {
+                let stderr = String(decoding: pull.stderr, as: UTF8.self)
+                throw NSError(domain: "XPCDockerRunner", code: 11, userInfo: [NSLocalizedDescriptionKey: "Failed to pull parent image: \(stderr)"])
+            }
+        }
+
+        debugLog("Pre-warming: Building baseline image '\(DockerScriptPreparer.defaultImage)'...")
+        guard let dockerfileData = DockerScriptPreparer.baselineDockerfile.data(using: .utf8) else {
+            throw NSError(domain: "XPCDockerRunner", code: 12, userInfo: [NSLocalizedDescriptionKey: "Failed to encode Dockerfile."])
+        }
+        let build = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerBuildBaselineArguments(),
+            stdinData: dockerfileData,
             timeoutSeconds: 300
         )
+        if build.exitCode != 0 {
+            let stderr = String(decoding: build.stderr, as: UTF8.self)
+            throw NSError(domain: "XPCDockerRunner", code: 13, userInfo: [NSLocalizedDescriptionKey: "Failed to build baseline image: \(stderr)"])
+        }
+        debugLog("Pre-warming: Baseline image built successfully.")
+    }
+
+    private func ensureWarmContainer(allowNetwork: Bool) async throws {
+        let name = DockerScriptPreparer.warmContainerName(allowNetwork: allowNetwork)
+
+        let imageInspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerInspectContainerImageArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let pathInspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerInspectContainerPathArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let imageName = String(decoding: imageInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = String(decoding: pathInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let needsRecreate =
+            imageInspect.exitCode != 0
+            || imageName != DockerScriptPreparer.defaultImage
+            || path != DockerScriptPreparer.warmContainerHoldBinary
+
+        if needsRecreate {
+            debugLog("Pre-warming: Recreating warm container '\(name)' (image=\(imageName), path=\(path))...")
+            _ = try await runXPCCommand(
+                arguments: ["docker"] + DockerScriptPreparer.dockerRmForceArguments(container: name),
+                timeoutSeconds: 15
+            )
+            let create = try await runXPCCommand(
+                arguments: ["docker"] + DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: allowNetwork),
+                timeoutSeconds: 30
+            )
+            if create.exitCode != 0 {
+                let stderr = String(decoding: create.stderr, as: UTF8.self)
+                throw NSError(domain: "XPCDockerRunner", code: 14, userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container \(name): \(stderr)"])
+            }
+        }
+
+        let runningInspect = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let running = String(decoding: runningInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if running == "true" {
+            debugLog("Warm container already running: \(name)")
+            return
+        }
+
+        debugLog("Pre-warming: Starting warm container '\(name)'...")
+        let start = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerStartArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 30
+        )
+        if start.exitCode != 0 {
+            let stderr = String(decoding: start.stderr, as: UTF8.self)
+            throw NSError(domain: "XPCDockerRunner", code: 15, userInfo: [NSLocalizedDescriptionKey: "Failed to start warm container \(name): \(stderr)"])
+        }
+
+        let verify = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let ok = String(decoding: verify.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if ok != "true" {
+            let stderr = String(decoding: start.stderr, as: UTF8.self)
+            throw NSError(
+                domain: "XPCDockerRunner",
+                code: 19,
+                userInfo: [NSLocalizedDescriptionKey: "Warm container \(name) is not running after start. \(stderr)"]
+            )
+        }
+        debugLog("Pre-warming: Warm container '\(name)' is running.")
+    }
+
+    private func smokeTestBaseline() async throws {
+        let smoke = DockerScriptPreparer.makeBaselineSmokeScript()
+        guard let stdinData = smoke.data(using: .utf8) else {
+            throw NSError(domain: "XPCDockerRunner", code: 16, userInfo: [NSLocalizedDescriptionKey: "Failed to encode baseline smoke script."])
+        }
+        debugLog("Pre-warming: Smoke-testing baseline packages via docker exec...")
+        let response = try await runXPCCommand(
+            arguments: ["docker"] + DockerScriptPreparer.dockerExecArguments(allowNetwork: true),
+            stdinData: stdinData,
+            timeoutSeconds: 60
+        )
+        let stdout = String(decoding: response.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let stderr = String(decoding: response.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stdout.isEmpty {
+            debugLog("[baseline smoke stdout] \(stdout)")
+        }
+        if !stderr.isEmpty {
+            debugLog("[baseline smoke stderr] \(stderr)")
+        }
+        if let launchError = response.launchError {
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: launchError])
+        }
+        if response.exitCode != 0 {
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Baseline package smoke test failed with exit code \(response.exitCode)."])
+        }
+        debugLog("Pre-warming: Baseline package smoke test succeeded.")
     }
 
     private func prewarmEnvironment() async {
         debugLog("Checking if Docker environment needs pre-warming...")
+        XPCDockerRunnerState.shared.isCreating = true
+        defer { XPCDockerRunnerState.shared.isCreating = false }
         do {
-            // 1. Check if the image exists
-            let inspectImage = try await runXPCCommand(
-                arguments: ["docker", "image", "inspect", DockerScriptPreparer.defaultImage],
-                timeoutSeconds: 15
-            )
-            
-            // 2. Check if the volume exists
-            let inspectVolume = try await runXPCCommand(
-                arguments: ["docker", "volume", "inspect", "derrick-pip-cache"],
-                timeoutSeconds: 15
-            )
-            
-            let imageExists = (inspectImage.exitCode == 0)
-            let volumeExists = (inspectVolume.exitCode == 0)
-            
-            XPCDockerRunnerState.shared.isCreating = true
-            defer { XPCDockerRunnerState.shared.isCreating = false }
+            try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
+            try await ensureVolume(DockerScriptPreparer.packagesVolume)
+            try await ensureBaselineImage()
+            try await ensureWarmContainer(allowNetwork: true)
+            try await ensureWarmContainer(allowNetwork: false)
+            try await smokeTestBaseline()
 
-            if imageExists && volumeExists {
-                debugLog("Docker environment is already warm (image and volume exist).")
-            } else {
-                debugLog("Docker environment requires pre-warming. imageExists=\(imageExists), volumeExists=\(volumeExists)")
-                
-                if !volumeExists {
-                    debugLog("Pre-warming: Creating volume 'derrick-pip-cache'...")
-                    _ = try await runXPCCommand(
-                        arguments: ["docker", "volume", "create", "derrick-pip-cache"],
-                        timeoutSeconds: 15
-                    )
-                }
-                
-                if !imageExists {
-                    debugLog("Pre-warming: Pulling image '\(DockerScriptPreparer.defaultImage)' in background...")
-                    _ = try await runXPCCommand(
-                        arguments: ["docker", "pull", DockerScriptPreparer.defaultImage],
-                        timeoutSeconds: 300 // Pull can take a while, allow up to 5 mins
-                    )
-                }
-            }
+            prewarmState.markCompleted()
 
-            debugLog("Pre-warming: Installing and verifying baseline python packages in /packages...")
-            let baselineWarmup = try await warmBaselinePackages()
-            let baselineStdout = String(decoding: baselineWarmup.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            let baselineStderr = String(decoding: baselineWarmup.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !baselineStdout.isEmpty {
-                debugLog("[baseline warmup stdout] \(baselineStdout)")
-            }
-            if !baselineStderr.isEmpty {
-                debugLog("[baseline warmup stderr] \(baselineStderr)")
-            }
-            if let launchError = baselineWarmup.launchError {
-                debugLog("Baseline package warmup launch error: \(launchError)")
-                throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: launchError])
-            }
-            if baselineWarmup.exitCode != 0 {
-                throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Baseline package warmup failed with exit code \(baselineWarmup.exitCode)."])
-            }
-            debugLog("Pre-warming: Baseline python packages verified successfully.")
             debugLog("Docker environment pre-warming completed successfully.")
         } catch {
             debugLog("Docker environment pre-warming failed or was skipped: \(error.localizedDescription)")
+        }
+    }
+
+    /// Ensures warm containers exist even if app-start prewarm failed or was still running.
+    private func ensureReadyForRun(allowNetwork: Bool) async throws {
+        if !prewarmState.isCompleted() {
+            try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
+            try await ensureVolume(DockerScriptPreparer.packagesVolume)
+            try await ensureBaselineImage()
+            try await ensureWarmContainer(allowNetwork: true)
+            try await ensureWarmContainer(allowNetwork: false)
+            prewarmState.markCompleted()
+        } else {
+            try await ensureWarmContainer(allowNetwork: allowNetwork)
         }
     }
 
@@ -210,19 +339,18 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             debugLog("XPC run request started for docker runner helper.")
         }
 
-        let allPackages = pythonPackages + Array(DockerScriptPreparer.baselinePackages)
-        let normalizedPackages = DockerScriptPreparer.normalizePackages(allPackages)
-        let nonBaselinePackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
-        debugLog("Normalized python packages: \(normalizedPackages.joined(separator: ", "))")
-        debugLog("Non-baseline python packages: \(nonBaselinePackages.joined(separator: ", "))")
+        try await ensureReadyForRun(allowNetwork: allowNetwork)
+
+        let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
+        debugLog("Extra (non-baseline) python packages: \(extras.isEmpty ? "(none)" : extras.joined(separator: ", "))")
         debugLog("Request flags: allowNetwork=\(allowNetwork), allowDependencyInstall=\(allowDependencyInstall), timeoutSeconds=\(timeoutSeconds)")
         let executionScript = DockerScriptPreparer.makeExecutionScript(
             script: script,
-            installPackages: normalizedPackages,
+            installPackages: extras,
             allowDependencyInstall: allowDependencyInstall,
-            nonBaselinePackages: nonBaselinePackages
+            nonBaselinePackages: extras
         )
-        let dockerArgs = DockerScriptPreparer.dockerRunArguments(image: DockerScriptPreparer.defaultImage, allowNetwork: allowNetwork)
+        let dockerArgs = DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
 
         guard let stdinData = executionScript.data(using: .utf8) else {
             throw NSError(domain: "XPCDockerRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode execution script."])

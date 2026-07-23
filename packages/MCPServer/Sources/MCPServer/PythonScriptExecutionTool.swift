@@ -7,6 +7,13 @@ You are a security reviewer for Python script tool declarations.
 Evaluate whether script, mode, description, reason, and user prompt align.
 expected_effects is only needed if the request mode is write.
 Baseline packages include `requests`, `beautifulsoup4`, `chardet`, and `lxml`.
+
+Isolation rules (deny if violated):
+- The container reuses a warm environment across runs. `/tmp` and `/var/tmp` are wiped between runs by the harness; scripts must not rely on prior-run temp files.
+- `/packages` is a shared persistent directory for installed Python packages only (pip/uv target and importable package trees).
+- Deny or flag as a concern any script that writes, saves, downloads, or dumps non-package artifacts under `/packages` (e.g. JSON/CSV/logs/images/user data, open(..., 'w') under /packages, pathlib writes, shutil copies into /packages).
+- Installing declared python_packages into `/packages` via the harness is allowed; scripts themselves must not treat `/packages` as general scratch or output storage.
+
 Return only valid JSON with this exact schema:
 {
   "alignedWithRequest": true|false,
@@ -305,7 +312,27 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
 /// Utilities for preparing docker run arguments and Python execution scripts.
 /// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
 public enum DockerScriptPreparer {
-    public static let defaultImage = "ghcr.io/astral-sh/uv:debian"
+    /// Parent image used when building the local baseline image.
+    public static let parentImage = "ghcr.io/astral-sh/uv:debian"
+
+    /// Bump when baseline package set or Dockerfile changes so prewarm rebuilds.
+    public static let baselineImageVersion = "2"
+
+    /// Local image with baseline packages baked in (`docker build` on prewarm if missing).
+    public static var defaultImage: String {
+        "derrick-python:baseline-\(baselineImageVersion)"
+    }
+
+    /// Virtualenv inside the baseline image (avoids Debian "externally managed" system Python).
+    public static let baselineVenvPath = "/opt/derrick-venv"
+    public static var baselinePythonPath: String {
+        "\(baselineVenvPath)/bin/python"
+    }
+
+    public static let pipCacheVolume = "derrick-pip-cache"
+    public static let packagesVolume = "derrick-python-packages"
+    public static let warmContainerNetwork = "derrick-python-runner-net"
+    public static let warmContainerNoNetwork = "derrick-python-runner-nonet"
 
     public static let baselinePackages: Set<String> = [
         "requests",
@@ -313,6 +340,19 @@ public enum DockerScriptPreparer {
         "chardet",
         "lxml"
     ]
+
+    public static var baselineDockerfile: String {
+        let packages = baselinePackages.sorted().joined(separator: " ")
+        // Debian/uv images mark system Python as externally managed (PEP 668).
+        // Install baseline deps into a dedicated venv and run scripts with that interpreter.
+        return """
+        FROM \(parentImage)
+        RUN uv venv \(baselineVenvPath) \\
+         && uv pip install --python \(baselinePythonPath) --no-cache \(packages)
+        ENV VIRTUAL_ENV=\(baselineVenvPath)
+        ENV PATH="\(baselineVenvPath)/bin:$$PATH"
+        """
+    }
 
     public static func normalizePackages(_ packages: [String]) -> [String] {
         var seen = Set<String>()
@@ -326,6 +366,15 @@ public enum DockerScriptPreparer {
         return output
     }
 
+    /// Packages that are not baked into the baseline image (installed into the packages volume).
+    public static func extraPackages(from requested: [String]) -> [String] {
+        normalizePackages(requested).filter { !baselinePackages.contains($0) }
+    }
+
+    public static func warmContainerName(allowNetwork: Bool) -> String {
+        allowNetwork ? warmContainerNetwork : warmContainerNoNetwork
+    }
+
     /// Minimal environment for docker CLI to locate daemon and config.
     public static func processEnvironment() -> [String: String] {
         [
@@ -335,7 +384,8 @@ public enum DockerScriptPreparer {
         ]
     }
 
-    /// Builds the Python wrapper script that installs packages and executes user code.
+    /// Builds the Python wrapper script that optionally installs *extra* packages and runs user code.
+    /// Baseline packages are expected to already be present in the image.
     public static func makeExecutionScript(
         script: String,
         installPackages: [String],
@@ -353,6 +403,9 @@ public enum DockerScriptPreparer {
         import base64
         import importlib
         import json
+        import os
+        import pathlib
+        import shutil
         import subprocess
         import sys
 
@@ -360,7 +413,27 @@ public enum DockerScriptPreparer {
         non_baseline_packages = json.loads('''\(nonBaselineJSON)''')
         allow_dependency_install = \(installEnabled)
 
-        # Pre-execution Syntax Check
+        def _wipe_ephemeral_dir(path: str) -> None:
+            root = pathlib.Path(path)
+            if not root.is_dir():
+                return
+            for child in list(root.iterdir()):
+                try:
+                    if child.is_symlink() or child.is_file():
+                        child.unlink(missing_ok=True)
+                    elif child.is_dir():
+                        shutil.rmtree(child, ignore_errors=True)
+                except Exception as error:
+                    print(f"[python_script_exec] failed to clean {child}: {error}", file=sys.stderr)
+
+        # Per-run isolation: warm container is reused, but temp dirs must not leak across scripts.
+        _wipe_ephemeral_dir("/tmp")
+        _wipe_ephemeral_dir("/var/tmp")
+        print("[python_script_exec] wiped /tmp and /var/tmp")
+
+        if os.path.isdir("/packages"):
+            sys.path.insert(0, "/packages")
+
         script_source = base64.b64decode("\(encodedScript)").decode("utf-8")
         try:
             ast.parse(script_source)
@@ -372,9 +445,8 @@ public enum DockerScriptPreparer {
             raise RuntimeError("Requested non-baseline python_packages require allow_dependency_install=true.")
         if install_packages:
             print(f"[python_script_exec] installing packages: {', '.join(install_packages)}")
-            # Install to /packages (an executable tmpfs) because the container runs --read-only
-            # and native Python extensions must be loaded from an executable filesystem.
-            # Try to use 'uv' first for lightning-fast Rust-powered installations, fall back to pip
+            # Install extras into the shared /packages volume (image root is read-only).
+            # /packages is for dependency trees only — not general script output storage.
             use_uv = False
             try:
                 subprocess.run(["uv", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
@@ -393,7 +465,8 @@ public enum DockerScriptPreparer {
                      "--quiet", "--target", "/packages", *install_packages],
                     check=True
                 )
-            sys.path.insert(0, "/packages")
+            if "/packages" not in sys.path:
+                sys.path.insert(0, "/packages")
             print(f"[python_script_exec] installed packages to /packages: {', '.join(install_packages)}")
 
         baseline_imports = {
@@ -420,29 +493,93 @@ public enum DockerScriptPreparer {
         """
     }
 
-    /// Arguments to pass to the `docker` command (everything after `docker`).
-    public static func dockerRunArguments(image: String, allowNetwork: Bool) -> [String] {
+    /// Lightweight smoke script used during prewarm (no package install).
+    public static func makeBaselineSmokeScript() -> String {
+        makeExecutionScript(
+            script: "print('baseline package smoke complete')",
+            installPackages: [],
+            allowDependencyInstall: false,
+            nonBaselinePackages: []
+        )
+    }
+
+    public static func dockerBuildBaselineArguments() -> [String] {
+        ["build", "-t", defaultImage, "-"]
+    }
+
+    public static func dockerVolumeCreateArguments(_ name: String) -> [String] {
+        ["volume", "create", name]
+    }
+
+    public static func dockerVolumeInspectArguments(_ name: String) -> [String] {
+        ["volume", "inspect", name]
+    }
+
+    public static func dockerImageInspectArguments(_ image: String) -> [String] {
+        ["image", "inspect", image]
+    }
+
+    public static func dockerPullArguments(_ image: String) -> [String] {
+        ["pull", image]
+    }
+
+    public static func dockerRmForceArguments(container: String) -> [String] {
+        ["rm", "-f", container]
+    }
+
+    public static func dockerInspectContainerImageArguments(allowNetwork: Bool) -> [String] {
+        ["inspect", "-f", "{{.Config.Image}}", warmContainerName(allowNetwork: allowNetwork)]
+    }
+
+    public static func dockerInspectContainerRunningArguments(allowNetwork: Bool) -> [String] {
+        ["inspect", "-f", "{{.State.Running}}", warmContainerName(allowNetwork: allowNetwork)]
+    }
+
+    /// Hold process for warm containers. Absolute path required: the uv/debian image is
+    /// minimal and does not put `sleep` on PATH (bare `sleep` → exec not found / exit 127).
+    public static let warmContainerHoldBinary = "/bin/sleep"
+    public static let warmContainerHoldArg = "infinity"
+
+    /// Create a long-lived warm container. Does not start it.
+    ///
+    /// Overrides image default `Cmd` (`/usr/local/bin/uv`) so the container stays up for
+    /// later `docker exec` of script runs.
+    public static func dockerCreateWarmContainerArguments(allowNetwork: Bool) -> [String] {
+        let name = warmContainerName(allowNetwork: allowNetwork)
         var args = [
-            "run",
-            "--rm",
+            "create",
+            "--name", name,
             "--init",
             "--read-only",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
-            "--tmpfs", "/packages:rw,nosuid,exec,size=256m",
             "--pids-limit", "64",
             "--cpus", "1.0",
             "--memory", "512m",
             "--security-opt", "no-new-privileges",
             "--cap-drop", "ALL",
             "--ulimit", "nofile=128:128",
-            "-v", "derrick-pip-cache:/root/.cache",
-            "-i",
-            image,
-            "python3", "-I", "-u", "-"
+            "-v", "\(pipCacheVolume):/root/.cache",
+            "-v", "\(packagesVolume):/packages",
+            "--entrypoint", warmContainerHoldBinary,
+            defaultImage,
+            warmContainerHoldArg
         ]
         args.insert(contentsOf: allowNetwork ? ["--network", "bridge"] : ["--network", "none"], at: 1)
         return args
+    }
+
+    public static func dockerInspectContainerPathArguments(allowNetwork: Bool) -> [String] {
+        ["inspect", "-f", "{{.Path}}", warmContainerName(allowNetwork: allowNetwork)]
+    }
+
+    public static func dockerStartArguments(allowNetwork: Bool) -> [String] {
+        ["start", warmContainerName(allowNetwork: allowNetwork)]
+    }
+
+    /// Exec into the warm container and run python reading the execution script from stdin.
+    public static func dockerExecArguments(allowNetwork: Bool) -> [String] {
+        ["exec", "-i", warmContainerName(allowNetwork: allowNetwork), baselinePythonPath, "-I", "-u", "-"]
     }
 
     /// Detects a docker-unavailable condition from stderr and exit code.
@@ -465,11 +602,28 @@ public enum DockerScriptPreparer {
 
 /// Direct-process docker runner. Used in tests and non-sandboxed contexts.
 /// In the sandboxed app, use `XPCDockerRunner` from the main target instead.
-public struct DockerPythonScriptRunner: PythonScriptRunner {
-    private let dockerImage: String
+public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Sendable {
+    private final class EnsureState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completed = false
+
+        func isCompleted() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return completed
+        }
+
+        func markCompleted() {
+            lock.lock()
+            defer { lock.unlock() }
+            completed = true
+        }
+    }
+
+    private let ensureState = EnsureState()
 
     public init(dockerImage: String = DockerScriptPreparer.defaultImage) {
-        self.dockerImage = dockerImage
+        _ = dockerImage
     }
 
     public func run(
@@ -480,19 +634,21 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         allowDependencyInstall: Bool
     ) async throws -> PythonScriptExecutionResult {
         let started = Date()
-        let allPackages = pythonPackages + Array(DockerScriptPreparer.baselinePackages)
-        let normalizedPackages = DockerScriptPreparer.normalizePackages(allPackages)
-        let nonBaselinePackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
+        try await ensureWarmEnvironment()
+
+        let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
         let executionScript = DockerScriptPreparer.makeExecutionScript(
             script: script,
-            installPackages: normalizedPackages,
+            installPackages: extras,
             allowDependencyInstall: allowDependencyInstall,
-            nonBaselinePackages: nonBaselinePackages
+            nonBaselinePackages: extras
         )
+
+        try await ensureWarmContainer(allowNetwork: allowNetwork)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["docker"] + DockerScriptPreparer.dockerRunArguments(image: dockerImage, allowNetwork: allowNetwork)
+        process.arguments = ["docker"] + DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
         process.environment = DockerScriptPreparer.processEnvironment()
 
         let stdinPipe = Pipe()
@@ -545,6 +701,153 @@ public struct DockerPythonScriptRunner: PythonScriptRunner {
         )
     }
 
+    private func ensureWarmEnvironment() async throws {
+        if ensureState.isCompleted() { return }
+
+        try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
+        try await ensureVolume(DockerScriptPreparer.packagesVolume)
+        try await ensureBaselineImage()
+        try await ensureWarmContainer(allowNetwork: true)
+        try await ensureWarmContainer(allowNetwork: false)
+
+        ensureState.markCompleted()
+    }
+
+    private func ensureVolume(_ name: String) async throws {
+        let inspect = try await runDocker(DockerScriptPreparer.dockerVolumeInspectArguments(name), timeoutSeconds: 15)
+        if inspect.exitCode == 0 { return }
+        _ = try await runDocker(DockerScriptPreparer.dockerVolumeCreateArguments(name), timeoutSeconds: 15)
+    }
+
+    private func ensureBaselineImage() async throws {
+        let inspect = try await runDocker(DockerScriptPreparer.dockerImageInspectArguments(DockerScriptPreparer.defaultImage), timeoutSeconds: 15)
+        if inspect.exitCode == 0 { return }
+
+        let parentInspect = try await runDocker(DockerScriptPreparer.dockerImageInspectArguments(DockerScriptPreparer.parentImage), timeoutSeconds: 15)
+        if parentInspect.exitCode != 0 {
+            let pull = try await runDocker(DockerScriptPreparer.dockerPullArguments(DockerScriptPreparer.parentImage), timeoutSeconds: 300)
+            if pull.exitCode != 0 {
+                throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to pull parent image \(DockerScriptPreparer.parentImage)."])
+            }
+        }
+
+        let dockerfile = DockerScriptPreparer.baselineDockerfile
+        let build = try await runDocker(
+            DockerScriptPreparer.dockerBuildBaselineArguments(),
+            stdin: dockerfile.data(using: .utf8) ?? Data(),
+            timeoutSeconds: 300
+        )
+        if build.exitCode != 0 {
+            let stderr = String(decoding: build.stderr, as: UTF8.self)
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to build baseline image: \(stderr)"])
+        }
+    }
+
+    private func ensureWarmContainer(allowNetwork: Bool) async throws {
+        try await recreateWarmContainerIfNeeded(allowNetwork: allowNetwork)
+        try await startWarmContainerIfNeeded(allowNetwork: allowNetwork)
+    }
+
+    private func recreateWarmContainerIfNeeded(allowNetwork: Bool) async throws {
+        let imageInspect = try await runDocker(
+            DockerScriptPreparer.dockerInspectContainerImageArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let pathInspect = try await runDocker(
+            DockerScriptPreparer.dockerInspectContainerPathArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let imageName = String(decoding: imageInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = String(decoding: pathInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let needsRecreate =
+            imageInspect.exitCode != 0
+            || imageName != DockerScriptPreparer.defaultImage
+            || path != DockerScriptPreparer.warmContainerHoldBinary
+
+        guard needsRecreate else { return }
+
+        _ = try await runDocker(
+            DockerScriptPreparer.dockerRmForceArguments(container: DockerScriptPreparer.warmContainerName(allowNetwork: allowNetwork)),
+            timeoutSeconds: 15
+        )
+        let create = try await runDocker(
+            DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 30
+        )
+        if create.exitCode != 0 {
+            let stderr = String(decoding: create.stderr, as: UTF8.self)
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container: \(stderr)"])
+        }
+    }
+
+    private func startWarmContainerIfNeeded(allowNetwork: Bool) async throws {
+        let runningInspect = try await runDocker(
+            DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let running = String(decoding: runningInspect.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if running == "true" { return }
+
+        let start = try await runDocker(DockerScriptPreparer.dockerStartArguments(allowNetwork: allowNetwork), timeoutSeconds: 30)
+        if start.exitCode != 0 {
+            let stderr = String(decoding: start.stderr, as: UTF8.self)
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to start warm container: \(stderr)"])
+        }
+
+        let verify = try await runDocker(
+            DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
+            timeoutSeconds: 15
+        )
+        let ok = String(decoding: verify.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if ok != "true" {
+            let err = String(decoding: start.stderr, as: UTF8.self)
+            throw NSError(
+                domain: "MCPServer",
+                code: 503,
+                userInfo: [NSLocalizedDescriptionKey: "Warm container is not running after start. \(err)"]
+            )
+        }
+    }
+
+    private struct LocalDockerResult {
+        let stdout: Data
+        let stderr: Data
+        let exitCode: Int32
+    }
+
+    private func runDocker(_ args: [String], stdin: Data = Data(), timeoutSeconds: Int) async throws -> LocalDockerResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["docker"] + args
+        process.environment = DockerScriptPreparer.processEnvironment()
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        if !stdin.isEmpty {
+            stdinPipe.fileHandleForWriting.write(stdin)
+        }
+        stdinPipe.fileHandleForWriting.closeFile()
+
+        let timedOut = await waitForExit(process: process, timeoutSeconds: timeoutSeconds)
+        if timedOut { process.terminate() }
+
+        let stdout = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let stderr = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+        return LocalDockerResult(stdout: stdout, stderr: stderr, exitCode: timedOut ? -1 : process.terminationStatus)
+    }
+
     private func waitForExit(process: Process, timeoutSeconds: Int) async -> Bool {
         let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutSeconds, 1)))
         while process.isRunning && Date() < deadline {
@@ -578,12 +881,12 @@ public enum PythonScriptExecutionVerifier {
         if !invalidPackageNames.isEmpty {
             findings.append("Invalid python_packages values: \(invalidPackageNames.joined(separator: ", ")).")
         }
-        let installPackages = normalizedPackages.filter { !DockerScriptPreparer.baselinePackages.contains($0) }
+        let installPackages = DockerScriptPreparer.extraPackages(from: args.pythonPackages)
         if !installPackages.isEmpty && !args.allowDependencyInstall {
             findings.append("Requested python_packages require allow_dependency_install=true: \(installPackages.joined(separator: ", ")).")
         }
-        if !normalizedPackages.isEmpty && !args.allowNetwork {
-            findings.append("Installing python_packages requires allow_network=true.")
+        if !installPackages.isEmpty && !args.allowNetwork {
+            findings.append("Installing non-baseline python_packages requires allow_network=true.")
         }
 
         if args.mode == .readonly {
@@ -594,6 +897,7 @@ public enum PythonScriptExecutionVerifier {
             let networkViolations = networkViolations(in: args.script)
             findings.append(contentsOf: networkViolations)
         }
+        findings.append(contentsOf: packagesVolumeViolations(in: args.script))
 
         if let prompt = args.userPrompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let score = relevanceScore(prompt: prompt, details: "\(args.description) \(args.reason)")
@@ -625,6 +929,28 @@ public enum PythonScriptExecutionVerifier {
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil
         }
+    }
+
+    /// Blocks treating the shared `/packages` volume as general output/scratch storage.
+    /// Package installs go through the harness; user scripts must not write non-package artifacts there.
+    private static func packagesVolumeViolations(in script: String) -> [String] {
+        let message = "Scripts must not write non-package files under /packages (shared package volume only)."
+        let patterns: [String] = [
+            #"(?m)open\s*\(\s*['\"]/packages/"#,
+            #"(?m)Path\s*\(\s*['\"]/packages/"#,
+            #"(?m)['\"]/packages/[^'\"]*['\"]\s*,\s*['\"][wax\+]"#,
+            #"(?m)(shutil\.(copy|copy2|copyfile|copytree|move)|os\.(replace|rename))\s*\([^)]*/packages/"#,
+            #"(?m)(pathlib\.Path\s*\(\s*['\"]/packages/[^'\"]*['\"]\s*\)\s*\.\s*(write_text|write_bytes|mkdir|touch|open))"#,
+            #"(?m)json\.dump\s*\([^)]*/packages/"#,
+            #"(?m)(to_csv|to_json|to_parquet|savefig|imwrite)\s*\(\s*['\"]/packages/"#
+        ]
+
+        for pattern in patterns {
+            if script.range(of: pattern, options: .regularExpression) != nil {
+                return [message]
+            }
+        }
+        return []
     }
 
     private static func relevanceScore(prompt: String, details: String) -> Double {

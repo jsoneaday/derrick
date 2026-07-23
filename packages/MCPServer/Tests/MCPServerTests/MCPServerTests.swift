@@ -14,10 +14,11 @@ import MCPClient
             _ = pythonPackages
             _ = allowDependencyInstall
             return PythonScriptExecutionResult(
-                status: "completed",
-                decision: "allow",
+                status: .completed,
+                decision: .allow,
                 verifier: "stub",
-                findings: [],
+                validationFindings: [],
+                reviewerAssessment: nil,
                 stdout: "ok:\(script.count)",
                 stderr: "",
                 exitCode: 0,
@@ -61,7 +62,7 @@ import MCPClient
             )
         )
 
-        #expect(result.results.map(\.content) == ["alpha", "beta"])
+        #expect(result.results.map(\.text) == ["alpha", "beta"])
         #expect(result.combinedContent == "alpha")
         #expect(result.isError == false)
     }
@@ -96,7 +97,7 @@ import MCPClient
             ]
         )
 
-        #expect(result.content == "bridge: hello/3/2")
+        #expect(result.text == "bridge: hello/3/2")
         #expect(result.isError == false)
     }
 
@@ -119,7 +120,7 @@ import MCPClient
     @Test func executionScriptVerifiesBaselinePackagesBeforeRunningUserCode() {
         let script = DockerScriptPreparer.makeExecutionScript(
             script: "print('hello')",
-            installPackages: ["requests", "beautifulsoup4", "chardet", "lxml"],
+            installPackages: [],
             allowDependencyInstall: false,
             nonBaselinePackages: []
         )
@@ -127,6 +128,85 @@ import MCPClient
         #expect(script.contains("verified baseline package"))
         #expect(script.contains("baseline package verification failed"))
         #expect(script.contains("lxml"))
+        #expect(script.contains("sys.path.insert(0, \"/packages\")"))
+        #expect(!script.contains("installing packages: requests"))
+        #expect(script.contains("_wipe_ephemeral_dir(\"/tmp\")"))
+        #expect(script.contains("_wipe_ephemeral_dir(\"/var/tmp\")"))
+        #expect(script.contains("wiped /tmp and /var/tmp"))
+    }
+
+    @Test func verifierBlocksNonPackageWritesUnderPackagesVolume() {
+        let args = PythonScriptExecutionArguments(
+            mode: .write,
+            description: "save report",
+            reason: "user asked for a file",
+            script: "open('/packages/report.json', 'w').write('{}')",
+            userPrompt: "save a report",
+            expectedEffects: ["write report"],
+            pythonPackages: [],
+            allowDependencyInstall: false,
+            timeoutSeconds: 30,
+            allowNetwork: false
+        )
+        let findings = PythonScriptExecutionVerifier.validate(args)
+        #expect(findings.contains(where: { $0.contains("/packages") }))
+    }
+
+    @Test func verifierAllowsScriptsThatDoNotWritePackagesVolume() {
+        let args = PythonScriptExecutionArguments(
+            mode: .readonly,
+            description: "fetch data",
+            reason: "user asked for info",
+            script: "import requests\nprint(requests.get('https://example.com').status_code)",
+            userPrompt: "check example.com",
+            expectedEffects: [],
+            pythonPackages: [],
+            allowDependencyInstall: false,
+            timeoutSeconds: 30,
+            allowNetwork: true
+        )
+        let findings = PythonScriptExecutionVerifier.validate(args)
+        #expect(!findings.contains(where: { $0.contains("/packages") }))
+    }
+
+    @Test func extraPackagesExcludesBaseline() {
+        let extras = DockerScriptPreparer.extraPackages(from: ["requests", "pandas", "lxml", "numpy"])
+        #expect(extras == ["pandas", "numpy"] || extras == ["numpy", "pandas"])
+        #expect(Set(extras) == Set(["pandas", "numpy"]))
+    }
+
+    @Test func dockerExecUsesWarmContainer() {
+        let args = DockerScriptPreparer.dockerExecArguments(allowNetwork: true)
+        #expect(args.contains("exec"))
+        #expect(args.contains(DockerScriptPreparer.warmContainerNetwork))
+        #expect(args.contains(DockerScriptPreparer.baselinePythonPath))
+    }
+
+    @Test func warmContainerCreateMountsPackagesVolume() {
+        let args = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: false)
+        #expect(args.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
+                args.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
+        #expect(args.contains(DockerScriptPreparer.warmContainerNoNetwork))
+        #expect(args.contains("--entrypoint"))
+        #expect(args.contains(DockerScriptPreparer.warmContainerHoldBinary))
+        #expect(args.contains(DockerScriptPreparer.warmContainerHoldArg))
+    }
+
+    @Test func baselineDockerfileInstallsBaselinePackages() {
+        let dockerfile = DockerScriptPreparer.baselineDockerfile
+        #expect(dockerfile.contains(DockerScriptPreparer.parentImage))
+        #expect(dockerfile.contains("uv venv"))
+        #expect(dockerfile.contains("uv pip install"))
+        #expect(dockerfile.contains("--system") == false)
+        #expect(dockerfile.contains(DockerScriptPreparer.baselineVenvPath))
+        #expect(dockerfile.contains("requests"))
+        #expect(dockerfile.contains("lxml"))
+    }
+
+    @Test func dockerExecUsesBaselineVenvPython() {
+        let args = DockerScriptPreparer.dockerExecArguments(allowNetwork: false)
+        #expect(args.contains(DockerScriptPreparer.baselinePythonPath))
+        #expect(!args.contains("python3"))
     }
 
     @Test func dockerUnavailableMessageIgnoresPackageLoadFailures() {
@@ -163,8 +243,8 @@ import MCPClient
         )
 
         #expect(result.isError == false)
-        #expect(result.content.contains("\"status\":\"blocked\""))
-        #expect(result.content.contains("\"decision\":\"deny\""))
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("\"decision\":\"deny\""))
     }
 
     @Test func pythonScriptToolDeniesWriteWhenReviewerMissing() async throws {
@@ -183,9 +263,9 @@ import MCPClient
             ]
         )
 
-        #expect(result.content.contains("\"status\":\"blocked\""))
-        #expect(result.content.contains("\"decision\":\"deny\""))
-        #expect(result.content.contains("Write mode requires configured reviewer."))
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("\"decision\":\"deny\""))
+        #expect(result.text.contains("Write mode requires configured reviewer."))
     }
 
     @Test func pythonScriptToolDeniesWhenReviewerFlagsMisalignment() async throws {
@@ -215,8 +295,8 @@ import MCPClient
             ]
         )
 
-        #expect(result.content.contains("\"status\":\"blocked\""))
-        #expect(result.content.contains("\"decision\":\"deny\""))
-        #expect(result.content.contains("Script appears unrelated to user prompt."))
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("\"decision\":\"deny\""))
+        #expect(result.text.contains("Script appears unrelated to user prompt."))
     }
 }
