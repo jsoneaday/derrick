@@ -12,6 +12,8 @@
 		DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */ = {isa = PBXBuildFile; productRef = DE5073382FF6FCA600D95676 /* MCPClient */; };
 		DE50733C2FF6FCAF00D95676 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DE50733B2FF6FCAF00D95676 /* MCPServer */; };
 		DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DEAE00013010000000AE001 /* AppEvents in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00023010000000AE001 /* AppEvents */; };
+		DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00043010000000AE001 /* PolicyUserInteraction */; };
 		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
@@ -100,6 +102,8 @@
 				DE1B9F382FEB7AE80042F227 /* DBRepository in Frameworks */,
 				DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */,
 				DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */,
+				DEAE00013010000000AE001 /* AppEvents in Frameworks */,
+				DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -175,6 +179,8 @@
 				DECF6280300ED94C00E1757D /* Plugin */,
 				DECF6283300ED9AC00E1757D /* Plugin */,
 				DED0C0022A0000000042F230 /* DockerRunnerXPC */,
+				DEAE00023010000000AE001 /* AppEvents */,
+				DEAE00043010000000AE001 /* PolicyUserInteraction */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -284,6 +290,8 @@
 				DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */,
 				DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */,
 				DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */,
+				DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */,
+				DEAE00063010000000AE001 /* XCLocalSwiftPackageReference "../packages/PolicyUserInteraction" */,
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -738,6 +746,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/MCPServer;
 		};
+		DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/AppEvents;
+		};
+		DEAE00063010000000AE001 /* XCLocalSwiftPackageReference "../packages/PolicyUserInteraction" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/PolicyUserInteraction;
+		};
 		DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/DockerRunnerXPC;
@@ -779,6 +795,14 @@
 		DE50733B2FF6FCAF00D95676 /* MCPServer */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MCPServer;
+		};
+		DEAE00023010000000AE001 /* AppEvents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppEvents;
+		};
+		DEAE00043010000000AE001 /* PolicyUserInteraction */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PolicyUserInteraction;
 		};
 		DECF6280300ED94C00E1757D /* Plugin */ = {
 			isa = XCSwiftPackageProductDependency;

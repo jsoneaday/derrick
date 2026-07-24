@@ -32,6 +32,15 @@
       location = "group:packages/Plugin">
    </FileRef>
    <FileRef
+      location = "group:packages/AppEvents">
+   </FileRef>
+   <FileRef
+      location = "group:packages/PolicyUserInteraction">
+   </FileRef>
+   <FileRef
+      location = "group:packages/EgressProxy">
+   </FileRef>
+   <FileRef
       location = "group:AGENTS.md">
    </FileRef>
    <FileRef

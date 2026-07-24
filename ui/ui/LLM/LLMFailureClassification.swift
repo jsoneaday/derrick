@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import LLMAgentClient
+import AppEvents
+import PolicyUserInteraction
 
 enum LLMFailureContext: Equatable, Sendable {
     case outOfCredits(provider: String)
@@ -15,6 +17,15 @@ final class LLMFailureReporter: ObservableObject, @unchecked Sendable {
 
     func report(_ context: LLMFailureContext) {
         latest = context
+        let event = PolicyUserEventFactory.llmProviderFailure(
+            title: context.title,
+            message: context.message
+        )
+        Task {
+            await AppEventBus.shared.publish(event)
+        }
+        // Clear stored latest so we don't also show a legacy overlay.
+        latest = nil
     }
 
     func clear() {

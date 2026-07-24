@@ -3,6 +3,9 @@ import MCP
 import MCPClient
 import MemorySystem
 import Lib
+import MCPServer
+import AppEvents
+import PolicyUserInteraction
 
 extension ConversationPipeline {
     func callToolWithPolicyInterception(
@@ -162,7 +165,39 @@ extension ConversationPipeline {
             debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
             debugLog("Tool result content: \(Self.debugPayload(result.text))")
         }
+        await Self.publishPolicyUserEventIfBlocked(toolName: interceptedEvent.toolName, resultText: result.text)
         return result
+    }
+
+    private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {
+        guard toolName == "python_script_exec" else { return }
+        guard let data = resultText.data(using: .utf8) else { return }
+        guard let payload = try? JSONDecoder().decode(PythonScriptExecutionResult.self, from: data) else { return }
+        guard payload.status == .blocked || payload.decision == .deny else { return }
+
+        let findings = payload.validationFindings
+        let event: PolicyUserEvent
+        if findings.contains(where: { $0.localizedCaseInsensitiveContains("static") || $0.localizedCaseInsensitiveContains("host.docker") || $0.localizedCaseInsensitiveContains("must not") })
+            || payload.verifier.contains("llm-skipped-static") {
+            event = PolicyUserEventFactory.staticValidationDenied(
+                findings: findings.isEmpty ? ["The request was blocked by static policy checks."] : findings,
+                scriptPreview: nil
+            )
+        } else if let assessment = payload.reviewerAssessment {
+            event = PolicyUserEventFactory.reviewerDenied(
+                summary: assessment.summary,
+                concerns: assessment.concerns
+            )
+        } else {
+            event = PolicyUserEventFactory.failure(
+                source: .system,
+                title: "Request blocked",
+                summary: findings.first ?? "The tool request was denied by policy.",
+                detail: findings.isEmpty ? nil : findings.joined(separator: "\n"),
+                toolName: toolName
+            )
+        }
+        await AppEventBus.shared.publish(event)
     }
 
     func batchCallToolsWithPolicyInterception(

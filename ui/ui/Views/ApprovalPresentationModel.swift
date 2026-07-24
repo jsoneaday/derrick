@@ -1,82 +1,41 @@
-//
-//  ApprovalPresentationModel.swift
-//  ui
-//
-//  Created by David Choi on 7/4/26.
-//
-
 import SwiftUI
 import Combine
+import AppEvents
+import PolicyUserInteraction
 
 @MainActor
 final class ApprovalPresentationModel: ObservableObject, ApprovalConfirmationPresenting {
-    private enum Constants {
-        static let timeoutNanoseconds: UInt64 = 60_000_000_000
-    }
-
-    @Published var pendingRequest: ApprovalConfirmationRequest?
-    @Published var editedArgumentsJSON = ""
-    @Published var actor = "ui-user"
-    @Published var validationError: String?
-
-    private var continuation: CheckedContinuation<ApprovalConfirmationDecision, Never>?
-    private var timeoutTask: Task<Void, Never>?
-
     func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
-        editedArgumentsJSON = request.argumentsJSON
-        actor = "ui-user"
-        validationError = nil
-        pendingRequest = request
-        timeoutTask?.cancel()
-        timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Constants.timeoutNanoseconds)
-            await self?.expirePendingApproval(requestID: request.id)
+        let preview: String
+        if request.argumentsJSON.count > 1200 {
+            preview = String(request.argumentsJSON.prefix(1200)) + "…"
+        } else {
+            preview = request.argumentsJSON
         }
 
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
+        let event = PolicyUserEventFactory.approvalRequired(
+            summary: "The agent wants to run “\(request.toolName)”. Review the request and choose Allow or Deny.",
+            detail: request.requiredFields.isEmpty
+                ? nil
+                : "Required fields: \(request.requiredFields.joined(separator: ", "))",
+            toolName: request.toolName,
+            payloadPreview: preview,
+            correlationId: request.sessionID,
+            rememberKey: "tool:\(request.toolName)"
+        )
+
+        debugLog("[policy-ui] requesting approval for tool=\(request.toolName)")
+        let decision = await AppEventBus.shared.initDecision(event)
+        switch decision {
+        case .approved(let actor):
+            return .approved(editedArgumentsJSON: request.argumentsJSON, actor: actor)
+        case .denied(let actor):
+            return .cancelled(actor: actor)
+        case .timedOut:
+            debugLog("Approval request expired after timeout.")
+            return .cancelled(actor: "system-timeout")
+        case .dismissed:
+            return .cancelled(actor: "ui-user")
         }
-    }
-
-    func approve() {
-        guard let data = editedArgumentsJSON.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data),
-              json is [String: Any] else {
-            validationError = "Arguments must be a valid JSON object."
-            return
-        }
-
-        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
-        continuation?.resume(returning: .approved(
-            editedArgumentsJSON: editedArgumentsJSON,
-            actor: actorValue.isEmpty ? nil : actorValue
-        ))
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        continuation = nil
-        pendingRequest = nil
-        validationError = nil
-    }
-
-    func cancel() {
-        let actorValue = actor.trimmingCharacters(in: .whitespacesAndNewlines)
-        continuation?.resume(returning: .cancelled(actor: actorValue.isEmpty ? nil : actorValue))
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        continuation = nil
-        pendingRequest = nil
-        validationError = nil
-    }
-
-    private func expirePendingApproval(requestID: String) {
-        guard pendingRequest?.id == requestID else {
-            return
-        }
-        continuation?.resume(returning: .cancelled(actor: "system-timeout"))
-        timeoutTask = nil
-        continuation = nil
-        pendingRequest = nil
-        validationError = nil
-        debugLog("Approval request expired after timeout.")
     }
 }

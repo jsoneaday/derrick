@@ -3,6 +3,7 @@ import Combine
 import LLMAgentClient
 import SwiftUI
 import DBRepository
+import PolicyUserInteraction
 
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
@@ -250,7 +251,6 @@ struct ContentView: View {
     @State private var dockerRequiredMessage = ""
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
-    @State private var llmFailureContext: LLMFailureContext?
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
     @State private var helperModelSettings: LLMModelSettings?
@@ -258,7 +258,7 @@ struct ContentView: View {
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
     @StateObject private var approvalPresentationModel = ApprovalPresentationModel()
-    @StateObject private var llmFailureReporter = LLMFailureReporter.shared
+    @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
 
     private var canSendPrompt: Bool {
         conversation != nil
@@ -295,21 +295,38 @@ struct ContentView: View {
         } message: {
             Text(dockerRequiredMessage)
         }
-        .sheet(item: $approvalPresentationModel.pendingRequest) { request in
-            approvalPrompt(request: request)
-        }
-        .overlay {
-            if let failureContext = llmFailureContext ?? llmFailureReporter.latest {
-                ErrorModalView(
-                    title: failureContext.title,
-                    message: failureContext.message,
-                    onDismiss: {
-                        llmFailureContext = nil
-                        llmFailureReporter.clear()
-                    }
-                )
+        .modalPopup(
+            isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented,
+            minWidth: 380,
+            minHeight: 160,
+            maxWidth: 460,
+            maxHeight: 360,
+            onBackdropDismiss: {
+                if let event = policyEventPresenter.activeEvent, event.kind != .approvalRequired {
+                    policyEventPresenter.dismissNotice()
+                }
+            },
+            header: {
+                if let event = policyEventPresenter.activeEvent {
+                    PolicyEventModalHeader(event: event)
+                }
+            },
+            body: {
+                if let event = policyEventPresenter.activeEvent {
+                    PolicyEventModalBody(event: event)
+                }
+            },
+            footer: {
+                if let event = policyEventPresenter.activeEvent {
+                    PolicyEventModalFooter(
+                        event: event,
+                        onDismiss: { policyEventPresenter.dismissNotice() },
+                        onApprove: { policyEventPresenter.approve() },
+                        onDeny: { policyEventPresenter.deny() }
+                    )
+                }
             }
-        }
+        )
         .modalPopup(
             isPresented: bootstrapStatus.isModalPresented,
             minWidth: 380,
@@ -379,6 +396,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await MainActor.run {
+                policyEventPresenter.start()
                 bootstrapStatus.beginLoadingSession()
             }
             if isDebugEnabled {
@@ -762,7 +780,8 @@ struct ContentView: View {
                 let stream = await conversation.stream(
                     prompt: currentPrompt,
                     apiKey: resolveAPIKey() ?? "",
-                    model: currentModel
+                    model: currentModel,
+                    approvalPresenter: approvalPresentationModel
                 )
                 for try await chunk in stream {
                     if let lastIndex = turns.indices.last {
@@ -775,7 +794,8 @@ struct ContentView: View {
                 }
             } catch {
                 errorMessage = error.localizedDescription
-                llmFailureContext = LLMFailureClassifier.classify(error, provider: currentModel.provider)
+                let failure = LLMFailureClassifier.classify(error, provider: currentModel.provider)
+                LLMFailureReporter.shared.report(failure)
             }
             isStreaming = false
         }
@@ -829,14 +849,5 @@ struct ContentView: View {
         }
         .padding()
         .frame(width: 300)
-    }
-
-    @ViewBuilder
-    private func approvalPrompt(request: ApprovalConfirmationRequest) -> some View {
-        ApprovalConfirmation(request: request, model: approvalPresentationModel) {
-            approvalPresentationModel.pendingRequest = nil
-        } onApprove: {
-            approvalPresentationModel.approve()
-        }
     }
 }
