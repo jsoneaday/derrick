@@ -342,8 +342,10 @@ struct ContentView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else if bootstrapStatus.phase == .failed {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                        Image(systemName: ModalChrome.bootstrapFailureSymbol)
+                            .font(ModalChrome.symbolFont)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(ModalChrome.failureSymbolColor)
                     }
                     Text(bootstrapStatus.phase == .failed
                          ? (bootstrapStatus.failureTitle ?? "Initialization Failed")
@@ -386,6 +388,7 @@ struct ContentView: View {
                         Button("OK") {
                             bootstrapStatus.dismissFailure()
                         }
+                        .buttonStyle(ModalPrimaryButtonStyle())
                         .keyboardShortcut(.defaultAction)
                     }
                 }

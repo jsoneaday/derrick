@@ -65,7 +65,7 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 footer
             }
-            .padding(15)
+            .padding(12)
             .frame(minWidth: minWidth, idealWidth: minWidth, maxWidth: maxWidth)
             .frame(minHeight: minHeight, maxHeight: maxHeight)
             .fixedSize(horizontal: false, vertical: true)
