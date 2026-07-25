@@ -85,9 +85,9 @@ actor ProcessRunner {
     }
 }
 
-extension NSData: @unchecked Sendable {}
+extension NSData: @unchecked @retroactive Sendable {}
 
-final class DockerRunnerService: NSObject, DockerProcessRunnerXPCProtocol, @unchecked Sendable {
+final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Sendable {
     private let runner = ProcessRunner()
 
     nonisolated func runProcess(requestData: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {

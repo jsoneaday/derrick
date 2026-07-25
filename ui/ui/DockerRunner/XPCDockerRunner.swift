@@ -2,9 +2,9 @@ import Foundation
 import DockerRunnerXPC
 import MCPServer
 
-extension NSData: @unchecked Sendable {}
+extension NSData: @unchecked @retroactive Sendable {}
 
-private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPCProtocol, @unchecked Sendable {
+private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked Sendable {
 
     func appendLog(message: String) {
         Task { @MainActor in
@@ -74,8 +74,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         self.appLogSink = appLogSink
 
         let conn = NSXPCConnection(serviceName: Self.serviceName)
-        conn.remoteObjectInterface = NSXPCInterface(with: DockerProcessRunnerXPCProtocol.self)
-        conn.exportedInterface = NSXPCInterface(with: DockerHelperLogSinkXPCProtocol.self)
+        conn.remoteObjectInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
+        conn.exportedInterface = NSXPCInterface(with: DockerHelperLogSinkXPC.self)
         conn.exportedObject = appLogSink
         conn.interruptionHandler = {
             Task { @MainActor in
@@ -117,7 +117,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
                 continuation.resume(throwing: error)
             }
-            guard let service = proxy as? any DockerProcessRunnerXPCProtocol else {
+            guard let service = proxy as? any DockerProcessRunnerXPC else {
                 continuation.resume(throwing: NSError(domain: "XPCDockerRunner", code: 2, userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]))
                 return
             }
@@ -463,7 +463,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 debugLog("XPC proxy error from service \(Self.serviceName): domain=\(nsError.domain), code=\(nsError.code), description=\(nsError.localizedDescription)")
                 continuation.resume(throwing: error)
             }
-            guard let service = proxy as? any DockerProcessRunnerXPCProtocol else {
+            guard let service = proxy as? any DockerProcessRunnerXPC else {
                 let error = NSError(
                     domain: "XPCDockerRunner", code: 2,
                     userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."])

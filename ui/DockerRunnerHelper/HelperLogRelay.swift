@@ -9,7 +9,7 @@ final class HelperLogRelay: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bufferedMessages: [String] = []
-    private var sink: (any DockerHelperLogSinkXPCProtocol)?
+    private var sink: (any DockerHelperLogSinkXPC)?
 
     func log(_ message: String) {
         relayLogger.log("\(message, privacy: .public)")
@@ -31,7 +31,7 @@ final class HelperLogRelay: @unchecked Sendable {
             relayLogger.error("Failed to attach app log sink: domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), description=\(nsError.localizedDescription, privacy: .public)")
         }
 
-        guard let sink = proxy as? any DockerHelperLogSinkXPCProtocol else {
+        guard let sink = proxy as? any DockerHelperLogSinkXPC else {
             log("App log sink unavailable; helper logs will remain local only.")
             return
         }

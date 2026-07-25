@@ -8,10 +8,10 @@ final class DockerRunnerHelperDelegate: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         logger.log("XPC listener received a new connection request from the app.")
         HelperLogRelay.shared.log("XPC listener received a new connection request from the app.")
-        connection.exportedInterface = NSXPCInterface(with: DockerProcessRunnerXPCProtocol.self)
+        connection.exportedInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
         HelperLogRelay.shared.log("Exported interface configured for DockerProcessRunnerXPCProtocol.")
 
-        connection.remoteObjectInterface = NSXPCInterface(with: DockerHelperLogSinkXPCProtocol.self)
+        connection.remoteObjectInterface = NSXPCInterface(with: DockerHelperLogSinkXPC.self)
         HelperLogRelay.shared.log("Remote object interface configured for DockerHelperLogSinkXPCProtocol.")
 
         let service = DockerRunnerService()

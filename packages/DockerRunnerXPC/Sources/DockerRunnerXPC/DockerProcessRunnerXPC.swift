@@ -50,11 +50,11 @@ public struct DockerRunResponse: Codable, Sendable {
 }
 
 /// XPC protocol for spawning a process outside the app sandbox.
-@objc public protocol DockerProcessRunnerXPCProtocol: NSObjectProtocol {
+@objc public protocol DockerProcessRunnerXPC: NSObjectProtocol {
     func runProcess(requestData: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 /// XPC protocol used by the helper to stream logs back to the app UI.
-@objc public protocol DockerHelperLogSinkXPCProtocol: NSObjectProtocol {
+@objc public protocol DockerHelperLogSinkXPC: NSObjectProtocol {
     func appendLog(message: String)
 }
