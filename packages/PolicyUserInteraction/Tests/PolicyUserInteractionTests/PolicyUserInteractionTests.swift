@@ -14,6 +14,16 @@ import AppEvents
         #expect(event.priority == .userDecision)
     }
 
+    @Test func factoryBuildsXPCValidationFailure() {
+        let event = PolicyUserEventFactory.xpcValidationFailure(
+            message: "XPC validation: executable is not allowed: /bin/zsh"
+        )
+        #expect(event.kind == .failure)
+        #expect(event.source == .xpcValidation)
+        #expect(event.title == "Docker helper rejected request")
+        #expect(event.summary.contains("not allowed"))
+    }
+
     @Test func approvalRequiredIsDecisionRequesting() async {
         let bus = AppEventBus()
         let event = PolicyUserEventFactory.approvalRequired(
@@ -26,7 +36,7 @@ import AppEvents
                 await bus.completeDecision(id: event.id, decision: PolicyUserDecision.approved(actor: "test"))
             }
         }
-        let decision = await bus.requestDecision(event)
+        let decision = await bus.initDecision(event)
         #expect(decision == .approved(actor: "test"))
     }
 }

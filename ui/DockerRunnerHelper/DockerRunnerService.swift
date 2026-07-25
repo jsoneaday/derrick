@@ -117,6 +117,24 @@ final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Se
                 return
             }
 
+            if let validationError = DockerRunRequestValidator.validateProcessAllowlist(request) {
+                let message = validationError.launchErrorMessage
+                logs.append(message)
+                serviceLogger.error("Process allowlist rejected request: \(message, privacy: .public)")
+                HelperLogRelay.shared.log(message)
+                let response = DockerRunResponse(
+                    stdout: Data(),
+                    stderr: Data(),
+                    exitCode: 1,
+                    timedOut: false,
+                    launchError: message,
+                    logs: logs
+                )
+                let replyData = (try? JSONEncoder().encode(response)) ?? Data()
+                reply(replyData as NSData)
+                return
+            }
+
             let response = await runner.run(request: request, initialLogs: logs)
             let replyData = (try? JSONEncoder().encode(response)) ?? Data()
             reply(replyData as NSData)

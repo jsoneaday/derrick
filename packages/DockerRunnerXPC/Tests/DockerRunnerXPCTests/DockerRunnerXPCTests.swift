@@ -35,4 +35,64 @@ struct DockerRunnerXPCTests {
         #expect(decoded.exitCode == 0)
         #expect(decoded.logs == response.logs)
     }
+
+    @Test func processAllowlistAcceptsEnvDocker() {
+        let request = DockerRunRequest(
+            executablePath: "/usr/bin/env",
+            arguments: ["docker", "version"],
+            environment: [:],
+            stdinData: Data(),
+            timeoutSeconds: 10
+        )
+        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == nil)
+    }
+
+    @Test func processAllowlistRejectsShell() {
+        let request = DockerRunRequest(
+            executablePath: "/bin/zsh",
+            arguments: ["-c", "echo hi"],
+            environment: [:],
+            stdinData: Data(),
+            timeoutSeconds: 10
+        )
+        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .disallowedExecutable("/bin/zsh"))
+    }
+
+    @Test func processAllowlistRejectsEnvWithoutDocker() {
+        let request = DockerRunRequest(
+            executablePath: "/usr/bin/env",
+            arguments: ["python3", "-c", "print(1)"],
+            environment: [:],
+            stdinData: Data(),
+            timeoutSeconds: 10
+        )
+        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .missingDockerInvocation)
+    }
+
+    @Test func processAllowlistRejectsEmptyArgs() {
+        let request = DockerRunRequest(
+            executablePath: "/usr/bin/env",
+            arguments: [],
+            environment: [:],
+            stdinData: Data(),
+            timeoutSeconds: 10
+        )
+        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .missingArguments)
+    }
+
+    @Test func processAllowlistRejectsRelativePath() {
+        let request = DockerRunRequest(
+            executablePath: "env",
+            arguments: ["docker"],
+            environment: [:],
+            stdinData: Data(),
+            timeoutSeconds: 10
+        )
+        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .relativeExecutablePath("env"))
+    }
+
+    @Test func validationErrorUsesStablePrefix() {
+        let message = DockerRunRequestValidationError.disallowedExecutable("/bin/sh").launchErrorMessage
+        #expect(message.hasPrefix(DockerRunRequestValidationError.launchErrorPrefix))
+    }
 }

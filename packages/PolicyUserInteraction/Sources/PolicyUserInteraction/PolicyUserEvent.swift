@@ -7,6 +7,8 @@ public enum PolicyEventSource: String, Sendable, Codable, Equatable {
     case egressProxy
     case toolGovernance
     case llmProvider
+    /// Privileged helper rejected a process launch (XPC allowlist).
+    case xpcValidation
     case system
 }
 
@@ -163,6 +165,19 @@ public enum PolicyUserEventFactory {
             source: .llmProvider,
             title: title,
             summary: message,
+            correlationId: correlationId
+        )
+    }
+
+    public static func xpcValidationFailure(
+        message: String,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .xpcValidation,
+            title: "Docker helper rejected request",
+            summary: message,
+            detail: "The privileged helper blocked a host process that is not on the allowlist.",
             correlationId: correlationId
         )
     }

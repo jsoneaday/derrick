@@ -1,6 +1,8 @@
 import Foundation
+import AppEvents
 import DockerRunnerXPC
 import MCPServer
+import PolicyUserInteraction
 
 extension NSData: @unchecked @retroactive Sendable {}
 
@@ -127,7 +129,18 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 }
             }
         }
-        return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
+        let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
+        if let launchError = response.launchError {
+            await Self.publishXPCValidationFailureIfNeeded(launchError)
+        }
+        return response
+    }
+
+    private static func publishXPCValidationFailureIfNeeded(_ launchError: String) async {
+        guard launchError.hasPrefix(DockerRunRequestValidationError.launchErrorPrefix) else { return }
+        debugLog("[xpc-validation] \(launchError)")
+        let event = PolicyUserEventFactory.xpcValidationFailure(message: launchError)
+        await AppEventBus.shared.publish(event)
     }
 
     private func ensureVolume(_ name: String) async throws {
@@ -493,6 +506,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         if let launchError = response.launchError {
             debugLog("Helper returned launch error: \(launchError)")
+            await Self.publishXPCValidationFailureIfNeeded(launchError)
             throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: launchError])
         }
 
