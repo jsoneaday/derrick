@@ -157,6 +157,54 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func scriptExecutionFailed(
+        exitCode: Int32,
+        stderr: String,
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = trimmed.isEmpty
+            ? "The script exited with code \(exitCode)."
+            : String(trimmed.prefix(400))
+        return failure(
+            source: .system,
+            title: "Script execution failed",
+            summary: summary,
+            detail: trimmed.isEmpty ? "exit code \(exitCode)" : "exit code \(exitCode)\n\(trimmed)",
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
+    public static func scriptExecutionTimedOut(
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .system,
+            title: "Script timed out",
+            summary: "The script did not finish before the timeout.",
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
+    public static func egressDenied(
+        detail: String,
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .egressProxy,
+            title: "Network request blocked",
+            summary: "The egress proxy blocked a network destination.",
+            detail: detail.isEmpty ? nil : detail,
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
     public static func llmProviderFailure(
         title: String,
         message: String,

@@ -5,6 +5,7 @@ import MCPClient
 import MCPServer
 import MCPToolCatalog
 import MemorySystem
+import PolicyRuntime
 
 @MainActor
 final class ConversationModel {
@@ -168,7 +169,7 @@ final class ConversationModel {
         guard let policyStore else {
             return DefaultPolicyInterceptor()
         }
-        let policy = OnDemandCompletionContentPolicy(store: policyStore, applicationName: "ui")
+        let policy = StoreBackedCompletionContentPolicy(store: policyStore, applicationName: "ui")
         return DefaultPolicyInterceptor(policy: policy)
     }
 

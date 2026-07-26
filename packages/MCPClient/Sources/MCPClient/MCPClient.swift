@@ -160,6 +160,7 @@ public actor MCPStdioBackend: MCPBackend {
     }
 
     public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
+        try await connectIfNeeded()
         let (content, isError) = try await client.callTool(name: name, arguments: arguments)
         var pieces: [MCPToolContent] = []
         for item in content {

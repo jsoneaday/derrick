@@ -58,6 +58,23 @@ public enum PythonScriptExecutionDecision: String, Codable, Sendable {
     case confirm
 }
 
+/// Which pipeline gate failed. Distinct from `decision` (policy allow/deny) and `status` (run outcome).
+/// Runtime failures must not be reported as security-review denials.
+public enum PythonScriptFailureStage: String, Codable, Sendable, Equatable {
+    /// No failure (completed successfully, or status still in flight).
+    case none
+    /// Static verifier rejected the request before run.
+    case staticValidation
+    /// LLM security reviewer rejected (or could not complete when required).
+    case llmReview
+    /// Script ran and exited non-zero (not a pre-run policy deny).
+    case execution
+    /// Script timed out.
+    case timeout
+    /// Egress proxy / network policy blocked a destination during run.
+    case egress
+}
+
 /// Sub-phase timings inside the LLM security reviewer call.
 public struct PythonScriptReviewerTiming: Codable, Sendable, Equatable {
     public var ttfbMS: Int
@@ -189,6 +206,8 @@ public struct PythonScriptPhaseTiming: Codable, Sendable, Equatable {
 public struct PythonScriptExecutionResult: Codable, Sendable {
     public let status: PythonScriptExecutionStatus
     public let decision: PythonScriptExecutionDecision
+    /// Explicit gate that failed. UI and callers must switch on this — never infer from `decision` + `reviewerAssessment`.
+    public let failureStage: PythonScriptFailureStage
     public let verifier: String
     public let validationFindings: [String]
     public let reviewerAssessment: PythonScriptReviewAssessment?
@@ -202,6 +221,7 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
     public init(
         status: PythonScriptExecutionStatus,
         decision: PythonScriptExecutionDecision,
+        failureStage: PythonScriptFailureStage = .none,
         verifier: String,
         validationFindings: [String],
         reviewerAssessment: PythonScriptReviewAssessment?,
@@ -214,6 +234,7 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
     ) {
         self.status = status
         self.decision = decision
+        self.failureStage = failureStage
         self.verifier = verifier
         self.validationFindings = validationFindings
         self.reviewerAssessment = reviewerAssessment
@@ -223,6 +244,53 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
         self.timedOut = timedOut
         self.durationMS = durationMS
         self.phaseTiming = phaseTiming
+    }
+
+    /// Classify a post-run runner outcome. Policy already allowed execution; non-zero exit is not a security deny.
+    public static func runnerOutcome(
+        timedOut: Bool,
+        exitCode: Int32,
+        stdout: String,
+        stderr: String,
+        durationMS: Int,
+        phaseTiming: PythonScriptPhaseTiming?,
+        verifier: String = "static-check-v1"
+    ) -> PythonScriptExecutionResult {
+        let combined = stdout + "\n" + stderr
+        let looksLikeEgress = combined.localizedCaseInsensitiveContains("UNAUTHORIZED_EGRESS")
+            || combined.localizedCaseInsensitiveContains("unauthorized egress")
+
+        let status: PythonScriptExecutionStatus
+        let failureStage: PythonScriptFailureStage
+        if timedOut {
+            status = .timeout
+            failureStage = .timeout
+        } else if exitCode == 0 {
+            status = .completed
+            failureStage = .none
+        } else if looksLikeEgress {
+            status = .failed
+            failureStage = .egress
+        } else {
+            status = .failed
+            failureStage = .execution
+        }
+
+        return PythonScriptExecutionResult(
+            status: status,
+            // Runtime outcome is not a policy decision; policy already allowed the run.
+            decision: .allow,
+            failureStage: failureStage,
+            verifier: verifier,
+            validationFindings: [],
+            reviewerAssessment: nil,
+            stdout: stdout,
+            stderr: stderr,
+            exitCode: exitCode,
+            timedOut: timedOut,
+            durationMS: durationMS,
+            phaseTiming: phaseTiming
+        )
     }
 }
 
@@ -586,6 +654,9 @@ public extension MCPServerHost {
             }
 
             if !findings.isEmpty {
+                // Fail-fast stage: static findings always win; otherwise this gate is LLM review.
+                let failureStage: PythonScriptFailureStage =
+                    !staticFindings.isEmpty ? .staticValidation : .llmReview
                 let totalMS = PythonScriptPhaseTiming.elapsedMS(from: toolStarted)
                 var phaseTiming = PythonScriptPhaseTiming(
                     staticValidateMS: staticValidateMS,
@@ -597,10 +668,11 @@ public extension MCPServerHost {
                     wrapperCharCount: 0
                 )
                 phaseTiming.applyReviewerTiming(reviewerTiming)
-                logger("[python_script_exec timing] blocked \(phaseTiming.summaryLine)")
+                logger("[python_script_exec timing] blocked stage=\(failureStage.rawValue) \(phaseTiming.summaryLine)")
                 let denied = PythonScriptExecutionResult(
                     status: .blocked,
                     decision: .deny,
+                    failureStage: failureStage,
                     verifier: verifierName,
                     validationFindings: findings,
                     reviewerAssessment: assessment,
@@ -628,10 +700,12 @@ public extension MCPServerHost {
             phaseTiming.scriptCharCount = scriptMetrics.chars
             phaseTiming.scriptLineCount = scriptMetrics.lines
             phaseTiming.applyReviewerTiming(reviewerTiming)
-            logger("[python_script_exec timing] \(phaseTiming.summaryLine)")
+            logger("[python_script_exec timing] stage=\(result.failureStage.rawValue) \(phaseTiming.summaryLine)")
+            // Preserve runner failureStage/decision; attach pre-run verifier + optional allow assessment.
             result = PythonScriptExecutionResult(
                 status: result.status,
                 decision: result.decision,
+                failureStage: result.failureStage,
                 verifier: verifierName,
                 validationFindings: findings,
                 reviewerAssessment: assessment,

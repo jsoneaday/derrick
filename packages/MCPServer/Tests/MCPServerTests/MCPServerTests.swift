@@ -16,6 +16,7 @@ import MCPClient
             return PythonScriptExecutionResult(
                 status: .completed,
                 decision: .allow,
+                failureStage: .none,
                 verifier: "stub",
                 validationFindings: [],
                 reviewerAssessment: nil,
@@ -325,6 +326,7 @@ import MCPClient
         #expect(result.isError == false)
         #expect(result.text.contains("\"status\":\"blocked\""))
         #expect(result.text.contains("\"decision\":\"deny\""))
+        #expect(result.text.contains("\"failureStage\":\"staticValidation\""))
     }
 
     @Test func pythonScriptToolDeniesWriteWhenReviewerMissing() async throws {
@@ -339,13 +341,15 @@ import MCPClient
                 "description": .string("create report file"),
                 "reason": .string("user asked for file output"),
                 "script": .string("print('hello')"),
-                "expected_effects": .array([.string("write /tmp/report.txt")])
+                "expected_effects": .array([.string("write /tmp/report.txt")]),
+                "allow_network": .bool(true)
             ]
         )
 
         #expect(result.text.contains("\"status\":\"blocked\""))
         #expect(result.text.contains("\"decision\":\"deny\""))
-        #expect(result.text.contains("Write mode requires configured reviewer."))
+        #expect(result.text.contains("\"failureStage\":\"llmReview\""))
+        #expect(result.text.contains("requires configured reviewer"))
     }
 
     @Test func pythonScriptToolDeniesWhenReviewerFlagsMisalignment() async throws {
@@ -371,12 +375,89 @@ import MCPClient
                 "description": .string("inspect csv"),
                 "reason": .string("analyze user-provided data"),
                 "script": .string("print('hi')"),
-                "user_prompt": .string("summarize this csv")
+                "user_prompt": .string("summarize this csv"),
+                "allow_network": .bool(true)
             ]
         )
 
         #expect(result.text.contains("\"status\":\"blocked\""))
         #expect(result.text.contains("\"decision\":\"deny\""))
+        #expect(result.text.contains("\"failureStage\":\"llmReview\""))
         #expect(result.text.contains("Script appears unrelated to user prompt."))
+    }
+
+    @Test func runnerOutcomeDoesNotPolicyDenyOnNonZeroExit() {
+        let result = PythonScriptExecutionResult.runnerOutcome(
+            timedOut: false,
+            exitCode: 1,
+            stdout: "",
+            stderr: "ValueError: boom",
+            durationMS: 10,
+            phaseTiming: nil
+        )
+        #expect(result.status == .failed)
+        #expect(result.decision == .allow)
+        #expect(result.failureStage == .execution)
+    }
+
+    @Test func runnerOutcomeClassifiesEgress() {
+        let result = PythonScriptExecutionResult.runnerOutcome(
+            timedOut: false,
+            exitCode: 1,
+            stdout: "",
+            stderr: "UNAUTHORIZED_EGRESS destination=reactjs.org",
+            durationMS: 10,
+            phaseTiming: nil
+        )
+        #expect(result.status == .failed)
+        #expect(result.decision == .allow)
+        #expect(result.failureStage == .egress)
+    }
+
+    @Test func runnerOutcomeTimeoutIsNotPolicyDeny() {
+        let result = PythonScriptExecutionResult.runnerOutcome(
+            timedOut: true,
+            exitCode: -1,
+            stdout: "",
+            stderr: "",
+            durationMS: 30_000,
+            phaseTiming: nil
+        )
+        #expect(result.status == .timeout)
+        #expect(result.decision == .allow)
+        #expect(result.failureStage == .timeout)
+    }
+
+    @Test func allowAssessmentSurvivesSuccessfulRunWithoutDenyStage() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.registerPythonScriptExecutionTool(
+                runner: StubPythonRunner(),
+                reviewer: StubReviewer(
+                    assessment: PythonScriptReviewAssessment(
+                        alignedWithRequest: true,
+                        confidence: 0.9,
+                        suggestedAction: "allow",
+                        concerns: ["Script may fetch external docs."],
+                        summary: "Looks fine with soft concerns."
+                    )
+                )
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "python_script_exec",
+            arguments: [
+                "mode": .string("readonly"),
+                "description": .string("fetch page"),
+                "reason": .string("test"),
+                "script": .string("print('hi')"),
+                "allow_network": .bool(true)
+            ]
+        )
+
+        #expect(result.text.contains("\"status\":\"completed\""))
+        #expect(result.text.contains("\"decision\":\"allow\""))
+        #expect(result.text.contains("\"failureStage\":\"none\""))
+        #expect(result.text.contains("Looks fine with soft concerns"))
     }
 }

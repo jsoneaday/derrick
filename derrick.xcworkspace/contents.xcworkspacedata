@@ -41,6 +41,9 @@
       location = "group:packages/PolicyUserInteraction">
    </FileRef>
    <FileRef
+      location = "group:packages/PolicyRuntime">
+   </FileRef>
+   <FileRef
       location = "group:packages/EgressProxy">
    </FileRef>
    <FileRef

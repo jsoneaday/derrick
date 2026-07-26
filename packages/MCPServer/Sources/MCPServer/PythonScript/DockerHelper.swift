@@ -494,16 +494,11 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
             wrapperCharCount: executionScript.utf8.count
         )
 
-        return PythonScriptExecutionResult(
-            status: timedOut ? .timeout : (exitCode == 0 ? .completed : .failed),
-            decision: (timedOut || exitCode != 0) ? .deny : .allow,
-            verifier: "static-check-v1",
-            validationFindings: [],
-            reviewerAssessment: nil,
+        return PythonScriptExecutionResult.runnerOutcome(
+            timedOut: timedOut,
+            exitCode: exitCode,
             stdout: stdout,
             stderr: stderr,
-            exitCode: exitCode,
-            timedOut: timedOut,
             durationMS: totalMS,
             phaseTiming: phaseTiming
         )

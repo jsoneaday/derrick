@@ -2,6 +2,7 @@ import Foundation
 import MCP
 import MCPClient
 import MemorySystem
+import PolicyRuntime
 import Lib
 import MCPServer
 import AppEvents
@@ -187,31 +188,57 @@ extension ConversationPipeline {
         guard toolName == "python_script_exec" else { return }
         guard let data = resultText.data(using: .utf8) else { return }
         guard let payload = try? JSONDecoder().decode(PythonScriptExecutionResult.self, from: data) else { return }
-        guard payload.status == .blocked || payload.decision == .deny else { return }
 
-        let findings = payload.validationFindings
-        let event: PolicyUserEvent
-        if findings.contains(where: { $0.localizedCaseInsensitiveContains("static") || $0.localizedCaseInsensitiveContains("host.docker") || $0.localizedCaseInsensitiveContains("must not") })
-            || payload.verifier.contains("llm-skipped-static") {
+        // Switch only on explicit failureStage — never infer from decision + reviewerAssessment
+        // (an allow assessment must not surface as “security review denied”).
+        let event: PolicyUserEvent?
+        switch payload.failureStage {
+        case .none:
+            event = nil
+        case .staticValidation:
+            let findings = payload.validationFindings
             event = PolicyUserEventFactory.staticValidationDenied(
                 findings: findings.isEmpty ? ["The request was blocked by static policy checks."] : findings,
+                toolName: toolName,
                 scriptPreview: nil
             )
-        } else if let assessment = payload.reviewerAssessment {
-            event = PolicyUserEventFactory.reviewerDenied(
-                summary: assessment.summary,
-                concerns: assessment.concerns
-            )
-        } else {
-            event = PolicyUserEventFactory.failure(
-                source: .system,
-                title: "Request blocked",
-                summary: findings.first ?? "The tool request was denied by policy.",
-                detail: findings.isEmpty ? nil : findings.joined(separator: "\n"),
+        case .llmReview:
+            if let assessment = payload.reviewerAssessment,
+               assessment.suggestedAction.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "deny"
+                || assessment.alignedWithRequest == false {
+                event = PolicyUserEventFactory.reviewerDenied(
+                    summary: assessment.summary,
+                    concerns: assessment.concerns,
+                    toolName: toolName
+                )
+            } else {
+                // Reviewer missing/failed/error findings — not soft allow concerns.
+                let findings = payload.validationFindings
+                event = PolicyUserEventFactory.reviewerDenied(
+                    summary: findings.first ?? "Security review could not approve this request.",
+                    concerns: findings,
+                    toolName: toolName
+                )
+            }
+        case .execution:
+            event = PolicyUserEventFactory.scriptExecutionFailed(
+                exitCode: payload.exitCode,
+                stderr: payload.stderr,
                 toolName: toolName
             )
+        case .timeout:
+            event = PolicyUserEventFactory.scriptExecutionTimedOut(toolName: toolName)
+        case .egress:
+            let detail = [payload.stderr, payload.stdout]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            event = PolicyUserEventFactory.egressDenied(detail: detail, toolName: toolName)
         }
-        await AppEventBus.shared.publish(event)
+
+        if let event {
+            await AppEventBus.shared.publish(event)
+        }
     }
 
     func batchCallToolsWithPolicyInterception(
@@ -250,7 +277,7 @@ extension ConversationPipeline {
             return override
         }
         if let policyStore {
-            let policy = OnDemandToolGovernancePolicy(store: policyStore, applicationName: applicationName)
+            let policy = StoreBackedToolGovernancePolicy(store: policyStore, applicationName: applicationName)
             return DefaultToolRequestInterceptor(policy: policy)
         }
         return DefaultToolRequestInterceptor()

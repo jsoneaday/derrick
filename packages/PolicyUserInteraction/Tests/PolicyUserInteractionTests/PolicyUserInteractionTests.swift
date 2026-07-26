@@ -24,6 +24,27 @@ import AppEvents
         #expect(event.summary.contains("not allowed"))
     }
 
+    @Test func factoryBuildsScriptExecutionFailed() {
+        let event = PolicyUserEventFactory.scriptExecutionFailed(
+            exitCode: 1,
+            stderr: "Traceback (most recent call last):\nValueError: boom"
+        )
+        #expect(event.kind == .failure)
+        #expect(event.source == .system)
+        #expect(event.title == "Script execution failed")
+        #expect(event.summary.contains("ValueError"))
+    }
+
+    @Test func factoryBuildsEgressDenied() {
+        let event = PolicyUserEventFactory.egressDenied(
+            detail: "UNAUTHORIZED_EGRESS destination=reactjs.org"
+        )
+        #expect(event.kind == .failure)
+        #expect(event.source == .egressProxy)
+        #expect(event.title == "Network request blocked")
+        #expect(event.detail?.contains("reactjs.org") == true)
+    }
+
     @Test func approvalRequiredIsDecisionRequesting() async {
         let bus = AppEventBus()
         let event = PolicyUserEventFactory.approvalRequired(

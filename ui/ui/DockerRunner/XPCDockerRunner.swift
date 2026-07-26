@@ -529,16 +529,11 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("[python_script_exec timing] runner \(phaseTiming.summaryLine)")
         debugLog("XPC run request finished successfully.")
 
-        return PythonScriptExecutionResult(
-            status: response.timedOut ? .timeout : (response.exitCode == 0 ? .completed : .failed),
-            decision: (response.timedOut || response.exitCode != 0) ? .deny : .allow,
-            verifier: "static-check-v1",
-            validationFindings: [],
-            reviewerAssessment: nil,
+        return PythonScriptExecutionResult.runnerOutcome(
+            timedOut: response.timedOut,
+            exitCode: response.exitCode,
             stdout: stdout,
             stderr: stderr,
-            exitCode: response.exitCode,
-            timedOut: response.timedOut,
             durationMS: totalMS,
             phaseTiming: phaseTiming
         )

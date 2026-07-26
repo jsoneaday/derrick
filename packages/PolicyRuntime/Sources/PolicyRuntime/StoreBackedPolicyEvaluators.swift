@@ -1,6 +1,8 @@
 import Foundation
+import MemorySystem
 
-public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
+/// Store-backed tool governance: loads rules from `PolicyStore`, matches, returns first enabled hit.
+public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {
     private let store: any PolicyStore
     private let applicationName: String
 
@@ -12,19 +14,18 @@ public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
     public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
         let rules = try await loadRules(scopes: ["tool_invocation", "tool_call"])
         guard !rules.isEmpty else {
-            // Fail closed: empty store is a misconfiguration, not an allow-all.
             return .deny(reason: Self.noRulesConfiguredReason)
         }
 
         let argumentsObject = parseJSONObject(from: event.argumentsJSON)
         for rule in rules {
+            guard rule.enabled else { continue }
             guard let matcher = try? decode(ToolMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
             guard matcher.matches(event: event, arguments: argumentsObject) else {
                 continue
             }
-
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
                 continue
             }
@@ -45,14 +46,17 @@ public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
         for scope in scopes {
             loaded.append(contentsOf: try await store.loadRules(applicationName: applicationName, scope: scope))
         }
-        return loaded.sorted { lhs, rhs in
-            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
-            return lhs.createdAt > rhs.createdAt
-        }
+        return loaded
+            .filter(\.enabled)
+            .sorted { lhs, rhs in
+                if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+                return lhs.createdAt > rhs.createdAt
+            }
     }
 }
 
-public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
+/// Store-backed assistant content policy for chunks and full completions.
+public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
     private let store: any PolicyStore
     private let applicationName: String
 
@@ -68,13 +72,13 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
         }
 
         for rule in rules {
+            guard rule.enabled else { continue }
             guard let matcher = try? decode(ContentMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
             guard matcher.matches(content: event.content) else {
                 continue
             }
-
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
                 continue
             }
@@ -92,13 +96,13 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
 
         let detectedPatterns = detectSensitivePatterns(in: event.fullCompletion)
         for rule in rules {
+            guard rule.enabled else { continue }
             guard let matcher = try? decode(CompletionMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
             guard matcher.matches(content: event.fullCompletion, detectedPatterns: detectedPatterns) else {
                 continue
             }
-
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
                 continue
             }
@@ -119,12 +123,16 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
         for scope in scopes {
             loaded.append(contentsOf: try await store.loadRules(applicationName: applicationName, scope: scope))
         }
-        return loaded.sorted { lhs, rhs in
-            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
-            return lhs.createdAt > rhs.createdAt
-        }
+        return loaded
+            .filter(\.enabled)
+            .sorted { lhs, rhs in
+                if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+                return lhs.createdAt > rhs.createdAt
+            }
     }
 }
+
+// MARK: - Matchers / outcomes
 
 private struct ToolMatcher: Decodable {
     let toolName: String?
@@ -147,22 +155,18 @@ private struct ToolMatcher: Decodable {
         if let toolName, event.toolName != toolName {
             return false
         }
-
         if let toolNameContains, !event.toolName.localizedCaseInsensitiveContains(toolNameContains) {
             return false
         }
-
         if let minArgumentsLength, event.argumentsJSON.count < minArgumentsLength {
             return false
         }
-
         if let argumentKey, let argumentExists {
             let hasKey = arguments[argumentKey] != nil
             if argumentExists != hasKey {
                 return false
             }
         }
-
         if let argumentKey, let argumentPattern {
             guard let argumentValue = arguments[argumentKey] as? String else {
                 return false
@@ -171,7 +175,6 @@ private struct ToolMatcher: Decodable {
                 return false
             }
         }
-
         return true
     }
 }
@@ -286,7 +289,6 @@ private func parseJSONObject(from json: String) -> [String: Any] {
 
 private func detectSensitivePatterns(in text: String) -> [String] {
     var detected: [String] = []
-
     if text.range(of: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", options: .regularExpression) != nil {
         detected.append("email")
     }
@@ -296,7 +298,6 @@ private func detectSensitivePatterns(in text: String) -> [String] {
     if text.range(of: "\\b\\d{3}-\\d{2}-\\d{4}\\b", options: .regularExpression) != nil {
         detected.append("ssn")
     }
-
     return detected
 }
 
