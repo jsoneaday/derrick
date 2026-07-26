@@ -74,6 +74,24 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(EgressProxyConfiguration.containerProxyEnvironment["HTTPS_PROXY"] != nil)
     }
 
+    @Test func configurationDefaultsToLoopbackListenHost() {
+        #expect(EgressProxyConfiguration.listenHost == "127.0.0.1")
+    }
+
+    @Test func listenParametersRequireConfiguredLocalEndpoint() {
+        let parameters = EgressProxyListenBinding.tcpParameters(
+            host: EgressProxyConfiguration.listenHost,
+            port: EgressProxyConfiguration.listenPort
+        )
+        guard let endpoint = parameters.requiredLocalEndpoint else {
+            Issue.record("expected requiredLocalEndpoint")
+            return
+        }
+        let description = "\(endpoint)"
+        #expect(description.contains("127.0.0.1"))
+        #expect(description.contains("\(EgressProxyConfiguration.listenPort)"))
+    }
+
     @Test func unauthorizedLoggerEmitsMessage() {
         final class Box: @unchecked Sendable {
             var messages: [String] = []

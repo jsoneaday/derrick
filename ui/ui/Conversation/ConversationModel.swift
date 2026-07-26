@@ -196,10 +196,11 @@ final class ConversationModel {
         }
     }
 
+    /// Opens the app DB and always seeds baseline policy rules when missing.
+    /// Seeding is not debug-only: empty rule tables fail closed at evaluation time.
     static func makeMemoryStore(
         applicationName: String,
-        databaseDirectoryURL: URL,
-        seedRules: Bool
+        databaseDirectoryURL: URL
     ) async throws -> DBRepository {
         let repository = DBRepository(
             configuration: DBRepositoryConfiguration(
@@ -220,18 +221,16 @@ final class ConversationModel {
             throw error
         }
 
-        if seedRules {
-            do {
-                let inserted = try await seedPolicyRulesIfNeeded(repository: repository, applicationName: applicationName)
-                if inserted > 0 {
-                    debugLog("Policy seed inserted \(inserted) default rule(s).")
-                } else {
-                    debugLog("Policy seed skipped (rules already present).")
-                }
-            } catch {
-                debugLog("Policy seed failed: \(error.localizedDescription)")
-                throw error
+        do {
+            let inserted = try await seedPolicyRulesIfNeeded(repository: repository, applicationName: applicationName)
+            if inserted > 0 {
+                debugLog("Policy seed inserted \(inserted) default rule(s).")
+            } else {
+                debugLog("Policy seed skipped (rules already present).")
             }
+        } catch {
+            debugLog("Policy seed failed: \(error.localizedDescription)")
+            throw error
         }
         return repository
     }
@@ -277,6 +276,31 @@ final class ConversationModel {
                 matcherJSON: #"{"detected_patterns_any":["ssn"]}"#,
                 outcomeJSON: #"{"action":"deny","reason":"SSN-like patterns are blocked."}"#,
                 priority: 950
+            ),
+            // Explicit low-priority allows (deny-by-default requires a matching allow rule).
+            PolicyRule(
+                applicationName: applicationName,
+                name: "allow-default-tools",
+                scope: "tool_invocation",
+                matcherJSON: #"{}"#,
+                outcomeJSON: #"{"action":"allow"}"#,
+                priority: 1
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "allow-default-assistant-chunks",
+                scope: "assistant_chunk",
+                matcherJSON: #"{}"#,
+                outcomeJSON: #"{"action":"allow"}"#,
+                priority: 1
+            ),
+            PolicyRule(
+                applicationName: applicationName,
+                name: "allow-default-assistant-completions",
+                scope: "assistant_completion_content",
+                matcherJSON: #"{}"#,
+                outcomeJSON: #"{"action":"allow"}"#,
+                priority: 1
             )
         ]
 

@@ -89,6 +89,97 @@ final class OnDemandPoliciesTests: XCTestCase {
         let outcome = try await policy.evaluateAssistantCompletion(completionEvent)
         XCTAssertEqual(outcome, .confirm(requiredFields: ["review"]))
     }
+
+    func test_toolPolicy_deniesWhenNoRulesConfigured() async throws {
+        let store = MockPolicyStore(rulesByScope: [:])
+        let policy = OnDemandToolGovernancePolicy(store: store, applicationName: "ui")
+        let event = ToolInvocationEvent(
+            sessionID: "s1",
+            toolName: "python_script_exec",
+            argumentsJSON: "{}"
+        )
+        let outcome = try await policy.evaluateToolInvocation(event)
+        XCTAssertEqual(outcome, .deny(reason: OnDemandToolGovernancePolicy.noRulesConfiguredReason))
+    }
+
+    func test_completionPolicy_deniesWhenNoRulesConfigured() async throws {
+        let store = MockPolicyStore(rulesByScope: [:])
+        let policy = OnDemandCompletionContentPolicy(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluateAssistantCompletion(
+            AssistantCompletionEvent(sessionID: "s1", fullCompletion: "hello", chunkCount: 1)
+        )
+        XCTAssertEqual(outcome, .deny(reason: OnDemandCompletionContentPolicy.noRulesConfiguredReason))
+    }
+
+    func test_toolPolicy_prefersHigherPriorityAcrossScopes() async throws {
+        let store = MockPolicyStore(rulesByScope: [
+            "tool_invocation": [
+                PolicyRule(
+                    applicationName: "ui",
+                    name: "low-confirm",
+                    scope: "tool_invocation",
+                    matcherJSON: #"{"tool_name":"file_write"}"#,
+                    outcomeJSON: #"{"action":"confirm","required_fields":["low"]}"#,
+                    priority: 10
+                )
+            ],
+            "tool_call": [
+                PolicyRule(
+                    applicationName: "ui",
+                    name: "high-deny",
+                    scope: "tool_call",
+                    matcherJSON: #"{"tool_name":"file_write"}"#,
+                    outcomeJSON: #"{"action":"deny","reason":"high priority"}"#,
+                    priority: 100
+                )
+            ]
+        ])
+        let policy = OnDemandToolGovernancePolicy(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluateToolInvocation(
+            ToolInvocationEvent(sessionID: "s1", toolName: "file_write", argumentsJSON: "{}")
+        )
+        XCTAssertEqual(outcome, .deny(reason: "high priority"))
+    }
+
+    func test_toolPolicy_deniesWhenNoRuleMatches() async throws {
+        let store = MockPolicyStore(rulesByScope: [
+            "tool_invocation": [
+                PolicyRule(
+                    applicationName: "ui",
+                    name: "deny-delete",
+                    scope: "tool_invocation",
+                    matcherJSON: #"{"tool_name":"delete_file"}"#,
+                    outcomeJSON: #"{"action":"deny","reason":"blocked"}"#,
+                    priority: 100
+                )
+            ]
+        ])
+        let policy = OnDemandToolGovernancePolicy(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluateToolInvocation(
+            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+        )
+        XCTAssertEqual(outcome, .deny(reason: OnDemandToolGovernancePolicy.noMatchingRuleReason))
+    }
+
+    func test_toolPolicy_allowsWhenExplicitAllowMatches() async throws {
+        let store = MockPolicyStore(rulesByScope: [
+            "tool_invocation": [
+                PolicyRule(
+                    applicationName: "ui",
+                    name: "allow-default",
+                    scope: "tool_invocation",
+                    matcherJSON: #"{}"#,
+                    outcomeJSON: #"{"action":"allow"}"#,
+                    priority: 1
+                )
+            ]
+        ])
+        let policy = OnDemandToolGovernancePolicy(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluateToolInvocation(
+            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+        )
+        XCTAssertEqual(outcome, .allow)
+    }
 }
 
 private actor MockPolicyStore: PolicyStore {

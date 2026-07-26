@@ -42,7 +42,7 @@ extension ConversationPipeline {
             }
         case .deny(let reason):
             await MainActor.run {
-                debugLog("Policy decision: deny \(name)")
+                debugLog("Policy decision: deny \(name) reason=\(reason)")
             }
             try await policyStore?.saveApproval(
                 PolicyApproval(
@@ -63,6 +63,20 @@ extension ConversationPipeline {
                 requestPayloadJSON: event.argumentsJSON,
                 decision: "denied",
                 actor: "policy-engine"
+            )
+            let preview: String
+            if event.argumentsJSON.count > 1200 {
+                preview = String(event.argumentsJSON.prefix(1200)) + "…"
+            } else {
+                preview = event.argumentsJSON
+            }
+            await AppEventBus.shared.publish(
+                PolicyUserEventFactory.toolGovernanceDenied(
+                    toolName: name,
+                    reason: reason,
+                    payloadPreview: preview,
+                    correlationId: sessionID
+                )
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
         case .confirm(let confirmEvent, let requiredFields):

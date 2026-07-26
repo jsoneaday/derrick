@@ -12,7 +12,8 @@ public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
     public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
         let rules = try await loadRules(scopes: ["tool_invocation", "tool_call"])
         guard !rules.isEmpty else {
-            return .allow
+            // Fail closed: empty store is a misconfiguration, not an allow-all.
+            return .deny(reason: Self.noRulesConfiguredReason)
         }
 
         let argumentsObject = parseJSONObject(from: event.argumentsJSON)
@@ -30,15 +31,24 @@ public struct OnDemandToolGovernancePolicy: ToolGovernancePolicy {
             return outcome.toolOutcome
         }
 
-        return .allow
+        return .deny(reason: Self.noMatchingRuleReason)
     }
+
+    public static let noRulesConfiguredReason =
+        "No tool governance rules are configured; denying by default."
+
+    public static let noMatchingRuleReason =
+        "No tool governance rule matched this request; denying by default."
 
     private func loadRules(scopes: [String]) async throws -> [PolicyRule] {
         var loaded: [PolicyRule] = []
         for scope in scopes {
             loaded.append(contentsOf: try await store.loadRules(applicationName: applicationName, scope: scope))
         }
-        return loaded
+        return loaded.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            return lhs.createdAt > rhs.createdAt
+        }
     }
 }
 
@@ -52,9 +62,9 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
     }
 
     public func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome {
-        let rules = try await store.loadRules(applicationName: applicationName, scope: "assistant_chunk")
+        let rules = try await loadRules(scopes: ["assistant_chunk"])
         guard !rules.isEmpty else {
-            return .allow
+            return .deny(reason: Self.noRulesConfiguredReason)
         }
 
         for rule in rules {
@@ -71,13 +81,13 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
             return outcome.contentOutcome(fallbackPattern: matcher.contentPattern)
         }
 
-        return .allow
+        return .deny(reason: Self.noMatchingRuleReason)
     }
 
     public func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome {
         let rules = try await loadRules(scopes: ["assistant_completion_content", "assistant_completion"])
         guard !rules.isEmpty else {
-            return .allow
+            return .deny(reason: Self.noRulesConfiguredReason)
         }
 
         let detectedPatterns = detectSensitivePatterns(in: event.fullCompletion)
@@ -95,15 +105,24 @@ public struct OnDemandCompletionContentPolicy: PolicyEvaluator {
             return outcome.contentOutcome(fallbackPattern: matcher.contentPattern)
         }
 
-        return .allow
+        return .deny(reason: Self.noMatchingRuleReason)
     }
+
+    public static let noRulesConfiguredReason =
+        "No content governance rules are configured; denying by default."
+
+    public static let noMatchingRuleReason =
+        "No content governance rule matched this content; denying by default."
 
     private func loadRules(scopes: [String]) async throws -> [PolicyRule] {
         var loaded: [PolicyRule] = []
         for scope in scopes {
             loaded.append(contentsOf: try await store.loadRules(applicationName: applicationName, scope: scope))
         }
-        return loaded
+        return loaded.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            return lhs.createdAt > rhs.createdAt
+        }
     }
 }
 
@@ -225,13 +244,15 @@ private struct OutcomeRule: Decodable {
             return .deny(reason: reason ?? "Tool invocation denied by policy.")
         case "confirm":
             return .confirm(requiredFields: requiredFields ?? ["user_approval"])
+        case "allow":
+            return .allow
         case "redact":
             guard let argumentKey, let pattern else {
-                return .allow
+                return .deny(reason: "Invalid redact outcome for tool rule (missing argument_key/pattern).")
             }
             return .redact(argumentKey: argumentKey, pattern: pattern, replacement: replacement ?? "[REDACTED]")
         default:
-            return .allow
+            return .deny(reason: "Unknown tool policy action '\(action)'; denying by default.")
         }
     }
 
@@ -241,14 +262,16 @@ private struct OutcomeRule: Decodable {
             return .deny(reason: reason ?? "Assistant content denied by policy.")
         case "confirm":
             return .confirm(requiredFields: requiredFields ?? ["review_confirmation"])
+        case "allow":
+            return .allow
         case "redact":
             let patternToUse = pattern ?? fallbackPattern
             guard let patternToUse else {
-                return .allow
+                return .deny(reason: "Invalid redact outcome for content rule (missing pattern).")
             }
             return .redact(pattern: patternToUse, replacement: replacement ?? "[REDACTED]")
         default:
-            return .allow
+            return .deny(reason: "Unknown content policy action '\(action)'; denying by default.")
         }
     }
 }

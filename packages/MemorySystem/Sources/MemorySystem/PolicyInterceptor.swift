@@ -12,9 +12,15 @@ public protocol PolicyEvaluator: Sendable {
     func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome
 }
 
+/// Result of content policy interception (preserves deny reasons for UI).
+public enum AssistantContentInterceptResult: Equatable, Sendable {
+    case allowed(String)
+    case denied(reason: String)
+}
+
 public protocol PolicyInterceptor: Sendable {
-    func interceptAssistantChunk(_ event: AssistantChunkEvent) async throws -> String?
-    func interceptAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> String?
+    func interceptAssistantChunk(_ event: AssistantChunkEvent) async throws -> AssistantContentInterceptResult
+    func interceptAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> AssistantContentInterceptResult
 }
 
 public struct DefaultPolicyInterceptor: PolicyInterceptor {
@@ -24,43 +30,46 @@ public struct DefaultPolicyInterceptor: PolicyInterceptor {
         self.policy = policy
     }
 
-    public func interceptAssistantChunk(_ event: AssistantChunkEvent) async throws -> String? {
-        guard let policy else { return event.content }
+    public func interceptAssistantChunk(_ event: AssistantChunkEvent) async throws -> AssistantContentInterceptResult {
+        guard let policy else { return .allowed(event.content) }
 
         let outcome = try await policy.evaluateAssistantChunk(event)
         switch outcome {
         case .allow:
-            return event.content
-        case .deny:
-            return nil
+            return .allowed(event.content)
+        case .deny(let reason):
+            return .denied(reason: reason)
         case .redact(let pattern, let replacement):
-            return event.content.replacingOccurrences(
+            let redacted = event.content.replacingOccurrences(
                 of: pattern,
                 with: replacement,
                 options: .regularExpression
             )
+            return .allowed(redacted)
         case .confirm:
-            return event.content
+            // Confirm for content still passes text until dedicated approval UX lands.
+            return .allowed(event.content)
         }
     }
 
-    public func interceptAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> String? {
-        guard let policy else { return event.fullCompletion }
+    public func interceptAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> AssistantContentInterceptResult {
+        guard let policy else { return .allowed(event.fullCompletion) }
 
         let outcome = try await policy.evaluateAssistantCompletion(event)
         switch outcome {
         case .allow:
-            return event.fullCompletion
-        case .deny:
-            return nil
+            return .allowed(event.fullCompletion)
+        case .deny(let reason):
+            return .denied(reason: reason)
         case .redact(let pattern, let replacement):
-            return event.fullCompletion.replacingOccurrences(
+            let redacted = event.fullCompletion.replacingOccurrences(
                 of: pattern,
                 with: replacement,
                 options: .regularExpression
             )
+            return .allowed(redacted)
         case .confirm:
-            return event.fullCompletion
+            return .allowed(event.fullCompletion)
         }
     }
 }

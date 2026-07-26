@@ -83,7 +83,7 @@ final class PolicyInterceptionTests: XCTestCase {
         )
 
         let result = try await interceptor.interceptAssistantChunk(event)
-        XCTAssertEqual(result, "Safe content")
+        XCTAssertEqual(result, .allowed("Safe content"))
     }
 
     func test_defaultPolicyInterceptor_withoutPolicy_passesThrough() async throws {
@@ -95,7 +95,7 @@ final class PolicyInterceptionTests: XCTestCase {
         )
 
         let result = try await interceptor.interceptAssistantChunk(event)
-        XCTAssertEqual(result, "Any content")
+        XCTAssertEqual(result, .allowed("Any content"))
     }
 
     func test_events_are_hashable() {
@@ -173,7 +173,7 @@ final class PolicyInterceptorTests: XCTestCase {
         )
 
         let result = try await interceptor.interceptAssistantChunk(event)
-        XCTAssertEqual(result, "Hello")
+        XCTAssertEqual(result, .allowed("Hello"))
     }
 
     func test_interceptor_denies_with_policy() async throws {
@@ -190,7 +190,7 @@ final class PolicyInterceptorTests: XCTestCase {
         )
 
         let result = try await interceptor.interceptAssistantChunk(event)
-        XCTAssertNil(result)
+        XCTAssertEqual(result, .denied(reason: "Policy violation"))
     }
 
     func test_interceptor_redacts_content() async throws {
@@ -202,6 +202,6 @@ final class PolicyInterceptorTests: XCTestCase {
         )
 
         let result = try await interceptor.interceptAssistantCompletion(event)
-        XCTAssertEqual(result, "Email is test@example.com here")
+        XCTAssertEqual(result, .allowed("Email is test@example.com here"))
     }
 }

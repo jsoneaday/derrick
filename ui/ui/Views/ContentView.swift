@@ -414,8 +414,7 @@ struct ContentView: View {
             do {
                 let repo = try await ConversationModel.makeMemoryStore(
                     applicationName: "ui",
-                    databaseDirectoryURL: databaseDirectoryURL,
-                    seedRules: debugConfiguration.isDebugEnabled
+                    databaseDirectoryURL: databaseDirectoryURL
                 )
                 repository = repo
                 helperModelSettings = LLMModelSettings(repository: repo)

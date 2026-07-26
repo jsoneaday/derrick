@@ -6,6 +6,7 @@ public enum PolicyEventSource: String, Sendable, Codable, Equatable {
     case llmReviewer
     case egressProxy
     case toolGovernance
+    case contentGovernance
     case llmProvider
     /// Privileged helper rejected a process launch (XPC allowlist).
     case xpcValidation
@@ -178,6 +179,38 @@ public enum PolicyUserEventFactory {
             title: "Docker helper rejected request",
             summary: message,
             detail: "The privileged helper blocked a host process that is not on the allowlist.",
+            correlationId: correlationId
+        )
+    }
+
+    public static func toolGovernanceDenied(
+        toolName: String,
+        reason: String,
+        payloadPreview: String? = nil,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .toolGovernance,
+            title: "Tool blocked by policy",
+            summary: reason,
+            detail: "Tool “\(toolName)” was denied by tool governance.",
+            toolName: toolName,
+            payloadPreview: payloadPreview,
+            correlationId: correlationId
+        )
+    }
+
+    public static func contentGovernanceDenied(
+        reason: String,
+        payloadPreview: String? = nil,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .contentGovernance,
+            title: "Content blocked by policy",
+            summary: reason,
+            detail: "Assistant output was denied by content governance.",
+            payloadPreview: payloadPreview,
             correlationId: correlationId
         )
     }

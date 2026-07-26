@@ -5,6 +5,8 @@ import MCPClient
 import MemorySystem
 import PartialJSON
 import Lib
+import AppEvents
+import PolicyUserInteraction
 
 extension ConversationPipeline {
     func streamWithPolicyInterception(
@@ -49,6 +51,7 @@ extension ConversationPipeline {
                         var streamedVisibleContent = false
                         var lastYieldedCompletionLength = 0
                         var lastYieldedThoughtLength = 0
+                        var publishedChunkDenial = false
 
                         upstreamLoop: for try await chunk in upstream {
                             let event = AssistantChunkEvent(
@@ -57,7 +60,23 @@ extension ConversationPipeline {
                                 content: chunk
                             )
 
-                            if let interceptedContent = try await interceptor.interceptAssistantChunk(event) {
+                            switch try await interceptor.interceptAssistantChunk(event) {
+                            case .denied(let reason):
+                                if !publishedChunkDenial {
+                                    publishedChunkDenial = true
+                                    await AppEventBus.shared.publish(
+                                        PolicyUserEventFactory.contentGovernanceDenied(
+                                            reason: reason,
+                                            payloadPreview: String(chunk.prefix(400)),
+                                            correlationId: sessionID
+                                        )
+                                    )
+                                    await MainActor.run {
+                                        debugLog("Chunk blocked by policy: \(reason)")
+                                    }
+                                }
+                                continue upstreamLoop
+                            case .allowed(let interceptedContent):
                                 completion += interceptedContent
                                 chunkIndex += 1
 
@@ -186,15 +205,27 @@ extension ConversationPipeline {
                             fullCompletion: fullCompletion,
                             chunkCount: chunkIndex
                         )
-                        guard let interceptedCompletion = try await interceptor.interceptAssistantCompletion(completionEvent) else {
+                        let completionIntercept = try await interceptor.interceptAssistantCompletion(completionEvent)
+                        if case .denied(let reason) = completionIntercept {
+                            await AppEventBus.shared.publish(
+                                PolicyUserEventFactory.contentGovernanceDenied(
+                                    reason: reason,
+                                    payloadPreview: String(fullCompletion.prefix(800)),
+                                    correlationId: sessionID
+                                )
+                            )
                             await MainActor.run {
-                                debugLog("Completion blocked by policy engine")
+                                debugLog("Completion blocked by policy engine: \(reason)")
                             }
+                            break
+                        }
+                        guard case .allowed(let interceptedCompletion) = completionIntercept else {
                             break
                         }
                         await MainActor.run {
                             debugLog("Completion validated by policy engine")
                         }
+                        _ = interceptedCompletion
                         
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch,
                            round < maxToolRounds

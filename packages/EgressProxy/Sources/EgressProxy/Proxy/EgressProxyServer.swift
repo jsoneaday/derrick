@@ -44,15 +44,16 @@ public actor EgressProxyServer: EgressProxyServing {
     public func start() async throws {
         guard !running else { throw EgressProxyError.alreadyRunning }
 
-        let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-
         let port = NWEndpoint.Port(rawValue: configuredPort)
             ?? NWEndpoint.Port(rawValue: 18_080)!
 
+        // Bind explicitly to listenHost (default 127.0.0.1). Using `on: port` alone
+        // can listen on all interfaces, which would expose the egress proxy on the LAN.
+        let parameters = EgressProxyListenBinding.tcpParameters(host: listenHost, port: port.rawValue)
+
         let listener: NWListener
         do {
-            listener = try NWListener(using: parameters, on: port)
+            listener = try NWListener(using: parameters)
         } catch {
             throw EgressProxyError.listenerFailed(error.localizedDescription)
         }
@@ -97,7 +98,8 @@ public actor EgressProxyServer: EgressProxyServing {
         }
         self.listener = listener
         running = true
-        logger.logInfo("listening on \(listenHost):\(boundPort)")
+        // requiredLocalEndpoint above constrains the bind; log the configured host explicitly.
+        logger.logInfo("listening on \(listenHost):\(boundPort) (requiredLocalEndpoint host=\(listenHost))")
     }
 
     public func stop() async {

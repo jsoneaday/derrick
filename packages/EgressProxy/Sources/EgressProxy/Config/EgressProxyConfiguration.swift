@@ -4,6 +4,8 @@ import Foundation
 /// Edit this file to change allow/deny defaults — not runtime tool args.
 public enum EgressProxyConfiguration: Sendable {
     /// Interface the proxy binds to on the host (helper process).
+    /// Must stay loopback unless you intentionally expose the proxy (not recommended).
+    /// `EgressProxyServer` sets `requiredLocalEndpoint` to this host so it does not bind all interfaces.
     public static let listenHost: String = "127.0.0.1"
 
     /// Fixed port so Docker containers can target `host.docker.internal:<port>`.
