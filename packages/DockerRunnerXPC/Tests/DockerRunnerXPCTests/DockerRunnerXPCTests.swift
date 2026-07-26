@@ -3,21 +3,33 @@ import Testing
 @testable import DockerRunnerXPC
 
 struct DockerRunnerXPCTests {
+    private func request(
+        executable: String = DockerHostLaunch.envExecutablePath,
+        arguments: [String] = DockerHostLaunch.dockerCLIArguments(["version"]),
+        environment: [String: String] = [:],
+        stdin: Data = Data(),
+        timeout: Int = 30
+    ) -> DockerRunRequest {
+        DockerRunRequest(
+            executablePath: executable,
+            arguments: arguments,
+            environment: environment,
+            stdinData: stdin,
+            timeoutSeconds: timeout
+        )
+    }
+
     @Test func requestRoundTripsThroughJSON() throws {
-        let request = DockerRunRequest(
-            executablePath: "/usr/bin/env",
-            arguments: ["docker", "run", "--rm", "image"],
-            environment: ["PATH": "/usr/bin"],
+        let request = DockerHostLaunch.makeRequest(
+            dockerArguments: ["run", "--rm", "image"],
             stdinData: Data("print(1)".utf8),
             timeoutSeconds: 30
         )
         let data = try JSONEncoder().encode(request)
         let decoded = try JSONDecoder().decode(DockerRunRequest.self, from: data)
-        #expect(decoded.executablePath == request.executablePath)
-        #expect(decoded.arguments == request.arguments)
-        #expect(decoded.environment == request.environment)
-        #expect(decoded.stdinData == request.stdinData)
-        #expect(decoded.timeoutSeconds == request.timeoutSeconds)
+        #expect(decoded.executablePath == DockerHostLaunch.envExecutablePath)
+        #expect(decoded.arguments.first == DockerHostLaunch.dockerCommandName)
+        #expect(decoded.stdinData == Data("print(1)".utf8))
     }
 
     @Test func responseRoundTripsThroughJSON() throws {
@@ -37,62 +49,114 @@ struct DockerRunnerXPCTests {
     }
 
     @Test func processAllowlistAcceptsEnvDocker() {
-        let request = DockerRunRequest(
-            executablePath: "/usr/bin/env",
-            arguments: ["docker", "version"],
-            environment: [:],
-            stdinData: Data(),
-            timeoutSeconds: 10
-        )
-        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == nil)
+        #expect(DockerRunRequestValidator.validate(request()) == nil)
     }
 
     @Test func processAllowlistRejectsShell() {
-        let request = DockerRunRequest(
-            executablePath: "/bin/zsh",
-            arguments: ["-c", "echo hi"],
-            environment: [:],
-            stdinData: Data(),
-            timeoutSeconds: 10
-        )
-        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .disallowedExecutable("/bin/zsh"))
+        let r = request(executable: "/bin/zsh", arguments: ["-c", "echo hi"])
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedExecutable("/bin/zsh"))
     }
 
     @Test func processAllowlistRejectsEnvWithoutDocker() {
-        let request = DockerRunRequest(
-            executablePath: "/usr/bin/env",
-            arguments: ["python3", "-c", "print(1)"],
-            environment: [:],
-            stdinData: Data(),
-            timeoutSeconds: 10
-        )
-        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .missingDockerInvocation)
+        let r = request(arguments: ["python3", "-c", "print(1)"])
+        #expect(DockerRunRequestValidator.validate(r) == .missingDockerInvocation)
     }
 
     @Test func processAllowlistRejectsEmptyArgs() {
-        let request = DockerRunRequest(
-            executablePath: "/usr/bin/env",
-            arguments: [],
-            environment: [:],
-            stdinData: Data(),
-            timeoutSeconds: 10
-        )
-        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .missingArguments)
+        let r = request(arguments: [])
+        #expect(DockerRunRequestValidator.validate(r) == .missingArguments)
     }
 
     @Test func processAllowlistRejectsRelativePath() {
-        let request = DockerRunRequest(
-            executablePath: "env",
-            arguments: ["docker"],
-            environment: [:],
-            stdinData: Data(),
-            timeoutSeconds: 10
+        let r = request(executable: "env", arguments: [DockerHostLaunch.dockerCommandName])
+        #expect(DockerRunRequestValidator.validate(r) == .relativeExecutablePath("env"))
+    }
+
+    @Test func rejectsDisallowedDockerSubcommand() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments(["system", "prune", "-af"]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerSubcommand("system"))
+    }
+
+    @Test func rejectsPrivilegedFlag() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "--privileged", "--name", "x", "image"
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("--privileged"))
+    }
+
+    @Test func rejectsHostNetwork() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "--network", "host", "--name", "x", "image"
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("--network=host"))
+    }
+
+    @Test func rejectsHostBindMount() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "-v", "/:/host", "--name", "x", "image"
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedVolumeMount("/:/host"))
+    }
+
+    @Test func acceptsNamedVolumeMount() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "-v", "derrick-pip-cache:/root/.cache", "--name", "x", "image"
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == nil)
+    }
+
+    @Test func acceptsProductSubcommands() {
+        for args in [
+            ["version"],
+            ["volume", "inspect", "derrick-pip-cache"],
+            ["image", "inspect", "img"],
+            ["build", "-t", "img", "-"],
+            ["pull", "img"],
+            ["exec", "-i", "c", "python", "-"],
+            ["start", "c"],
+            ["rm", "-f", "c"],
+            ["inspect", "-f", "{{.State.Running}}", "c"]
+        ] as [[String]] {
+            let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+            #expect(DockerRunRequestValidator.validate(r) == nil, "expected allow for \(args)")
+        }
+    }
+
+    @Test func rejectsTimeoutOutOfRange() {
+        #expect(DockerRunRequestValidator.validate(request(timeout: 0)) == .timeoutOutOfRange(0))
+        #expect(
+            DockerRunRequestValidator.validate(request(timeout: DockerHostLaunch.maxTimeoutSeconds + 1))
+                == .timeoutOutOfRange(DockerHostLaunch.maxTimeoutSeconds + 1)
         )
-        #expect(DockerRunRequestValidator.validateProcessAllowlist(request) == .relativeExecutablePath("env"))
+    }
+
+    @Test func rejectsOversizedStdin() {
+        let big = Data(repeating: 0x41, count: DockerHostLaunch.maxStdinBytes + 1)
+        #expect(DockerRunRequestValidator.validate(request(stdin: big)) == .stdinTooLarge(big.count))
+    }
+
+    @Test func approveUsesHelperEnvironmentIgnoringClient() {
+        let r = request(environment: ["PATH": "/evil", "HOME": "/tmp/evil"])
+        switch DockerRunRequestValidator.approve(r, homeDirectory: "/Users/test", temporaryDirectory: "/tmp") {
+        case .failure(let error):
+            Issue.record("unexpected failure \(error)")
+        case .success(let launch):
+            #expect(launch.environment["PATH"] == DockerHostLaunch.pathEnvironmentValue)
+            #expect(launch.environment["HOME"] == "/Users/test")
+            #expect(launch.environment["DOCKER_HOST"] == "unix:///Users/test/.docker/run/docker.sock")
+            #expect(launch.environment["PATH"] != "/evil")
+            #expect(launch.executablePath == DockerHostLaunch.envExecutablePath)
+        }
     }
 
     @Test func validationErrorUsesStablePrefix() {
         let message = DockerRunRequestValidationError.disallowedExecutable("/bin/sh").launchErrorMessage
         #expect(message.hasPrefix(DockerRunRequestValidationError.launchErrorPrefix))
+    }
+
+    @Test func hostLaunchConstantsAreStable() {
+        #expect(DockerHostLaunch.envExecutablePath == "/usr/bin/env")
+        #expect(DockerHostLaunch.dockerCommandName == "docker")
+        #expect(DockerHostLaunch.dockerCLIArguments(["version"]) == ["docker", "version"])
     }
 }

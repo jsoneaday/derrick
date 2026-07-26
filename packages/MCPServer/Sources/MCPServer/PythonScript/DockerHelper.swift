@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DockerRunnerXPC
 
 /// Utilities for preparing docker run arguments and Python execution scripts.
 /// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
@@ -118,12 +119,9 @@ exec /bin/sleep infinity
     }
 
     /// Minimal environment for docker CLI to locate daemon and config.
+    /// Delegates to `DockerHostLaunch` so PATH and layout stay centralized.
     public static func processEnvironment() -> [String: String] {
-        [
-            "HOME": NSHomeDirectory(),
-            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            "TMPDIR": NSTemporaryDirectory()
-        ]
+        DockerHostLaunch.clientProcessEnvironment()
     }
 
     /// Builds the Python wrapper script that optionally installs *extra* packages and runs user code.
@@ -443,8 +441,10 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
 
         let execStarted = Date()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["docker"] + DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
+        process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
+        process.arguments = DockerHostLaunch.dockerCLIArguments(
+            DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
+        )
         process.environment = DockerScriptPreparer.processEnvironment()
 
         let stdinPipe = Pipe()
@@ -631,8 +631,8 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
 
     private func runDocker(_ args: [String], stdin: Data = Data(), timeoutSeconds: Int) async throws -> LocalDockerResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["docker"] + args
+        process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
+        process.arguments = DockerHostLaunch.dockerCLIArguments(args)
         process.environment = DockerScriptPreparer.processEnvironment()
 
         let stdinPipe = Pipe()

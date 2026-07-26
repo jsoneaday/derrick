@@ -14,20 +14,14 @@ actor TimeoutTracker {
 }
 
 actor ProcessRunner {
-    func run(request: DockerRunRequest, initialLogs: [String]) async -> DockerRunResponse {
+    func run(launch: ApprovedDockerLaunch, initialLogs: [String]) async -> DockerRunResponse {
         var logs = initialLogs
         logs.append("runProcess called inside ProcessRunner actor.")
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: request.executablePath)
-        process.arguments = request.arguments
-
-        var environment = request.environment
-        let homeDir = NSHomeDirectory()
-        environment["HOME"] = homeDir
-        let dockerHost = "unix://" + homeDir + "/.docker/run/docker.sock"
-        environment["DOCKER_HOST"] = dockerHost
-        process.environment = environment
+        process.executableURL = URL(fileURLWithPath: launch.executablePath)
+        process.arguments = launch.arguments
+        process.environment = launch.environment
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -36,7 +30,7 @@ actor ProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let timeoutSeconds = max(request.timeoutSeconds, 1)
+        let timeoutSeconds = launch.timeoutSeconds
         let tracker = TimeoutTracker()
 
         let timeoutTask = Task {
@@ -54,7 +48,7 @@ actor ProcessRunner {
             }
             do {
                 try process.run()
-                stdinPipe.fileHandleForWriting.write(request.stdinData)
+                stdinPipe.fileHandleForWriting.write(launch.stdinData)
                 stdinPipe.fileHandleForWriting.closeFile()
             } catch {
                 launchError = error
@@ -117,10 +111,11 @@ final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Se
                 return
             }
 
-            if let validationError = DockerRunRequestValidator.validateProcessAllowlist(request) {
+            switch DockerRunRequestValidator.approve(request) {
+            case .failure(let validationError):
                 let message = validationError.launchErrorMessage
                 logs.append(message)
-                serviceLogger.error("Process allowlist rejected request: \(message, privacy: .public)")
+                serviceLogger.error("Request validation failed: \(message, privacy: .public)")
                 HelperLogRelay.shared.log(message)
                 let response = DockerRunResponse(
                     stdout: Data(),
@@ -133,11 +128,12 @@ final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Se
                 let replyData = (try? JSONEncoder().encode(response)) ?? Data()
                 reply(replyData as NSData)
                 return
+            case .success(let launch):
+                logs.append("Request approved for docker CLI launch.")
+                let response = await runner.run(launch: launch, initialLogs: logs)
+                let replyData = (try? JSONEncoder().encode(response)) ?? Data()
+                reply(replyData as NSData)
             }
-
-            let response = await runner.run(request: request, initialLogs: logs)
-            let replyData = (try? JSONEncoder().encode(response)) ?? Data()
-            reply(replyData as NSData)
         }
     }
 }
