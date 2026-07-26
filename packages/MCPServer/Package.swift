@@ -15,7 +15,8 @@ let package = Package(
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
         .package(path: "../MCPClient"),
         .package(path: "../LLMAgentClient"),
-        .package(path: "../DockerRunnerXPC")
+        .package(path: "../DockerRunnerXPC"),
+        .package(path: "../MCPToolCatalog")
     ],
     targets: [
         .target(
@@ -24,7 +25,8 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
                 "MCPClient",
                 "LLMAgentClient",
-                "DockerRunnerXPC"
+                "DockerRunnerXPC",
+                "MCPToolCatalog"
             ],
             path: "Sources/MCPServer"
         ),

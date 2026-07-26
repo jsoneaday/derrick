@@ -20,6 +20,9 @@
       location = "group:packages/MCPServer">
    </FileRef>
    <FileRef
+      location = "group:packages/MCPToolCatalog">
+   </FileRef>
+   <FileRef
       location = "group:packages/MemorySystem">
    </FileRef>
    <FileRef

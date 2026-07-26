@@ -3,6 +3,7 @@ import DBRepository
 import LLMAgentClient
 import MCPClient
 import MCPServer
+import MCPToolCatalog
 import MemorySystem
 
 @MainActor
@@ -247,14 +248,6 @@ final class ConversationModel {
             ),
             PolicyRule(
                 applicationName: applicationName,
-                name: "confirm-write-tools",
-                scope: "tool_invocation",
-                matcherJSON: #"{"tool_name_contains":"write"}"#,
-                outcomeJSON: #"{"action":"confirm","required_fields":["change_ticket","justification"]}"#,
-                priority: 900
-            ),
-            PolicyRule(
-                applicationName: applicationName,
                 name: "redact-api-key-chunks",
                 scope: "assistant_chunk",
                 matcherJSON: #"{"content_pattern":"(?i)api[_ -]?key\s*[:=]\s*\S+"}"#,
@@ -277,15 +270,17 @@ final class ConversationModel {
                 outcomeJSON: #"{"action":"deny","reason":"SSN-like patterns are blocked."}"#,
                 priority: 950
             ),
-            // Explicit low-priority allows (deny-by-default requires a matching allow rule).
+            // Explicit allows for each catalog MCP tool (deny-by-default; no catch-all).
+        ] + AllowedMCPTool.allCases.map { tool in
             PolicyRule(
                 applicationName: applicationName,
-                name: "allow-default-tools",
+                name: "allow-\(tool.rawValue)",
                 scope: "tool_invocation",
-                matcherJSON: #"{}"#,
+                matcherJSON: #"{"tool_name":"\#(tool.rawValue)"}"#,
                 outcomeJSON: #"{"action":"allow"}"#,
                 priority: 1
-            ),
+            )
+        } + [
             PolicyRule(
                 applicationName: applicationName,
                 name: "allow-default-assistant-chunks",

@@ -17,6 +17,7 @@
 		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
+		DED0C0122A0000000042F240 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0112A0000000042F240 /* MCPToolCatalog */; };
 		DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
 		DEE6B0013010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0023010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
@@ -102,6 +103,7 @@
 				DE1B9F382FEB7AE80042F227 /* DBRepository in Frameworks */,
 				DE5073392FF6FCA600D95676 /* MCPClient in Frameworks */,
 				DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */,
+				DED0C0122A0000000042F240 /* MCPToolCatalog in Frameworks */,
 				DEAE00013010000000AE001 /* AppEvents in Frameworks */,
 				DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */,
 			);
@@ -179,6 +181,7 @@
 				DECF6280300ED94C00E1757D /* Plugin */,
 				DECF6283300ED9AC00E1757D /* Plugin */,
 				DED0C0022A0000000042F230 /* DockerRunnerXPC */,
+				DED0C0112A0000000042F240 /* MCPToolCatalog */,
 				DEAE00023010000000AE001 /* AppEvents */,
 				DEAE00043010000000AE001 /* PolicyUserInteraction */,
 			);
@@ -290,6 +293,7 @@
 				DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */,
 				DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */,
 				DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */,
+				DED0C0102A0000000042F240 /* XCLocalSwiftPackageReference "../packages/MCPToolCatalog" */,
 				DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */,
 				DEAE00063010000000AE001 /* XCLocalSwiftPackageReference "../packages/PolicyUserInteraction" */,
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
@@ -758,6 +762,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/DockerRunnerXPC;
 		};
+		DED0C0102A0000000042F240 /* XCLocalSwiftPackageReference "../packages/MCPToolCatalog" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/MCPToolCatalog;
+		};
 		DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/EgressProxy;
@@ -815,6 +823,10 @@
 		DED0C0022A0000000042F230 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DockerRunnerXPC;
+		};
+		DED0C0112A0000000042F240 /* MCPToolCatalog */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPToolCatalog;
 		};
 		DED0C0032A0000000042F230 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;

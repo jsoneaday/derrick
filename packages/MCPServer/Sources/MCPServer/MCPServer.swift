@@ -1,6 +1,7 @@
 import Foundation
 import MCP
 import MCPClient
+import MCPToolCatalog
 
 #if canImport(System)
 import System
@@ -15,7 +16,27 @@ public actor MCPToolRegistry {
 
     public init() {}
 
-    public func register(name: String, description: String, inputSchema: Value = .object([:]), handler: @escaping Handler) {
+    /// Registers a catalog tool (preferred public path).
+    public func register(
+        tool: AllowedMCPTool,
+        description: String,
+        inputSchema: Value = .object([:]),
+        handler: @escaping Handler
+    ) {
+        handlers[tool.rawValue] = (description, inputSchema, handler)
+    }
+
+    public func register(_ registration: MCPToolRegistration) {
+        register(
+            tool: registration.tool,
+            description: registration.description,
+            inputSchema: registration.inputSchema,
+            handler: registration.handler
+        )
+    }
+
+    /// Test / meta-tool escape hatch. Prefer `AllowedMCPTool` for product tools.
+    func registerRaw(name: String, description: String, inputSchema: Value = .object([:]), handler: @escaping Handler) {
         handlers[name] = (description, inputSchema, handler)
     }
 
@@ -94,7 +115,7 @@ public struct SessionMemorySearchArguments: Sendable {
     }
 }
 
-public final class MCPServerHost: @unchecked Sendable {
+public final class MCPServerHost: MCPToolRegistering, @unchecked Sendable {
     private let server: Server
     private let registry: MCPToolRegistry
 
@@ -107,13 +128,32 @@ public final class MCPServerHost: @unchecked Sendable {
         )
     }
 
-    public func registerTool(
-        name: String,
+    public func register(_ registration: MCPToolRegistration) async {
+        await registry.register(registration)
+    }
+
+    public func register(
+        tool: AllowedMCPTool,
         description: String,
         inputSchema: Value = .object([:]),
         handler: @escaping MCPToolRegistry.Handler
     ) async {
-        await registry.register(name: name, description: description, inputSchema: inputSchema, handler: handler)
+        await registry.register(
+            tool: tool,
+            description: description,
+            inputSchema: inputSchema,
+            handler: handler
+        )
+    }
+
+    /// Preferred name for catalog registration (alias of `register(tool:…)`).
+    public func registerTool(
+        tool: AllowedMCPTool,
+        description: String,
+        inputSchema: Value = .object([:]),
+        handler: @escaping MCPToolRegistry.Handler
+    ) async {
+        await register(tool: tool, description: description, inputSchema: inputSchema, handler: handler)
     }
 
     public func searchRegisteredTools(matching query: String) async -> [MCPToolDescriptor] {
@@ -125,40 +165,10 @@ public final class MCPServerHost: @unchecked Sendable {
     }
 
     public func registerSessionMemorySearchTool(
-        description: String = "Search prior session memory entries with optional query and paging.",
+        description: String? = nil,
         handler: @escaping @Sendable (SessionMemorySearchArguments) async throws -> String
     ) async {
-        await registry.register(
-            name: "session_memory_search",
-            description: description,
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "query": .object([
-                        "type": .string("string"),
-                        "description": .string("Optional search text for matching prior memory entries.")
-                    ]),
-                    "limit": .object([
-                        "type": .string("number"),
-                        "description": .string("Number of prior entries to return per page.")
-                    ]),
-                    "page": .object([
-                        "type": .string("number"),
-                        "description": .string("Page number, starting at 1.")
-                    ])
-                ]),
-                "required": .array([.string("limit"), .string("page")])
-            ])
-        ) { arguments in
-            let data = try JSONEncoder().encode(arguments)
-            let payload = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-            let searchArguments = SessionMemorySearchArguments(
-                query: payload["query"] as? String,
-                limit: Self.integerValue(from: payload["limit"]) ?? 10,
-                page: Self.integerValue(from: payload["page"]) ?? 1
-            )
-            return try await handler(searchArguments)
-        }
+        await register(SessionMemorySearchToolModule.makeRegistration(description: description, handler: handler))
     }
 
     public func start(transport: any Transport) async throws {

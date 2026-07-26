@@ -12,13 +12,15 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0")
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        .package(path: "../MCPToolCatalog")
     ],
     targets: [
         .target(
             name: "MCPClient",
             dependencies: [
-                .product(name: "MCP", package: "swift-sdk")
+                .product(name: "MCP", package: "swift-sdk"),
+                "MCPToolCatalog"
             ],
             path: "Sources/MCPClient"
         ),

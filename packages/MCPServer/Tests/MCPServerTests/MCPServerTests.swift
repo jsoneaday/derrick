@@ -60,7 +60,7 @@ import MCPClient
 
     @Test func registrySearchMatchesToolName() async throws {
         let registry = MCPToolRegistry()
-        await registry.register(name: "tool_search", description: "Search tools") { _ in "ok" }
+        await registry.registerRaw(name: "tool_search", description: "Search tools") { _ in "ok" }
 
         let results = await registry.search(matching: "search")
 
@@ -69,8 +69,8 @@ import MCPClient
 
     @Test func batchCallAggregatesResults() async throws {
         let registry = MCPToolRegistry()
-        await registry.register(name: "tool_one", description: "First tool") { _ in "alpha" }
-        await registry.register(name: "tool_two", description: "Second tool") { _ in "beta" }
+        await registry.registerRaw(name: "tool_one", description: "First tool") { _ in "alpha" }
+        await registry.registerRaw(name: "tool_two", description: "Second tool") { _ in "beta" }
 
         let result = await registry.batchCall(
             MCPToolBatchRequest(

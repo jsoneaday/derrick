@@ -1,6 +1,7 @@
 import Foundation
 import LLMAgentClient
 import MCP
+import MCPToolCatalog
 
 public struct PythonScriptExecutionArguments: Sendable {
     public enum Mode: String, Sendable {
@@ -499,84 +500,29 @@ public enum PythonScriptExecutionVerifier {
 
 public extension MCPServerHost {
     func registerPythonScriptExecutionTool(
-        name: String = "python_script_exec",
-        description: String = "Run declared Python script in a constrained Docker container after verification.",
+        description: String? = nil,
         runner: any PythonScriptRunner = DockerPythonScriptRunner(),
         reviewer: (any PythonScriptReviewer)? = GeminiPythonScriptReviewer.fromEnvironment(),
         logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async {
-        await registryRegisterPythonTool(
-            name: name,
-            description: description,
-            runner: runner,
-            reviewer: reviewer,
-            logger: logger
+        await register(
+            PythonScriptExecutionToolModule.makeRegistration(
+                description: description,
+                runner: runner,
+                reviewer: reviewer,
+                logger: logger
+            )
         )
     }
 
-    private func registryRegisterPythonTool(
-        name: String,
-        description: String,
+    /// Shared execution body used by `PythonScriptExecutionToolModule` (keeps parse/verify helpers on host).
+    static func runPythonScriptToolBody(
+        arguments: [String: Value],
         runner: any PythonScriptRunner,
         reviewer: (any PythonScriptReviewer)?,
-        logger: @escaping @Sendable (String) -> Void
-    ) async {
-        let inputSchema: Value = .object([
-            "type": .string("object"),
-            "properties": .object([
-                "mode": .object([
-                    "type": .string("string"),
-                    "enum": .array([.string("readonly"), .string("write")]),
-                    "description": .string("Execution mode declaration. readonly forbids write-like behavior.")
-                ]),
-                "description": .object([
-                    "type": .string("string"),
-                    "description": .string("Human description of what the script does.")
-                ]),
-                "reason": .object([
-                    "type": .string("string"),
-                    "description": .string("Why this script is needed.")
-                ]),
-                "script": .object([
-                    "type": .string("string"),
-                    "description": .string("Python script source code.")
-                ]),
-                "user_prompt": .object([
-                    "type": .string("string"),
-                    "description": .string("Original user prompt to validate relevance.")
-                ]),
-                "expected_effects": .object([
-                    "type": .string("array"),
-                    "items": .object(["type": .string("string")]),
-                    "description": .string("Declared intended effects (required for write mode).")
-                ]),
-                "python_packages": .object([
-                    "type": .string("array"),
-                    "items": .object(["type": .string("string")]),
-                    "description": .string("Optional dependency names (PyPI packages). Baseline packages are curated and can be installed without allow_dependency_install.")
-                ]),
-                "allow_dependency_install": .object([
-                    "type": .string("boolean"),
-                    "description": .string("Allow per-run pip install of non-baseline packages. Requires allow_network=true.")
-                ]),
-                "timeout_seconds": .object([
-                    "type": .string("number"),
-                    "description": .string("Execution timeout in seconds (1...300).")
-                ]),
-                "allow_network": .object([
-                    "type": .string("boolean"),
-                    "description": .string("Enable container network access when the user request requires fetching live/current web data or installing packages.")
-                ])
-            ]),
-            "required": .array([.string("mode"), .string("allow_network"), .string("description"), .string("reason"), .string("script")])
-        ])
-
-        await registerTool(
-            name: name,
-            description: description,
-            inputSchema: inputSchema
-        ) { arguments in
-            let toolStarted = Date()
+        logger: @escaping @Sendable (String) -> Void,
+        toolStarted: Date
+    ) async throws -> String {
             let parsed = try Self.parsePythonScriptExecutionArguments(arguments)
             let scriptMetrics = PythonScriptPhaseTiming.scriptMetrics(parsed.script)
             logger(
@@ -697,7 +643,6 @@ public extension MCPServerHost {
                 phaseTiming: phaseTiming
             )
             return Self.encodeJSON(result)
-        }
     }
 
     private static func parsePythonScriptExecutionArguments(_ arguments: [String: Value]) throws -> PythonScriptExecutionArguments {
