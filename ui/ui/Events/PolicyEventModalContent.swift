@@ -11,6 +11,8 @@ enum ModalChrome {
             return "exclamationmark.circle"
         case .approvalRequired:
             return "checkmark.shield"
+        case .networkAccessRequest:
+            return "network"
         case .notice:
             return "info.circle"
         }
@@ -25,7 +27,7 @@ enum ModalChrome {
         case .failure:
             // Warm amber, lower saturation than system orange-on-fill.
             return Color(red: 0.72, green: 0.48, blue: 0.18)
-        case .approvalRequired:
+        case .approvalRequired, .networkAccessRequest:
             // Deep slate-blue used by sidebar brand, not system accent blue.
             return Color(red: 0.176, green: 0.286, blue: 0.576)
         case .notice:
@@ -107,6 +109,8 @@ struct PolicyEventModalFooter: View {
     let event: PolicyUserEvent
     let onDismiss: () -> Void
     let onApprove: () -> Void
+    let onApproveOnce: () -> Void
+    let onApproveAlways: () -> Void
     let onDeny: () -> Void
 
     var body: some View {
@@ -122,6 +126,15 @@ struct PolicyEventModalFooter: View {
                     .buttonStyle(ModalSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Allow", action: onApprove)
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            case .networkAccessRequest:
+                Button("Deny", action: onDeny)
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Allow once", action: onApproveOnce)
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                Button("Always", action: onApproveAlways)
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }

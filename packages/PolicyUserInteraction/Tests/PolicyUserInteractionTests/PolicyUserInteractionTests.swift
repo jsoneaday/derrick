@@ -45,6 +45,14 @@ import AppEvents
         #expect(event.detail?.contains("reactjs.org") == true)
     }
 
+    @Test func factoryBuildsEgressAccessRequest() {
+        let event = PolicyUserEventFactory.egressAccessRequest(host: "api.reactjs.org")
+        #expect(event.kind == .networkAccessRequest)
+        #expect(event.source == .egressProxy)
+        #expect(event.summary.contains("api.reactjs.org"))
+        #expect(event.detail?.contains("reactjs.org") == true)
+    }
+
     @Test func approvalRequiredIsDecisionRequesting() async {
         let bus = AppEventBus()
         let event = PolicyUserEventFactory.approvalRequired(

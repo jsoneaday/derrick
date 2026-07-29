@@ -566,11 +566,15 @@ public enum PythonScriptExecutionVerifier {
     }
 }
 
+/// Optional pre-run network gate (app-owned). Returns encoded blocked tool JSON, or nil to proceed.
+public typealias PythonScriptNetworkPreflight = @Sendable (_ script: String, _ allowNetwork: Bool) async -> String?
+
 public extension MCPServerHost {
     func registerPythonScriptExecutionTool(
         description: String? = nil,
         runner: any PythonScriptRunner = DockerPythonScriptRunner(),
         reviewer: (any PythonScriptReviewer)? = GeminiPythonScriptReviewer.fromEnvironment(),
+        networkPreflight: PythonScriptNetworkPreflight? = nil,
         logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async {
         await register(
@@ -578,6 +582,7 @@ public extension MCPServerHost {
                 description: description,
                 runner: runner,
                 reviewer: reviewer,
+                networkPreflight: networkPreflight,
                 logger: logger
             )
         )
@@ -588,6 +593,7 @@ public extension MCPServerHost {
         arguments: [String: Value],
         runner: any PythonScriptRunner,
         reviewer: (any PythonScriptReviewer)?,
+        networkPreflight: PythonScriptNetworkPreflight? = nil,
         logger: @escaping @Sendable (String) -> Void,
         toolStarted: Date
     ) async throws -> String {
@@ -684,6 +690,13 @@ public extension MCPServerHost {
                     phaseTiming: phaseTiming
                 )
                 return Self.encodeJSON(denied)
+            }
+
+            // Egress preflight (app-provided): unknown hosts prompt; any Deny aborts before Docker run.
+            if let networkPreflight,
+               let blockedJSON = await networkPreflight(parsed.script, parsed.allowNetwork) {
+                logger("[python_script_exec] blocked by egress preflight")
+                return blockedJSON
             }
 
             var result = try await runner.run(

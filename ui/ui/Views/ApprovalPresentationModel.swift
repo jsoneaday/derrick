@@ -27,7 +27,8 @@ final class ApprovalPresentationModel: ObservableObject, ApprovalConfirmationPre
         debugLog("[policy-ui] requesting approval for tool=\(request.toolName)")
         let decision = await AppEventBus.shared.initDecision(event)
         switch decision {
-        case .approved(let actor):
+        case .approved(let actor), .approvedOnce(let actor), .approvedPermanently(let actor):
+            // Tool confirm only has Allow/Deny; once/always map to allow if ever used.
             return .approved(editedArgumentsJSON: request.argumentsJSON, actor: actor)
         case .denied(let actor):
             return .cancelled(actor: actor)

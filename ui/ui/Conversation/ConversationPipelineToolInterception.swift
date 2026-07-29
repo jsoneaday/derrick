@@ -229,10 +229,13 @@ extension ConversationPipeline {
         case .timeout:
             event = PolicyUserEventFactory.scriptExecutionTimedOut(toolName: toolName)
         case .egress:
-            let detail = [payload.stderr, payload.stdout]
+            let detailFromIO = [payload.stderr, payload.stdout]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
+            let detail = detailFromIO.isEmpty
+                ? payload.validationFindings.joined(separator: "\n")
+                : detailFromIO
             event = PolicyUserEventFactory.egressDenied(detail: detail, toolName: toolName)
         }
 

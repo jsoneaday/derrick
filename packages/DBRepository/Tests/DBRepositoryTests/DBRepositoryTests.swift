@@ -63,12 +63,52 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
         XCTAssertTrue(try tableExists(named: "memory_records", at: url))
+        XCTAssertTrue(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
 
         XCTAssertEqual(try schemaVersion(at: url), 0)
         XCTAssertFalse(try tableExists(named: "memory_sessions", at: url))
         XCTAssertFalse(try tableExists(named: "memory_records", at: url))
+        XCTAssertFalse(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
+    }
+
+    func testEgressAllowlistSeedAndCRUD() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let inserted = try await repository.seedEgressAllowedDomainSuffixesIfNeeded(
+            ["github.com", "pypi.org"],
+            source: "seed"
+        )
+        XCTAssertEqual(inserted, 2)
+        let again = try await repository.seedEgressAllowedDomainSuffixesIfNeeded(
+            ["github.com", "pypi.org"],
+            source: "seed"
+        )
+        XCTAssertEqual(again, 0)
+
+        try await repository.saveEgressAllowedDomainSuffix(
+            EgressAllowedDomainSuffix(suffix: "reactjs.org", source: "user")
+        )
+        let rows = try await repository.loadEgressAllowedDomainSuffixes()
+        XCTAssertTrue(rows.map(\.suffix).contains("reactjs.org"))
+        XCTAssertTrue(rows.map(\.suffix).contains("github.com"))
+
+        try await repository.deleteEgressAllowedDomainSuffix(suffix: "reactjs.org")
+        let after = try await repository.loadEgressAllowedDomainSuffixes()
+        XCTAssertFalse(after.map(\.suffix).contains("reactjs.org"))
     }
 
     func testSearchPriorReturnsNewestMatchingPastSessionsOnly() async throws {

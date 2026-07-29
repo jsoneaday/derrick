@@ -12,6 +12,7 @@ private struct StaticDNSResolver: DNSResolving {
 @Suite struct EgressProxyTests {
     @Test func allowsGithubAPIWithPublicResolution() async {
         let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: EgressProxyConfiguration.defaultSeedDomainSuffixes,
             resolver: StaticDNSResolver(addresses: [
                 "api.github.com": ["140.82.112.6"]
             ])
@@ -22,6 +23,7 @@ private struct StaticDNSResolver: DNSResolving {
 
     @Test func deniesNonAllowlistedHost() async {
         let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: EgressProxyConfiguration.defaultSeedDomainSuffixes,
             resolver: StaticDNSResolver(addresses: [
                 "evil.example": ["93.184.216.34"]
             ])
@@ -35,7 +37,7 @@ private struct StaticDNSResolver: DNSResolving {
     }
 
     @Test func deniesHostDockerInternal() async {
-        let policy = DefaultDestinationPolicy()
+        let policy = DefaultDestinationPolicy(allowedDomainSuffixes: EgressProxyConfiguration.defaultSeedDomainSuffixes)
         let decision = await policy.evaluate(destination: ProxyDestination(host: "host.docker.internal", port: 8080))
         guard case .deny(let reason) = decision else {
             Issue.record("expected deny")
@@ -45,7 +47,7 @@ private struct StaticDNSResolver: DNSResolving {
     }
 
     @Test func deniesPrivateIPv4Literal() async {
-        let policy = DefaultDestinationPolicy()
+        let policy = DefaultDestinationPolicy(allowedDomainSuffixes: EgressProxyConfiguration.defaultSeedDomainSuffixes)
         let decision = await policy.evaluate(destination: ProxyDestination(host: "192.168.1.10", port: 80))
         guard case .deny(let reason) = decision else {
             Issue.record("expected deny")
@@ -56,6 +58,7 @@ private struct StaticDNSResolver: DNSResolving {
 
     @Test func deniesAllowlistedHostResolvingToPrivateIP() async {
         let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: EgressProxyConfiguration.defaultSeedDomainSuffixes,
             resolver: StaticDNSResolver(addresses: [
                 "api.github.com": ["10.0.0.5"]
             ])
@@ -66,6 +69,34 @@ private struct StaticDNSResolver: DNSResolving {
             return
         }
         #expect(reason.contains("blocked IPv4"))
+    }
+
+    @Test func sessionGrantAllowsExactHost() async {
+        let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            resolver: StaticDNSResolver(addresses: [
+                "reactjs.org": ["93.184.216.34"]
+            ])
+        )
+        policy.grantSessionHosts(["reactjs.org"])
+        let decision = await policy.evaluate(destination: ProxyDestination(host: "reactjs.org", port: 443))
+        #expect(decision == .allow)
+    }
+
+    @Test func extractHostsFromScript() {
+        let script = """
+        import requests
+        r = requests.get("https://api.github.com/repos/facebook/react/releases/latest")
+        s = requests.get('https://reactjs.org/docs')
+        """
+        let hosts = EgressHostExtractor.extractHosts(from: script)
+        #expect(hosts.contains("api.github.com"))
+        #expect(hosts.contains("reactjs.org"))
+    }
+
+    @Test func permanentSuffixUsesLastTwoLabels() {
+        #expect(EgressHostExtractor.permanentSuffix(for: "api.github.com") == "github.com")
+        #expect(EgressHostExtractor.permanentSuffix(for: "reactjs.org") == "reactjs.org")
     }
 
     @Test func configurationExposesContainerProxyURL() {

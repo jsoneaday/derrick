@@ -180,8 +180,14 @@ final class ConversationModel {
     ) async throws -> MCPLocalBridge {
         return try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
-                runner: XPCDockerRunner(),
+                runner: XPCDockerRunner.shared,
                 reviewer: ConfiguredPythonScriptReviewer(settings: helperModelSettings),
+                networkPreflight: { script, allowNetwork in
+                    await EgressAllowlistService.shared.preflightPythonScriptNetwork(
+                        script: script,
+                        allowNetwork: allowNetwork
+                    )
+                },
                 logger: { message in debugLog(message) }
             )
             await server.registerSessionMemorySearchTool { arguments in

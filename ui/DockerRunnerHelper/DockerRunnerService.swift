@@ -136,4 +136,36 @@ final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Se
             }
         }
     }
+
+    nonisolated func setEgressAllowedDomainSuffixes(
+        suffixesJSON: NSData,
+        withReply reply: @escaping @Sendable (Bool) -> Void
+    ) {
+        do {
+            let suffixes = try JSONDecoder().decode([String].self, from: suffixesJSON as Data)
+            EgressProxyBootstrap.setAllowedDomainSuffixes(suffixes)
+            reply(true)
+        } catch {
+            HelperLogRelay.shared.log(
+                "Failed to decode egress allowlist: \(error.localizedDescription)"
+            )
+            reply(false)
+        }
+    }
+
+    nonisolated func grantEgressSessionHosts(
+        hostsJSON: NSData,
+        withReply reply: @escaping @Sendable (Bool) -> Void
+    ) {
+        do {
+            let hosts = try JSONDecoder().decode([String].self, from: hostsJSON as Data)
+            EgressProxyBootstrap.grantSessionHosts(hosts)
+            reply(true)
+        } catch {
+            HelperLogRelay.shared.log(
+                "Failed to decode egress session hosts: \(error.localizedDescription)"
+            )
+            reply(false)
+        }
+    }
 }

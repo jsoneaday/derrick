@@ -63,7 +63,7 @@ final class PolicyEventPresenter: ObservableObject {
         isPresented = true
         debugLog("[policy-ui] present kind=\(next.kind.rawValue) source=\(next.source.rawValue) title=\(next.title)")
 
-        if next.kind == .approvalRequired {
+        if next.kind == .approvalRequired || next.kind == .networkAccessRequest {
             let eventID = next.id
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
@@ -84,6 +84,14 @@ final class PolicyEventPresenter: ObservableObject {
         finish(decision: .approved(actor: actor))
     }
 
+    func approveOnce(actor: String? = "ui-user") {
+        finish(decision: .approvedOnce(actor: actor))
+    }
+
+    func approveAlways(actor: String? = "ui-user") {
+        finish(decision: .approvedPermanently(actor: actor))
+    }
+
     func deny(actor: String? = "ui-user") {
         finish(decision: .denied(actor: actor))
     }
@@ -99,7 +107,7 @@ final class PolicyEventPresenter: ObservableObject {
         isProcessing = false
         debugLog("[policy-ui] decision=\(String(describing: decision)) for \(eventID)")
 
-        if kind == .approvalRequired {
+        if kind == .approvalRequired || kind == .networkAccessRequest {
             Task {
                 await bus.completeDecision(id: eventID, decision: decision)
             }

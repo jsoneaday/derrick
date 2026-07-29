@@ -3,8 +3,11 @@ import EgressProxy
 
 /// Starts the local egress proxy inside the privileged helper and relays logs to the app.
 enum EgressProxyBootstrap {
+    /// Shared policy instance so XPC can update the allowlist at runtime.
+    static let policy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
+
     private static let server = EgressProxyServer(
-        policy: DefaultDestinationPolicy(),
+        policy: policy,
         logger: MultiplexEgressProxyLogger(sinks: [
             OSLogEgressProxyLogger(subsystem: "derrick.ui.DockerRunnerHelper", category: "EgressProxy"),
             CallbackEgressProxyLogger { message in
@@ -30,5 +33,19 @@ enum EgressProxyBootstrap {
                 )
             }
         }
+    }
+
+    static func setAllowedDomainSuffixes(_ suffixes: [String]) {
+        policy.setAllowedDomainSuffixes(suffixes)
+        HelperLogRelay.shared.log(
+            "EgressProxy allowlist updated (\(suffixes.count) suffix(es))"
+        )
+    }
+
+    static func grantSessionHosts(_ hosts: [String]) {
+        policy.grantSessionHosts(hosts)
+        HelperLogRelay.shared.log(
+            "EgressProxy session grants: \(hosts.joined(separator: ", "))"
+        )
     }
 }

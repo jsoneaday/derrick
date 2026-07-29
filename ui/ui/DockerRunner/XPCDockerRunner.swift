@@ -38,6 +38,8 @@ public final class XPCDockerRunnerState: @unchecked Sendable {
 /// PythonScriptRunner that delegates docker execution to the DockerRunnerHelper XPC service.
 /// The XPC service runs outside the app sandbox and has full access to the Docker socket.
 public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
+    public static let shared = XPCDockerRunner()
+
     private static let serviceName = "derrick.ui.DockerRunnerHelper"
     private let connection: NSXPCConnection
     private let appLogSink: XPCAppLogSink
@@ -141,6 +143,47 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("[xpc-validation] \(launchError)")
         let event = PolicyUserEventFactory.xpcValidationFailure(message: launchError)
         await AppEventBus.shared.publish(event)
+    }
+
+    /// Pushes permanent domain suffixes into the helper egress proxy.
+    public func pushEgressAllowedDomainSuffixes(_ suffixes: [String]) async {
+        guard let data = try? JSONEncoder().encode(suffixes) else {
+            debugLog("Failed to encode egress allowlist for helper.")
+            return
+        }
+        let ok: Bool = await withCheckedContinuation { continuation in
+            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                debugLog("XPC egress allowlist push failed: \(error.localizedDescription)")
+                continuation.resume(returning: false)
+            }
+            guard let service = proxy as? any DockerProcessRunnerXPC else {
+                continuation.resume(returning: false)
+                return
+            }
+            service.setEgressAllowedDomainSuffixes(suffixesJSON: data as NSData) { success in
+                continuation.resume(returning: success)
+            }
+        }
+        debugLog("Pushed egress allowlist to helper (ok=\(ok), count=\(suffixes.count))")
+    }
+
+    /// Session-only host grants (Allow once) for the helper egress proxy.
+    public func grantEgressSessionHosts(_ hosts: [String]) async {
+        guard !hosts.isEmpty, let data = try? JSONEncoder().encode(hosts) else { return }
+        let ok: Bool = await withCheckedContinuation { continuation in
+            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                debugLog("XPC egress session grant failed: \(error.localizedDescription)")
+                continuation.resume(returning: false)
+            }
+            guard let service = proxy as? any DockerProcessRunnerXPC else {
+                continuation.resume(returning: false)
+                return
+            }
+            service.grantEgressSessionHosts(hostsJSON: data as NSData) { success in
+                continuation.resume(returning: success)
+            }
+        }
+        debugLog("Pushed egress session hosts to helper (ok=\(ok), hosts=\(hosts.joined(separator: ",")))")
     }
 
     private func ensureVolume(_ name: String) async throws {

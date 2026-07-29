@@ -241,7 +241,7 @@ struct ContentView: View {
 
     @State private var repository: DBRepository?
     @State private var conversation: ConversationModel?
-    @State private var prompt = "Tell me about the latest reactjs release"
+    @State private var prompt = "search amazon.com and give me a list of the top 10 bicycles being sold"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -302,7 +302,9 @@ struct ContentView: View {
             maxWidth: 460,
             maxHeight: 360,
             onBackdropDismiss: {
-                if let event = policyEventPresenter.activeEvent, event.kind != .approvalRequired {
+                if let event = policyEventPresenter.activeEvent,
+                   event.kind != .approvalRequired,
+                   event.kind != .networkAccessRequest {
                     policyEventPresenter.dismissNotice()
                 }
             },
@@ -322,6 +324,8 @@ struct ContentView: View {
                         event: event,
                         onDismiss: { policyEventPresenter.dismissNotice() },
                         onApprove: { policyEventPresenter.approve() },
+                        onApproveOnce: { policyEventPresenter.approveOnce() },
+                        onApproveAlways: { policyEventPresenter.approveAlways() },
                         onDeny: { policyEventPresenter.deny() }
                     )
                 }
@@ -419,11 +423,14 @@ struct ContentView: View {
                 repository = repo
                 helperModelSettings = LLMModelSettings(repository: repo)
                 await helperModelSettings?.loadSettings()
-                
+                await EgressAllowlistService.shared.configure(repository: repo)
+
                 conversation = try await ConversationModel.makeDefault(
                     repository: repo,
                     helperModelSettings: helperModelSettings!
                 )
+                // Helper connection is up via XPCDockerRunner.shared; re-push allowlist.
+                await EgressAllowlistService.shared.pushToHelper()
                 // XPCDockerRunner starts Docker prewarm; bootstrap modal continues until that finishes.
                 await MainActor.run {
                     bootstrapStatus.update(

@@ -20,11 +20,11 @@ public enum EgressProxyConfiguration: Sendable {
     /// Connect timeout to upstream (seconds).
     public static let upstreamConnectTimeoutSeconds: TimeInterval = 15
 
-    /// Public hostnames permitted when network is enabled (suffix match).
-    /// Example: `github.com` also matches `api.github.com`.
-    public static let allowedDomainSuffixes: [String] = [
+    /// Default suffixes seeded into the app DB on first launch.
+    /// Live allow decisions use the DB-backed list pushed into the helper — not this array at request time.
+    public static let defaultSeedDomainSuffixes: [String] = [
         "github.com",
-        "githubusercontent.com",
+        "githubusercontent.com",    
         "npmjs.org",
         "npmjs.com",
         "registry.npmjs.org",

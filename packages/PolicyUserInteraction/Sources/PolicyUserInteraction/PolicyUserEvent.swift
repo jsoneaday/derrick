@@ -20,11 +20,17 @@ public enum PolicyEventKind: String, Sendable, Codable, Equatable {
     case failure
     /// Needs explicit approve / deny before waiter continues.
     case approvalRequired
+    /// Network host access: Allow once / Always / Deny.
+    case networkAccessRequest
 }
 
 public enum PolicyUserDecision: Sendable, Equatable {
     case dismissed
     case approved(actor: String?)
+    /// Session-only allow (egress “Allow once”).
+    case approvedOnce(actor: String?)
+    /// Permanent allow (egress “Always”).
+    case approvedPermanently(actor: String?)
     case denied(actor: String?)
     case timedOut
 }
@@ -205,6 +211,25 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func egressAccessRequest(
+        host: String,
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        let suffix = permanentSuffixLabel(for: host)
+        return PolicyUserEvent(
+            priority: .userDecision,
+            correlationId: correlationId,
+            kind: .networkAccessRequest,
+            source: .egressProxy,
+            title: "Network access",
+            summary: "Allow this script to reach “\(host)”?",
+            detail: "Deny cancels the entire script run. Always saves “\(suffix)” for future runs.",
+            toolName: toolName,
+            rememberKey: "egress.suffix:\(host.lowercased())"
+        )
+    }
+
     public static func llmProviderFailure(
         title: String,
         message: String,
@@ -261,5 +286,12 @@ public enum PolicyUserEventFactory {
             payloadPreview: payloadPreview,
             correlationId: correlationId
         )
+    }
+
+    private static func permanentSuffixLabel(for host: String) -> String {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let parts = normalized.split(separator: ".").map(String.init)
+        guard parts.count >= 2 else { return normalized }
+        return parts.suffix(2).joined(separator: ".")
     }
 }

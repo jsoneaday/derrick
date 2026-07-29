@@ -25,7 +25,6 @@ extension ConversationPipeline {
                     var workingPrompt = prompt
                     var aggregatedToolCalls = toolCalls
                     let maxToolRounds = 3
-                    let requiresCurrentInformation = Self.promptAskingForCurrentInfo(prompt)
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
 
@@ -155,17 +154,15 @@ extension ConversationPipeline {
                                         }
                                         break
                                     case .complete:
-                                        if !requiresCurrentInformation || !aggregatedToolCalls.isEmpty {
-                                            if let assistantResponse = agentResponse?.assistantResponse {
-                                                let newLength = assistantResponse.count
-                                                if newLength > lastYieldedCompletionLength {
-                                                    let index = assistantResponse.index(assistantResponse.startIndex, offsetBy: lastYieldedCompletionLength)
-                                                    let delta = String(assistantResponse[index...])
-                                                    
-                                                    streamedVisibleContent = true
-                                                    continuation.yield(AgentResponseNextChunk(status: .complete, chunk: delta))
-                                                    lastYieldedCompletionLength = newLength
-                                                }
+                                        if let assistantResponse = agentResponse?.assistantResponse {
+                                            let newLength = assistantResponse.count
+                                            if newLength > lastYieldedCompletionLength {
+                                                let index = assistantResponse.index(assistantResponse.startIndex, offsetBy: lastYieldedCompletionLength)
+                                                let delta = String(assistantResponse[index...])
+
+                                                streamedVisibleContent = true
+                                                continuation.yield(AgentResponseNextChunk(status: .complete, chunk: delta))
+                                                lastYieldedCompletionLength = newLength
                                             }
                                         }
                                     case .thinking:
@@ -199,7 +196,19 @@ extension ConversationPipeline {
                         }
 
                         debugLog("**Start Completion**")
-                        let fullCompletion = Self.getFullCompletion(agentResponse, jsonEncoder: jsonEncoder)
+                        // Prefer structured assistant_response; if the model ignored the JSON schema
+                        // and returned plain prose, surface that text instead of an empty bubble.
+                        var fullCompletion = Self.getFullCompletion(agentResponse, jsonEncoder: jsonEncoder)
+                        if fullCompletion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            let raw = completion.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let isToolStatus = agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch
+                            if !raw.isEmpty, !isToolStatus {
+                                fullCompletion = raw
+                                await MainActor.run {
+                                    debugLog("Using raw completion text (model did not emit schema-shaped assistant_response)")
+                                }
+                            }
+                        }
                         let completionEvent = AssistantCompletionEvent(
                             sessionID: sessionID,
                             fullCompletion: fullCompletion,
@@ -225,7 +234,6 @@ extension ConversationPipeline {
                         await MainActor.run {
                             debugLog("Completion validated by policy engine")
                         }
-                        _ = interceptedCompletion
                         
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch,
                            round < maxToolRounds
@@ -258,17 +266,18 @@ extension ConversationPipeline {
                             continue
                         }
 
-                        if requiresCurrentInformation, aggregatedToolCalls.isEmpty, round < maxToolRounds {
-                            await MainActor.run {
-                                debugLog("Current-info request answered without tool; forcing tool_request retry")
-                            }
-                            workingPrompt = Self.buildForcedToolPrompt(originalPrompt: prompt)
-                            continue
-                        }
-
                         if !streamedVisibleContent {
-                            debugLog("Chunk final complete \(interceptedCompletion)")
-                            continuation.yield(AgentResponseNextChunk(status: .complete, chunk: interceptedCompletion))
+                            let text = interceptedCompletion.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if text.isEmpty {
+                                await MainActor.run {
+                                    debugLog("Chunk final complete (empty — nothing to show)")
+                                }
+                            } else {
+                                await MainActor.run {
+                                    debugLog("Chunk final complete (\(text.count) chars)")
+                                }
+                                continuation.yield(AgentResponseNextChunk(status: .complete, chunk: interceptedCompletion))
+                            }
                         }
 
                         try? await memoryCoordinator.ingest(
@@ -473,37 +482,6 @@ extension ConversationPipeline {
         When presenting a list of choices, options, steps, items, or alternative paths to the user, ALWAYS format them as a clean Markdown bulleted list (using `-` or `*`) or a numbered list (using `1.`, `2.`), instead of writing them as plain paragraphs.
         Use the JSON schema to respond. Set status to "complete" and populate the assistant_response field.
         """
-    }
-
-    private static func buildForcedToolPrompt(originalPrompt: String) -> String {
-        """
-        The user asked for current/latest information:
-        \(originalPrompt)
-
-        You must not answer from model memory. Use the JSON schema to execute a tool:
-        Set status to "tool_call", tool_name to "python_script_exec", and populate the arguments object.
-
-        Use readonly mode, allow_network=true, and fetch authoritative current sources relevant to the request.
-        """
-    }
-
-    /// Is the prompt asking for current or newest information?
-    private static func promptAskingForCurrentInfo(_ prompt: String) -> Bool {
-        let lowered = prompt.lowercased()
-        let triggers = [
-            "latest",
-            "current",
-            "recent",
-            "up-to-date",
-            "up to date",
-            "live",
-            "release notes",
-            "changelog",
-            "new features",
-            "what are the new",
-            "production"
-        ]
-        return triggers.contains { lowered.contains($0) }
     }
 
     private static func toolCallRecordArguments(from arguments: [String: Value]) -> [String: String] {

@@ -1,8 +1,9 @@
 import SwiftUI
 import DBRepository
 
-private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable {
+private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels
+    case networkAccess
 
     var id: String { rawValue }
 
@@ -10,6 +11,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .helperModels:
             return "Select helper models"
+        case .networkAccess:
+            return "Network access"
         }
     }
 
@@ -17,26 +20,47 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .helperModels:
             return "brain.head.profile"
+        case .networkAccess:
+            return "network"
         }
     }
 }
 
 struct LLMModelSettingsView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    @ObservedObject private var egressAllowlist = EgressAllowlistService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
+    @State private var newSuffixDraft = ""
+    @State private var networkError: String?
 
     var body: some View {
-        NavigationSplitView {
-            List(LLMModelSettingsSidebarItem.allCases, selection: $selectedItem) { item in
-                Label(item.title, systemImage: item.systemImage)
-                    .tag(item)
+        // Prefer a plain HStack over NavigationSplitView: split views often leave a blank
+        // detail column when hosted in a free-floating NSWindow.
+        HStack(spacing: 0) {
+            List(selection: $selectedItem) {
+                ForEach(LLMModelSettingsSidebarItem.allCases) { item in
+                    Label(item.title, systemImage: item.systemImage)
+                        .tag(item)
+                }
             }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 240)
-        } detail: {
-            helperModelDetail
-                .padding(24)
+            .listStyle(.sidebar)
+            .frame(width: 220)
+            .frame(maxHeight: .infinity)
+
+            Divider()
+
+            Group {
+                switch selectedItem {
+                case .helperModels:
+                    helperModelDetail
+                case .networkAccess:
+                    networkAccessDetail
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(24)
         }
-        .frame(width: 760, height: 440)
+        .frame(minWidth: 760, minHeight: 440)
     }
 
     @ViewBuilder
@@ -63,9 +87,97 @@ struct LLMModelSettingsView: View {
                     )
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var networkAccessDetail: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Network access")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+
+            Text("Domain suffixes the egress proxy may reach from network-enabled scripts. Private and metadata hosts stay blocked.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                TextField("example.com", text: $newSuffixDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await addSuffix() } }
+                Button("Add") {
+                    Task { await addSuffix() }
+                }
+                .disabled(newSuffixDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let networkError {
+                Text(networkError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if egressAllowlist.suffixes.isEmpty {
+                Text("No allowed domain suffixes yet. Seeded defaults appear after first app launch, or add a domain above.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(egressAllowlist.suffixes) { row in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.suffix)
+                                        .font(.body.monospaced())
+                                    Text(row.source == "seed" ? "Default" : "User")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if !row.enabled {
+                                    Text("Disabled")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Button(role: .destructive) {
+                                    Task {
+                                        do {
+                                            try await egressAllowlist.removeSuffix(id: row.id)
+                                            networkError = nil
+                                        } catch {
+                                            networkError = error.localizedDescription
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .padding(.vertical, 8)
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func addSuffix() async {
+        let draft = newSuffixDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        do {
+            try await egressAllowlist.addSuffix(draft, source: "user")
+            newSuffixDraft = ""
+            networkError = nil
+        } catch {
+            networkError = error.localizedDescription
+        }
     }
 
     private func helperModelPicker(

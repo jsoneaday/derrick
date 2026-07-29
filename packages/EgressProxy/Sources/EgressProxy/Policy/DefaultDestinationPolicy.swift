@@ -1,15 +1,20 @@
 import Foundation
 
-/// Hardcoded allow/deny policy driven by `EgressProxyConfiguration`.
-public struct DefaultDestinationPolicy: DestinationPolicy {
-    private let allowedDomainSuffixes: [String]
+/// Allow/deny policy for the egress proxy.
+/// Permanent suffixes and session grants are updatable at runtime (helper receives list from the app).
+/// Hard blocks (private IP, metadata hostnames) stay compile-time and are never user-overridable.
+public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Sendable {
+    private let lock = NSLock()
+    private var allowedDomainSuffixes: [String]
+    /// Exact hosts granted for the current app session only (Allow once).
+    private var sessionExactHosts: Set<String> = []
     private let blockedHostnames: [String]
     private let blockedIPv4: [IPv4CIDR]
     private let blockedIPv6: [IPv6Prefix]
     private let resolver: any DNSResolving
 
     public init(
-        allowedDomainSuffixes: [String] = EgressProxyConfiguration.allowedDomainSuffixes,
+        allowedDomainSuffixes: [String] = [],
         blockedHostnames: [String] = EgressProxyConfiguration.blockedHostnames,
         blockedIPv4CIDRs: [String] = EgressProxyConfiguration.blockedIPv4CIDRs,
         blockedIPv6CIDRs: [String] = EgressProxyConfiguration.blockedIPv6CIDRs,
@@ -20,6 +25,35 @@ public struct DefaultDestinationPolicy: DestinationPolicy {
         self.blockedIPv4 = blockedIPv4CIDRs.compactMap(IPv4CIDR.init)
         self.blockedIPv6 = blockedIPv6CIDRs.compactMap(IPv6Prefix.init)
         self.resolver = resolver
+    }
+
+    public func setAllowedDomainSuffixes(_ suffixes: [String]) {
+        lock.lock()
+        allowedDomainSuffixes = suffixes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        lock.unlock()
+    }
+
+    public func allowedDomainSuffixesSnapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return allowedDomainSuffixes
+    }
+
+    public func grantSessionHosts(_ hosts: [String]) {
+        lock.lock()
+        for host in hosts {
+            let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty else { continue }
+            sessionExactHosts.insert(normalized)
+        }
+        lock.unlock()
+    }
+
+    public func clearSessionHosts() {
+        lock.lock()
+        sessionExactHosts.removeAll()
+        lock.unlock()
     }
 
     public func evaluate(destination: ProxyDestination) async -> ProxyDecision {
@@ -75,11 +109,36 @@ public struct DefaultDestinationPolicy: DestinationPolicy {
     }
 
     private func isAllowedDomain(_ host: String) -> Bool {
-        for suffix in allowedDomainSuffixes {
+        lock.lock()
+        let suffixes = allowedDomainSuffixes
+        let session = sessionExactHosts
+        lock.unlock()
+
+        if session.contains(host) {
+            return true
+        }
+        for suffix in suffixes {
             if host == suffix || host.hasSuffix("." + suffix) {
                 return true
             }
         }
+        return false
+    }
+
+    /// Whether `host` is covered by permanent suffixes or session grants (no DNS / IP checks).
+    public func isHostCoveredByAllowlist(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if blockedHostnames.contains(normalized) { return false }
+        return isAllowedDomain(normalized)
+    }
+
+    /// Hard-blocked hostnames (SSRF). Never prompt to allow these.
+    public func isHardBlockedHostname(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if blockedHostnames.contains(normalized) { return true }
+        if IPv4Address(normalized) != nil { return true }
+        if normalized.contains(":"), IPv6Address.parse(normalized) != nil { return true }
         return false
     }
 

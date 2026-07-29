@@ -52,6 +52,10 @@ public struct DockerRunResponse: Codable, Sendable {
 /// XPC protocol for spawning a process outside the app sandbox.
 @objc public protocol DockerProcessRunnerXPC: NSObjectProtocol {
     func runProcess(requestData: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// JSON array of domain suffixes for permanent egress allowlist.
+    func setEgressAllowedDomainSuffixes(suffixesJSON: NSData, withReply reply: @escaping @Sendable (Bool) -> Void)
+    /// JSON array of exact hosts granted for this app session only (Allow once).
+    func grantEgressSessionHosts(hostsJSON: NSData, withReply reply: @escaping @Sendable (Bool) -> Void)
 }
 
 /// XPC protocol used by the helper to stream logs back to the app UI.

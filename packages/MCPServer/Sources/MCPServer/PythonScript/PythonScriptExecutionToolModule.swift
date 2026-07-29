@@ -68,6 +68,7 @@ public enum PythonScriptExecutionToolModule: MCPToolModule {
         description: String? = nil,
         runner: any PythonScriptRunner,
         reviewer: (any PythonScriptReviewer)?,
+        networkPreflight: PythonScriptNetworkPreflight? = nil,
         logger: @escaping @Sendable (String) -> Void
     ) -> MCPToolRegistration {
         MCPToolRegistration(
@@ -79,6 +80,7 @@ public enum PythonScriptExecutionToolModule: MCPToolModule {
                 arguments: arguments,
                 runner: runner,
                 reviewer: reviewer,
+                networkPreflight: networkPreflight,
                 logger: logger
             )
         }
@@ -88,14 +90,15 @@ public enum PythonScriptExecutionToolModule: MCPToolModule {
         arguments: [String: Value],
         runner: any PythonScriptRunner,
         reviewer: (any PythonScriptReviewer)?,
+        networkPreflight: PythonScriptNetworkPreflight?,
         logger: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         let toolStarted = Date()
-        // continued below via extension body that was the old handler
         return try await MCPServerHost.runPythonScriptToolBody(
             arguments: arguments,
             runner: runner,
             reviewer: reviewer,
+            networkPreflight: networkPreflight,
             logger: logger,
             toolStarted: toolStarted
         )
