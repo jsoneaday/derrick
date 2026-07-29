@@ -28,7 +28,7 @@ public extension DBRepository {
         }
     }
 
-    public func currentMemorySchemaVersion(username: String, password: String) throws -> Int {
+    func currentMemorySchemaVersion(username: String, password: String) throws -> Int {
         try authenticate(username: username, password: password)
         try Self.ensureDirectory(at: databaseDirectoryURL)
         return try withDatabaseHandle { handle in

@@ -79,9 +79,12 @@ extension ConversationPipeline {
                                 completion += interceptedContent
                                 chunkIndex += 1
 
-                                if let jsonAny = try? PartialJSON.parse(completion) {
-                                    let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: [])
-                                    agentResponse = try? jsonDecoder.decode(AgentResponse.self, from: jsonData ?? Data())
+                                // PartialJSON may yield non-object values mid-stream (String/Number/Bool).
+                                // JSONSerialization aborts on invalid top-level types — try? does not catch that.
+                                if let jsonAny = try? PartialJSON.parse(completion),
+                                   JSONSerialization.isValidJSONObject(jsonAny),
+                                   let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: []) {
+                                    agentResponse = try? jsonDecoder.decode(AgentResponse.self, from: jsonData)
 
                                     if round == 0 {
                                         if chunkIndex == 1 {
