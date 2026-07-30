@@ -134,93 +134,266 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
 
 // MARK: - Matchers / outcomes
 
-private struct ToolMatcher: Decodable {
-    let toolName: String?
-    let toolNameContains: String?
-    let minArgumentsLength: Int?
-    let argumentKey: String?
-    let argumentPattern: String?
-    let argumentExists: Bool?
+/// Recursive JSON matcher for tool invocations.
+///
+/// Leaf fields (AND together when present):
+/// - `tool_name`, `tool_name_contains`, `tool_name_prefix`
+/// - `min_arguments_length`, `argument_key`, `argument_pattern`, `argument_exists`
+///
+/// Combinators (exactly one wins when present; checked in order `all`, `any`, `not`):
+/// - `{"all":[...matchers]}` — every child matches
+/// - `{"any":[...matchers]}` — at least one child matches
+/// - `{"not":{...matcher}}` — child does not match
+private indirect enum ToolMatcher: Decodable {
+    case leaf(Leaf)
+    case all([ToolMatcher])
+    case any([ToolMatcher])
+    case not(ToolMatcher)
 
-    enum CodingKeys: String, CodingKey {
-        case toolName = "tool_name"
-        case toolNameContains = "tool_name_contains"
-        case minArgumentsLength = "min_arguments_length"
-        case argumentKey = "argument_key"
-        case argumentPattern = "argument_pattern"
-        case argumentExists = "argument_exists"
+    struct Leaf: Decodable {
+        let toolName: String?
+        let toolNameContains: String?
+        let toolNamePrefix: String?
+        let minArgumentsLength: Int?
+        let argumentKey: String?
+        let argumentPattern: String?
+        let argumentExists: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case toolName = "tool_name"
+            case toolNameContains = "tool_name_contains"
+            case toolNamePrefix = "tool_name_prefix"
+            case minArgumentsLength = "min_arguments_length"
+            case argumentKey = "argument_key"
+            case argumentPattern = "argument_pattern"
+            case argumentExists = "argument_exists"
+        }
+
+        func matches(event: ToolInvocationEvent, arguments: [String: Any]) -> Bool {
+            if let toolName, event.toolName != toolName {
+                return false
+            }
+            if let toolNameContains, !event.toolName.localizedCaseInsensitiveContains(toolNameContains) {
+                return false
+            }
+            if let toolNamePrefix, !event.toolName.hasPrefix(toolNamePrefix) {
+                return false
+            }
+            if let minArgumentsLength, event.argumentsJSON.count < minArgumentsLength {
+                return false
+            }
+            if let argumentKey, let argumentExists {
+                let hasKey = arguments[argumentKey] != nil
+                if argumentExists != hasKey {
+                    return false
+                }
+            }
+            if let argumentKey, let argumentPattern {
+                guard let argumentValue = arguments[argumentKey] as? String else {
+                    return false
+                }
+                guard argumentValue.range(of: argumentPattern, options: .regularExpression) != nil else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    private enum CombinatorKeys: String, CodingKey {
+        case all
+        case any
+        case not
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CombinatorKeys.self)
+        if container.contains(.all) {
+            self = .all(try container.decode([ToolMatcher].self, forKey: .all))
+            return
+        }
+        if container.contains(.any) {
+            self = .any(try container.decode([ToolMatcher].self, forKey: .any))
+            return
+        }
+        if container.contains(.not) {
+            self = .not(try container.decode(ToolMatcher.self, forKey: .not))
+            return
+        }
+        self = .leaf(try Leaf(from: decoder))
     }
 
     func matches(event: ToolInvocationEvent, arguments: [String: Any]) -> Bool {
-        if let toolName, event.toolName != toolName {
-            return false
+        switch self {
+        case .leaf(let leaf):
+            return leaf.matches(event: event, arguments: arguments)
+        case .all(let children):
+            return !children.isEmpty && children.allSatisfy { $0.matches(event: event, arguments: arguments) }
+        case .any(let children):
+            return children.contains { $0.matches(event: event, arguments: arguments) }
+        case .not(let child):
+            return !child.matches(event: event, arguments: arguments)
         }
-        if let toolNameContains, !event.toolName.localizedCaseInsensitiveContains(toolNameContains) {
-            return false
-        }
-        if let minArgumentsLength, event.argumentsJSON.count < minArgumentsLength {
-            return false
-        }
-        if let argumentKey, let argumentExists {
-            let hasKey = arguments[argumentKey] != nil
-            if argumentExists != hasKey {
-                return false
-            }
-        }
-        if let argumentKey, let argumentPattern {
-            guard let argumentValue = arguments[argumentKey] as? String else {
-                return false
-            }
-            guard argumentValue.range(of: argumentPattern, options: .regularExpression) != nil else {
-                return false
-            }
-        }
-        return true
     }
 }
 
-private struct ContentMatcher: Decodable {
-    let contentPattern: String?
-    let minContentLength: Int?
+/// Recursive JSON matcher for assistant chunk content (`all` / `any` / `not` + leaf fields).
+private indirect enum ContentMatcher: Decodable {
+    case leaf(Leaf)
+    case all([ContentMatcher])
+    case any([ContentMatcher])
+    case not(ContentMatcher)
 
-    enum CodingKeys: String, CodingKey {
-        case contentPattern = "content_pattern"
-        case minContentLength = "min_content_length"
+    struct Leaf: Decodable {
+        let contentPattern: String?
+        let minContentLength: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case contentPattern = "content_pattern"
+            case minContentLength = "min_content_length"
+        }
+
+        func matches(content: String) -> Bool {
+            if let minContentLength, content.count < minContentLength {
+                return false
+            }
+            if let contentPattern {
+                return content.range(of: contentPattern, options: .regularExpression) != nil
+            }
+            return true
+        }
+    }
+
+    private enum CombinatorKeys: String, CodingKey {
+        case all
+        case any
+        case not
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CombinatorKeys.self)
+        if container.contains(.all) {
+            self = .all(try container.decode([ContentMatcher].self, forKey: .all))
+            return
+        }
+        if container.contains(.any) {
+            self = .any(try container.decode([ContentMatcher].self, forKey: .any))
+            return
+        }
+        if container.contains(.not) {
+            self = .not(try container.decode(ContentMatcher.self, forKey: .not))
+            return
+        }
+        self = .leaf(try Leaf(from: decoder))
     }
 
     func matches(content: String) -> Bool {
-        if let minContentLength, content.count < minContentLength {
-            return false
+        switch self {
+        case .leaf(let leaf):
+            return leaf.matches(content: content)
+        case .all(let children):
+            return !children.isEmpty && children.allSatisfy { $0.matches(content: content) }
+        case .any(let children):
+            return children.contains { $0.matches(content: content) }
+        case .not(let child):
+            return !child.matches(content: content)
         }
-        if let contentPattern {
-            return content.range(of: contentPattern, options: .regularExpression) != nil
+    }
+
+    /// Pattern used as redact fallback when outcome omits `pattern`.
+    var contentPattern: String? {
+        switch self {
+        case .leaf(let leaf):
+            return leaf.contentPattern
+        case .all(let children), .any(let children):
+            return children.lazy.compactMap(\.contentPattern).first
+        case .not(let child):
+            return child.contentPattern
         }
-        return true
     }
 }
 
-private struct CompletionMatcher: Decodable {
-    let contentPattern: String?
-    let minContentLength: Int?
-    let detectedPatternsAny: [String]?
+/// Recursive JSON matcher for full assistant completions.
+private indirect enum CompletionMatcher: Decodable {
+    case leaf(Leaf)
+    case all([CompletionMatcher])
+    case any([CompletionMatcher])
+    case not(CompletionMatcher)
 
-    enum CodingKeys: String, CodingKey {
-        case contentPattern = "content_pattern"
-        case minContentLength = "min_content_length"
-        case detectedPatternsAny = "detected_patterns_any"
+    struct Leaf: Decodable {
+        let contentPattern: String?
+        let minContentLength: Int?
+        let detectedPatternsAny: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case contentPattern = "content_pattern"
+            case minContentLength = "min_content_length"
+            case detectedPatternsAny = "detected_patterns_any"
+        }
+
+        func matches(content: String, detectedPatterns: [String]) -> Bool {
+            if let minContentLength, content.count < minContentLength {
+                return false
+            }
+            if let contentPattern, content.range(of: contentPattern, options: .regularExpression) == nil {
+                return false
+            }
+            if let detectedPatternsAny, detectedPatternsAny.allSatisfy({ !detectedPatterns.contains($0) }) {
+                return false
+            }
+            return true
+        }
+    }
+
+    private enum CombinatorKeys: String, CodingKey {
+        case all
+        case any
+        case not
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CombinatorKeys.self)
+        if container.contains(.all) {
+            self = .all(try container.decode([CompletionMatcher].self, forKey: .all))
+            return
+        }
+        if container.contains(.any) {
+            self = .any(try container.decode([CompletionMatcher].self, forKey: .any))
+            return
+        }
+        if container.contains(.not) {
+            self = .not(try container.decode(CompletionMatcher.self, forKey: .not))
+            return
+        }
+        self = .leaf(try Leaf(from: decoder))
     }
 
     func matches(content: String, detectedPatterns: [String]) -> Bool {
-        if let minContentLength, content.count < minContentLength {
-            return false
+        switch self {
+        case .leaf(let leaf):
+            return leaf.matches(content: content, detectedPatterns: detectedPatterns)
+        case .all(let children):
+            return !children.isEmpty && children.allSatisfy {
+                $0.matches(content: content, detectedPatterns: detectedPatterns)
+            }
+        case .any(let children):
+            return children.contains {
+                $0.matches(content: content, detectedPatterns: detectedPatterns)
+            }
+        case .not(let child):
+            return !child.matches(content: content, detectedPatterns: detectedPatterns)
         }
-        if let contentPattern, content.range(of: contentPattern, options: .regularExpression) == nil {
-            return false
+    }
+
+    var contentPattern: String? {
+        switch self {
+        case .leaf(let leaf):
+            return leaf.contentPattern
+        case .all(let children), .any(let children):
+            return children.lazy.compactMap(\.contentPattern).first
+        case .not(let child):
+            return child.contentPattern
         }
-        if let detectedPatternsAny, detectedPatternsAny.allSatisfy({ !detectedPatterns.contains($0) }) {
-            return false
-        }
-        return true
     }
 }
 

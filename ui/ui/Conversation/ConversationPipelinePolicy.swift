@@ -84,7 +84,12 @@ extension ConversationPipeline {
                                 if let jsonAny = try? PartialJSON.parse(completion),
                                    JSONSerialization.isValidJSONObject(jsonAny),
                                    let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: []) {
-                                    agentResponse = try? jsonDecoder.decode(AgentResponse.self, from: jsonData)
+                                    // Only replace when decode succeeds. PartialJSON often yields incomplete
+                                    // status strings (e.g. "tool") that fail enum decode; assigning nil would
+                                    // wipe a previously decoded partial response.
+                                    if let decoded = try? jsonDecoder.decode(AgentResponse.self, from: jsonData) {
+                                        agentResponse = decoded
+                                    }
 
                                     if round == 0 {
                                         if chunkIndex == 1 {
@@ -113,6 +118,9 @@ extension ConversationPipeline {
                                     }
 
                                     switch agentResponse?.status {
+                                    case .none:
+                                        // Mid-stream: partial JSON not yet a full AgentResponse.
+                                        break
                                     case .toolCall:
                                         if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
                                             continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
@@ -182,7 +190,7 @@ extension ConversationPipeline {
                                             }
                                         }
                                     default:
-                                        debugLog("Received unrecognized agent response status: '\(completion)'. Breaking out of streaming loop.")
+                                        // Known statuses are exhaustive; keep a quiet fallback for future enum cases.
                                         break
                                     }
                                 }

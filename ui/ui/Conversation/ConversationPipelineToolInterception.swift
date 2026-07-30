@@ -29,19 +29,126 @@ extension ConversationPipeline {
         }
 
         let effectiveInterceptor = makeToolInterceptor(override: interceptor)
-
-        let interceptedEvent: ToolInvocationEvent
-        let decision = try await effectiveInterceptor.evaluateToolInvocation(event)
         await MainActor.run {
             debugLog("Policy rule processing: evaluating \(name)")
         }
-        switch decision {
-        case .allow(let allowedEvent):
-            interceptedEvent = allowedEvent
-            await MainActor.run {
-                debugLog("Policy decision: allow \(name)")
-            }
-        case .deny(let reason):
+
+        do {
+            return try await effectiveInterceptor.interceptAndRun(
+                event,
+                confirm: { [self] confirmEvent, requiredFields in
+                    await MainActor.run {
+                        debugLog("Policy decision: confirm \(name)")
+                    }
+                    guard let approvalPresenter else {
+                        try await policyStore?.saveApproval(
+                            PolicyApproval(
+                                applicationName: applicationName,
+                                sessionID: sessionID,
+                                ruleID: "runtime-confirmation",
+                                requestType: "tool_invocation",
+                                requestPayloadJSON: event.argumentsJSON,
+                                editedPayloadJSON: nil,
+                                decision: "cancelled",
+                                actor: "system",
+                                createdAt: .now,
+                                acedAt: .now
+                            )
+                        )
+                        try await persistPolicyDecision(
+                            sessionID: sessionID,
+                            requestPayloadJSON: event.argumentsJSON,
+                            decision: "cancelled",
+                            actor: "system"
+                        )
+                        throw MCPClientError.toolExecutionDenied(
+                            toolName: name,
+                            reason: "Tool execution requires user confirmation"
+                        )
+                    }
+
+                    let confirmationRequest = ApprovalConfirmationRequest(
+                        sessionID: sessionID,
+                        toolName: confirmEvent.toolName,
+                        argumentsJSON: confirmEvent.argumentsJSON,
+                        requiredFields: requiredFields
+                    )
+                    let confirmation = await approvalPresenter.confirm(confirmationRequest)
+                    await MainActor.run {
+                        debugLog("Approval response received for \(name)")
+                    }
+                    let approvalRecord = PolicyApproval.fromApprovalDecision(
+                        applicationName: applicationName,
+                        sessionID: sessionID,
+                        requestPayloadJSON: confirmEvent.argumentsJSON,
+                        decision: confirmation
+                    )
+                    try await policyStore?.saveApproval(approvalRecord)
+
+                    switch confirmation {
+                    case .approved(let editedArgumentsJSON, let actor):
+                        await MainActor.run {
+                            debugLog("Approval granted for \(name) by \(actor ?? "unknown")")
+                        }
+                        try await persistPolicyDecision(
+                            sessionID: sessionID,
+                            requestPayloadJSON: confirmEvent.argumentsJSON,
+                            decision: "approved",
+                            actor: actor
+                        )
+                        return .approved(
+                            ToolInvocationEvent(
+                                sessionID: confirmEvent.sessionID,
+                                toolName: confirmEvent.toolName,
+                                argumentsJSON: editedArgumentsJSON,
+                                timestamp: confirmEvent.timestamp
+                            )
+                        )
+                    case .cancelled(let actor):
+                        await MainActor.run {
+                            debugLog("Approval cancelled for \(name) by \(actor ?? "unknown")")
+                        }
+                        try await persistPolicyDecision(
+                            sessionID: sessionID,
+                            requestPayloadJSON: confirmEvent.argumentsJSON,
+                            decision: "cancelled",
+                            actor: actor
+                        )
+                        return .cancelled(actor: actor)
+                    }
+                },
+                proceed: { [self] interceptedEvent in
+                    await MainActor.run {
+                        debugLog("Policy decision: allow \(interceptedEvent.toolName)")
+                    }
+                    let interceptedArguments = try toolArgumentsFromJSON(interceptedEvent.argumentsJSON)
+                    guard let mcpClient else {
+                        return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
+                    }
+                    if interceptedEvent.toolName == "python_script_exec" {
+                        await MainActor.run {
+                            debugLog("Python reviewer validating request")
+                        }
+                    }
+                    await MainActor.run {
+                        debugLog("Executing tool: \(interceptedEvent.toolName)")
+                    }
+                    let result = try await mcpClient.callTool(
+                        named: interceptedEvent.toolName,
+                        arguments: interceptedArguments
+                    )
+                    await MainActor.run {
+                        debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
+                        debugLog("Tool result content: \(Self.debugPayload(result.text))")
+                    }
+                    await Self.publishPolicyUserEventIfBlocked(
+                        toolName: interceptedEvent.toolName,
+                        resultText: result.text
+                    )
+                    return result
+                }
+            )
+        } catch ToolInvocationInterceptionError.denied(let reason) {
             await MainActor.run {
                 debugLog("Policy decision: deny \(name) reason=\(reason)")
             }
@@ -80,108 +187,9 @@ extension ConversationPipeline {
                 )
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
-        case .confirm(let confirmEvent, let requiredFields):
-            await MainActor.run {
-                debugLog("Policy decision: confirm \(name)")
-            }
-            guard let approvalPresenter else {
-                try await policyStore?.saveApproval(
-                    PolicyApproval(
-                        applicationName: applicationName,
-                        sessionID: sessionID,
-                        ruleID: "runtime-confirmation",
-                        requestType: "tool_invocation",
-                        requestPayloadJSON: event.argumentsJSON,
-                        editedPayloadJSON: nil,
-                        decision: "cancelled",
-                        actor: "system",
-                        createdAt: .now,
-                        acedAt: .now
-                    )
-                )
-                try await persistPolicyDecision(
-                    sessionID: sessionID,
-                    requestPayloadJSON: event.argumentsJSON,
-                    decision: "cancelled",
-                    actor: "system"
-                )
-                throw MCPClientError.toolExecutionDenied(
-                    toolName: name,
-                    reason: "Tool execution requires user confirmation"
-                )
-            }
-
-            let confirmationRequest = ApprovalConfirmationRequest(
-                sessionID: sessionID,
-                toolName: confirmEvent.toolName,
-                argumentsJSON: confirmEvent.argumentsJSON,
-                requiredFields: requiredFields
-            )
-            let confirmation = await approvalPresenter.confirm(confirmationRequest)
-            await MainActor.run {
-                debugLog("Approval response received for \(name)")
-            }
-            let approvalRecord = PolicyApproval.fromApprovalDecision(
-                applicationName: applicationName,
-                sessionID: sessionID,
-                requestPayloadJSON: confirmEvent.argumentsJSON,
-                decision: confirmation
-            )
-            try await policyStore?.saveApproval(approvalRecord)
-
-            switch confirmation {
-            case .approved(let editedArgumentsJSON, let actor):
-                await MainActor.run {
-                    debugLog("Approval granted for \(name) by \(actor ?? "unknown")")
-                }
-                try await persistPolicyDecision(
-                    sessionID: sessionID,
-                    requestPayloadJSON: confirmEvent.argumentsJSON,
-                    decision: "approved",
-                    actor: actor
-                )
-                interceptedEvent = ToolInvocationEvent(
-                    sessionID: confirmEvent.sessionID,
-                    toolName: confirmEvent.toolName,
-                    argumentsJSON: editedArgumentsJSON,
-                    timestamp: confirmEvent.timestamp
-                )
-            case .cancelled(let actor):
-                await MainActor.run {
-                    debugLog("Approval cancelled for \(name) by \(actor ?? "unknown")")
-                }
-                try await persistPolicyDecision(
-                    sessionID: sessionID,
-                    requestPayloadJSON: confirmEvent.argumentsJSON,
-                    decision: "cancelled",
-                    actor: actor
-                )
-                throw MCPClientError.toolExecutionDenied(
-                    toolName: name,
-                    reason: "User cancelled the approval request"
-                )
-            }
+        } catch ToolInvocationInterceptionError.cancelled(let reason) {
+            throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
         }
-
-        let interceptedArguments = try toolArgumentsFromJSON(interceptedEvent.argumentsJSON)
-        guard let mcpClient else {
-            return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
-        }
-        if interceptedEvent.toolName == "python_script_exec" {
-            await MainActor.run {
-                debugLog("Python reviewer validating request")
-            }
-        }
-        await MainActor.run {
-            debugLog("Executing tool: \(interceptedEvent.toolName)")
-        }
-        let result = try await mcpClient.callTool(named: interceptedEvent.toolName, arguments: interceptedArguments)
-        await MainActor.run {
-            debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
-            debugLog("Tool result content: \(Self.debugPayload(result.text))")
-        }
-        await Self.publishPolicyUserEventIfBlocked(toolName: interceptedEvent.toolName, resultText: result.text)
-        return result
     }
 
     private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {

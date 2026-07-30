@@ -237,4 +237,172 @@ final class ToolRequestInterceptorTests: XCTestCase {
             XCTFail("Expected confirm decision")
         }
     }
+
+    // MARK: - interceptAndRun (item 4: confirm-before-proceed)
+
+    private final class CallProbe: @unchecked Sendable {
+        var confirmCalled = false
+        var proceedCalled = false
+        var proceedTool: String?
+        var seenFields: [String] = []
+    }
+
+    func test_interceptAndRun_allow_calls_proceed_only() async throws {
+        struct AllowPolicy: ToolGovernancePolicy {
+            func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+                .allow
+            }
+        }
+
+        let interceptor = DefaultToolRequestInterceptor(policy: AllowPolicy())
+        let event = ToolInvocationEvent(
+            sessionID: "session-1",
+            toolName: "read_file",
+            argumentsJSON: #"{}"#
+        )
+
+        let probe = CallProbe()
+        let result = try await interceptor.interceptAndRun(
+            event,
+            confirm: { _, _ in
+                probe.confirmCalled = true
+                return .cancelled(actor: nil)
+            },
+            proceed: { gated in
+                probe.proceedTool = gated.toolName
+                return "ok"
+            }
+        )
+
+        XCTAssertEqual(result, "ok")
+        XCTAssertFalse(probe.confirmCalled)
+        XCTAssertEqual(probe.proceedTool, "read_file")
+    }
+
+    func test_interceptAndRun_deny_throws_without_proceed() async throws {
+        struct DenyPolicy: ToolGovernancePolicy {
+            func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+                .deny(reason: "blocked by policy")
+            }
+        }
+
+        let interceptor = DefaultToolRequestInterceptor(policy: DenyPolicy())
+        let event = ToolInvocationEvent(
+            sessionID: "session-1",
+            toolName: "shell_exec",
+            argumentsJSON: #"{}"#
+        )
+
+        let probe = CallProbe()
+        do {
+            _ = try await interceptor.interceptAndRun(
+                event,
+                confirm: { _, _ in .cancelled(actor: nil) },
+                proceed: { _ -> String in
+                    probe.proceedCalled = true
+                    return "should not run"
+                }
+            )
+            XCTFail("Expected deny error")
+        } catch ToolInvocationInterceptionError.denied(let reason) {
+            XCTAssertEqual(reason, "blocked by policy")
+        }
+        XCTAssertFalse(probe.proceedCalled)
+    }
+
+    func test_interceptAndRun_confirm_approved_then_proceed() async throws {
+        struct ConfirmPolicy: ToolGovernancePolicy {
+            func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+                .confirm(requiredFields: ["user_approval"])
+            }
+        }
+
+        let interceptor = DefaultToolRequestInterceptor(policy: ConfirmPolicy())
+        let event = ToolInvocationEvent(
+            sessionID: "session-1",
+            toolName: "delete_file",
+            argumentsJSON: #"{"path":"/tmp/a"}"#
+        )
+
+        let probe = CallProbe()
+        let result = try await interceptor.interceptAndRun(
+            event,
+            confirm: { confirmEvent, fields in
+                probe.seenFields = fields
+                return .approved(
+                    ToolInvocationEvent(
+                        sessionID: confirmEvent.sessionID,
+                        toolName: confirmEvent.toolName,
+                        argumentsJSON: #"{"path":"/tmp/edited"}"#,
+                        timestamp: confirmEvent.timestamp
+                    )
+                )
+            },
+            proceed: { gated in
+                XCTAssertEqual(gated.argumentsJSON, #"{"path":"/tmp/edited"}"#)
+                return gated.argumentsJSON
+            }
+        )
+
+        XCTAssertEqual(probe.seenFields, ["user_approval"])
+        XCTAssertEqual(result, #"{"path":"/tmp/edited"}"#)
+    }
+
+    func test_interceptAndRun_confirm_cancelled_throws_without_proceed() async throws {
+        struct ConfirmPolicy: ToolGovernancePolicy {
+            func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+                .confirm(requiredFields: ["user_approval"])
+            }
+        }
+
+        let interceptor = DefaultToolRequestInterceptor(policy: ConfirmPolicy())
+        let event = ToolInvocationEvent(
+            sessionID: "session-1",
+            toolName: "delete_file",
+            argumentsJSON: #"{}"#
+        )
+
+        let probe = CallProbe()
+        do {
+            _ = try await interceptor.interceptAndRun(
+                event,
+                confirm: { _, _ in .cancelled(actor: "tester") },
+                proceed: { _ -> String in
+                    probe.proceedCalled = true
+                    return "no"
+                }
+            )
+            XCTFail("Expected cancelled error")
+        } catch ToolInvocationInterceptionError.cancelled(let reason) {
+            XCTAssertTrue(reason.contains("cancelled"))
+            XCTAssertTrue(reason.contains("tester"))
+        }
+        XCTAssertFalse(probe.proceedCalled)
+    }
+
+    func test_interceptAndRun_redact_then_proceed_with_redacted_event() async throws {
+        struct RedactPolicy: ToolGovernancePolicy {
+            func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+                .redact(argumentKey: "token", pattern: ".+", replacement: "[REDACTED]")
+            }
+        }
+
+        let interceptor = DefaultToolRequestInterceptor(policy: RedactPolicy())
+        let event = ToolInvocationEvent(
+            sessionID: "session-1",
+            toolName: "auth",
+            argumentsJSON: #"{"token":"secret"}"#
+        )
+
+        let result = try await interceptor.interceptAndRun(
+            event,
+            confirm: { _, _ in .cancelled(actor: nil) },
+            proceed: { gated in
+                gated.argumentsJSON
+            }
+        )
+
+        XCTAssertTrue(result.contains("[REDACTED]"))
+        XCTAssertFalse(result.contains("secret"))
+    }
 }

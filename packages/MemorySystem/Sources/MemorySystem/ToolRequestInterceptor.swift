@@ -13,6 +13,20 @@ public enum ToolInterceptionDecision: Equatable, Sendable {
     case confirm(ToolInvocationEvent, requiredFields: [String])
 }
 
+/// Errors thrown by confirm-before-proceed tool interception.
+public enum ToolInvocationInterceptionError: Error, Equatable, Sendable {
+    case denied(reason: String)
+    case cancelled(reason: String)
+}
+
+/// Result of asking the user to approve a tool that policy marked as `confirm`.
+public enum ToolInvocationConfirmation: Equatable, Sendable {
+    /// Proceed with this (possibly edited) invocation event.
+    case approved(ToolInvocationEvent)
+    /// User (or system) cancelled confirmation.
+    case cancelled(actor: String?)
+}
+
 public protocol ToolGovernancePolicy: Sendable {
     func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome
 }
@@ -20,6 +34,18 @@ public protocol ToolGovernancePolicy: Sendable {
 public protocol ToolRequestInterceptor: Sendable {
     func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolInterceptionDecision
     func interceptToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolInvocationEvent?
+
+    /// Evaluate policy, optionally confirm with the user, then run `proceed` with the gated event.
+    ///
+    /// Control flow:
+    /// - allow / redact → `proceed(processedEvent)`
+    /// - deny → throws `ToolInvocationInterceptionError.denied`
+    /// - confirm → `confirm(...)`; on approve → `proceed`; on cancel → throws `.cancelled`
+    func interceptAndRun<R: Sendable>(
+        _ event: ToolInvocationEvent,
+        confirm: @escaping @Sendable (ToolInvocationEvent, [String]) async throws -> ToolInvocationConfirmation,
+        proceed: @escaping @Sendable (ToolInvocationEvent) async throws -> R
+    ) async throws -> R
 }
 
 public struct DefaultToolRequestInterceptor: ToolRequestInterceptor {
@@ -80,6 +106,29 @@ public struct DefaultToolRequestInterceptor: ToolRequestInterceptor {
             return nil
         case .confirm(let processedEvent, _):
             return processedEvent
+        }
+    }
+
+    public func interceptAndRun<R: Sendable>(
+        _ event: ToolInvocationEvent,
+        confirm: @escaping @Sendable (ToolInvocationEvent, [String]) async throws -> ToolInvocationConfirmation,
+        proceed: @escaping @Sendable (ToolInvocationEvent) async throws -> R
+    ) async throws -> R {
+        switch try await evaluateToolInvocation(event) {
+        case .allow(let allowedEvent):
+            return try await proceed(allowedEvent)
+        case .deny(let reason):
+            throw ToolInvocationInterceptionError.denied(reason: reason)
+        case .confirm(let confirmEvent, let requiredFields):
+            switch try await confirm(confirmEvent, requiredFields) {
+            case .approved(let approvedEvent):
+                return try await proceed(approvedEvent)
+            case .cancelled(let actor):
+                let suffix = actor.map { " by \($0)" } ?? ""
+                throw ToolInvocationInterceptionError.cancelled(
+                    reason: "User cancelled the approval request\(suffix)"
+                )
+            }
         }
     }
 }

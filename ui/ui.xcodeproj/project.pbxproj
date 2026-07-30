@@ -317,6 +317,7 @@
 				DEAE00063010000000AE001 /* XCLocalSwiftPackageReference "../packages/PolicyUserInteraction" */,
 				DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */,
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
+				DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -810,6 +811,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/PolicyRuntime;
 		};
+		DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/Plugin;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -850,10 +855,12 @@
 		};
 		DECF6280300ED94C00E1757D /* Plugin */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */;
 			productName = Plugin;
 		};
 		DECF6283300ED9AC00E1757D /* Plugin */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */;
 			productName = Plugin;
 		};
 		DED0C0022A0000000042F230 /* DockerRunnerXPC */ = {
