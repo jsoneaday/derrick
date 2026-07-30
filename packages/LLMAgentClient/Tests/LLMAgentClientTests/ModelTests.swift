@@ -5,8 +5,8 @@ import Testing
 @Suite("Model Definitions")
 struct ModelTests {
     @Test func openAIModelIdentifier() {
-        #expect(OpenAIModel.gpt5Mini.id.provider == "openai")
-        #expect(OpenAIModel.gpt5Mini.id.rawValue == "gpt-5-mini")
+        #expect(OpenAIModel.gpt56Luna.id.provider == "openai")
+        #expect(OpenAIModel.gpt56Luna.id.rawValue == "gpt-5.6-luna")
     }
 
     @Test func geminiModelIdentifier() {
@@ -23,7 +23,7 @@ struct ModelTests {
     }
 
     @Test func openAIModelContextBudgetsArePresent() {
-        #expect(OpenAIModel.gpt5Mini.maxSupportedContextTokens > OpenAIModel.gpt5Mini.maxIdealContextTokens)
+        #expect(OpenAIModel.gpt56Luna.maxSupportedContextTokens > OpenAIModel.gpt56Luna.maxIdealContextTokens)
     }
 
     @Test func openAIAdditionalModelsAreAvailable() {
@@ -90,7 +90,7 @@ struct ModelTests {
         )
 
         let request = OpenAIStreamRequest(
-            model: "gpt-5-mini",
+            model: "gpt-5.6-luna",
             messages: [
                 .init(role: .system, content: "You are a concise JSON generator."),
                 .init(role: .user, content: "Update status")
@@ -153,7 +153,7 @@ struct ModelTests {
         )
 
         let request = OpenAIStreamRequest(
-            model: "gpt-5-mini",
+            model: "gpt-5.6-luna",
             messages: [.init(role: .user, content: "test")],
             temperature: 0.1,
             responseSchema: schema

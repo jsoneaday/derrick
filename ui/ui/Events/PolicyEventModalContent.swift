@@ -7,7 +7,6 @@ enum ModalChrome {
     static func symbolName(for kind: PolicyEventKind) -> String {
         switch kind {
         case .failure:
-            // Soft alert — not the classic filled “road hazard” triangle.
             return "exclamationmark.circle"
         case .approvalRequired:
             return "checkmark.shield"
@@ -18,17 +17,14 @@ enum ModalChrome {
         }
     }
 
-    /// Bootstrap / generic failure when there is no `PolicyEventKind`.
     static let bootstrapFailureSymbol = "exclamationmark.circle"
     static let bootstrapReadySymbol = "checkmark.circle"
 
     static func symbolColor(for kind: PolicyEventKind) -> Color {
         switch kind {
         case .failure:
-            // Warm amber, lower saturation than system orange-on-fill.
             return Color(red: 0.72, green: 0.48, blue: 0.18)
         case .approvalRequired, .networkAccessRequest:
-            // Deep slate-blue used by sidebar brand, not system accent blue.
             return Color(red: 0.176, green: 0.286, blue: 0.576)
         case .notice:
             return Color(nsColor: .secondaryLabelColor)
@@ -54,6 +50,8 @@ struct PolicyEventModalHeader: View {
                 .foregroundStyle(ModalChrome.symbolColor(for: event.kind))
             Text(event.title)
                 .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
@@ -70,21 +68,23 @@ struct PolicyEventModalBody: View {
             Text(event.summary)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
 
             if let toolName = event.toolName, !toolName.isEmpty {
                 labeled("Tool", toolName)
             }
             if let detail = event.detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.subheadline)
+                    .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let preview = event.payloadPreview, !preview.isEmpty {
                 Text(preview)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .lineLimit(8)
+                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
                     .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
@@ -95,12 +95,15 @@ struct PolicyEventModalBody: View {
     }
 
     private func labeled(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("\(title):")
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
             Text(value)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 }
@@ -115,12 +118,13 @@ struct PolicyEventModalFooter: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Spacer()
+            Spacer(minLength: 0)
             switch event.kind {
             case .failure, .notice:
                 Button("OK", action: onDismiss)
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.cancelAction)
             case .approvalRequired:
                 Button("Deny", action: onDeny)
                     .buttonStyle(ModalSecondaryButtonStyle())
@@ -134,11 +138,13 @@ struct PolicyEventModalFooter: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Allow once", action: onApproveOnce)
                     .buttonStyle(ModalSecondaryButtonStyle())
+                    .lineLimit(1)
                 Button("Always", action: onApproveAlways)
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }
         }
+        .lineLimit(1)
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .padding(.top, 4)
@@ -147,26 +153,26 @@ struct PolicyEventModalFooter: View {
 
 // MARK: - Neutral modal buttons (no system accent blue)
 
-/// Filled charcoal primary — matches prompt chrome, not macOS default blue.
 struct ModalPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
+            .lineLimit(1)
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .labelColor).opacity(configuration.isPressed ? 68 : 0.85))
+                    .fill(Color(nsColor: .labelColor).opacity(configuration.isPressed ? 0.68 : 0.85))
             )
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
     }
 }
 
-/// Quiet outline secondary — pairs with chips / bordered controls in the shell.
 struct ModalSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .regular))
+            .lineLimit(1)
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
             .background(

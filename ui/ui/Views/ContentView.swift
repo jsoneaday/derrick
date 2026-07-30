@@ -252,7 +252,7 @@ struct ContentView: View {
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .openai
-    @State private var selectedModel: LLMModelChoice = .openai(.gpt5Mini)
+    @State private var selectedModel: LLMModelChoice = .openai(.gpt56Luna)
     @State private var helperModelSettings: LLMModelSettings?
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
@@ -298,15 +298,14 @@ struct ContentView: View {
         .modalPopup(
             isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented,
             minWidth: 380,
-            minHeight: 160,
+            minHeight: 0,
             maxWidth: 460,
             maxHeight: 360,
             onBackdropDismiss: {
-                if let event = policyEventPresenter.activeEvent,
-                   event.kind != .approvalRequired,
-                   event.kind != .networkAccessRequest {
-                    policyEventPresenter.dismissNotice()
-                }
+                Self.handlePolicyModalEscape(presenter: policyEventPresenter)
+            },
+            onEscape: {
+                Self.handlePolicyModalEscape(presenter: policyEventPresenter)
             },
             header: {
                 if let event = policyEventPresenter.activeEvent {
@@ -334,10 +333,13 @@ struct ContentView: View {
         .modalPopup(
             isPresented: bootstrapStatus.isModalPresented,
             minWidth: 380,
-            minHeight: 160,
+            minHeight: 0,
             maxWidth: 440,
             maxHeight: 280,
             onBackdropDismiss: bootstrapStatus.phase == .failed
+                ? { bootstrapStatus.dismissFailure() }
+                : nil,
+            onEscape: bootstrapStatus.phase == .failed
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
             header: {
@@ -386,18 +388,21 @@ struct ContentView: View {
                 .padding(.bottom, 12)
             },
             footer: {
-                HStack {
-                    Spacer()
-                    if bootstrapStatus.phase == .failed {
+                // Only show footer chrome when there is an action (avoids empty padded gap while initializing).
+                if bootstrapStatus.phase == .failed {
+                    HStack {
+                        Spacer(minLength: 0)
                         Button("OK") {
                             bootstrapStatus.dismissFailure()
                         }
                         .buttonStyle(ModalPrimaryButtonStyle())
                         .keyboardShortcut(.defaultAction)
+                        .keyboardShortcut(.cancelAction)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
             }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -807,6 +812,17 @@ struct ContentView: View {
                 LLMFailureReporter.shared.report(failure)
             }
             isStreaming = false
+        }
+    }
+
+    /// Escape / backdrop: dismiss notices/failures; deny decision-requiring modals.
+    private static func handlePolicyModalEscape(presenter: PolicyEventPresenter) {
+        guard let event = presenter.activeEvent else { return }
+        switch event.kind {
+        case .failure, .notice:
+            presenter.dismissNotice()
+        case .approvalRequired, .networkAccessRequest:
+            presenter.deny()
         }
     }
 

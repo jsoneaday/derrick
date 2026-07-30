@@ -3,28 +3,29 @@ import SwiftUI
 /// Default geometry for `ModalPopup`. Callers may override per presentation.
 enum ModalPopupDefaults {
     static let minWidth: CGFloat = 320
-    static let minHeight: CGFloat = 180
+    /// No forced tall chrome — card hugs content (word-wrap included) up to `maxHeight`.
+    static let minHeight: CGFloat = 0
     /// Caps growth so the card stays a centered popup, not a full-window panel.
     static let maxWidth: CGFloat = 480
     static let maxHeight: CGFloat = 360
     static let cornerRadius: CGFloat = 16
     static let backdropOpacity: Double = 0.35
-    /// Keeps the modal above ordinary overlays and sheets content hosts.
     static let zIndex: Double = 10_000
+    /// Reserve for header + footer when body must scroll under the height cap.
+    static let headerFooterReserve: CGFloat = 100
 }
 
 /// Full-window modal that always sits on top of the app.
 ///
-/// - **Header** and **footer** are optional and accept arbitrary views
-///   (titles, buttons, validation messages, etc.).
-/// - **Body** is required.
-/// - **minWidth** / **minHeight** are configurable by the caller.
+/// Height: **hugs content** when short; if content would exceed `maxHeight`, uses a capped
+/// card with a scrollable body. Empty header/footer types (`EmptyView`) take no space.
 struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
     private let minWidth: CGFloat
     private let minHeight: CGFloat
     private let maxWidth: CGFloat
     private let maxHeight: CGFloat
     private let onBackdropDismiss: (() -> Void)?
+    private let onEscape: (() -> Void)?
     private let header: Header
     private let bodyContent: BodyContent
     private let footer: Footer
@@ -35,6 +36,7 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
         maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
         maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
+        onEscape: (() -> Void)? = nil,
         @ViewBuilder header: () -> Header = { EmptyView() },
         @ViewBuilder body: () -> BodyContent,
         @ViewBuilder footer: () -> Footer = { EmptyView() }
@@ -44,9 +46,20 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.onBackdropDismiss = onBackdropDismiss
+        self.onEscape = onEscape ?? onBackdropDismiss
         self.header = header()
         self.bodyContent = body()
         self.footer = footer()
+    }
+
+    private var hasHeader: Bool { Header.self != EmptyView.self }
+    private var hasFooter: Bool { Footer.self != EmptyView.self }
+
+    private var bodyMaxHeight: CGFloat {
+        var reserve: CGFloat = 24 // card padding
+        if hasHeader { reserve += ModalPopupDefaults.headerFooterReserve * 0.45 }
+        if hasFooter { reserve += ModalPopupDefaults.headerFooterReserve * 0.45 }
+        return max(80, maxHeight - reserve)
     }
 
     var body: some View {
@@ -59,31 +72,77 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
                 }
                 .accessibilityHidden(true)
 
-            VStack(spacing: 0) {
-                header
-                bodyContent
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                footer
+            // Prefer content-sized card; only if it does not fit do we use a scrolling body.
+            // Background is on the card itself — never on a maxHeight-expanded frame (avoids empty gaps).
+            ViewThatFits(in: .vertical) {
+                styledCard(scrollBody: false)
+                styledCard(scrollBody: true)
             }
-            .padding(12)
-            .frame(minWidth: minWidth, idealWidth: minWidth, maxWidth: maxWidth)
-            .frame(minHeight: minHeight, maxHeight: maxHeight)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: maxWidth)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+            .background(
+                Button("", action: { onEscape?() })
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0.001)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .zIndex(ModalPopupDefaults.zIndex)
+        .onExitCommand {
+            onEscape?()
+        }
+    }
+
+    private func styledCard(scrollBody: Bool) -> some View {
+        cardChrome(scrollBody: scrollBody)
             .background(
                 RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius)
                     .fill(Color(nsColor: .windowBackgroundColor))
                     .shadow(color: .black.opacity(0.25), radius: 24, x: 0, y: 8)
             )
             .clipShape(RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius))
-            .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(.isModal)
+            .frame(maxHeight: scrollBody ? maxHeight : nil, alignment: .top)
+    }
+
+    @ViewBuilder
+    private func cardChrome(scrollBody: Bool) -> some View {
+        VStack(spacing: 0) {
+            if hasHeader {
+                header
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if scrollBody {
+                ScrollView(.vertical, showsIndicators: true) {
+                    bodyContent
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(maxHeight: bodyMaxHeight, alignment: .top)
+            } else {
+                bodyContent
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if hasFooter {
+                footer
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .zIndex(ModalPopupDefaults.zIndex)
+        .padding(12)
+        .frame(minWidth: minWidth, idealWidth: minWidth, maxWidth: maxWidth, alignment: .top)
+        .frame(minHeight: minHeight > 0 ? minHeight : nil, alignment: .top)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-// MARK: - Body-only convenience (no header / footer type noise)
+// MARK: - Body-only convenience
 
 extension ModalPopup where Header == EmptyView, Footer == EmptyView {
     init(
@@ -92,6 +151,7 @@ extension ModalPopup where Header == EmptyView, Footer == EmptyView {
         maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
         maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
+        onEscape: (() -> Void)? = nil,
         @ViewBuilder body: () -> BodyContent
     ) {
         self.init(
@@ -100,6 +160,7 @@ extension ModalPopup where Header == EmptyView, Footer == EmptyView {
             maxWidth: maxWidth,
             maxHeight: maxHeight,
             onBackdropDismiss: onBackdropDismiss,
+            onEscape: onEscape,
             header: { EmptyView() },
             body: body,
             footer: { EmptyView() }
@@ -118,6 +179,7 @@ extension View {
         maxWidth: CGFloat = ModalPopupDefaults.maxWidth,
         maxHeight: CGFloat = ModalPopupDefaults.maxHeight,
         onBackdropDismiss: (() -> Void)? = nil,
+        onEscape: (() -> Void)? = nil,
         @ViewBuilder header: () -> Header = { EmptyView() },
         @ViewBuilder body: () -> BodyContent,
         @ViewBuilder footer: () -> Footer = { EmptyView() }
@@ -130,6 +192,7 @@ extension View {
                     maxWidth: maxWidth,
                     maxHeight: maxHeight,
                     onBackdropDismiss: onBackdropDismiss,
+                    onEscape: onEscape,
                     header: header,
                     body: body,
                     footer: footer

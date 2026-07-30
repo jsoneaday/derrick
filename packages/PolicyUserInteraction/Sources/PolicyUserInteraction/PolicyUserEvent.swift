@@ -170,9 +170,7 @@ public enum PolicyUserEventFactory {
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        let summary = trimmed.isEmpty
-            ? "The script exited with code \(exitCode)."
-            : String(trimmed.prefix(400))
+        let summary = Self.humanReadableScriptFailureSummary(exitCode: exitCode, stderr: trimmed)
         return failure(
             source: .system,
             title: "Script execution failed",
@@ -181,6 +179,32 @@ public enum PolicyUserEventFactory {
             toolName: toolName,
             correlationId: correlationId
         )
+    }
+
+    /// Prefer a short user-facing reason; full traceback stays in `detail`.
+    private static func humanReadableScriptFailureSummary(exitCode: Int32, stderr: String) -> String {
+        if stderr.isEmpty {
+            return "The script exited with code \(exitCode)."
+        }
+        let lower = stderr.lowercased()
+        if lower.contains("jsondecodeerror") || lower.contains("expecting value") {
+            return "The script expected JSON from a network response but received non-JSON (often an HTML error or block page). Check the destination URL and response."
+        }
+        if lower.contains("connectionerror") || lower.contains("max retries") || lower.contains("nameresolutionerror") {
+            return "The script could not reach a network host (connection or DNS failure)."
+        }
+        if lower.contains("timeout") || lower.contains("timed out") {
+            return "The script timed out while waiting for a network response."
+        }
+        // Prefer the last non-empty traceback line when it looks like an exception type.
+        let lines = stderr.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if let lastException = lines.reversed().first(where: {
+            $0.contains("Error:") || $0.contains("Exception:") || $0.hasPrefix("json.decoder")
+        }) {
+            let clipped = lastException.trimmingCharacters(in: .whitespaces)
+            return clipped.count > 220 ? String(clipped.prefix(220)) + "…" : clipped
+        }
+        return String(stderr.prefix(220)) + (stderr.count > 220 ? "…" : "")
     }
 
     public static func scriptExecutionTimedOut(

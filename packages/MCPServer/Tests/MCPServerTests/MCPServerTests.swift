@@ -220,7 +220,7 @@ import MCPClient
                 requestChars: 100,
                 responseChars: 200,
                 chunkCount: 3,
-                model: "gpt-5-mini"
+                model: "gpt-5.6-luna"
             )
         )
         let summary = phase.summaryLine
@@ -229,7 +229,7 @@ import MCPClient
         #expect(summary.contains("reviewer_ttfb_ms=4"))
         #expect(summary.contains("reviewer_stream_ms=5"))
         #expect(summary.contains("reviewer_response_chars=200"))
-        #expect(summary.contains("reviewer_model=gpt-5-mini"))
+        #expect(summary.contains("reviewer_model=gpt-5.6-luna"))
     }
 
     @Test func dockerExecUsesWarmContainer() {

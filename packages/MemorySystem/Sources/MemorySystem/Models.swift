@@ -206,7 +206,9 @@ public extension MemoryBudget {
     static let recommendedMaxTokenCounts: [MemoryModelKey: Int] = [
         .init(provider: "gemini", name: "gemini-2.5-flash-lite"): 50_000,
         .init(provider: "gemini", name: "gemini-3.1-flash-lite"): 50_000,
-        .init(provider: "openai", name: "gpt-5-mini"): 25_000
+        .init(provider: "openai", name: "gpt-5.6-luna"): 25_000,
+        .init(provider: "openai", name: "gpt-5.6-terra"): 50_000,
+        .init(provider: "openai", name: "gpt-5.6-sol"): 50_000
     ]
 
     static func maxTokenCount(forProvider provider: String, modelName: String) -> Int {

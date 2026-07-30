@@ -13,7 +13,7 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
     private let model: OpenAIModel
     private let client: OpenAIAgentClient
 
-    public init(apiKey: String, model: OpenAIModel = .gpt5Mini) {
+    public init(apiKey: String, model: OpenAIModel = .gpt56Luna) {
         self.name = "openai-\(model.rawValue)"
         self.model = model
         self.client = OpenAIAgentClient(provider: OpenAIProvider(apiKey: apiKey))
@@ -21,7 +21,7 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
 
     public static func fromEnvironment(
         variable: String = "OPENAI_API_KEY",
-        model: OpenAIModel = .gpt5Mini
+        model: OpenAIModel = .gpt56Luna
     ) -> OpenAIPythonScriptReviewer? {
         guard let apiKey = ProcessInfo.processInfo.environment[variable], !apiKey.isEmpty else {
             return nil

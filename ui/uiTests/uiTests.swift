@@ -82,7 +82,7 @@ import DBRepository
 
     @Test func llmProviderDefaultsToExpectedModels() {
         #expect(LLMProviderChoice..google.defaultModel.displayName == "gemini-3.1-flash-lite")
-        #expect(LLMProviderChoice.openai.defaultModel.displayName == "gpt-5-mini")
+        #expect(LLMProviderChoice.openai.defaultModel.displayName == "gpt-5.6-luna")
         #expect(LLMProviderChoice..google.apiKeyEnvironmentKeys.contains("GEMINI_API_KEY"))
         #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
     }
@@ -161,9 +161,13 @@ import DBRepository
     }
 
     @Test func helperModelChoicesExposeEverySupportedModel() {
-        #expect(LLMModelChoice.allCases.count == 6)
+        #expect(LLMModelChoice.allCases.count == 8)
         #expect(LLMModelChoice.allCases.contains(.gemini(.gemini25FlashLite)))
         #expect(LLMModelChoice.allCases.contains(.openai(.gpt55)))
+        #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Luna)))
+        #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Terra)))
+        #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Sol)))
+        #expect(LLMModelChoice.defaultHelperModel == .openai(.gpt56Luna))
     }
 
     @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {

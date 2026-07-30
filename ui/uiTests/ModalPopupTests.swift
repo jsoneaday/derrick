@@ -6,7 +6,7 @@ import Testing
 @Suite struct ModalPopupTests {
     @Test func defaultsMatchDocumentedGeometry() {
         #expect(ModalPopupDefaults.minWidth == 320)
-        #expect(ModalPopupDefaults.minHeight == 180)
+        #expect(ModalPopupDefaults.minHeight == 0)
         #expect(ModalPopupDefaults.maxWidth == 480)
         #expect(ModalPopupDefaults.maxHeight == 360)
         #expect(ModalPopupDefaults.cornerRadius == 16)
@@ -22,6 +22,8 @@ import Testing
         #expect(ModalPopupDefaults.cornerRadius > 0)
         #expect(ModalPopupDefaults.backdropOpacity > 0 && ModalPopupDefaults.backdropOpacity < 1)
         #expect(ModalPopupDefaults.zIndex > 0)
+        #expect(ModalPopupDefaults.headerFooterReserve > 0)
+        #expect(ModalPopupDefaults.headerFooterReserve < ModalPopupDefaults.maxHeight)
     }
 
     @MainActor

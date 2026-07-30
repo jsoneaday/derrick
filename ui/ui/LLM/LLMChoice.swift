@@ -45,7 +45,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
         case .google:
             return .gemini(.gemini31FlashLite)
         case .openai:
-            return .openai(.gpt5Mini)
+            return .openai(.gpt56Luna)
         }
     }
 }
@@ -57,13 +57,16 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
     static let allCases: [LLMModelChoice] = [
         .gemini(.gemini25FlashLite),
         .gemini(.gemini31FlashLite),
-        .openai(.gpt5Mini),
         .openai(.gpt54Mini),
         .openai(.gpt54),
-        .openai(.gpt55)
+        .openai(.gpt55),
+        .openai(.gpt56Luna),
+        .openai(.gpt56Terra),
+        .openai(.gpt56Sol)
     ]
 
-    static let defaultHelperModel: LLMModelChoice = .openai(.gpt5Mini)
+    /// Default for summarizer, Python reviewer, and conversation UI preselection.
+    static let defaultHelperModel: LLMModelChoice = .openai(.gpt56Luna)
 
     var id: String {
         switch self {

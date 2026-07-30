@@ -1,10 +1,13 @@
 import Foundation
 
 public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
-    case gpt5Mini = "gpt-5-mini"
     case gpt54Mini = "gpt-5.4-mini"
     case gpt54 = "gpt-5.4"
     case gpt55 = "gpt-5.5"
+    /// GPT-5.6 capability tiers (generation 5.6).
+    case gpt56Sol = "gpt-5.6-sol"
+    case gpt56Terra = "gpt-5.6-terra"
+    case gpt56Luna = "gpt-5.6-luna"
 
     public var id: AgentModelID {
         .init(provider: "openai", name: rawValue)
