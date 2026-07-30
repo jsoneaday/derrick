@@ -94,6 +94,30 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(hosts.contains("reactjs.org"))
     }
 
+    @Test func extractHostsIgnoresBeautifulSoupHtmlParser() {
+        // Production false positive: BeautifulSoup(s.text, 'html.parser') was treated as a host.
+        let script = """
+        import requests
+        from bs4 import BeautifulSoup
+        r=requests.get('https://api.github.com/repos/facebook/react/releases/latest',timeout=15)
+        s=requests.get('https://reactjs.org/blog/',timeout=15)
+        soup=BeautifulSoup(s.text,'html.parser')
+        post=soup.select_one('article a')
+        """
+        let hosts = EgressHostExtractor.extractHosts(from: script)
+        #expect(!hosts.contains("html.parser"))
+        #expect(hosts.contains("api.github.com"))
+        #expect(hosts.contains("reactjs.org"))
+        #expect(!EgressHostExtractor.isPlausibleHostname("html.parser"))
+    }
+
+    @Test func extractHostsIgnoresModuleLikeQuotedNames() {
+        #expect(!EgressHostExtractor.isPlausibleHostname("urllib.parse"))
+        #expect(!EgressHostExtractor.isPlausibleHostname("json.decoder"))
+        #expect(EgressHostExtractor.isPlausibleHostname("github.com"))
+        #expect(EgressHostExtractor.isPlausibleHostname("api.github.com"))
+    }
+
     @Test func permanentSuffixUsesLastTwoLabels() {
         #expect(EgressHostExtractor.permanentSuffix(for: "api.github.com") == "github.com")
         #expect(EgressHostExtractor.permanentSuffix(for: "reactjs.org") == "reactjs.org")

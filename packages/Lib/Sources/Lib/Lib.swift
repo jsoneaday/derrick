@@ -1,14 +1,6 @@
 import Foundation
 import MCP
 
-public func toolArgumentsFromJSON(_ json: String) throws -> [String: Value] {
-    guard let data = json.data(using: .utf8),
-          let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return [:]
-    }
-    return obj.mapValues { jsonToToolValue($0) }
-}
-
 public func jsonToToolValue(_ obj: Any) -> Value {
     if let str = obj as? String {
         return .string(str)

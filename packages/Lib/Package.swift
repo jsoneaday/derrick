@@ -23,6 +23,11 @@ let package = Package(
                  .product(name: "MCP", package: "swift-sdk")
             ],
             path: "Sources/Lib"
+        ),
+        .testTarget(
+            name: "LibTests",
+            dependencies: ["Lib"],
+            path: "Tests/LibTests"
         )
     ]
 )

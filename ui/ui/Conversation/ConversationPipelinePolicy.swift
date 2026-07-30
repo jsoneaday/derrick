@@ -199,6 +199,13 @@ extension ConversationPipeline {
                         }
 
                         debugLog("**Start Completion**")
+                        // Prefer a full re-decode of the finished stream. Mid-stream PartialJSON can leave
+                        // a stale agentResponse (e.g. tool_call without complete arguments) that then
+                        // fails parseToolPayload and skips execution — empty follow-up / "no live fetch".
+                        if let finalized = Self.decodeAgentResponse(from: completion, decoder: jsonDecoder) {
+                            agentResponse = finalized
+                        }
+
                         // Prefer structured assistant_response; if the model ignored the JSON schema
                         // and returned plain prose, surface that text instead of an empty bubble.
                         var fullCompletion = Self.getFullCompletion(agentResponse, jsonEncoder: jsonEncoder)
@@ -244,14 +251,22 @@ extension ConversationPipeline {
                             await MainActor.run {
                                 debugLog("Tool request detected; forwarding to policy engine")
                             }
+                            let parsedTool = Self.parseToolPayload(agentResponse)
+                            if parsedTool == nil {
+                                await MainActor.run {
+                                    let name = agentResponse?.toolCall?.toolName ?? agentResponse?.toolBatch?.tools?.first?.toolName ?? "(unknown)"
+                                    let argsPreview = agentResponse?.toolCall?.arguments.map { String($0.prefix(200)) } ?? "(nil)"
+                                    debugLog("Tool payload parse failed for status=\(agentResponse?.status.rawValue ?? "?") name=\(name) argsPreview=\(argsPreview)")
+                                }
+                            }
                             let toolExecution = try await executeToolRequest(
-                                Self.parseToolPayload(agentResponse),
+                                parsedTool,
                                 sessionID: sessionID,
                                 approvalPresenter: approvalPresenter
                             )
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
                             await MainActor.run {
-                                debugLog("Tool result received")
+                                debugLog("Tool result received summaryChars=\(toolExecution.summary.count) records=\(toolExecution.records.count)")
                             }
 
                             workingPrompt = Self.buildFollowUpPrompt(
@@ -311,6 +326,27 @@ extension ConversationPipeline {
         }
     }
     
+    /// Decode a finished model completion. Prefer full JSONSerialization over PartialJSON mid-stream state.
+    private static func decodeAgentResponse(from completion: String, decoder: JSONDecoder) -> AgentResponse? {
+        let trimmed = completion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let data = trimmed.data(using: .utf8),
+           let response = try? decoder.decode(AgentResponse.self, from: data) {
+            return response
+        }
+
+        // Fallback: PartialJSON → object → Data → decode (only when top-level is a JSON object/array).
+        if let jsonAny = try? PartialJSON.parse(trimmed),
+           JSONSerialization.isValidJSONObject(jsonAny),
+           let data = try? JSONSerialization.data(withJSONObject: jsonAny, options: []),
+           let response = try? decoder.decode(AgentResponse.self, from: data) {
+            return response
+        }
+
+        return nil
+    }
+
     private static func getFullCompletion(_ agentResponse: AgentResponse?, jsonEncoder: JSONEncoder) -> String {
         if agentResponse == nil {
             return ""
@@ -357,7 +393,10 @@ extension ConversationPipeline {
         approvalPresenter: (any ApprovalConfirmationPresenting)?
     ) async throws -> (summary: String, records: [ToolCallRecord]) {
         guard let request else {
-            return ("No tool request detected.", [])
+            return (
+                "No tool request detected (model emitted tool_call/tool_batch but payload could not be parsed). Retry with a simpler tool arguments JSON.",
+                []
+            )
         }
         
         switch request {
@@ -410,40 +449,19 @@ extension ConversationPipeline {
         guard let agentResponse = agentResponse else {
             return nil
         }
-        
+        let toolName = agentResponse.toolCall?.toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !toolName.isEmpty else {
+            return nil
+        }
+
+        let rawArguments = agentResponse.toolCall?.arguments ?? ""
+        // Shared resilient parser (handles illegal escapes like `\$` in model-emitted scripts).
+        let arguments = try parseToolArgumentsObject(rawArguments)
+
         return MCPSingleToolRequest(
-            toolName: agentResponse.toolCall?.toolName ?? "",
-            arguments: try toolArgumentsFromJSON(agentResponse.toolCall?.arguments ?? "")
+            toolName: toolName,
+            arguments: arguments
         )
-    }
-
-    private static func toolArgumentsFromJSON(_ json: String) throws -> [String: Value] {
-        guard let data = json.data(using: .utf8),
-              let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return [:]
-        }
-        return obj.mapValues { jsonToToolValue($0) }
-    }
-
-    private static func jsonToToolValue(_ obj: Any) -> Value {
-        if let str = obj as? String {
-            return .string(str)
-        } else if let num = obj as? NSNumber {
-            if CFGetTypeID(num) == CFBooleanGetTypeID() {
-                return .bool(num.boolValue)
-            } else if num.doubleValue.truncatingRemainder(dividingBy: 1) == 0 {
-                return .int(num.intValue)
-            } else {
-                return .double(num.doubleValue)
-            }
-        } else if let bool = obj as? Bool {
-            return .bool(bool)
-        } else if let arr = obj as? [Any] {
-            return .array(arr.map { jsonToToolValue($0) })
-        } else if let dict = obj as? [String: Any] {
-            return .object(dict.mapValues { jsonToToolValue($0) })
-        }
-        return .null
     }
 
     private static func parseToolPayload(_ agentResponse: AgentResponse?) -> ParsedToolRequest? {
@@ -456,9 +474,15 @@ extension ConversationPipeline {
             return .batch(batch)
         }
 
-        if let single = try? mcpSingleToolRequest(agentResponse),
-           !single.toolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .single(single)
+        do {
+            if let single = try mcpSingleToolRequest(agentResponse),
+               !single.toolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .single(single)
+            }
+        } catch {
+            // Keep nil so executeToolRequest reports a clear message; error is logged by caller preview.
+            debugLog("parseToolPayload single failed: \(error.localizedDescription)")
+            return nil
         }
 
         return nil
