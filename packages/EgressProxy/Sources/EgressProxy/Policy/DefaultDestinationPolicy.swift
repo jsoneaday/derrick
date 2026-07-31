@@ -12,19 +12,23 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
     private let blockedIPv4: [IPv4CIDR]
     private let blockedIPv6: [IPv6Prefix]
     private let resolver: any DNSResolving
+    /// When set, unknown hosts prompt the app mid-CONNECT instead of hard-denying.
+    private let hostAccessPrompter: (any HostAccessPrompter)?
 
     public init(
         allowedDomainSuffixes: [String] = [],
         blockedHostnames: [String] = EgressProxyConfiguration.blockedHostnames,
         blockedIPv4CIDRs: [String] = EgressProxyConfiguration.blockedIPv4CIDRs,
         blockedIPv6CIDRs: [String] = EgressProxyConfiguration.blockedIPv6CIDRs,
-        resolver: any DNSResolving = SystemDNSResolver()
+        resolver: any DNSResolving = SystemDNSResolver(),
+        hostAccessPrompter: (any HostAccessPrompter)? = nil
     ) {
         self.allowedDomainSuffixes = allowedDomainSuffixes.map { $0.lowercased() }
         self.blockedHostnames = blockedHostnames.map { $0.lowercased() }
         self.blockedIPv4 = blockedIPv4CIDRs.compactMap(IPv4CIDR.init)
         self.blockedIPv6 = blockedIPv6CIDRs.compactMap(IPv6Prefix.init)
         self.resolver = resolver
+        self.hostAccessPrompter = hostAccessPrompter
     }
 
     public func setAllowedDomainSuffixes(_ suffixes: [String]) {
@@ -80,8 +84,24 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
             return .deny(reason: "raw IPv6 destinations are not allowlisted: \(host)")
         }
 
-        guard isAllowedDomain(host) else {
-            return .deny(reason: "hostname not in allowlist: \(host)")
+        if !isAllowedDomain(host) {
+            // Mid-flight hold: ask the app (once/always/deny) when a prompter is configured.
+            guard let hostAccessPrompter else {
+                return .deny(reason: "hostname not in allowlist: \(host)")
+            }
+            switch await hostAccessPrompter.requestAccess(host: host) {
+            case .deny:
+                return .deny(reason: "user denied network access to \(host)")
+            case .allowOnce:
+                grantSessionHosts([host])
+            case .allowAlways:
+                // Permanent suffix is persisted by the app; grant session so this CONNECT proceeds.
+                grantSessionHosts([host])
+            }
+            // Re-check coverage after grant (exact host session grant).
+            guard isAllowedDomain(host) else {
+                return .deny(reason: "hostname not in allowlist after user decision: \(host)")
+            }
         }
 
         do {

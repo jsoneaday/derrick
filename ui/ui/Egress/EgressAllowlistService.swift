@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import DBRepository
+import DockerRunnerXPC
 import EgressProxy
 import AppEvents
 import PolicyUserInteraction
@@ -146,6 +147,52 @@ final class EgressAllowlistService: ObservableObject {
             toolName: toolName
         )
         return await AppEventBus.shared.initDecision(event)
+    }
+
+    /// Mid-flight CONNECT hold from the helper (reverse XPC).
+    /// Persists always-allow suffixes and session grants so the helper can complete the tunnel.
+    func handleMidFlightHostAccess(host: String, toolName: String = "python_script_exec") async -> EgressHostAccessReply {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.isEmpty {
+            return EgressHostAccessReply(decision: .deny, actor: "system")
+        }
+        if localPolicy.isHardBlockedHostname(normalized) {
+            debugLog("Egress mid-flight hard-block for \(normalized)")
+            return EgressHostAccessReply(decision: .deny, actor: "system")
+        }
+        // Already covered (race with preflight / permanent list).
+        if localPolicy.isHostCoveredByAllowlist(normalized) {
+            debugLog("Egress mid-flight already allowed for \(normalized)")
+            return EgressHostAccessReply(decision: .once, actor: "system")
+        }
+
+        let decision = await promptForHost(normalized, toolName: toolName)
+        switch decision {
+        case .approved(let actor), .approvedOnce(let actor):
+            debugLog("Egress mid-flight allow once for \(normalized) by \(actor ?? "user")")
+            localPolicy.grantSessionHosts([normalized])
+            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            return EgressHostAccessReply(decision: .once, actor: actor)
+        case .approvedPermanently(let actor):
+            debugLog("Egress mid-flight allow always for \(normalized) by \(actor ?? "user")")
+            let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
+            do {
+                try await addSuffix(suffix, source: "user")
+                // Session grant covers the exact host while permanent suffix propagates.
+                localPolicy.grantSessionHosts([normalized])
+                await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+                return EgressHostAccessReply(decision: .always, actor: actor)
+            } catch {
+                debugLog("Egress mid-flight permanent save failed: \(error.localizedDescription)")
+                return EgressHostAccessReply(decision: .deny, actor: actor)
+            }
+        case .denied(let actor):
+            debugLog("Egress mid-flight deny for \(normalized) by \(actor ?? "user")")
+            return EgressHostAccessReply(decision: .deny, actor: actor)
+        case .dismissed, .timedOut:
+            debugLog("Egress mid-flight dismissed/timeout for \(normalized)")
+            return EgressHostAccessReply(decision: .deny, actor: "system")
+        }
     }
 
     private static func blockedResultJSON(findings: [String], stage: String) -> String {

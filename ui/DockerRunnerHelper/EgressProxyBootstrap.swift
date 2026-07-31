@@ -4,7 +4,18 @@ import EgressProxy
 /// Starts the local egress proxy inside the privileged helper and relays logs to the app.
 enum EgressProxyBootstrap {
     /// Shared policy instance so XPC can update the allowlist at runtime.
-    static let policy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
+    /// Mid-flight unknown hosts prompt the app via reverse XPC (once/always/deny).
+    static let policy: DefaultDestinationPolicy = {
+        let reverseXPC = ClosureHostAccessPrompter { host in
+            await HelperLogRelay.shared.requestEgressHostAccess(host: host)
+        }
+        // Coalesce concurrent CONNECTs to the same host + 120s timeout.
+        let coalesced = CoalescingHostAccessPrompterBox(underlying: reverseXPC, timeoutSeconds: 120)
+        return DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            hostAccessPrompter: coalesced
+        )
+    }()
 
     private static let server = EgressProxyServer(
         policy: policy,

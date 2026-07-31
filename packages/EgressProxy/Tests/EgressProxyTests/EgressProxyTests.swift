@@ -83,6 +83,65 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(decision == .allow)
     }
 
+    @Test func midFlightPrompterAllowOnceGrantsHost() async {
+        final class OncePrompter: HostAccessPrompter, @unchecked Sendable {
+            var calls = 0
+            func requestAccess(host: String) async -> HostAccessUserDecision {
+                calls += 1
+                return .allowOnce
+            }
+        }
+        let prompter = OncePrompter()
+        let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            resolver: StaticDNSResolver(addresses: [
+                "news.example": ["93.184.216.34"]
+            ]),
+            hostAccessPrompter: prompter
+        )
+        let decision = await policy.evaluate(destination: ProxyDestination(host: "news.example", port: 443))
+        #expect(decision == .allow)
+        #expect(prompter.calls == 1)
+        #expect(policy.isHostCoveredByAllowlist("news.example"))
+    }
+
+    @Test func midFlightPrompterDenyKeepsBlocked() async {
+        let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            resolver: StaticDNSResolver(addresses: [
+                "evil.example": ["93.184.216.34"]
+            ]),
+            hostAccessPrompter: ClosureHostAccessPrompter { _ in .deny }
+        )
+        let decision = await policy.evaluate(destination: ProxyDestination(host: "evil.example", port: 443))
+        guard case .deny(let reason) = decision else {
+            Issue.record("expected deny")
+            return
+        }
+        #expect(reason.contains("user denied") || reason.contains("allowlist"))
+    }
+
+    @Test func midFlightDoesNotPromptHardBlockedHosts() async {
+        final class CountingPrompter: HostAccessPrompter, @unchecked Sendable {
+            var calls = 0
+            func requestAccess(host: String) async -> HostAccessUserDecision {
+                calls += 1
+                return .allowOnce
+            }
+        }
+        let prompter = CountingPrompter()
+        let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            hostAccessPrompter: prompter
+        )
+        let decision = await policy.evaluate(destination: ProxyDestination(host: "host.docker.internal", port: 80))
+        guard case .deny = decision else {
+            Issue.record("expected deny for hard-blocked host")
+            return
+        }
+        #expect(prompter.calls == 0)
+    }
+
     @Test func extractHostsFromScript() {
         let script = """
         import requests

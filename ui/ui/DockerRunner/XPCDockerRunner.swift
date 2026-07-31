@@ -13,6 +13,21 @@ private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked 
             debugLog("[XPC helper] \(message)")
         }
     }
+
+    /// Mid-flight CONNECT hold: helper is waiting for once/always/deny before opening upstream.
+    func requestEgressHostAccess(host: String, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        Task { @MainActor in
+            debugLog("[XPC helper] Mid-flight egress prompt for host=\(host)")
+            let payload = await EgressAllowlistService.shared.handleMidFlightHostAccess(host: host)
+            let data: Data
+            if let encoded = try? payload.encodeJSON() {
+                data = encoded
+            } else {
+                data = (try? EgressHostAccessReply(decision: .deny).encodeJSON()) ?? Data("{}".utf8)
+            }
+            reply(data as NSData)
+        }
+    }
 }
 
 public final class XPCDockerRunnerState: @unchecked Sendable {
