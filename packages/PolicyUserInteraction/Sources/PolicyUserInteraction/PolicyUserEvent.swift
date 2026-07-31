@@ -10,6 +10,7 @@ public enum PolicyEventSource: String, Sendable, Codable, Equatable {
     case llmProvider
     /// Privileged helper rejected a process launch (XPC allowlist).
     case xpcValidation
+    case usageLimits
     case system
 }
 
@@ -22,6 +23,8 @@ public enum PolicyEventKind: String, Sendable, Codable, Equatable {
     case approvalRequired
     /// Network host access: Allow once / Always / Deny.
     case networkAccessRequest
+    /// Usage limit hit: Stop / Raise for this session.
+    case usageLimitRequest
 }
 
 public enum PolicyUserDecision: Sendable, Equatable {
@@ -332,6 +335,40 @@ public enum PolicyUserEventFactory {
             toolName: nil,
             payloadPreview: payloadPreview,
             rememberKey: "content.category:\(key)"
+        )
+    }
+
+    public static func usageLimitExceeded(
+        dimensionTitle: String,
+        currentLimit: Int,
+        proposedSessionLimit: Int,
+        detail: String? = nil,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        PolicyUserEvent(
+            priority: .userDecision,
+            correlationId: correlationId,
+            kind: .usageLimitRequest,
+            source: .usageLimits,
+            title: "Usage limit reached",
+            summary: "\(dimensionTitle) limit (\(currentLimit)) was reached. Raise to \(proposedSessionLimit) for this session only?",
+            detail: (detail.map { $0 + "\n\n" } ?? "")
+                + "Stop ends this action. Raise applies until you quit the app. Permanent limits are in Settings → Usage limits (capped).",
+            rememberKey: "usage.limit:\(dimensionTitle)"
+        )
+    }
+
+    public static func usageLimitHardStop(
+        dimensionTitle: String,
+        currentLimit: Int,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .usageLimits,
+            title: "Usage limit reached",
+            summary: "\(dimensionTitle) is already at the maximum allowed (\(currentLimit)). This action will stop.",
+            detail: "You cannot raise this further in-session. Lower usage or adjust Settings within the permanent cap.",
+            correlationId: correlationId
         )
     }
 

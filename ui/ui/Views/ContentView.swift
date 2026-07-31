@@ -430,6 +430,7 @@ struct ContentView: View {
                 await helperModelSettings?.loadSettings()
                 await EgressAllowlistService.shared.configure(repository: repo)
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
+                await UsageLimitsService.shared.configure(repository: repo)
 
                 conversation = try await ConversationModel.makeDefault(
                     repository: repo,
@@ -822,7 +823,7 @@ struct ContentView: View {
         switch event.kind {
         case .failure, .notice:
             presenter.dismissNotice()
-        case .approvalRequired, .networkAccessRequest:
+        case .approvalRequired, .networkAccessRequest, .usageLimitRequest:
             presenter.deny()
         }
     }

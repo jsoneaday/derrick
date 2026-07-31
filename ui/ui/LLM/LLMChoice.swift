@@ -116,4 +116,13 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
             return model.maxIdealContextTokens
         }
     }
+
+    var tokenPricing: ModelTokenPricing {
+        switch self {
+        case .gemini(let model):
+            return model.tokenPricing
+        case .openai(let model):
+            return model.tokenPricing
+        }
+    }
 }

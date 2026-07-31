@@ -7,6 +7,7 @@ import Lib
 import MCPServer
 import AppEvents
 import PolicyUserInteraction
+import LLMAgentClient
 
 extension ConversationPipeline {
     func callToolWithPolicyInterception(
@@ -126,6 +127,23 @@ extension ConversationPipeline {
                         return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
                     }
                     if interceptedEvent.toolName == "python_script_exec" {
+                        let pythonAllowed = await UsageLimitsService.shared.allowPythonScriptRun()
+                        if !pythonAllowed {
+                            throw MCPClientError.toolExecutionDenied(
+                                toolName: interceptedEvent.toolName,
+                                reason: "Usage limit: max python_script_exec runs for this message."
+                            )
+                        }
+                        let allowNetwork = Self.boolArgument(interceptedArguments, key: "allow_network")
+                        if allowNetwork {
+                            let reviewerAllowed = await UsageLimitsService.shared.allowReviewerCall()
+                            if !reviewerAllowed {
+                                throw MCPClientError.toolExecutionDenied(
+                                    toolName: interceptedEvent.toolName,
+                                    reason: "Usage limit: max security reviewer calls for this message."
+                                )
+                            }
+                        }
                         await MainActor.run {
                             debugLog("Python reviewer validating request")
                         }
@@ -137,6 +155,10 @@ extension ConversationPipeline {
                         named: interceptedEvent.toolName,
                         arguments: interceptedArguments
                     )
+                    // Attribute reviewer-ish tokens from phase timing when present.
+                    if interceptedEvent.toolName == "python_script_exec" {
+                        await Self.recordReviewerTokensIfPresent(resultText: result.text)
+                    }
                     await MainActor.run {
                         debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
                         debugLog("Tool result content: \(Self.debugPayload(result.text))")
@@ -352,6 +374,45 @@ extension ConversationPipeline {
             return payload
         }
         return String(payload.prefix(limit)) + "\n... [truncated \(payload.count - limit) chars]"
+    }
+
+    private static func boolArgument(_ arguments: [String: Value], key: String) -> Bool {
+        guard let value = arguments[key] else { return false }
+        switch value {
+        case .bool(let b): return b
+        case .string(let s):
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return t == "true" || t == "1" || t == "yes"
+        case .int(let i): return i != 0
+        default: return false
+        }
+    }
+
+    private static func recordReviewerTokensIfPresent(resultText: String) async {
+        guard let data = resultText.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let timing = obj["phaseTiming"] as? [String: Any]
+        else { return }
+        // Prefer explicit API usage if the tool ever embeds it; else char-based estimate for reviewer I/O.
+        if let prompt = timing["reviewerPromptTokens"] as? Int,
+           let completion = timing["reviewerCompletionTokens"] as? Int {
+            let usage = AgentTokenUsage(
+                promptTokens: prompt,
+                completionTokens: completion,
+                source: .providerAPI
+            )
+            _ = await UsageLimitsService.shared.recordAPIUsage(usage)
+            return
+        }
+        let req = timing["reviewerRequestChars"] as? Int ?? 0
+        let res = timing["reviewerResponseChars"] as? Int ?? 0
+        let usage = AgentTokenUsage(
+            promptTokens: max(0, (req + 3) / 4),
+            completionTokens: max(0, (res + 3) / 4),
+            source: .estimated
+        )
+        guard usage.totalTokens > 0 else { return }
+        _ = await UsageLimitsService.shared.recordAPIUsage(usage)
     }
 }
 

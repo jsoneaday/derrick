@@ -63,7 +63,7 @@ final class PolicyEventPresenter: ObservableObject {
         isPresented = true
         debugLog("[policy-ui] present kind=\(next.kind.rawValue) source=\(next.source.rawValue) title=\(next.title)")
 
-        if next.kind == .approvalRequired || next.kind == .networkAccessRequest {
+        if next.kind == .approvalRequired || next.kind == .networkAccessRequest || next.kind == .usageLimitRequest {
             let eventID = next.id
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
@@ -107,7 +107,7 @@ final class PolicyEventPresenter: ObservableObject {
         isProcessing = false
         debugLog("[policy-ui] decision=\(String(describing: decision)) for \(eventID)")
 
-        if kind == .approvalRequired || kind == .networkAccessRequest {
+        if kind == .approvalRequired || kind == .networkAccessRequest || kind == .usageLimitRequest {
             Task {
                 await bus.completeDecision(id: eventID, decision: decision)
             }

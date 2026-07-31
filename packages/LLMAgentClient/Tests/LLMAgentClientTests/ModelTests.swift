@@ -47,6 +47,32 @@ struct ModelTests {
         #expect(chunks == ["Hel", "lo"])
     }
 
+    @Test func openAIStreamDecoderParsesUsage() throws {
+        let event = """
+        data: {"choices":[{"delta":{"content":"Hi"}}]}
+        data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}
+
+        data: [DONE]
+
+        """
+        let events = try openAIStreamEvents(from: event)
+        #expect(events.contains(.text("Hi")))
+        guard case .usage(let usage) = events.last else {
+            Issue.record("expected usage event")
+            return
+        }
+        #expect(usage.promptTokens == 12)
+        #expect(usage.completionTokens == 3)
+        #expect(usage.totalTokens == 15)
+        #expect(usage.source == .providerAPI)
+    }
+
+    @Test func modelPricingEstimatesUSD() {
+        let pricing = ModelTokenPricing(inputUSDPer1MTokens: 1.0, outputUSDPer1MTokens: 2.0)
+        let usd = pricing.estimateUSD(promptTokens: 1_000_000, completionTokens: 500_000)
+        #expect(abs(usd - 2.0) < 0.0001)
+    }
+
     @Test func geminiJSONStreamRequestSerialization() throws {
         let schema = AgentSchema(
             type: .object,

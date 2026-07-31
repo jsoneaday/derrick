@@ -12,6 +12,8 @@ enum ModalChrome {
             return "checkmark.shield"
         case .networkAccessRequest:
             return "network"
+        case .usageLimitRequest:
+            return "gauge.with.dots.needle.67percent"
         case .notice:
             return "info.circle"
         }
@@ -24,7 +26,7 @@ enum ModalChrome {
         switch kind {
         case .failure:
             return Color(red: 0.72, green: 0.48, blue: 0.18)
-        case .approvalRequired, .networkAccessRequest:
+        case .approvalRequired, .networkAccessRequest, .usageLimitRequest:
             return Color(red: 0.176, green: 0.286, blue: 0.576)
         case .notice:
             return Color(nsColor: .secondaryLabelColor)
@@ -142,6 +144,14 @@ struct PolicyEventModalFooter: View {
                 Button("Always", action: onApproveAlways)
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
+            case .usageLimitRequest:
+                Button("Stop", action: onDeny)
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Raise for this session", action: onApproveOnce)
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .lineLimit(1)
             }
         }
         .lineLimit(1)

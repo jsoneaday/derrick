@@ -25,6 +25,14 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
             return 128_000
         }
     }
+
+    /// Approximate list prices (USD / 1M tokens). Update when Google changes rates.
+    public var tokenPricing: ModelTokenPricing {
+        switch self {
+        case .gemini25FlashLite, .gemini31FlashLite:
+            return ModelTokenPricing(inputUSDPer1MTokens: 0.10, outputUSDPer1MTokens: 0.40)
+        }
+    }
 }
 
 public struct GeminiProvider: AgentProvider {
@@ -36,7 +44,7 @@ public struct GeminiProvider: AgentProvider {
         self.transport = transport
     }
 
-    public func stream(_ request: AgentRequest, model: GeminiModel) -> AsyncThrowingStream<String, Error> {
+    public func stream(_ request: AgentRequest, model: GeminiModel) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         if let responseSchema = request.responseSchema {
             return streamJSON(request, model: model, responseSchema: responseSchema)
         }
@@ -56,11 +64,9 @@ public struct GeminiProvider: AgentProvider {
 
                     var didYieldText = false
                     for try await event in SSEDecoder(bytes: bytes).events {
-                        for chunk in try decodeGeminiChunks(from: event) {
-                            if let text = chunk.candidates.first?.content.text, !text.isEmpty {
-                                didYieldText = true
-                                continuation.yield(text)
-                            }
+                        for streamEvent in try geminiStreamEvents(from: event) {
+                            if case .text = streamEvent { didYieldText = true }
+                            continuation.yield(streamEvent)
                         }
                     }
 
@@ -84,7 +90,7 @@ public struct GeminiProvider: AgentProvider {
         _ request: AgentRequest,
         model: GeminiModel,
         responseSchema: AgentSchema? = nil
-    ) -> AsyncThrowingStream<String, Error> {
+    ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -104,11 +110,9 @@ public struct GeminiProvider: AgentProvider {
 
                     var didYieldText = false
                     for try await event in SSEDecoder(bytes: bytes).events {
-                        for chunk in try decodeGeminiChunks(from: event) {
-                            if let text = chunk.candidates.first?.content.text, !text.isEmpty {
-                                didYieldText = true
-                                continuation.yield(text)
-                            }
+                        for streamEvent in try geminiStreamEvents(from: event) {
+                            if case .text = streamEvent { didYieldText = true }
+                            continuation.yield(streamEvent)
                         }
                     }
 
@@ -147,7 +151,9 @@ public struct GeminiProvider: AgentProvider {
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
         if payloads.count <= 1 {
-            return [try decode(GeminiStreamChunk.self, from: Data(event.utf8))]
+            let trimmed = event.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+            return [try decode(GeminiStreamChunk.self, from: Data(trimmed.utf8))]
         }
 
         var chunks: [GeminiStreamChunk] = []
@@ -156,6 +162,47 @@ public struct GeminiProvider: AgentProvider {
         }
         return chunks
     }
+}
+
+func geminiStreamEvents(from event: String) throws -> [AgentStreamEvent] {
+    var events: [AgentStreamEvent] = []
+    let payloads = event
+        .split(whereSeparator: \.isNewline)
+        .map(String.init)
+        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    let chunks: [GeminiStreamChunk]
+    if payloads.isEmpty {
+        chunks = []
+    } else if payloads.count == 1 {
+        chunks = [try decode(GeminiStreamChunk.self, from: Data(payloads[0].utf8))]
+    } else {
+        chunks = try payloads.map { try decode(GeminiStreamChunk.self, from: Data($0.utf8)) }
+    }
+
+    for chunk in chunks {
+        if let text = chunk.candidates.first?.content.text, !text.isEmpty {
+            events.append(.text(text))
+        }
+        if let usage = chunk.usageMetadata {
+            let prompt = usage.promptTokenCount ?? 0
+            let completion = usage.candidatesTokenCount ?? usage.totalTokenCount.map { max(0, $0 - prompt) } ?? 0
+            let total = usage.totalTokenCount ?? (prompt + completion)
+            if prompt > 0 || completion > 0 || total > 0 {
+                events.append(
+                    .usage(
+                        AgentTokenUsage(
+                            promptTokens: prompt,
+                            completionTokens: completion,
+                            totalTokens: total,
+                            source: .providerAPI
+                        )
+                    )
+                )
+            }
+        }
+    }
+    return events
 }
 
 private struct GeminiStreamRequest: Encodable {
@@ -236,23 +283,46 @@ struct GeminiPart: Codable, Sendable {
 
 private struct GeminiStreamChunk: Decodable {
     let candidates: [Candidate]
+    let usageMetadata: GeminiUsageMetadata?
 
     struct Candidate: Decodable {
         let content: GeminiStreamContent
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            content = try container.decodeIfPresent(GeminiStreamContent.self, forKey: .content)
+                ?? GeminiStreamContent(parts: [])
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case content
+        }
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         candidates = try container.decodeIfPresent([Candidate].self, forKey: .candidates) ?? []
+        usageMetadata = try container.decodeIfPresent(GeminiUsageMetadata.self, forKey: .usageMetadata)
     }
 
     private enum CodingKeys: String, CodingKey {
         case candidates
+        case usageMetadata
     }
+}
+
+private struct GeminiUsageMetadata: Decodable {
+    let promptTokenCount: Int?
+    let candidatesTokenCount: Int?
+    let totalTokenCount: Int?
 }
 
 private struct GeminiStreamContent: Decodable {
     let parts: [GeminiPart]
+
+    init(parts: [GeminiPart]) {
+        self.parts = parts
+    }
 
     var text: String? {
         parts.compactMap(\.text).joined().nilIfEmpty

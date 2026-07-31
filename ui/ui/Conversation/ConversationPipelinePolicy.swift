@@ -24,11 +24,15 @@ extension ConversationPipeline {
                 do {
                     var workingPrompt = prompt
                     var aggregatedToolCalls = toolCalls
-                    let maxToolRounds = 3
+                    await MainActor.run {
+                        UsageLimitsService.shared.resetMessageCounters()
+                    }
+                    // Upper bound is absolute max; per-message cap + session raises gate tool rounds.
+                    let maxToolRoundIterations = UsageLimits.absoluteMax.maxToolRoundsPerMessage
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
 
-                    for round in 0...maxToolRounds {
+                    for round in 0...maxToolRoundIterations {
                         await MainActor.run {
                             debugLog("Prompt sent (round \(round + 1)): \(workingPrompt.prefix(120))")
                         }
@@ -54,8 +58,16 @@ extension ConversationPipeline {
                         /// When true, stop painting complete deltas (sensitive content pending review).
                         var holdCompleteUI = false
                         var heldCompleteThroughLength = 0
+                        var lastAPIUsage: AgentTokenUsage?
 
-                        upstreamLoop: for try await chunk in upstream {
+                        upstreamLoop: for try await streamEvent in upstream {
+                            if case .usage(let usage) = streamEvent {
+                                lastAPIUsage = usage
+                                continue upstreamLoop
+                            }
+                            guard case .text(let chunk) = streamEvent else {
+                                continue upstreamLoop
+                            }
                             let event = AssistantChunkEvent(
                                 sessionID: sessionID,
                                 chunkIndex: chunkIndex,
@@ -296,6 +308,35 @@ extension ConversationPipeline {
                             debugLog("Completion validated by policy engine")
                         }
 
+                        // Prefer provider-reported usage; fall back to estimate if the API omitted it.
+                        let tokenOK: Bool
+                        if let usage = lastAPIUsage {
+                            tokenOK = await UsageLimitsService.shared.recordAPIUsage(
+                                usage,
+                                pricing: model.tokenPricing
+                            )
+                        } else {
+                            tokenOK = await UsageLimitsService.shared.recordTokens(
+                                promptText: workingPrompt,
+                                completionText: completion,
+                                pricing: model.tokenPricing
+                            )
+                        }
+                        if !tokenOK {
+                            await MainActor.run {
+                                debugLog("Stopped: usage token budget exhausted")
+                            }
+                            if !streamedVisibleContent {
+                                continuation.yield(
+                                    AgentResponseNextChunk(
+                                        status: .complete,
+                                        chunk: "Stopped: usage token budget reached. You can raise session limits when prompted, or set permanent caps in Settings → Usage limits."
+                                    )
+                                )
+                            }
+                            break
+                        }
+
                         // Flush any held complete text after allow/confirm (single paint of remainder).
                         if agentResponse?.status == .complete || holdCompleteUI {
                             let text = interceptedCompletion
@@ -313,9 +354,20 @@ extension ConversationPipeline {
                             }
                         }
                         
-                        if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch,
-                           round < maxToolRounds
-                        {
+                        if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch {
+                            let roundAllowed = await UsageLimitsService.shared.allowToolRound(roundIndex: round)
+                            if !roundAllowed {
+                                await MainActor.run {
+                                    debugLog("Stopped: max tool rounds reached (round \(round))")
+                                }
+                                continuation.yield(
+                                    AgentResponseNextChunk(
+                                        status: .complete,
+                                        chunk: "Stopped: max tool rounds reached. Raise the session limit when prompted, or change Settings → Usage limits."
+                                    )
+                                )
+                                break
+                            }
                             await MainActor.run {
                                 debugLog("Tool request detected; forwarding to policy engine")
                             }

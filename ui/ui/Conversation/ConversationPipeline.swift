@@ -6,7 +6,7 @@ import MCPClient
 protocol ConversationStreamingClient: Sendable {
     associatedtype Model: AgentModel
 
-    func stream(_ request: AgentRequest, model: Model) -> AsyncThrowingStream<String, Error>
+    func stream(_ request: AgentRequest, model: Model) -> AsyncThrowingStream<AgentStreamEvent, Error>
 }
 
 protocol ConversationToolClient: Sendable {
@@ -70,7 +70,8 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
                     let upstream = client.stream(request, model: model)
                     var completion = ""
 
-                    for try await chunk in upstream {
+                    for try await event in upstream {
+                        guard case .text(let chunk) = event else { continue }
                         completion += chunk
                         continuation.yield(chunk)
                     }

@@ -372,7 +372,7 @@ enum PythonScriptReviewerRuntime {
     static func runStreamedReview(
         modelLabel: String,
         args: PythonScriptExecutionArguments,
-        stream: AsyncThrowingStream<String, Error>
+        stream: AsyncThrowingStream<AgentStreamEvent, Error>
     ) async throws -> PythonScriptReviewOutcome {
         let userContent = reviewInput(from: args)
         let requestChars = ReviewerSystemPrompt.utf8.count + userContent.utf8.count
@@ -383,15 +383,21 @@ enum PythonScriptReviewerRuntime {
         var lastChunkAt: Date?
         var chunkCount = 0
         var completion = ""
+        var apiUsage: AgentTokenUsage?
 
-        for try await chunk in stream {
-            let now = Date()
-            if firstChunkAt == nil {
-                firstChunkAt = now
+        for try await event in stream {
+            switch event {
+            case .text(let chunk):
+                let now = Date()
+                if firstChunkAt == nil {
+                    firstChunkAt = now
+                }
+                lastChunkAt = now
+                chunkCount += 1
+                completion += chunk
+            case .usage(let usage):
+                apiUsage = usage
             }
-            lastChunkAt = now
-            chunkCount += 1
-            completion += chunk
         }
 
         let streamEnded = Date()

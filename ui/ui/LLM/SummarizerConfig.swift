@@ -101,12 +101,12 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
         }
     }
 
-    private func collect(_ stream: AsyncThrowingStream<String, Error>) async throws -> String {
-        var response = ""
-        for try await chunk in stream {
-            response += chunk
+    private func collect(_ stream: AsyncThrowingStream<AgentStreamEvent, Error>) async throws -> String {
+        let (text, usage) = try await collectAgentStream(stream)
+        if let usage {
+            _ = await UsageLimitsService.shared.recordAPIUsage(usage)
         }
-        return response
+        return text
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {

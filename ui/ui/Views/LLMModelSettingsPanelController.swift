@@ -28,8 +28,8 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         panel.level = .normal
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
-        panel.contentMinSize = NSSize(width: 760, height: 440)
-        panel.setContentSize(NSSize(width: 760, height: 440))
+        panel.contentMinSize = NSSize(width: 800, height: 520)
+        panel.setContentSize(NSSize(width: 840, height: 560))
         panel.delegate = self
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         center(panel, relativeTo: preferredParentWindow())
@@ -61,7 +61,7 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         panel.layoutIfNeeded()
         var frame = panel.frame
         if frame.width < 1 || frame.height < 1 {
-            frame.size = NSSize(width: 760, height: 440)
+            frame.size = NSSize(width: 840, height: 560)
         }
 
         if let parent {

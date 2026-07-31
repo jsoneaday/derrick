@@ -170,12 +170,70 @@ public protocol AgentModel: Hashable, Codable, Sendable {
     var id: AgentModelID { get }
     var maxSupportedContextTokens: Int { get }
     var maxIdealContextTokens: Int { get }
+    /// List prices for estimated USD (not billed by the chat API).
+    var tokenPricing: ModelTokenPricing { get }
+}
+
+/// Provider list prices used only to *estimate* USD from token counts.
+public struct ModelTokenPricing: Hashable, Codable, Sendable, Equatable {
+    /// USD per 1M input (prompt) tokens.
+    public let inputUSDPer1MTokens: Double
+    /// USD per 1M output (completion) tokens.
+    public let outputUSDPer1MTokens: Double
+
+    public init(inputUSDPer1MTokens: Double, outputUSDPer1MTokens: Double) {
+        self.inputUSDPer1MTokens = inputUSDPer1MTokens
+        self.outputUSDPer1MTokens = outputUSDPer1MTokens
+    }
+
+    public func estimateUSD(promptTokens: Int, completionTokens: Int) -> Double {
+        let input = Double(max(0, promptTokens)) * inputUSDPer1MTokens / 1_000_000
+        let output = Double(max(0, completionTokens)) * outputUSDPer1MTokens / 1_000_000
+        return input + output
+    }
+
+    public func estimateUSD(usage: AgentTokenUsage) -> Double {
+        estimateUSD(promptTokens: usage.promptTokens, completionTokens: usage.completionTokens)
+    }
+}
+
+/// Token counts reported by the provider (not dollars).
+public struct AgentTokenUsage: Hashable, Codable, Sendable, Equatable {
+    public let promptTokens: Int
+    public let completionTokens: Int
+    public let totalTokens: Int
+    public let source: Source
+
+    public enum Source: String, Codable, Sendable {
+        case providerAPI
+        case estimated
+    }
+
+    public init(promptTokens: Int, completionTokens: Int, totalTokens: Int? = nil, source: Source = .providerAPI) {
+        self.promptTokens = max(0, promptTokens)
+        self.completionTokens = max(0, completionTokens)
+        let sum = self.promptTokens + self.completionTokens
+        self.totalTokens = totalTokens.map { max(0, $0) } ?? sum
+        self.source = source
+    }
+
+    public static func estimated(fromText prompt: String, completion: String) -> AgentTokenUsage {
+        let p = max(1, (prompt.utf8.count + 3) / 4)
+        let c = max(0, (completion.utf8.count + 3) / 4)
+        return AgentTokenUsage(promptTokens: p, completionTokens: c, source: .estimated)
+    }
+}
+
+/// One item from a provider stream: text delta and/or final usage.
+public enum AgentStreamEvent: Sendable, Equatable {
+    case text(String)
+    case usage(AgentTokenUsage)
 }
 
 public protocol AgentProvider: Sendable {
     associatedtype Model: AgentModel
 
-    func stream(_ request: AgentRequest, model: Model) -> AsyncThrowingStream<String, Error>
+    func stream(_ request: AgentRequest, model: Model) -> AsyncThrowingStream<AgentStreamEvent, Error>
 }
 
 public struct AgentClient<Provider: AgentProvider>: Sendable {
@@ -185,9 +243,26 @@ public struct AgentClient<Provider: AgentProvider>: Sendable {
         self.provider = provider
     }
 
-    public func stream(_ request: AgentRequest, model: Provider.Model) -> AsyncThrowingStream<String, Error> {
+    public func stream(_ request: AgentRequest, model: Provider.Model) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         provider.stream(request, model: model)
     }
+}
+
+/// Collect full assistant text and last usage event from a stream.
+public func collectAgentStream(
+    _ stream: AsyncThrowingStream<AgentStreamEvent, Error>
+) async throws -> (text: String, usage: AgentTokenUsage?) {
+    var text = ""
+    var usage: AgentTokenUsage?
+    for try await event in stream {
+        switch event {
+        case .text(let chunk):
+            text += chunk
+        case .usage(let u):
+            usage = u
+        }
+    }
+    return (text, usage)
 }
 
 public protocol HTTPTransport: Sendable {

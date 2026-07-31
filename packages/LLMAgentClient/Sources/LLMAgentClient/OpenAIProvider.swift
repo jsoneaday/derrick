@@ -20,6 +20,24 @@ public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
     public var maxIdealContextTokens: Int {
         200_000
     }
+
+    /// Approximate list prices (USD / 1M tokens). Update when OpenAI changes rates.
+    public var tokenPricing: ModelTokenPricing {
+        switch self {
+        case .gpt54Mini:
+            return ModelTokenPricing(inputUSDPer1MTokens: 0.25, outputUSDPer1MTokens: 2.00)
+        case .gpt54:
+            return ModelTokenPricing(inputUSDPer1MTokens: 1.25, outputUSDPer1MTokens: 10.00)
+        case .gpt55:
+            return ModelTokenPricing(inputUSDPer1MTokens: 1.25, outputUSDPer1MTokens: 10.00)
+        case .gpt56Luna:
+            return ModelTokenPricing(inputUSDPer1MTokens: 0.50, outputUSDPer1MTokens: 4.00)
+        case .gpt56Terra:
+            return ModelTokenPricing(inputUSDPer1MTokens: 1.25, outputUSDPer1MTokens: 10.00)
+        case .gpt56Sol:
+            return ModelTokenPricing(inputUSDPer1MTokens: 2.50, outputUSDPer1MTokens: 15.00)
+        }
+    }
 }
 
 public struct OpenAIProvider: AgentProvider {
@@ -31,7 +49,7 @@ public struct OpenAIProvider: AgentProvider {
         self.transport = transport
     }
 
-    public func stream(_ request: AgentRequest, model: OpenAIModel) -> AsyncThrowingStream<String, Error> {
+    public func stream(_ request: AgentRequest, model: OpenAIModel) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -60,8 +78,8 @@ public struct OpenAIProvider: AgentProvider {
                     try validate(response: response)
 
                     for try await event in SSEDecoder(bytes: bytes).events {
-                        for text in try openAITextChunks(from: event) {
-                            continuation.yield(text)
+                        for streamEvent in try openAIStreamEvents(from: event) {
+                            continuation.yield(streamEvent)
                         }
                     }
 
@@ -84,6 +102,7 @@ struct OpenAIStreamRequest: Encodable {
     let stream: Bool
     let temperature: Double?
     let responseFormat: OpenAIResponseFormat?
+    let streamOptions: OpenAIStreamOptions?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -91,12 +110,14 @@ struct OpenAIStreamRequest: Encodable {
         case stream
         case temperature
         case responseFormat = "response_format"
+        case streamOptions = "stream_options"
     }
 
     init(model: String, messages: [AgentMessage], temperature: Double?, responseSchema: AgentSchema?) {
         self.model = model
         self.messages = messages.map(OpenAIMessage.init)
         self.stream = true
+        self.streamOptions = OpenAIStreamOptions(includeUsage: true)
         
         // OpenAI's reasoning-class models (GPT-5 series) lock temperature internally and reject manual settings with HTTP 400.
         if model.contains("gpt-5") {
@@ -294,11 +315,20 @@ struct OpenAIMessage: Encodable {
     }
 }
 
+struct OpenAIStreamOptions: Encodable {
+    let includeUsage: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case includeUsage = "include_usage"
+    }
+}
+
 private struct OpenAIStreamChunk: Decodable {
     let choices: [Choice]
+    let usage: OpenAIUsage?
 
     struct Choice: Decodable {
-        let delta: Delta
+        let delta: Delta?
     }
 
     struct Delta: Decodable {
@@ -306,8 +336,21 @@ private struct OpenAIStreamChunk: Decodable {
     }
 }
 
-func openAITextChunks(from event: String) throws -> [String] {
-    var chunks: [String] = []
+private struct OpenAIUsage: Decodable {
+    let promptTokens: Int?
+    let completionTokens: Int?
+    let totalTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+    }
+}
+
+/// Parses OpenAI SSE payloads into text deltas and optional usage (when `stream_options.include_usage` is set).
+func openAIStreamEvents(from event: String) throws -> [AgentStreamEvent] {
+    var events: [AgentStreamEvent] = []
     for payload in event.split(whereSeparator: \.isNewline).map(String.init).filter({ !$0.isEmpty }) {
         let normalized: String
         if payload.hasPrefix("data:") {
@@ -317,14 +360,38 @@ func openAITextChunks(from event: String) throws -> [String] {
         }
 
         if normalized == "[DONE]" {
-            return chunks
+            return events
         }
 
         let chunk = try decode(OpenAIStreamChunk.self, from: Data(normalized.utf8))
-        if let text = chunk.choices.first?.delta.content, !text.isEmpty {
-            chunks.append(text)
+        if let text = chunk.choices.first?.delta?.content, !text.isEmpty {
+            events.append(.text(text))
+        }
+        if let usage = chunk.usage {
+            let prompt = usage.promptTokens ?? 0
+            let completion = usage.completionTokens ?? 0
+            let total = usage.totalTokens ?? (prompt + completion)
+            if prompt > 0 || completion > 0 || total > 0 {
+                events.append(
+                    .usage(
+                        AgentTokenUsage(
+                            promptTokens: prompt,
+                            completionTokens: completion,
+                            totalTokens: total,
+                            source: .providerAPI
+                        )
+                    )
+                )
+            }
         }
     }
+    return events
+}
 
-    return chunks
+/// Backward-compatible text-only helper for tests.
+func openAITextChunks(from event: String) throws -> [String] {
+    try openAIStreamEvents(from: event).compactMap {
+        if case .text(let t) = $0 { return t }
+        return nil
+    }
 }
