@@ -3,6 +3,39 @@ import Testing
 @testable import DockerRunnerXPC
 
 struct DockerRunnerXPCTests {
+    @Test func peerRequirementIncludesMainAppIdentifier() {
+        let requirement = XPCPeerAuthentication.requirementString(
+            allowedPeerIdentifiers: [XPCPeerAuthentication.mainAppIdentifier],
+            teamIdentifier: "ABCDE12345"
+        )
+        #expect(requirement.contains("identifier \"derrick.ui\""))
+        #expect(requirement.contains("certificate leaf[subject.OU] = \"ABCDE12345\""))
+        #expect(requirement.contains("anchor apple generic"))
+    }
+
+    @Test func peerRequirementIncludesHelperIdentifier() {
+        let requirement = XPCPeerAuthentication.requirementString(for: .appConnectingToHelper)
+        #expect(requirement.contains("identifier \"derrick.ui.DockerRunnerHelper\""))
+    }
+
+    @Test func peerRequirementWithoutTeamUsesIdentifierOnly() {
+        let requirement = XPCPeerAuthentication.requirementString(
+            allowedPeerIdentifiers: ["derrick.ui"],
+            teamIdentifier: nil
+        )
+        #expect(requirement == "identifier \"derrick.ui\"")
+    }
+
+    @Test func peerRequirementORsMultipleIdentifiers() {
+        let requirement = XPCPeerAuthentication.requirementString(
+            allowedPeerIdentifiers: ["derrick.ui", "derrick.ui.bridge"],
+            teamIdentifier: "TEAM1"
+        )
+        #expect(requirement.contains("identifier \"derrick.ui\""))
+        #expect(requirement.contains("identifier \"derrick.ui.bridge\""))
+        #expect(requirement.contains(" or "))
+    }
+
     private func request(
         executable: String = DockerHostLaunch.envExecutablePath,
         arguments: [String] = DockerHostLaunch.dockerCLIArguments(["version"]),

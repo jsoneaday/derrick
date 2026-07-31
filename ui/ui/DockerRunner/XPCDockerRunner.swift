@@ -91,6 +91,17 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 debugLog("XPC connection invalidated for service \(Self.serviceName).")
             }
         }
+
+        // Peer must be the embedded helper (same team when Team ID is available).
+        let requirement = XPCPeerAuthentication.requirementString(for: .appConnectingToHelper)
+        do {
+            try XPCPeerAuthentication.apply(requirement: requirement, to: conn)
+            debugLog("XPC peer code-signing requirement applied: \(requirement)")
+        } catch {
+            debugLog("XPC peer code-signing requirement failed: \(error.localizedDescription) requirement=\(requirement)")
+            // Still resume: connection will fail closed on use if peer is wrong; log makes mis-signing visible.
+        }
+
         conn.resume()
         self.connection = conn
         debugLog("NSXPCConnection resumed for service \(Self.serviceName).")

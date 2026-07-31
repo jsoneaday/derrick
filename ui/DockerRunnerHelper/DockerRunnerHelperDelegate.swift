@@ -8,6 +8,19 @@ final class DockerRunnerHelperDelegate: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         logger.log("XPC listener received a new connection request from the app.")
         HelperLogRelay.shared.log("XPC listener received a new connection request from the app.")
+
+        // Peer must be the signed main app (same team when Team ID is available).
+        let requirement = XPCPeerAuthentication.requirementString(for: .helperAcceptingApp)
+        do {
+            try XPCPeerAuthentication.apply(requirement: requirement, to: connection)
+            HelperLogRelay.shared.log("XPC peer code-signing requirement applied: \(requirement)")
+        } catch {
+            let message = "Rejected XPC connection: peer code-signing requirement failed (\(error.localizedDescription)). requirement=\(requirement)"
+            logger.error("\(message, privacy: .public)")
+            HelperLogRelay.shared.log(message)
+            return false
+        }
+
         connection.exportedInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
         HelperLogRelay.shared.log("Exported interface configured for DockerProcessRunnerXPCProtocol.")
 

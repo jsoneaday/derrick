@@ -241,7 +241,7 @@ struct ContentView: View {
 
     @State private var repository: DBRepository?
     @State private var conversation: ConversationModel?
-    @State private var prompt = "search amazon.com and give me a list of the top 10 bicycles being sold"
+    @State private var prompt = "tell me about the latest reactjs"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
