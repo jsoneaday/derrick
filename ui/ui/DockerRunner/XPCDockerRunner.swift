@@ -506,7 +506,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         let ensureStarted = Date()
         try await ensureReadyForRun(allowNetwork: allowNetwork)
         let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
-        debugLog("[python_script_exec timing] ensure_ms=\(ensureMS)")
+        debugLog("[TIME_METRIC] python_script_exec ensure_ms=\(ensureMS)")
 
         let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
         debugLog("Extra (non-baseline) python packages: \(extras.isEmpty ? "(none)" : extras.joined(separator: ", "))")
@@ -562,7 +562,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
-        debugLog("[python_script_exec timing] exec_ms=\(execMS)")
+        debugLog("[TIME_METRIC] python_script_exec exec_ms=\(execMS)")
 
         await MainActor.run {
             debugLog("--- Helper Logs ---")
@@ -595,7 +595,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             scriptLineCount: scriptMetrics.lines,
             wrapperCharCount: executionScript.utf8.count
         )
-        debugLog("[python_script_exec timing] runner \(phaseTiming.summaryLine)")
+        debugLog("\(phaseTiming.summaryLine) runner=xpc")
         debugLog("XPC run request finished successfully.")
 
         return PythonScriptExecutionResult.runnerOutcome(

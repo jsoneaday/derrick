@@ -107,7 +107,7 @@ public struct PythonScriptReviewerTiming: Codable, Sendable, Equatable {
     }
 
     public var summaryLine: String {
-        "reviewer_model=\(model.isEmpty ? "?" : model) reviewer_ttfb_ms=\(ttfbMS) reviewer_stream_ms=\(streamMS) reviewer_decode_ms=\(decodeMS) reviewer_total_ms=\(totalMS) reviewer_request_chars=\(requestChars) reviewer_response_chars=\(responseChars) reviewer_chunks=\(chunkCount)"
+        "[TIME_METRIC] python_reviewer reviewer_model=\(model.isEmpty ? "?" : model) reviewer_ttfb_ms=\(ttfbMS) reviewer_stream_ms=\(streamMS) reviewer_decode_ms=\(decodeMS) reviewer_total_ms=\(totalMS) reviewer_request_chars=\(requestChars) reviewer_response_chars=\(responseChars) reviewer_chunks=\(chunkCount)"
     }
 }
 
@@ -185,7 +185,7 @@ public struct PythonScriptPhaseTiming: Codable, Sendable, Equatable {
     }
 
     public var summaryLine: String {
-        let base = "static_ms=\(staticValidateMS) reviewer_ms=\(reviewerMS) ensure_ms=\(ensureMS) exec_ms=\(execMS) total_ms=\(totalMS) script_chars=\(scriptCharCount) script_lines=\(scriptLineCount) wrapper_chars=\(wrapperCharCount)"
+        let base = "[TIME_METRIC] python_script_exec static_ms=\(staticValidateMS) reviewer_ms=\(reviewerMS) ensure_ms=\(ensureMS) exec_ms=\(execMS) total_ms=\(totalMS) script_chars=\(scriptCharCount) script_lines=\(scriptLineCount) wrapper_chars=\(wrapperCharCount)"
         guard !reviewerModel.isEmpty || reviewerTtfbMS > 0 || reviewerStreamMS > 0 || reviewerResponseChars > 0 else {
             return base
         }
@@ -429,7 +429,7 @@ enum PythonScriptReviewerRuntime {
         )
 
         print("[PythonScriptExecutionTool] Reviewer outcome: aligned=\(assessment.alignedWithRequest), confidence=\(assessment.confidence), suggestedAction=\(assessment.suggestedAction), concerns=\(assessment.concerns.count), summary=\(assessment.summary)")
-        print("[PythonScriptExecutionTool] Reviewer timing: \(timing.summaryLine)")
+        print(timing.summaryLine)
         return PythonScriptReviewOutcome(assessment: assessment, timing: timing)
     }
 }
@@ -613,7 +613,7 @@ public extension MCPServerHost {
             let staticFindings = PythonScriptExecutionVerifier.validate(parsed)
             let staticValidateMS = PythonScriptPhaseTiming.elapsedMS(from: staticStarted)
             logger("staticFindings \(staticFindings.map(\.debugDescription).joined(separator: "\n"))")
-            logger("[python_script_exec timing] static_ms=\(staticValidateMS)")
+            logger("[TIME_METRIC] python_script_exec static_ms=\(staticValidateMS)")
             var findings = staticFindings
             var verifierName = "static-check-v1"
             var assessment: PythonScriptReviewAssessment?
@@ -637,7 +637,7 @@ public extension MCPServerHost {
                     logger("[PythonScriptExecutionTool] Reviewer assessment: \(outcome.assessment.summary)")
                     reviewerTiming = outcome.timing
                     verifierName += "+\(reviewer.name)"
-                    logger("[python_script_exec timing] \(reviewerTiming.summaryLine)")
+                    logger(reviewerTiming.summaryLine)
                 } catch {
                     // Fail closed: any reviewer exception blocks execution.
                     logger("[PythonScriptExecutionTool] Reviewer failed: \(error.localizedDescription)")
@@ -680,7 +680,7 @@ public extension MCPServerHost {
                     wrapperCharCount: 0
                 )
                 phaseTiming.applyReviewerTiming(reviewerTiming)
-                logger("[python_script_exec timing] blocked stage=\(failureStage.rawValue) \(phaseTiming.summaryLine)")
+                logger("\(phaseTiming.summaryLine) blocked stage=\(failureStage.rawValue)")
                 let denied = PythonScriptExecutionResult(
                     status: .blocked,
                     decision: .deny,
@@ -719,7 +719,7 @@ public extension MCPServerHost {
             phaseTiming.scriptCharCount = scriptMetrics.chars
             phaseTiming.scriptLineCount = scriptMetrics.lines
             phaseTiming.applyReviewerTiming(reviewerTiming)
-            logger("[python_script_exec timing] stage=\(result.failureStage.rawValue) \(phaseTiming.summaryLine)")
+            logger("\(phaseTiming.summaryLine) stage=\(result.failureStage.rawValue)")
             // Preserve runner failureStage/decision; attach pre-run verifier + optional allow assessment.
             result = PythonScriptExecutionResult(
                 status: result.status,

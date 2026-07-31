@@ -29,7 +29,8 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
 
             if let defaultReview = await defaultReviewerAssessment(for: args) {
                 await MainActor.run {
-                    debugLog("Default helper reviewer succeeded after primary model was unavailable. \(defaultReview.timing.summaryLine)")
+                    debugLog("Default helper reviewer succeeded after primary model was unavailable.")
+                    debugLog(defaultReview.timing.summaryLine)
                 }
                 return defaultReview
             }
@@ -45,7 +46,7 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         do {
             let outcome = try await review(args, model: selectedModel, apiKey: apiKey)
             await MainActor.run {
-                debugLog("[python_script_exec timing] \(outcome.timing.summaryLine)")
+                debugLog(outcome.timing.summaryLine)
             }
             return outcome
         } catch {
@@ -59,7 +60,8 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
             }
             if let defaultReview = await defaultReviewerAssessment(for: args) {
                 await MainActor.run {
-                    debugLog("Default helper reviewer succeeded after primary failure. \(defaultReview.timing.summaryLine)")
+                    debugLog("Default helper reviewer succeeded after primary failure.")
+                    debugLog(defaultReview.timing.summaryLine)
                 }
                 return defaultReview
             }

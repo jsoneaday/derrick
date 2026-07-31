@@ -21,6 +21,7 @@ extension ConversationPipeline {
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
         return AsyncThrowingStream(AgentResponseNextChunk.self, bufferingPolicy: .unbounded) { continuation in
             let task = Task {
+                let overallStarted = Date()
                 do {
                     var workingPrompt = prompt
                     var aggregatedToolCalls = toolCalls
@@ -31,22 +32,44 @@ extension ConversationPipeline {
                     let maxToolRoundIterations = UsageLimits.absoluteMax.maxToolRoundsPerMessage
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
+                    PipelineTiming.log(
+                        "turn_start session=\(sessionID.prefix(8)) model=\(String(describing: model)) max_tool_rounds_cap=\(maxToolRoundIterations)"
+                    )
 
                     for round in 0...maxToolRoundIterations {
+                        let roundStarted = Date()
+                        let roundLabel = "round_\(round + 1)"
                         await MainActor.run {
                             debugLog("Prompt sent (round \(round + 1)): \(workingPrompt.prefix(120))")
                         }
+
+                        let memoryStarted = Date()
                         let retrieval = (try? await retrieveMemoryContext(for: workingPrompt)) ?? ""
+                        let memoryMS = PipelineTiming.elapsedMS(from: memoryStarted)
+
+                        let catalogStarted = Date()
                         let toolCatalog = await toolCatalogContext()
+                        let catalogMS = PipelineTiming.elapsedMS(from: catalogStarted)
+
+                        let promptBuildStarted = Date()
                         let request = AgentRequest.prompt(
                             workingPrompt,
                             system: systemPrompt(from: retrieval, toolCatalog: toolCatalog),
                             temperature: 0.1,
                             responseSchema: responseSchema
                         )
+                        let promptBuildMS = PipelineTiming.elapsedMS(from: promptBuildStarted)
+                        let systemChars = (request.messages.first { $0.role == .system }?.content.utf8.count) ?? 0
+                        let userChars = (request.messages.last { $0.role == .user }?.content.utf8.count) ?? 0
+                        PipelineTiming.log(
+                            "\(roundLabel) setup memory_ms=\(memoryMS) catalog_ms=\(catalogMS) prompt_build_ms=\(promptBuildMS) system_chars=\(systemChars) user_chars=\(userChars) memory_chars=\(retrieval.utf8.count) catalog_chars=\(toolCatalog.utf8.count)"
+                        )
+
                         await MainActor.run {
                             debugLog(Self.formatLLMRequest(request, round: round + 1))
                         }
+                        let llmStarted = Date()
+                        var llmFirstChunkAt: Date?
                         let upstream = client.stream(request, model: model)
                         var completion = ""
                         var agentResponse: AgentResponse?
@@ -59,6 +82,8 @@ extension ConversationPipeline {
                         var holdCompleteUI = false
                         var heldCompleteThroughLength = 0
                         var lastAPIUsage: AgentTokenUsage?
+                        var partialJSONDecodeCount = 0
+                        var chunkPolicyMS = 0
 
                         upstreamLoop: for try await streamEvent in upstream {
                             if case .usage(let usage) = streamEvent {
@@ -68,13 +93,18 @@ extension ConversationPipeline {
                             guard case .text(let chunk) = streamEvent else {
                                 continue upstreamLoop
                             }
+                            if llmFirstChunkAt == nil {
+                                llmFirstChunkAt = Date()
+                            }
                             let event = AssistantChunkEvent(
                                 sessionID: sessionID,
                                 chunkIndex: chunkIndex,
                                 content: chunk
                             )
 
+                            let chunkPolicyStarted = Date()
                             let chunkIntercept = try await interceptor.interceptAssistantChunk(event)
+                            chunkPolicyMS += PipelineTiming.elapsedMS(from: chunkPolicyStarted)
                             let interceptedContent: String
                             switch chunkIntercept {
                             case .denied(let reason):
@@ -107,6 +137,7 @@ extension ConversationPipeline {
                             if let jsonAny = try? PartialJSON.parse(completion),
                                JSONSerialization.isValidJSONObject(jsonAny),
                                let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: []) {
+                                partialJSONDecodeCount += 1
                                 // Only replace when decode succeeds. PartialJSON often yields incomplete
                                 // status strings (e.g. "tool") that fail enum decode; assigning nil would
                                 // wipe a previously decoded partial response.
@@ -238,8 +269,17 @@ extension ConversationPipeline {
                             }
                         }
 
+                        let llmEnded = Date()
+                        let llmTtfbMS = llmFirstChunkAt.map { PipelineTiming.elapsedMS(from: llmStarted, to: $0) } ?? PipelineTiming.elapsedMS(from: llmStarted, to: llmEnded)
+                        let llmStreamMS = llmFirstChunkAt.map { PipelineTiming.elapsedMS(from: $0, to: llmEnded) } ?? 0
+                        let llmTotalMS = PipelineTiming.elapsedMS(from: llmStarted, to: llmEnded)
+                        PipelineTiming.log(
+                            "\(roundLabel) llm ttfb_ms=\(llmTtfbMS) stream_ms=\(llmStreamMS) total_ms=\(llmTotalMS) chunks=\(chunkIndex) completion_chars=\(completion.utf8.count) partial_json_decodes=\(partialJSONDecodeCount) chunk_policy_ms=\(chunkPolicyMS) usage=\(lastAPIUsage.map { "\($0.totalTokens)(\($0.source.rawValue))" } ?? "none")"
+                        )
+
                         guard !completion.isEmpty else {
                             debugLog("Completion is empty")
+                            PipelineTiming.log("\(roundLabel) empty_completion round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))")
                             break
                         }
                         await MainActor.run {
@@ -248,12 +288,14 @@ extension ConversationPipeline {
                         }
 
                         debugLog("**Start Completion**")
+                        let finalizeStarted = Date()
                         // Prefer a full re-decode of the finished stream. Mid-stream PartialJSON can leave
                         // a stale agentResponse (e.g. tool_call without complete arguments) that then
                         // fails parseToolPayload and skips execution — empty follow-up / "no live fetch".
                         if let finalized = Self.decodeAgentResponse(from: completion, decoder: jsonDecoder) {
                             agentResponse = finalized
                         }
+                        let finalizeDecodeMS = PipelineTiming.elapsedMS(from: finalizeStarted)
 
                         // Prefer structured assistant_response; if the model ignored the JSON schema
                         // and returned plain prose, surface that text instead of an empty bubble.
@@ -273,7 +315,10 @@ extension ConversationPipeline {
                             fullCompletion: fullCompletion,
                             chunkCount: chunkIndex
                         )
+                        let completionPolicyStarted = Date()
                         let completionIntercept = try await interceptor.interceptAssistantCompletion(completionEvent)
+                        var completionPolicyMS = PipelineTiming.elapsedMS(from: completionPolicyStarted)
+                        let contentConfirmStarted = Date()
                         let interceptedCompletion: String?
                         switch completionIntercept {
                         case .denied(let reason):
@@ -300,15 +345,27 @@ extension ConversationPipeline {
                         case .allowed(let allowedContent):
                             interceptedCompletion = allowedContent
                         }
+                        let contentConfirmMS = PipelineTiming.elapsedMS(from: contentConfirmStarted)
+                        if case .confirm = completionIntercept {
+                            completionPolicyMS += contentConfirmMS
+                            PipelineTiming.log("\(roundLabel) content_confirm_ms=\(contentConfirmMS)")
+                        }
 
                         guard let interceptedCompletion else {
+                            PipelineTiming.log(
+                                "\(roundLabel) completion_blocked finalize_decode_ms=\(finalizeDecodeMS) completion_policy_ms=\(completionPolicyMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
+                            )
                             break
                         }
                         await MainActor.run {
                             debugLog("Completion validated by policy engine")
                         }
+                        PipelineTiming.log(
+                            "\(roundLabel) post_llm finalize_decode_ms=\(finalizeDecodeMS) completion_policy_ms=\(completionPolicyMS) status=\(agentResponse?.status.rawValue ?? "nil")"
+                        )
 
                         // Prefer provider-reported usage; fall back to estimate if the API omitted it.
+                        let usageStarted = Date()
                         let tokenOK: Bool
                         if let usage = lastAPIUsage {
                             tokenOK = await UsageLimitsService.shared.recordAPIUsage(
@@ -322,10 +379,14 @@ extension ConversationPipeline {
                                 pricing: model.tokenPricing
                             )
                         }
+                        let usageMS = PipelineTiming.elapsedMS(from: usageStarted)
                         if !tokenOK {
                             await MainActor.run {
                                 debugLog("Stopped: usage token budget exhausted")
                             }
+                            PipelineTiming.log(
+                                "\(roundLabel) stopped_usage_budget usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted))"
+                            )
                             if !streamedVisibleContent {
                                 continuation.yield(
                                     AgentResponseNextChunk(
@@ -355,11 +416,16 @@ extension ConversationPipeline {
                         }
                         
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch {
+                            let limitStarted = Date()
                             let roundAllowed = await UsageLimitsService.shared.allowToolRound(roundIndex: round)
+                            let toolLimitMS = PipelineTiming.elapsedMS(from: limitStarted)
                             if !roundAllowed {
                                 await MainActor.run {
                                     debugLog("Stopped: max tool rounds reached (round \(round))")
                                 }
+                                PipelineTiming.log(
+                                    "\(roundLabel) stopped_tool_round_limit tool_limit_ms=\(toolLimitMS) usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted))"
+                                )
                                 continuation.yield(
                                     AgentResponseNextChunk(
                                         status: .complete,
@@ -371,7 +437,9 @@ extension ConversationPipeline {
                             await MainActor.run {
                                 debugLog("Tool request detected; forwarding to policy engine")
                             }
+                            let parseStarted = Date()
                             let parsedTool = Self.parseToolPayload(agentResponse)
+                            let parseToolMS = PipelineTiming.elapsedMS(from: parseStarted)
                             if parsedTool == nil {
                                 await MainActor.run {
                                     let name = agentResponse?.toolCall?.toolName ?? agentResponse?.toolBatch?.tools?.first?.toolName ?? "(unknown)"
@@ -379,20 +447,35 @@ extension ConversationPipeline {
                                     debugLog("Tool payload parse failed for status=\(agentResponse?.status.rawValue ?? "?") name=\(name) argsPreview=\(argsPreview)")
                                 }
                             }
+                            let toolStarted = Date()
                             let toolExecution = try await executeToolRequest(
                                 parsedTool,
                                 sessionID: sessionID,
                                 approvalPresenter: approvalPresenter
                             )
+                            let toolWallMS = PipelineTiming.elapsedMS(from: toolStarted)
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
+                            let slimFollowUpBody = ToolFollowUpFormatter.slimToolResults(records: toolExecution.records)
+                            let slimRequestLine = ToolFollowUpFormatter.slimToolRequestLine(records: toolExecution.records)
                             await MainActor.run {
-                                debugLog("Tool result received summaryChars=\(toolExecution.summary.count) records=\(toolExecution.records.count)")
+                                // Full wire result for debug only; agent follow-up uses slim body.
+                                debugLog(
+                                    "Tool result full summaryChars=\(toolExecution.summary.count) records=\(toolExecution.records.count) slimFollowUpChars=\(slimFollowUpBody.count)\n\(toolExecution.summary)"
+                                )
                             }
+                            PipelineTiming.log(
+                                "\(roundLabel) tool wall_ms=\(toolWallMS) parse_ms=\(parseToolMS) limit_ms=\(toolLimitMS) usage_ms=\(usageMS) records=\(toolExecution.records.count) summary_chars=\(toolExecution.summary.utf8.count) slim_followup_chars=\(slimFollowUpBody.utf8.count) names=\(toolExecution.records.map(\.name).joined(separator: ","))"
+                            )
 
+                            let followUpStarted = Date()
                             workingPrompt = Self.buildFollowUpPrompt(
                                 originalPrompt: prompt,
-                                assistantToolRequest: toolExecution.records.map { "\($0.name): \($0.arguments)" }.joined(separator: ", "),
-                                toolResultSummary: toolExecution.summary
+                                assistantToolRequest: slimRequestLine,
+                                toolResultSummary: slimFollowUpBody
+                            )
+                            let followUpBuildMS = PipelineTiming.elapsedMS(from: followUpStarted)
+                            PipelineTiming.log(
+                                "\(roundLabel) followup_build_ms=\(followUpBuildMS) followup_chars=\(workingPrompt.utf8.count) slim_result_chars=\(slimFollowUpBody.utf8.count) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
                             )
                             continue
                         }
@@ -401,6 +484,9 @@ extension ConversationPipeline {
                             await MainActor.run {
                                 debugLog("Tool request payload failed strict schema validation")
                             }
+                            PipelineTiming.log(
+                                "\(roundLabel) tool_payload_invalid round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
+                            )
                             continue
                         }
 
@@ -418,6 +504,10 @@ extension ConversationPipeline {
                             }
                         }
 
+                        PipelineTiming.log(
+                            "\(roundLabel) final_complete usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted)) tool_records=\(aggregatedToolCalls.count)"
+                        )
+                        let ingestStarted = Date()
                         try? await memoryCoordinator.ingest(
                             MemoryIngestInput(
                                 sessionKey: sessionKey,
@@ -428,11 +518,15 @@ extension ConversationPipeline {
                                 scope: scope
                             )
                         )
+                        PipelineTiming.log(
+                            "turn_complete ingest_ms=\(PipelineTiming.elapsedMS(from: ingestStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted)) tool_records=\(aggregatedToolCalls.count)"
+                        )
                         break
                     }
 
                     continuation.finish()
                 } catch {
+                    PipelineTiming.log("turn_error turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted)) error=\(error.localizedDescription)")
                     await MainActor.run {
                         debugLog("Error occurred during streaming: \(error)")
                     }
@@ -608,6 +702,8 @@ extension ConversationPipeline {
         return nil
     }
 
+    /// Builds the round-2+ user message. `toolResultSummary` must already be slimmed for the model
+    /// (`ToolFollowUpFormatter`); full tool JSON is logged separately before this is called.
     private static func buildFollowUpPrompt(
         originalPrompt: String,
         assistantToolRequest: String,
@@ -620,7 +716,7 @@ extension ConversationPipeline {
         You requested the following tool call:
         \(assistantToolRequest)
 
-        Tool execution result:
+        Tool execution result (stdout/stderr only; internal review/timing fields omitted):
         \(toolResultSummary)
 
         Produce the final user-facing response using the tool execution result as authoritative.

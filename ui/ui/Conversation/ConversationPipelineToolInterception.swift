@@ -17,14 +17,17 @@ extension ConversationPipeline {
         interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolResult {
+        let toolOverallStarted = Date()
         await MainActor.run {
             debugLog("Tool request given: \(name)")
         }
+        let encodeStarted = Date()
         let event = ToolInvocationEvent(
             sessionID: sessionID,
             toolName: name,
             argumentsJSON: try toolArgumentsToJSON(arguments)
         )
+        let encodeMS = PipelineTiming.elapsedMS(from: encodeStarted)
         await MainActor.run {
             debugLog("Tool request JSON: \(Self.debugPayload(event.argumentsJSON))")
         }
@@ -35,9 +38,13 @@ extension ConversationPipeline {
         }
 
         do {
-            return try await effectiveInterceptor.interceptAndRun(
+            let confirmMSBox = TimingAccumulator()
+            let proceedMSBox = TimingAccumulator()
+            let result = try await effectiveInterceptor.interceptAndRun(
                 event,
                 confirm: { [self] confirmEvent, requiredFields in
+                    let confirmStarted = Date()
+                    defer { confirmMSBox.add(PipelineTiming.elapsedMS(from: confirmStarted)) }
                     await MainActor.run {
                         debugLog("Policy decision: confirm \(name)")
                     }
@@ -119,6 +126,8 @@ extension ConversationPipeline {
                     }
                 },
                 proceed: { [self] interceptedEvent in
+                    let proceedStarted = Date()
+                    defer { proceedMSBox.add(PipelineTiming.elapsedMS(from: proceedStarted)) }
                     await MainActor.run {
                         debugLog("Policy decision: allow \(interceptedEvent.toolName)")
                     }
@@ -151,9 +160,14 @@ extension ConversationPipeline {
                     await MainActor.run {
                         debugLog("Executing tool: \(interceptedEvent.toolName)")
                     }
+                    let execStarted = Date()
                     let result = try await mcpClient.callTool(
                         named: interceptedEvent.toolName,
                         arguments: interceptedArguments
+                    )
+                    let mcpCallMS = PipelineTiming.elapsedMS(from: execStarted)
+                    PipelineTiming.log(
+                        "tool=\(interceptedEvent.toolName) mcp_call_ms=\(mcpCallMS) isError=\(result.isError) result_chars=\(result.text.utf8.count)"
                     )
                     // Attribute reviewer-ish tokens from phase timing when present.
                     if interceptedEvent.toolName == "python_script_exec" {
@@ -170,7 +184,14 @@ extension ConversationPipeline {
                     return result
                 }
             )
+            PipelineTiming.log(
+                "tool=\(name) encode_ms=\(encodeMS) confirm_ms=\(confirmMSBox.total) proceed_ms=\(proceedMSBox.total) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted))"
+            )
+            return result
         } catch ToolInvocationInterceptionError.denied(let reason) {
+            PipelineTiming.log(
+                "tool=\(name) denied encode_ms=\(encodeMS) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted)) reason=\(reason)"
+            )
             await MainActor.run {
                 debugLog("Policy decision: deny \(name) reason=\(reason)")
             }
@@ -210,6 +231,9 @@ extension ConversationPipeline {
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
         } catch ToolInvocationInterceptionError.cancelled(let reason) {
+            PipelineTiming.log(
+                "tool=\(name) cancelled encode_ms=\(encodeMS) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted)) reason=\(reason)"
+            )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
         }
     }
@@ -413,6 +437,24 @@ extension ConversationPipeline {
         )
         guard usage.totalTokens > 0 else { return }
         _ = await UsageLimitsService.shared.recordAPIUsage(usage)
+    }
+}
+
+/// Thread-safe cumulative ms for nested async tool timing.
+private final class TimingAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var total: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func add(_ ms: Int) {
+        lock.lock()
+        value += max(0, ms)
+        lock.unlock()
     }
 }
 

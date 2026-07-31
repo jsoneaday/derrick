@@ -91,14 +91,23 @@ final class EgressAllowlistService: ObservableObject {
     ) async -> String? {
         guard allowNetwork else { return nil }
 
+        let preflightStarted = Date()
         let hosts = EgressHostExtractor.extractHosts(from: script)
-        guard !hosts.isEmpty else { return nil }
+        guard !hosts.isEmpty else {
+            PipelineTiming.log("egress_preflight hosts=0 total_ms=0 modal_ms=0")
+            return nil
+        }
 
         var sessionGrants: [String] = []
+        var modalMS = 0
+        var promptedHosts = 0
 
         for host in hosts {
             if localPolicy.isHardBlockedHostname(host) {
                 let message = "Network access to “\(host)” is permanently blocked (private/metadata host)."
+                PipelineTiming.log(
+                    "egress_preflight blocked_hard host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+                )
                 // Modal published by pipeline from failureStage=egress result.
                 return Self.blockedResultJSON(findings: [message], stage: "egress")
             }
@@ -107,7 +116,10 @@ final class EgressAllowlistService: ObservableObject {
                 continue
             }
 
+            promptedHosts += 1
+            let modalStarted = Date()
             let decision = await promptForHost(host, toolName: toolName)
+            modalMS += PipelineTiming.elapsedMS(from: modalStarted)
             switch decision {
             case .approved(let actor), .approvedOnce(let actor):
                 debugLog("Egress allow once for \(host) by \(actor ?? "user")")
@@ -120,6 +132,9 @@ final class EgressAllowlistService: ObservableObject {
                     try await addSuffix(suffix, source: "user")
                 } catch {
                     debugLog("Failed to persist egress suffix \(suffix): \(error.localizedDescription)")
+                    PipelineTiming.log(
+                        "egress_preflight persist_failed host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+                    )
                     return Self.blockedResultJSON(
                         findings: ["Failed to save permanent allow for \(host): \(error.localizedDescription)"],
                         stage: "egress"
@@ -128,9 +143,15 @@ final class EgressAllowlistService: ObservableObject {
             case .denied(let actor):
                 debugLog("Egress deny for \(host) by \(actor ?? "user") — aborting entire script run")
                 let message = "User denied network access to “\(host)”. The script was not run."
+                PipelineTiming.log(
+                    "egress_preflight user_denied host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS) prompted_hosts=\(promptedHosts)"
+                )
                 return Self.blockedResultJSON(findings: [message], stage: "egress")
             case .dismissed, .timedOut:
                 let message = "Network access to “\(host)” was not approved. The script was not run."
+                PipelineTiming.log(
+                    "egress_preflight dismissed_or_timeout host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+                )
                 return Self.blockedResultJSON(findings: [message], stage: "egress")
             }
         }
@@ -138,6 +159,9 @@ final class EgressAllowlistService: ObservableObject {
         if !sessionGrants.isEmpty {
             await XPCDockerRunner.shared.grantEgressSessionHosts(sessionGrants)
         }
+        PipelineTiming.log(
+            "egress_preflight ok hosts=\(hosts.count) prompted=\(promptedHosts) session_grants=\(sessionGrants.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+        )
         return nil
     }
 
@@ -152,26 +176,38 @@ final class EgressAllowlistService: ObservableObject {
     /// Mid-flight CONNECT hold from the helper (reverse XPC).
     /// Persists always-allow suffixes and session grants so the helper can complete the tunnel.
     func handleMidFlightHostAccess(host: String, toolName: String = "python_script_exec") async -> EgressHostAccessReply {
+        let midStarted = Date()
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized.isEmpty {
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
         if localPolicy.isHardBlockedHostname(normalized) {
             debugLog("Egress mid-flight hard-block for \(normalized)")
+            PipelineTiming.log(
+                "egress_midflight hard_block host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
+            )
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
         // Already covered (race with preflight / permanent list).
         if localPolicy.isHostCoveredByAllowlist(normalized) {
             debugLog("Egress mid-flight already allowed for \(normalized)")
+            PipelineTiming.log(
+                "egress_midflight already_allowed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
+            )
             return EgressHostAccessReply(decision: .once, actor: "system")
         }
 
+        let modalStarted = Date()
         let decision = await promptForHost(normalized, toolName: toolName)
+        let modalMS = PipelineTiming.elapsedMS(from: modalStarted)
         switch decision {
         case .approved(let actor), .approvedOnce(let actor):
             debugLog("Egress mid-flight allow once for \(normalized) by \(actor ?? "user")")
             localPolicy.grantSessionHosts([normalized])
             await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            PipelineTiming.log(
+                "egress_midflight once host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
+            )
             return EgressHostAccessReply(decision: .once, actor: actor)
         case .approvedPermanently(let actor):
             debugLog("Egress mid-flight allow always for \(normalized) by \(actor ?? "user")")
@@ -181,16 +217,28 @@ final class EgressAllowlistService: ObservableObject {
                 // Session grant covers the exact host while permanent suffix propagates.
                 localPolicy.grantSessionHosts([normalized])
                 await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+                PipelineTiming.log(
+                    "egress_midflight always host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
+                )
                 return EgressHostAccessReply(decision: .always, actor: actor)
             } catch {
                 debugLog("Egress mid-flight permanent save failed: \(error.localizedDescription)")
+                PipelineTiming.log(
+                    "egress_midflight persist_failed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
+                )
                 return EgressHostAccessReply(decision: .deny, actor: actor)
             }
         case .denied(let actor):
             debugLog("Egress mid-flight deny for \(normalized) by \(actor ?? "user")")
+            PipelineTiming.log(
+                "egress_midflight denied host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
+            )
             return EgressHostAccessReply(decision: .deny, actor: actor)
         case .dismissed, .timedOut:
             debugLog("Egress mid-flight dismissed/timeout for \(normalized)")
+            PipelineTiming.log(
+                "egress_midflight dismissed_or_timeout host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
+            )
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
     }

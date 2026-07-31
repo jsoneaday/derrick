@@ -224,6 +224,7 @@ import MCPClient
             )
         )
         let summary = phase.summaryLine
+        #expect(summary.hasPrefix("[TIME_METRIC]"))
         #expect(summary.contains("reviewer_ms=10"))
         #expect(summary.contains("exec_ms=3"))
         #expect(summary.contains("reviewer_ttfb_ms=4"))
