@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS idx_content_sensitivity_grants_session;
+DROP INDEX IF EXISTS idx_content_sensitivity_grants_permanent_category;
+DROP TABLE IF EXISTS content_sensitivity_grants;

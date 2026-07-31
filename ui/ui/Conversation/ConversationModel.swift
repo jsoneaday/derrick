@@ -271,6 +271,14 @@ final class ConversationModel {
             ),
             PolicyRule(
                 applicationName: applicationName,
+                name: "confirm-phone-completions",
+                scope: "assistant_completion_content",
+                matcherJSON: #"{"detected_patterns_any":["phone"]}"#,
+                outcomeJSON: #"{"action":"confirm","required_fields":["privacy_review"]}"#,
+                priority: 800
+            ),
+            PolicyRule(
+                applicationName: applicationName,
                 name: "deny-ssn-completions",
                 scope: "assistant_completion_content",
                 matcherJSON: #"{"detected_patterns_any":["ssn"]}"#,

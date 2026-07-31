@@ -16,6 +16,8 @@ public protocol PolicyEvaluator: Sendable {
 public enum AssistantContentInterceptResult: Equatable, Sendable {
     case allowed(String)
     case denied(reason: String)
+    /// Policy requires user approval before this content is accepted as final.
+    case confirm(content: String, requiredFields: [String])
 }
 
 public protocol PolicyInterceptor: Sendable {
@@ -47,7 +49,7 @@ public struct DefaultPolicyInterceptor: PolicyInterceptor {
             )
             return .allowed(redacted)
         case .confirm:
-            // Confirm for content still passes text until dedicated approval UX lands.
+            // Streaming chunks: never modal mid-token. Completion path enforces confirm.
             return .allowed(event.content)
         }
     }
@@ -68,8 +70,8 @@ public struct DefaultPolicyInterceptor: PolicyInterceptor {
                 options: .regularExpression
             )
             return .allowed(redacted)
-        case .confirm:
-            return .allowed(event.fullCompletion)
+        case .confirm(let requiredFields):
+            return .confirm(content: event.fullCompletion, requiredFields: requiredFields)
         }
     }
 }

@@ -204,4 +204,30 @@ final class PolicyInterceptorTests: XCTestCase {
         let result = try await interceptor.interceptAssistantCompletion(event)
         XCTAssertEqual(result, .allowed("Email is test@example.com here"))
     }
+
+    func test_interceptor_completion_confirm_does_not_silently_allow() async throws {
+        var policy = MockResponseContentPolicy()
+        policy.shouldAllow = false
+        policy.shouldDeny = false
+
+        let interceptor = DefaultPolicyInterceptor(policy: policy)
+        let event = AssistantCompletionEvent(
+            sessionID: "session-1",
+            fullCompletion: "Contact me at a@b.co",
+            chunkCount: 1
+        )
+        let result = try await interceptor.interceptAssistantCompletion(event)
+        XCTAssertEqual(result, .confirm(content: "Contact me at a@b.co", requiredFields: []))
+    }
+
+    func test_interceptor_chunk_confirm_still_soft_allows() async throws {
+        var policy = MockResponseContentPolicy()
+        policy.shouldAllow = false
+        policy.shouldDeny = false
+
+        let interceptor = DefaultPolicyInterceptor(policy: policy)
+        let event = AssistantChunkEvent(sessionID: "s", chunkIndex: 0, content: "partial")
+        let result = try await interceptor.interceptAssistantChunk(event)
+        XCTAssertEqual(result, .allowed("partial"))
+    }
 }

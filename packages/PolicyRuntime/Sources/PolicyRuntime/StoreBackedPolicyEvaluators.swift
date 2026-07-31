@@ -460,7 +460,8 @@ private func parseJSONObject(from json: String) -> [String: Any] {
     return object
 }
 
-private func detectSensitivePatterns(in text: String) -> [String] {
+/// Detects well-known sensitive categories used by completion matchers and content grants.
+public func detectSensitivePatterns(in text: String) -> [String] {
     var detected: [String] = []
     if text.range(of: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", options: .regularExpression) != nil {
         detected.append("email")

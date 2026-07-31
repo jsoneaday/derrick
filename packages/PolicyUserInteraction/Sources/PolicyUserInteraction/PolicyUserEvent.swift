@@ -312,6 +312,29 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    /// Confirm sensitive assistant content: Allow once / Always / Deny (same chrome as network).
+    public static func contentSensitivityAccessRequest(
+        categories: [String],
+        categoryIds: [String],
+        payloadPreview: String? = nil,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        let list = categories.isEmpty ? "sensitive data" : categories.joined(separator: ", ")
+        let key = categoryIds.sorted().joined(separator: ",")
+        return PolicyUserEvent(
+            priority: .userDecision,
+            correlationId: correlationId,
+            kind: .networkAccessRequest,
+            source: .contentGovernance,
+            title: "Sensitive content",
+            summary: "This reply may include \(list). Allow it to be shown?",
+            detail: "Deny discards this reply. Always remembers your choice for these categories in Settings.",
+            toolName: nil,
+            payloadPreview: payloadPreview,
+            rememberKey: "content.category:\(key)"
+        )
+    }
+
     private static func permanentSuffixLabel(for host: String) -> String {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let parts = normalized.split(separator: ".").map(String.init)

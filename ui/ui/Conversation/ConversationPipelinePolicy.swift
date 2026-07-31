@@ -51,6 +51,9 @@ extension ConversationPipeline {
                         var lastYieldedCompletionLength = 0
                         var lastYieldedThoughtLength = 0
                         var publishedChunkDenial = false
+                        /// When true, stop painting complete deltas (sensitive content pending review).
+                        var holdCompleteUI = false
+                        var heldCompleteThroughLength = 0
 
                         upstreamLoop: for try await chunk in upstream {
                             let event = AssistantChunkEvent(
@@ -59,7 +62,9 @@ extension ConversationPipeline {
                                 content: chunk
                             )
 
-                            switch try await interceptor.interceptAssistantChunk(event) {
+                            let chunkIntercept = try await interceptor.interceptAssistantChunk(event)
+                            let interceptedContent: String
+                            switch chunkIntercept {
                             case .denied(let reason):
                                 if !publishedChunkDenial {
                                     publishedChunkDenial = true
@@ -75,97 +80,121 @@ extension ConversationPipeline {
                                     }
                                 }
                                 continue upstreamLoop
-                            case .allowed(let interceptedContent):
-                                completion += interceptedContent
-                                chunkIndex += 1
+                            case .confirm(let content, _):
+                                // Chunk confirm is soft-allow (no modal mid-stream).
+                                interceptedContent = content
+                            case .allowed(let content):
+                                interceptedContent = content
+                            }
 
-                                // PartialJSON may yield non-object values mid-stream (String/Number/Bool).
-                                // JSONSerialization aborts on invalid top-level types — try? does not catch that.
-                                if let jsonAny = try? PartialJSON.parse(completion),
-                                   JSONSerialization.isValidJSONObject(jsonAny),
-                                   let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: []) {
-                                    // Only replace when decode succeeds. PartialJSON often yields incomplete
-                                    // status strings (e.g. "tool") that fail enum decode; assigning nil would
-                                    // wipe a previously decoded partial response.
-                                    if let decoded = try? jsonDecoder.decode(AgentResponse.self, from: jsonData) {
-                                        agentResponse = decoded
-                                    }
+                            completion += interceptedContent
+                            chunkIndex += 1
 
-                                    if round == 0 {
-                                        if chunkIndex == 1 {
-                                            let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            await MainActor.run {
-                                                debugLog("Model started formulating plan to: \(currentPrompt)")
-                                            }
-                                        } else if chunkIndex % 150 == 0 {
-                                            let currentChunks = chunkIndex
-                                            let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            await MainActor.run {
-                                                debugLog("Model is formulating plan (chunk \(currentChunks)) to: \(currentPrompt)")
-                                            }
+                            // PartialJSON may yield non-object values mid-stream (String/Number/Bool).
+                            // JSONSerialization aborts on invalid top-level types — try? does not catch that.
+                            if let jsonAny = try? PartialJSON.parse(completion),
+                               JSONSerialization.isValidJSONObject(jsonAny),
+                               let jsonData = try? JSONSerialization.data(withJSONObject: jsonAny, options: []) {
+                                // Only replace when decode succeeds. PartialJSON often yields incomplete
+                                // status strings (e.g. "tool") that fail enum decode; assigning nil would
+                                // wipe a previously decoded partial response.
+                                if let decoded = try? jsonDecoder.decode(AgentResponse.self, from: jsonData) {
+                                    agentResponse = decoded
+                                }
+
+                                if round == 0 {
+                                    if chunkIndex == 1 {
+                                        let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        await MainActor.run {
+                                            debugLog("Model started formulating plan to: \(currentPrompt)")
                                         }
+                                    } else if chunkIndex % 150 == 0 {
+                                        let currentChunks = chunkIndex
+                                        let currentPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        await MainActor.run {
+                                            debugLog("Model is formulating plan (chunk \(currentChunks)) to: \(currentPrompt)")
+                                        }
+                                    }
+                                } else {
+                                    if chunkIndex == 1 {
+                                        await MainActor.run {
+                                            debugLog("Model started generating final response...")
+                                        }
+                                    } else if chunkIndex % 150 == 0 {
+                                        let currentChunks = chunkIndex
+                                        await MainActor.run {
+                                            debugLog("Model is generating final response (chunk \(currentChunks))...")
+                                        }
+                                    }
+                                }
+
+                                switch agentResponse?.status {
+                                case .none:
+                                    // Mid-stream: partial JSON not yet a full AgentResponse.
+                                    break
+                                case .toolCall:
+                                    if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
+                                        continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
                                     } else {
-                                        if chunkIndex == 1 {
-                                            await MainActor.run {
-                                                debugLog("Model started generating final response...")
-                                            }
-                                        } else if chunkIndex % 150 == 0 {
-                                            let currentChunks = chunkIndex
-                                            await MainActor.run {
-                                                debugLog("Model is generating final response (chunk \(currentChunks))...")
+                                        var toolName: String?
+                                        if let toolCall = agentResponse?.toolCall {
+                                            toolName = toolCall.toolName
+                                        } else {
+                                            let singleToolCall = Self.parseToolPayload(agentResponse)
+                                            
+                                            switch singleToolCall {
+                                            case .single(let toolRequest):
+                                                toolName = toolRequest.toolName
+                                            default:
+                                                toolName = nil
                                             }
                                         }
+                                        continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolName))
                                     }
-
-                                    switch agentResponse?.status {
-                                    case .none:
-                                        // Mid-stream: partial JSON not yet a full AgentResponse.
-                                        break
-                                    case .toolCall:
-                                        if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
-                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                    break
+                                case .toolBatch:
+                                    if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
+                                        debugLog("Chunk thinking \(thought)")
+                                        continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                    } else {
+                                        var toolNames: String?
+                                        if let toolCall = agentResponse?.toolBatch {
+                                            let tools = toolCall.tools
+                                            let count = tools?.count ?? 0
+                                            toolNames = count > 0 ? tools?.map{ tool in tool.toolName ?? "batch tool name error" }.joined(separator: ", "): "batch tool name error"
                                         } else {
-                                            var toolName: String?
-                                            if let toolCall = agentResponse?.toolCall {
-                                                toolName = toolCall.toolName
-                                            } else {
-                                                let singleToolCall = Self.parseToolPayload(agentResponse)
-                                                
-                                                switch singleToolCall {
-                                                case .single(let toolRequest):
-                                                    toolName = toolRequest.toolName
-                                                default:
-                                                    toolName = nil
+                                            let batchToolCall = Self.parseToolPayload(agentResponse)
+                                            
+                                            switch batchToolCall {
+                                            case .batch(let toolRequest):
+                                                toolNames = toolRequest.invocations.map { $0.toolName } .joined(separator: ", ")
+                                            default:
+                                                toolNames = nil
+                                            }
+                                        }
+                                        continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolNames))
+                                    }
+                                    break
+                                case .complete:
+                                    if let assistantResponse = agentResponse?.assistantResponse {
+                                        // Smart hold: only pause complete *UI* once ungranted email appears.
+                                        // Thinking/tool_call keep streaming; non-sensitive answers stream fully.
+                                        if !holdCompleteUI {
+                                            let shouldHold = await MainActor.run {
+                                                ContentSensitivityGrantService.shared.shouldHoldCompleteStreaming(
+                                                    for: assistantResponse,
+                                                    sessionID: sessionID
+                                                )
+                                            }
+                                            if shouldHold {
+                                                holdCompleteUI = true
+                                                heldCompleteThroughLength = lastYieldedCompletionLength
+                                                await MainActor.run {
+                                                    debugLog("Holding complete UI stream (ungranted sensitive content detected)")
                                                 }
                                             }
-                                            continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolName))
                                         }
-                                        break
-                                    case .toolBatch:
-                                        if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
-                                            debugLog("Chunk thinking \(thought)")
-                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
-                                        } else {
-                                            var toolNames: String?
-                                            if let toolCall = agentResponse?.toolBatch {
-                                                let tools = toolCall.tools
-                                                let count = tools?.count ?? 0
-                                                toolNames = count > 0 ? tools?.map{ tool in tool.toolName ?? "batch tool name error" }.joined(separator: ", "): "batch tool name error"
-                                            } else {
-                                                let batchToolCall = Self.parseToolPayload(agentResponse)
-                                                
-                                                switch batchToolCall {
-                                                case .batch(let toolRequest):
-                                                    toolNames = toolRequest.invocations.map { $0.toolName } .joined(separator: ", ")
-                                                default:
-                                                    toolNames = nil
-                                                }
-                                            }
-                                            continuation.yield(AgentResponseNextChunk(status: .toolCall, chunk: "", toolName: toolNames))
-                                        }
-                                        break
-                                    case .complete:
-                                        if let assistantResponse = agentResponse?.assistantResponse {
+                                        if !holdCompleteUI {
                                             let newLength = assistantResponse.count
                                             if newLength > lastYieldedCompletionLength {
                                                 let index = assistantResponse.index(assistantResponse.startIndex, offsetBy: lastYieldedCompletionLength)
@@ -176,23 +205,23 @@ extension ConversationPipeline {
                                                 lastYieldedCompletionLength = newLength
                                             }
                                         }
-                                    case .thinking:
-                                        if let thought = agentResponse?.thought, !thought.isEmpty {
-                                            let newLength = thought.count
-                                            if newLength > lastYieldedThoughtLength {
-                                                let index = thought.index(thought.startIndex, offsetBy: lastYieldedThoughtLength)
-                                                let delta = String(thought[index...])
-                                                
-                                                streamedVisibleContent = true
-                                                debugLog("Chunk thinking \(delta)")
-                                                continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: delta))
-                                                lastYieldedThoughtLength = newLength
-                                            }
-                                        }
-                                    default:
-                                        // Known statuses are exhaustive; keep a quiet fallback for future enum cases.
-                                        break
                                     }
+                                case .thinking:
+                                    if let thought = agentResponse?.thought, !thought.isEmpty {
+                                        let newLength = thought.count
+                                        if newLength > lastYieldedThoughtLength {
+                                            let index = thought.index(thought.startIndex, offsetBy: lastYieldedThoughtLength)
+                                            let delta = String(thought[index...])
+                                            
+                                            streamedVisibleContent = true
+                                            debugLog("Chunk thinking \(delta)")
+                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: delta))
+                                            lastYieldedThoughtLength = newLength
+                                        }
+                                    }
+                                default:
+                                    // Known statuses are exhaustive; keep a quiet fallback for future enum cases.
+                                    break
                                 }
                             }
                         }
@@ -233,7 +262,9 @@ extension ConversationPipeline {
                             chunkCount: chunkIndex
                         )
                         let completionIntercept = try await interceptor.interceptAssistantCompletion(completionEvent)
-                        if case .denied(let reason) = completionIntercept {
+                        let interceptedCompletion: String?
+                        switch completionIntercept {
+                        case .denied(let reason):
                             await AppEventBus.shared.publish(
                                 PolicyUserEventFactory.contentGovernanceDenied(
                                     reason: reason,
@@ -244,13 +275,42 @@ extension ConversationPipeline {
                             await MainActor.run {
                                 debugLog("Completion blocked by policy engine: \(reason)")
                             }
-                            break
+                            interceptedCompletion = nil
+                        case .confirm(let contentToConfirm, let requiredFields):
+                            await MainActor.run {
+                                debugLog("Completion requires content confirmation fields=\(requiredFields.joined(separator: ","))")
+                            }
+                            interceptedCompletion = await ContentSensitivityGrantService.shared.resolveConfirm(
+                                content: contentToConfirm,
+                                requiredFields: requiredFields,
+                                sessionID: sessionID
+                            )
+                        case .allowed(let allowedContent):
+                            interceptedCompletion = allowedContent
                         }
-                        guard case .allowed(let interceptedCompletion) = completionIntercept else {
+
+                        guard let interceptedCompletion else {
                             break
                         }
                         await MainActor.run {
                             debugLog("Completion validated by policy engine")
+                        }
+
+                        // Flush any held complete text after allow/confirm (single paint of remainder).
+                        if agentResponse?.status == .complete || holdCompleteUI {
+                            let text = interceptedCompletion
+                            if holdCompleteUI || lastYieldedCompletionLength < text.count {
+                                let start = min(heldCompleteThroughLength, text.count)
+                                if start < text.count {
+                                    let idx = text.index(text.startIndex, offsetBy: start)
+                                    let remainder = String(text[idx...])
+                                    if !remainder.isEmpty {
+                                        streamedVisibleContent = true
+                                        continuation.yield(AgentResponseNextChunk(status: .complete, chunk: remainder))
+                                        lastYieldedCompletionLength = text.count
+                                    }
+                                }
+                            }
                         }
                         
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch,

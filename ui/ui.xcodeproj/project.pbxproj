@@ -807,13 +807,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Lib;
 		};
-		DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../packages/PolicyRuntime;
-		};
 		DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Plugin;
+		};
+		DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/PolicyRuntime;
 		};
 /* End XCLocalSwiftPackageReference section */
 

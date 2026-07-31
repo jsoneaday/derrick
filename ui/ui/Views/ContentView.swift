@@ -429,6 +429,7 @@ struct ContentView: View {
                 helperModelSettings = LLMModelSettings(repository: repo)
                 await helperModelSettings?.loadSettings()
                 await EgressAllowlistService.shared.configure(repository: repo)
+                await ContentSensitivityGrantService.shared.configure(repository: repo)
 
                 conversation = try await ConversationModel.makeDefault(
                     repository: repo,

@@ -4,6 +4,7 @@ import DBRepository
 private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels
     case networkAccess
+    case sensitiveContent
 
     var id: String { rawValue }
 
@@ -13,6 +14,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Select helper models"
         case .networkAccess:
             return "Network access"
+        case .sensitiveContent:
+            return "Sensitive content"
         }
     }
 
@@ -22,6 +25,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "brain.head.profile"
         case .networkAccess:
             return "network"
+        case .sensitiveContent:
+            return "eye.slash"
         }
     }
 }
@@ -29,9 +34,11 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
 struct LLMModelSettingsView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject private var egressAllowlist = EgressAllowlistService.shared
+    @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
     @State private var newSuffixDraft = ""
     @State private var networkError: String?
+    @State private var contentError: String?
 
     var body: some View {
         // Prefer a plain HStack over NavigationSplitView: split views often leave a blank
@@ -55,6 +62,8 @@ struct LLMModelSettingsView: View {
                     helperModelDetail
                 case .networkAccess:
                     networkAccessDetail
+                case .sensitiveContent:
+                    sensitiveContentDetail
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -161,6 +170,67 @@ struct LLMModelSettingsView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var sensitiveContentDetail: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Sensitive content")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+
+            Text("When a reply may include sensitive data, Derrick can ask before showing it. Always-allow matches the “Always” button on those prompts.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let contentError {
+                Text(contentError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Form {
+                ForEach(ContentSensitivityGrantService.grantableCategories, id: \.id) { item in
+                    Toggle(
+                        isOn: Binding(
+                            get: { contentSensitivity.isPermanentlyGranted(item.id) },
+                            set: { newValue in
+                                Task {
+                                    do {
+                                        try await contentSensitivity.setPermanentGrant(
+                                            category: item.id,
+                                            enabled: newValue
+                                        )
+                                        contentError = nil
+                                    } catch {
+                                        contentError = error.localizedDescription
+                                    }
+                                }
+                            }
+                        )
+                    ) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Always allow \(item.title.lowercased())")
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Social Security–like numbers")
+                            .font(.body)
+                        Text("Always blocked by policy. Not overridable here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Spacer(minLength: 0)

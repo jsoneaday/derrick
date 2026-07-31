@@ -64,6 +64,7 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
         XCTAssertTrue(try tableExists(named: "memory_records", at: url))
         XCTAssertTrue(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
+        XCTAssertTrue(try tableExists(named: "content_sensitivity_grants", at: url))
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
 
@@ -71,6 +72,45 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertFalse(try tableExists(named: "memory_sessions", at: url))
         XCTAssertFalse(try tableExists(named: "memory_records", at: url))
         XCTAssertFalse(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
+        XCTAssertFalse(try tableExists(named: "content_sensitivity_grants", at: url))
+    }
+
+    func testContentSensitivityGrantCRUD() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        try await repository.saveContentSensitivityGrant(
+            ContentSensitivityGrant(category: "email", scope: "permanent", actor: "tester")
+        )
+        var permanent = try await repository.loadContentSensitivityGrants(permanentOnly: true)
+        XCTAssertEqual(permanent.map(\.category), ["email"])
+
+        try await repository.saveContentSensitivityGrant(
+            ContentSensitivityGrant(category: "email", scope: "permanent", actor: "tester2")
+        )
+        permanent = try await repository.loadContentSensitivityGrants(permanentOnly: true)
+        XCTAssertEqual(permanent.count, 1)
+        XCTAssertEqual(permanent.first?.actor, "tester2")
+
+        try await repository.saveContentSensitivityGrant(
+            ContentSensitivityGrant(category: "phone", scope: "session", sessionID: "s1", actor: "u")
+        )
+        let forSession = try await repository.loadContentSensitivityGrants(sessionID: "s1")
+        XCTAssertEqual(Set(forSession.map(\.category)), Set(["email", "phone"]))
+
+        try await repository.deletePermanentContentSensitivityGrant(category: "email")
+        permanent = try await repository.loadContentSensitivityGrants(permanentOnly: true)
+        XCTAssertTrue(permanent.isEmpty)
     }
 
     func testEgressAllowlistSeedAndCRUD() async throws {
