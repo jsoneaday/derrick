@@ -141,9 +141,7 @@ final class ConversationModel {
             let task = Task {
                 do {
                     let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
-                        await orchestrator.setCallerAgent(child.ref)
-                        defer { Task { await orchestrator.setCallerAgent(nil) } }
-
+                        // Caller identity is set by HierarchicalOrchestrator via AgentCallContext (task-local).
                         let childKey = MemorySessionKey(agentRef: child.ref)
                         let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
                         let rag = [ragInstructions, overlay].joined(separator: "\n\n")
@@ -173,26 +171,25 @@ final class ConversationModel {
 
                     try await orchestrator.withWorkerRunner(workerRunner) {
                         try await orchestrator.deliverUserMessage(prompt) { envelope in
-                            await orchestrator.setCallerAgent(orchestrator.userFacingRef)
-                            defer { Task { await orchestrator.setCallerAgent(nil) } }
-
-                            let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn].joined(separator: "\n\n")
-                            let pipelineStream = await Self.makePolicyStream(
-                                prompt: envelope.body,
-                                apiKey: apiKey,
-                                model: model,
-                                sessionKey: sessionKey,
-                                memoryCoordinator: memoryCoordinator,
-                                policyStore: policyStore,
-                                mcpClient: mcpClient,
-                                ragInstructions: userRag,
-                                mcpToolInstructions: mcpToolInstructions,
-                                responseSchema: responseSchema,
-                                interceptor: interceptor,
-                                approvalPresenter: approvalPresenter
-                            )
-                            for try await chunk in pipelineStream {
-                                continuation.yield(chunk)
+                            try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
+                                let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn].joined(separator: "\n\n")
+                                let pipelineStream = await Self.makePolicyStream(
+                                    prompt: envelope.body,
+                                    apiKey: apiKey,
+                                    model: model,
+                                    sessionKey: sessionKey,
+                                    memoryCoordinator: memoryCoordinator,
+                                    policyStore: policyStore,
+                                    mcpClient: mcpClient,
+                                    ragInstructions: userRag,
+                                    mcpToolInstructions: mcpToolInstructions,
+                                    responseSchema: responseSchema,
+                                    interceptor: interceptor,
+                                    approvalPresenter: approvalPresenter
+                                )
+                                for try await chunk in pipelineStream {
+                                    continuation.yield(chunk)
+                                }
                             }
                         }
                     }
@@ -313,8 +310,8 @@ final class ConversationModel {
                 }
             )
             await server.register(
-                AgentOrchestrationToolModule.completeTaskRegistration { result in
-                    try await orchestrator.completeTask(result: result)
+                AgentOrchestrationToolModule.completeTaskRegistration { result, agentID in
+                    try await orchestrator.completeTask(result: result, agentID: agentID)
                 }
             )
             await server.register(

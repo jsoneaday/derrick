@@ -2,7 +2,7 @@ import Foundation
 import AgentRuntime
 import MemorySystem
 
-/// Session-scoped multi-agent entry point (MA-1/MA-2).
+/// Session-scoped multi-agent entry point (MA-1–MA-3).
 final class SessionOrchestrator: Sendable {
     let sessionID: String
     let directory: InMemoryAgentDirectory
@@ -10,7 +10,7 @@ final class SessionOrchestrator: Sendable {
     let limits: OrchestrationLimits
     let userFacingRef: AgentRef
 
-    /// Turn context for worker LLM runs (set per user turn).
+    /// Worker LLM runner installed for the duration of a user-facing turn.
     private let turnContext: TurnContextStore
 
     init(
@@ -65,8 +65,7 @@ final class SessionOrchestrator: Sendable {
         guard let runner = await turnContext.runner else {
             throw AgentRuntimeError.turnInProgress(userFacingRef)
         }
-        // Caller identity: for MA-2, only user-facing spawns from the chat path.
-        let caller = await turnContext.callerAgent ?? userFacingRef
+        let caller = currentCaller()
         let outcome = try await hierarchy.spawnAndAwait(
             SpawnWorkerRequest(parent: caller, goal: goal, task: task, agentID: agentID),
             runTurn: runner
@@ -74,22 +73,23 @@ final class SessionOrchestrator: Sendable {
         debugLog(
             "AgentRuntime: spawn \(outcome.child.agentID) status=\(outcome.status.rawValue) resultChars=\(outcome.result.count)"
         )
-        return """
-        child_agent_id: \(outcome.child.agentID)
-        status: \(outcome.status.rawValue)
-        result:
-        \(outcome.result)
-        """
+        return formatSpawnResult(outcome)
     }
 
-    func completeTask(result: String) async throws -> String {
-        let worker = await turnContext.callerAgent ?? userFacingRef
+    func completeTask(result: String, agentID: String? = nil) async throws -> String {
+        // MCP handlers do not inherit TaskLocal from the worker LLM task; resolve via
+        // explicit agent_id, TaskLocal (same-task path), or sole active worker turn.
+        let worker = try await hierarchy.resolveWorkerForCompleteTask(
+            sessionID: sessionID,
+            agentID: agentID
+        )
         try await hierarchy.completeTask(worker: worker, result: result)
+        debugLog("AgentRuntime: complete_task agent=\(worker.agentID) resultChars=\(result.count)")
         return "task completed for \(worker.agentID)"
     }
 
     func listAgents(childrenOnly: Bool) async throws -> String {
-        let caller = await turnContext.callerAgent ?? userFacingRef
+        let caller = currentCaller()
         let records: [AgentRecord]
         if childrenOnly {
             records = await hierarchy.listChildren(of: caller)
@@ -104,20 +104,30 @@ final class SessionOrchestrator: Sendable {
     }
 
     func send(toAgentID: String, message: String) async throws -> String {
-        let from = await turnContext.callerAgent ?? userFacingRef
+        let from = currentCaller()
         try await hierarchy.send(from: from, toAgentID: toAgentID, message: message)
         return "message queued to \(toAgentID)"
     }
 
     func cancel(agentID: String) async throws -> String {
-        let requester = await turnContext.callerAgent ?? userFacingRef
+        let requester = currentCaller()
         let target = AgentRef(sessionID: sessionID, agentID: agentID)
         try await hierarchy.cancel(agent: target, by: requester)
         return "cancelled \(agentID)"
     }
 
-    func setCallerAgent(_ ref: AgentRef?) async {
-        await turnContext.setCaller(ref)
+    /// Prefer task-local caller (safe under concurrent workers); fall back to user-facing agent.
+    private func currentCaller() -> AgentRef {
+        AgentCallContext.caller ?? userFacingRef
+    }
+
+    private func formatSpawnResult(_ outcome: SpawnWorkerResult) -> String {
+        """
+        child_agent_id: \(outcome.child.agentID)
+        status: \(outcome.status.rawValue)
+        result:
+        \(outcome.result)
+        """
     }
 }
 
@@ -125,14 +135,9 @@ final class SessionOrchestrator: Sendable {
 
 private actor TurnContextStore {
     private(set) var runner: (@Sendable (AgentRecord, AgentEnvelope) async throws -> String)?
-    private(set) var callerAgent: AgentRef?
 
     func setRunner(_ runner: (@Sendable (AgentRecord, AgentEnvelope) async throws -> String)?) {
         self.runner = runner
-    }
-
-    func setCaller(_ ref: AgentRef?) {
-        callerAgent = ref
     }
 }
 

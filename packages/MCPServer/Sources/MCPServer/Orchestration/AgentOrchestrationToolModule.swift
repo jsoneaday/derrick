@@ -43,7 +43,7 @@ public enum AgentOrchestrationToolModule {
     }
 
     public static func completeTaskRegistration(
-        handler: @escaping @Sendable (_ result: String) async throws -> String
+        handler: @escaping @Sendable (_ result: String, _ agentID: String?) async throws -> String
     ) -> MCPToolRegistration {
         MCPToolRegistration(
             tool: .agentsCompleteTask,
@@ -53,13 +53,18 @@ public enum AgentOrchestrationToolModule {
                     "result": .object([
                         "type": .string("string"),
                         "description": .string("Concise result for the parent agent.")
+                    ]),
+                    "agent_id": .object([
+                        "type": .string("string"),
+                        "description": .string("Worker agent id (from Agent-ID in the task). Required when multiple workers run in parallel.")
                     ])
                 ]),
                 "required": .array([.string("result")])
             ])
         ) { arguments in
             let result = stringArg(arguments, "result") ?? ""
-            return try await handler(result)
+            let agentID = stringArg(arguments, "agent_id")
+            return try await handler(result, agentID)
         }
     }
 

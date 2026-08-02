@@ -59,16 +59,32 @@ public actor MCPToolRegistry {
     }
 
     public func batchCall(_ request: MCPToolBatchRequest) async -> MCPToolBatchResult {
-        var results: [MCPToolResult] = []
+        let count = request.invocations.count
+        guard count > 0 else {
+            return MCPToolBatchResult(results: [], combinedContent: "", isError: false)
+        }
 
-        for invocation in request.invocations {
-            do {
-                let content = try await call(name: invocation.toolName, arguments: invocation.arguments)
-                results.append(MCPToolResult(content: [MCPToolContent.text(content)], isError: false))
-            } catch {
-                print("[MCPServer] batch call failed for \(invocation.toolName): \(error)")
-                results.append(MCPToolResult(content: [MCPToolContent.text(error.localizedDescription)], isError: true))
+        // Concurrent fan-out; result order matches invocation order.
+        let results: [MCPToolResult] = await withTaskGroup(of: (Int, MCPToolResult).self) { group in
+            for (index, invocation) in request.invocations.enumerated() {
+                group.addTask {
+                    do {
+                        let content = try await self.call(name: invocation.toolName, arguments: invocation.arguments)
+                        return (index, MCPToolResult(content: [MCPToolContent.text(content)], isError: false))
+                    } catch {
+                        print("[MCPServer] batch call failed for \(invocation.toolName): \(error)")
+                        return (
+                            index,
+                            MCPToolResult(content: [MCPToolContent.text(error.localizedDescription)], isError: true)
+                        )
+                    }
+                }
             }
+            var ordered = Array<MCPToolResult?>(repeating: nil, count: count)
+            for await (index, result) in group {
+                ordered[index] = result
+            }
+            return ordered.compactMap { $0 }
         }
 
         return MCPToolBatchResult(

@@ -304,21 +304,45 @@ extension ConversationPipeline {
         interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolBatchResult {
-        var results: [MCPToolResult] = []
+        // MA-3: run independent batch invocations concurrently (order of results preserved).
+        let count = request.invocations.count
+        guard count > 0 else {
+            return MCPToolBatchResult(results: [], combinedContent: "", isError: false)
+        }
 
-        for invocation in request.invocations {
-            do {
-                let result = try await callToolWithPolicyInterception(
-                    named: invocation.toolName,
-                    arguments: invocation.arguments,
-                    sessionID: sessionID,
-                    interceptor: interceptor,
-                    approvalPresenter: approvalPresenter
-                )
-                results.append(result)
-            } catch MCPClientError.toolExecutionDenied(let toolName, let reason) {
-                results.append(MCPToolResult(content: [MCPToolContent.text("\(toolName) \(reason)")], isError: true))
+        let results: [MCPToolResult] = await withTaskGroup(of: (Int, MCPToolResult).self) { group in
+            for (index, invocation) in request.invocations.enumerated() {
+                group.addTask {
+                    do {
+                        let result = try await self.callToolWithPolicyInterception(
+                            named: invocation.toolName,
+                            arguments: invocation.arguments,
+                            sessionID: sessionID,
+                            interceptor: interceptor,
+                            approvalPresenter: approvalPresenter
+                        )
+                        return (index, result)
+                    } catch MCPClientError.toolExecutionDenied(let toolName, let reason) {
+                        return (
+                            index,
+                            MCPToolResult(content: [MCPToolContent.text("\(toolName) \(reason)")], isError: true)
+                        )
+                    } catch {
+                        return (
+                            index,
+                            MCPToolResult(
+                                content: [MCPToolContent.text(error.localizedDescription)],
+                                isError: true
+                            )
+                        )
+                    }
+                }
             }
+            var ordered = Array<MCPToolResult?>(repeating: nil, count: count)
+            for await (index, result) in group {
+                ordered[index] = result
+            }
+            return ordered.compactMap { $0 }
         }
 
         let hasErrors = results.contains(where: \.isError)

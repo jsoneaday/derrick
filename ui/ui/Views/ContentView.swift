@@ -241,7 +241,7 @@ struct ContentView: View {
 
     @State private var repository: DBRepository?
     @State private var conversation: ConversationModel?
-    @State private var prompt = "tell me about the latest reactjs"
+    @State private var prompt = "I need a short practical React guide. Split the research: one worker on hooks pitfalls (useEffect deps, stale closures, rules of hooks), another on component design (composition, controlled vs uncontrolled inputs, list keys, when to split components). Then pull both into one clean write-up with sections for Hooks, Components, and a five-item checklist."
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?

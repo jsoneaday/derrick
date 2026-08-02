@@ -37,13 +37,72 @@ public actor HierarchicalOrchestrator {
     private var explicitTaskResults: [AgentRef: String] = [:]
     /// Agents cancelled while running.
     private var cancelled: Set<AgentRef> = []
+    /// Worker turns currently inside `runTurn` (for complete_task identity when TaskLocal is unavailable across MCP).
+    private var activeWorkerTurns: Set<AgentRef> = []
 
     public init(directory: InMemoryAgentDirectory) {
         self.directory = directory
     }
 
+    /// Active worker refs for a session (used to resolve `agents_complete_task` without TaskLocal).
+    public func activeWorkers(sessionID: String) -> [AgentRef] {
+        activeWorkerTurns.filter { $0.sessionID == sessionID }.sorted { $0.agentID < $1.agentID }
+    }
+
+    /// Resolve which worker is completing a task.
+    /// Prefer explicit `agentID`, then TaskLocal caller, then the sole active worker.
+    public func resolveWorkerForCompleteTask(
+        sessionID: String,
+        agentID: String?
+    ) throws -> AgentRef {
+        if let raw = agentID?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return AgentRef(sessionID: sessionID, agentID: raw)
+        }
+        if let caller = AgentCallContext.caller, caller.sessionID == sessionID {
+            return caller
+        }
+        let active = activeWorkers(sessionID: sessionID)
+        if active.count == 1 {
+            return active[0]
+        }
+        if active.isEmpty {
+            throw AgentRuntimeError.completeTaskNoActiveWorker
+        }
+        throw AgentRuntimeError.completeTaskAmbiguousWorkers(agentIDs: active.map(\.agentID))
+    }
+
     /// Creates a worker child and runs one task-assign turn to completion.
     public func spawnAndAwait(
+        _ request: SpawnWorkerRequest,
+        runTurn: @escaping @Sendable (_ child: AgentRecord, _ envelope: AgentEnvelope) async throws -> String
+    ) async throws -> SpawnWorkerResult {
+        try await spawnOne(request, runTurn: runTurn)
+    }
+
+    /// Fan-out: run multiple worker spawns concurrently (order of results matches `requests`).
+    /// Concurrency is bounded by the directory's `maxConcurrentTurns` cap.
+    public func spawnManyAndAwait(
+        _ requests: [SpawnWorkerRequest],
+        runTurn: @escaping @Sendable (_ child: AgentRecord, _ envelope: AgentEnvelope) async throws -> String
+    ) async throws -> [SpawnWorkerResult] {
+        guard !requests.isEmpty else { return [] }
+
+        return try await withThrowingTaskGroup(of: (Int, SpawnWorkerResult).self) { group in
+            for (index, request) in requests.enumerated() {
+                group.addTask {
+                    let result = try await self.spawnOne(request, runTurn: runTurn)
+                    return (index, result)
+                }
+            }
+            var ordered = Array<SpawnWorkerResult?>(repeating: nil, count: requests.count)
+            for try await (index, result) in group {
+                ordered[index] = result
+            }
+            return ordered.compactMap { $0 }
+        }
+    }
+
+    private func spawnOne(
         _ request: SpawnWorkerRequest,
         runTurn: @escaping @Sendable (_ child: AgentRecord, _ envelope: AgentEnvelope) async throws -> String
     ) async throws -> SpawnWorkerResult {
@@ -76,10 +135,13 @@ public actor HierarchicalOrchestrator {
             to: childRef,
             from: request.parent,
             body: """
+            Agent-ID: \(childID)
             Goal: \(request.goal)
 
             Task:
             \(request.task)
+
+            When finished: prefer agents_complete_task with result and agent_id "\(childID)". Otherwise complete with the full answer in assistant_response—never a meta excuse.
             """,
             correlationId: correlation
         )
@@ -90,8 +152,18 @@ public actor HierarchicalOrchestrator {
                 if await self.isCancelled(childRef) {
                     throw AgentRuntimeError.agentCancelled(childRef)
                 }
-                let text = try await runTurn(childRecord, envelope)
-                await turnTextBox.set(text)
+                await self.beginWorkerTurn(childRef)
+                do {
+                    // Task-local when same task tree; activeWorkerTurns covers MCP handlers.
+                    let text = try await AgentCallContext.$caller.withValue(childRef) {
+                        try await runTurn(childRecord, envelope)
+                    }
+                    await turnTextBox.set(text)
+                    await self.endWorkerTurn(childRef)
+                } catch {
+                    await self.endWorkerTurn(childRef)
+                    throw error
+                }
             }
         } catch {
             try? await directory.updateStatus(childRef, status: .failed)
@@ -135,6 +207,14 @@ public actor HierarchicalOrchestrator {
         }
         explicitTaskResults[worker] = result
         try await directory.updateStatus(worker, status: .completed)
+    }
+
+    private func beginWorkerTurn(_ ref: AgentRef) {
+        activeWorkerTurns.insert(ref)
+    }
+
+    private func endWorkerTurn(_ ref: AgentRef) {
+        activeWorkerTurns.remove(ref)
     }
 
     public func listAgents(sessionID: String) async -> [AgentRecord] {

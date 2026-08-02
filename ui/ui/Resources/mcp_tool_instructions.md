@@ -23,8 +23,8 @@
    1. If the user names a multi-agent tool or asks to spawn/list/send/cancel agents, issue that `tool_call` (or `tool_batch`) **before** any `complete` answer. Do not invent tool results.
    2. `agents_spawn` — required args: `goal` (short), `task` (concrete). Blocks until the worker finishes; use the returned `result` in your next step. Optional `agent_id` slug.
    3. Workers never talk to the user; you synthesize worker results into the final `assistant_response`.
-   4. `agents_complete_task` — workers only; arg `result` (concise outcome for the parent).
+   4. `agents_complete_task` — workers only; args `result` (required) and `agent_id` (your Agent-ID; required when multiple workers run in parallel). If skipped, workers must still put the full task answer in `assistant_response`—never a meta “tool unavailable” / status-only reply.
    5. `agents_list` — optional `children_only` boolean. Call it when the user asks for the agent list.
    6. `agents_send` — parent/child only; args `to_agent_id`, `message`. No sibling messaging.
    7. `agents_cancel` — arg `agent_id`. Parent or self.
-   8. Keep worker count small (prefer 1–2 unless the user asks for more).
+   8. Keep worker count small (prefer 1–2 unless the user asks for more). Independent workers: prefer one `tool_batch` with multiple `agents_spawn` (they run in parallel).
