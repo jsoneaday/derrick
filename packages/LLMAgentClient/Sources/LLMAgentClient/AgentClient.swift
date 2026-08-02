@@ -140,15 +140,62 @@ public struct AgentResponse: Decodable, Encodable, Sendable {
     public struct ToolCall: Decodable, Encodable, Sendable {
         public let toolName: String?
         public let arguments: String?
-        
-        enum CodingKeys: String, Encodable, CodingKey {
+
+        public init(toolName: String?, arguments: String?) {
+            self.toolName = toolName
+            self.arguments = arguments
+        }
+
+        enum CodingKeys: String, CodingKey {
             case toolName = "tool_name"
+            case name
             case arguments
         }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // Schema uses `tool_name`; models sometimes emit `name`.
+            toolName =
+                try container.decodeIfPresent(String.self, forKey: .toolName)
+                ?? container.decodeIfPresent(String.self, forKey: .name)
+            arguments = try container.decodeIfPresent(String.self, forKey: .arguments)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(toolName, forKey: .toolName)
+            try container.encodeIfPresent(arguments, forKey: .arguments)
+        }
     }
-    
+
     public struct ToolBatch: Decodable, Encodable, Sendable {
+        /// Invocations in this batch (canonical storage).
         public let tools: [ToolCall]?
+
+        public init(tools: [ToolCall]?) {
+            self.tools = tools
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case tools
+            case invocations
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // Response schema uses `invocations`; older/wire paths may use `tools`.
+            if let invocations = try container.decodeIfPresent([ToolCall].self, forKey: .invocations) {
+                tools = invocations
+            } else {
+                tools = try container.decodeIfPresent([ToolCall].self, forKey: .tools)
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            // Prefer schema key when re-encoding.
+            try container.encodeIfPresent(tools, forKey: .invocations)
+        }
     }
 }
 

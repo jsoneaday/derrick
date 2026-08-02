@@ -22,6 +22,50 @@ struct ModelTests {
         #expect(request.messages.last?.role == .user)
     }
 
+    @Test func toolBatchDecodesSchemaInvocationsAndNameAlias() throws {
+        // Matches live model payload that previously failed: invocations + name (not tools + tool_name).
+        let json = """
+        {
+          "status": "tool_batch",
+          "tool_batch": {
+            "invocations": [
+              {
+                "name": "agents_spawn",
+                "arguments": "{\\"goal\\":\\"hooks\\",\\"task\\":\\"list pitfalls\\"}"
+              },
+              {
+                "tool_name": "agents_spawn",
+                "arguments": "{\\"goal\\":\\"components\\",\\"task\\":\\"list design tips\\"}"
+              }
+            ]
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(AgentResponse.self, from: Data(json.utf8))
+        #expect(response.status == .toolBatch)
+        let tools = response.toolBatch?.tools
+        #expect(tools?.count == 2)
+        #expect(tools?[0].toolName == "agents_spawn")
+        #expect(tools?[0].arguments?.contains("hooks") == true)
+        #expect(tools?[1].toolName == "agents_spawn")
+        #expect(tools?[1].arguments?.contains("components") == true)
+    }
+
+    @Test func toolBatchDecodesLegacyToolsKey() throws {
+        let json = """
+        {
+          "status": "tool_batch",
+          "tool_batch": {
+            "tools": [
+              { "tool_name": "agents_list", "arguments": "{}" }
+            ]
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(AgentResponse.self, from: Data(json.utf8))
+        #expect(response.toolBatch?.tools?.first?.toolName == "agents_list")
+    }
+
     @Test func openAIModelContextBudgetsArePresent() {
         #expect(OpenAIModel.gpt56Luna.maxSupportedContextTokens > OpenAIModel.gpt56Luna.maxIdealContextTokens)
     }

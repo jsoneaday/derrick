@@ -24,6 +24,7 @@
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
+		DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAR00022A00000000AR001 /* AgentRuntime */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +124,7 @@
 				DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */,
 				DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */,
 				DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */,
+				DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -203,6 +205,7 @@
 				DEAE00043010000000AE001 /* PolicyUserInteraction */,
 				DEPR00022A00000000PR001 /* PolicyRuntime */,
 				DEE6B0053010000000E6B001 /* EgressProxy */,
+				DEAR00022A00000000AR001 /* AgentRuntime */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -318,6 +321,7 @@
 				DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */,
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
 				DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */,
+				DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -815,6 +819,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/PolicyRuntime;
 		};
+		DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/AgentRuntime;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -895,6 +903,10 @@
 		DEPR00022A00000000PR001 /* PolicyRuntime */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PolicyRuntime;
+		};
+		DEAR00022A00000000AR001 /* AgentRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentRuntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

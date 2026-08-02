@@ -19,3 +19,12 @@
    7. If Python dependencies are needed, include `python_packages` and set `allow_network=true`. If a needed dependency is missing, set `allow_dependency_install=true` and name the package in `python_packages`.
    8. Keep the python script concise. Do NOT include comments. Avoid large helpers or boilerplate. Prefer a short 10–25 line script.
 8. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
+9. Multi-agent tools (when listed in the catalog):
+   1. If the user names a multi-agent tool or asks to spawn/list/send/cancel agents, issue that `tool_call` (or `tool_batch`) **before** any `complete` answer. Do not invent tool results.
+   2. `agents_spawn` — required args: `goal` (short), `task` (concrete). Blocks until the worker finishes; use the returned `result` in your next step. Optional `agent_id` slug.
+   3. Workers never talk to the user; you synthesize worker results into the final `assistant_response`.
+   4. `agents_complete_task` — workers only; arg `result` (concise outcome for the parent).
+   5. `agents_list` — optional `children_only` boolean. Call it when the user asks for the agent list.
+   6. `agents_send` — parent/child only; args `to_agent_id`, `message`. No sibling messaging.
+   7. `agents_cancel` — arg `agent_id`. Parent or self.
+   8. Keep worker count small (prefer 1–2 unless the user asks for more).

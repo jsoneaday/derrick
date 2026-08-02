@@ -1,4 +1,5 @@
 import Foundation
+import AgentRuntime
 import DBRepository
 import LLMAgentClient
 import MCPClient
@@ -10,6 +11,7 @@ import PolicyRuntime
 @MainActor
 final class ConversationModel {
     let sessionKey: MemorySessionKey
+    let orchestrator: SessionOrchestrator
     let memoryCoordinator: MemoryCoordinator
     let policyStore: (any PolicyStore)?
     let mcpBridge: MCPLocalBridge
@@ -54,6 +56,7 @@ final class ConversationModel {
 
     private init(
         sessionKey: MemorySessionKey,
+        orchestrator: SessionOrchestrator,
         memoryCoordinator: MemoryCoordinator,
         policyStore: (any PolicyStore)?,
         mcpBridge: MCPLocalBridge,
@@ -62,6 +65,7 @@ final class ConversationModel {
         mcpToolInstructions: String
     ) {
         self.sessionKey = sessionKey
+        self.orchestrator = orchestrator
         self.memoryCoordinator = memoryCoordinator
         self.policyStore = policyStore
         self.mcpBridge = mcpBridge
@@ -71,7 +75,10 @@ final class ConversationModel {
     }
 
     static func makeDefault(repository: DBRepository, helperModelSettings: LLMModelSettings) async throws -> ConversationModel {
-        let sessionKey = MemorySessionKey(sessionID: UUID().uuidString, agentID: "ui")
+        let sessionID = UUID().uuidString
+        let orchestrator = SessionOrchestrator(sessionID: sessionID)
+        try await orchestrator.bootstrapUserFacingAgent()
+        let sessionKey = orchestrator.memorySessionKey
         let databaseDirectoryURL = await repository.databaseDirectoryURL
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
@@ -93,11 +100,13 @@ final class ConversationModel {
                 budget: budget
             ),
             sessionKey: sessionKey,
+            orchestrator: orchestrator,
             helperModelSettings: helperModelSettings
         )
         debugLog("MCP Bridge started")
         return ConversationModel(
             sessionKey: sessionKey,
+            orchestrator: orchestrator,
             memoryCoordinator: MemoryCoordinator(
                 store: repository,
                 summarizer: summarizer,
@@ -118,6 +127,102 @@ final class ConversationModel {
         model: LLMModelChoice,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
+        let sessionKey = self.sessionKey
+        let memoryCoordinator = self.memoryCoordinator
+        let policyStore = self.policyStore
+        let mcpClient = self.mcpBridge.client
+        let ragInstructions = self.ragInstructions
+        let mcpToolInstructions = self.mcpToolInstructions
+        let responseSchema = self.responseSchema
+        let interceptor = makeContentPolicyInterceptor()
+        let orchestrator = self.orchestrator
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
+                        await orchestrator.setCallerAgent(child.ref)
+                        defer { Task { await orchestrator.setCallerAgent(nil) } }
+
+                        let childKey = MemorySessionKey(agentRef: child.ref)
+                        let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
+                        let rag = [ragInstructions, overlay].joined(separator: "\n\n")
+                        // Workers: use pipeline but do not yield to user UI.
+                        let stream = await Self.makePolicyStream(
+                            prompt: envelope.body,
+                            apiKey: apiKey,
+                            model: model,
+                            sessionKey: childKey,
+                            memoryCoordinator: memoryCoordinator,
+                            policyStore: policyStore,
+                            mcpClient: mcpClient,
+                            ragInstructions: rag,
+                            mcpToolInstructions: mcpToolInstructions,
+                            responseSchema: responseSchema,
+                            interceptor: interceptor,
+                            approvalPresenter: nil
+                        )
+                        var completeText = ""
+                        for try await chunk in stream {
+                            if chunk.status == .complete {
+                                completeText += chunk.chunk ?? ""
+                            }
+                        }
+                        return completeText
+                    }
+
+                    try await orchestrator.withWorkerRunner(workerRunner) {
+                        try await orchestrator.deliverUserMessage(prompt) { envelope in
+                            await orchestrator.setCallerAgent(orchestrator.userFacingRef)
+                            defer { Task { await orchestrator.setCallerAgent(nil) } }
+
+                            let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn].joined(separator: "\n\n")
+                            let pipelineStream = await Self.makePolicyStream(
+                                prompt: envelope.body,
+                                apiKey: apiKey,
+                                model: model,
+                                sessionKey: sessionKey,
+                                memoryCoordinator: memoryCoordinator,
+                                policyStore: policyStore,
+                                mcpClient: mcpClient,
+                                ragInstructions: userRag,
+                                mcpToolInstructions: mcpToolInstructions,
+                                responseSchema: responseSchema,
+                                interceptor: interceptor,
+                                approvalPresenter: approvalPresenter
+                            )
+                            for try await chunk in pipelineStream {
+                                continuation.yield(chunk)
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    debugLog("AgentRuntime turn failed: \(error.localizedDescription)")
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    /// Builds the existing conversation pipeline stream for one envelope body (turn engine unchanged).
+    nonisolated private static func makePolicyStream(
+        prompt: String,
+        apiKey: String,
+        model: LLMModelChoice,
+        sessionKey: MemorySessionKey,
+        memoryCoordinator: MemoryCoordinator,
+        policyStore: (any PolicyStore)?,
+        mcpClient: MCPClient,
+        ragInstructions: String,
+        mcpToolInstructions: String,
+        responseSchema: AgentSchema,
+        interceptor: PolicyInterceptor,
+        approvalPresenter: (any ApprovalConfirmationPresenting)?
+    ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
         switch model {
         case .gemini(let geminiModel):
             let provider = GeminiProvider(apiKey: apiKey)
@@ -127,7 +232,7 @@ final class ConversationModel {
                 memoryCoordinator: memoryCoordinator,
                 policyStore: policyStore,
                 applicationName: "ui",
-                mcpClient: mcpBridge.client,
+                mcpClient: mcpClient,
                 client: client,
                 model: geminiModel,
                 ragInstructions: ragInstructions,
@@ -137,7 +242,7 @@ final class ConversationModel {
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
-                interceptor: makeContentPolicyInterceptor(),
+                interceptor: interceptor,
                 approvalPresenter: approvalPresenter,
                 responseSchema: responseSchema
             )
@@ -149,7 +254,7 @@ final class ConversationModel {
                 memoryCoordinator: memoryCoordinator,
                 policyStore: policyStore,
                 applicationName: "ui",
-                mcpClient: mcpBridge.client,
+                mcpClient: mcpClient,
                 client: client,
                 model: openAIModel,
                 ragInstructions: ragInstructions,
@@ -159,7 +264,7 @@ final class ConversationModel {
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
-                interceptor: makeContentPolicyInterceptor(),
+                interceptor: interceptor,
                 approvalPresenter: approvalPresenter
             )
         }
@@ -176,6 +281,7 @@ final class ConversationModel {
     private static func makeLocalBridge(
         memoryCoordinator: MemoryCoordinator,
         sessionKey: MemorySessionKey,
+        orchestrator: SessionOrchestrator,
         helperModelSettings: LLMModelSettings
     ) async throws -> MCPLocalBridge {
         return try await MCPLocalBridge.make { server in
@@ -201,6 +307,31 @@ final class ConversationModel {
                 )
                 return retrieval.context
             }
+            await server.register(
+                AgentOrchestrationToolModule.spawnRegistration { goal, task, agentID in
+                    try await orchestrator.spawnWorker(goal: goal, task: task, agentID: agentID)
+                }
+            )
+            await server.register(
+                AgentOrchestrationToolModule.completeTaskRegistration { result in
+                    try await orchestrator.completeTask(result: result)
+                }
+            )
+            await server.register(
+                AgentOrchestrationToolModule.listRegistration { childrenOnly in
+                    try await orchestrator.listAgents(childrenOnly: childrenOnly)
+                }
+            )
+            await server.register(
+                AgentOrchestrationToolModule.sendRegistration { toAgentID, message in
+                    try await orchestrator.send(toAgentID: toAgentID, message: message)
+                }
+            )
+            await server.register(
+                AgentOrchestrationToolModule.cancelRegistration { agentID in
+                    try await orchestrator.cancel(agentID: agentID)
+                }
+            )
         }
     }
 
