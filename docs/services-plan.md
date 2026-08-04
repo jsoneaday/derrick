@@ -78,7 +78,7 @@ UI ─────────────────────────�
 | **P0** | done | This ADR + locked decisions |
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
-| **P3** | partial | MCPService XPC embed; bootstrap/health; callTool/searchTools + principal; UI/Agent ensure-up (Agent still hosts local MCP bridge for turns) |
+| **P3** | partial | MCPService XPC embed + UI ensure-up. Peer endpoint handoff: UI←MCP (XPC)→Agent (XPC). Effectors Agent→MCPService; `agents_*` local. |
 | **P4** | pending | JobService |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |

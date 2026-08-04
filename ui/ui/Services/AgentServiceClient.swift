@@ -158,12 +158,38 @@ public final class AgentServiceClient: @unchecked Sendable {
         }
     }
 
+    /// Deliver MCPService peer listener endpoint into AgentService (pure XPC handoff).
+    public func setMCPServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            proxy.setMCPServicePeerEndpoint(endpoint) { data in
+                let text = AgentServiceXPCCodec.decodeString(data as Data)
+                if text == "ok" {
+                    cont.resume()
+                } else {
+                    cont.resume(throwing: AgentServiceClientError.turnFailed(text.isEmpty ? "setMCPServicePeerEndpoint failed" : text))
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("AgentService MCPService peer endpoint handoff ok")
+        }
+    }
+
     private func remoteProxy() throws -> AgentServiceXPC {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
             let conn = NSXPCConnection(serviceName: serviceName)
-            conn.remoteObjectInterface = NSXPCInterface(with: AgentServiceXPC.self)
+            let remote = NSXPCInterface(with: AgentServiceXPC.self)
+            // Allow NSXPCListenerEndpoint argument on setMCPServicePeerEndpoint:
+            remote.setClasses(
+                NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+                for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:withReply:)),
+                argumentIndex: 0,
+                ofReply: false
+            )
+            conn.remoteObjectInterface = remote
             conn.exportedInterface = NSXPCInterface(with: AgentServiceClientSinkXPC.self)
             conn.exportedObject = sink
             do {

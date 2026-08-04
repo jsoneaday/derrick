@@ -140,8 +140,14 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         }
 
         do {
+            await MainActor.run {
+                debugLog("Loading tool catalog…")
+            }
             let tools = try await mcpClient.searchTools(matching: "")
             guard !tools.isEmpty else {
+                await MainActor.run {
+                    debugLog("Tool catalog empty")
+                }
                 return "Available MCP tools: none."
             }
             await MainActor.run {

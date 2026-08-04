@@ -17,7 +17,14 @@ final class AgentServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
         }
 
         let exported = AgentServiceExportedObject()
-        connection.exportedInterface = NSXPCInterface(with: AgentServiceXPC.self)
+        let exportedInterface = NSXPCInterface(with: AgentServiceXPC.self)
+        exportedInterface.setClasses(
+            NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+            for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        connection.exportedInterface = exportedInterface
         connection.exportedObject = exported
         // Reverse channel: UI exports AgentServiceClientSinkXPC.
         connection.remoteObjectInterface = NSXPCInterface(with: AgentServiceClientSinkXPC.self)
@@ -27,3 +34,4 @@ final class AgentServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
         return true
     }
 }
+

@@ -6,4 +6,6 @@ fputs("[MCPService] main starting pid=\(processInfo.processIdentifier)\n", stder
 let listener = NSXPCListener.service()
 listener.delegate = delegate
 listener.resume()
+// Peer listener for AgentService (endpoint handed off via UI XPC, not disk).
+_ = MCPServicePeerEndpoint.shared.endpointForHandoff()
 fputs("[MCPService] listener resumed\n", stderr)

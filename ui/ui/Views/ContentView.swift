@@ -542,6 +542,14 @@ struct ContentView: View {
                     debugLog(
                         "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
                     )
+                    // Pure XPC handoff: MCP peer endpoint only travels via NSXPCCoder (not disk).
+                    do {
+                        let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
+                        try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
+                        debugLog("MCPService peer endpoint handed to AgentService")
+                    } catch {
+                        debugLog("MCPService peer endpoint handoff failed: \(error.localizedDescription)")
+                    }
                 case .failure(let error):
                     debugLog("MCPService ensure-up failed (non-fatal): \(error.localizedDescription)")
                 }

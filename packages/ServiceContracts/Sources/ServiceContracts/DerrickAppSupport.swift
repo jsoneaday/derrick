@@ -51,4 +51,5 @@ public enum DerrickAppSupport {
         }
         return urls
     }
+
 }

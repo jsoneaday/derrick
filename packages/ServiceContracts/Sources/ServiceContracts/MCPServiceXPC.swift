@@ -5,6 +5,9 @@ import Foundation
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Anonymous peer listener endpoint for sibling services (AgentService).
+    /// Must travel over XPC (`NSXPCCoder`); cannot be NSKeyedArchived to disk.
+    func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
     /// `requestJSON` is `MCPToolCallRequest`. Reply is `MCPToolCallResultDTO`.
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// `queryJSON` is `MCPToolSearchRequest`. Reply is `MCPToolSearchResultDTO`.

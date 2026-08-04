@@ -166,9 +166,6 @@ extension ConversationPipeline {
                                 )
                             }
                         }
-                        await MainActor.run {
-                            debugLog("Python reviewer validating request")
-                        }
                     }
                     await MainActor.run {
                         debugLog("Executing tool: \(interceptedEvent.toolName)")

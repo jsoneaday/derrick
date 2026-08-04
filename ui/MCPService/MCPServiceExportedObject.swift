@@ -31,6 +31,7 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
             do {
                 let repo = try await MCPServiceStore.shared.sharedRepository()
                 _ = try await MCPServiceToolHost.shared.ensureReady()
+                _ = MCPServicePeerEndpoint.shared.endpointForHandoff()
                 let path = await repo.databaseURL.path
                 try await repo.appendServiceLog(
                     ServiceLogEntry(
@@ -57,6 +58,12 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
                 reply((try? MCPServiceXPCCodec.encodeBootstrap(result)) as NSData? ?? Data("{}".utf8) as NSData)
             }
         }
+    }
+
+    func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
+        let endpoint = MCPServicePeerEndpoint.shared.endpointForHandoff()
+        fputs("[MCPService] peerListenerEndpoint handoff\n", stderr)
+        reply(endpoint)
     }
 
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {

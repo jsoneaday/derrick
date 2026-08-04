@@ -110,6 +110,22 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         }
     }
 
+    func setMCPServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    ) {
+        MCPServiceClient.shared.installPeerEndpoint(endpoint)
+        fputs("[AgentService] MCPService peer endpoint installed\n", stderr)
+        Task {
+            await AgentServiceStore.shared.log(
+                level: .info,
+                message: "MCPService peer endpoint installed",
+                code: "mcp_peer_endpoint"
+            )
+        }
+        reply(AgentServiceXPCCodec.encodeString("ok") as NSData)
+    }
+
     func startTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let data = requestJSON as Data
         let context = connectionContext

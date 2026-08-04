@@ -38,9 +38,6 @@
 		DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0053010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
-		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
-		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
-		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
 		DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEMC10012A00000000MC001 /* MCPService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* ServiceContracts */; };
 		DEMC10112A00000000MC001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10212A00000000MC001 /* DBRepository */; };
@@ -48,6 +45,9 @@
 		DEMC10132A00000000MC001 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10232A00000000MC001 /* MCPServer */; };
 		DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10242A00000000MC001 /* MCPToolCatalog */; };
 		DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10252A00000000MC001 /* DockerRunnerXPC */; };
+		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
+		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
+		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -167,17 +167,17 @@
 			path = AgentService;
 			sourceTree = "<group>";
 		};
-		DESH00012A00000000SH001 /* SharedAgentRuntime */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = SharedAgentRuntime;
-			sourceTree = "<group>";
-		};
 		DEMC10022A00000000MC001 /* MCPService */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				DEMC100E2A00000000MC001 /* Exceptions for "MCPService" folder in "MCPService" target */,
 			);
 			path = MCPService;
+			sourceTree = "<group>";
+		};
+		DESH00012A00000000SH001 /* SharedAgentRuntime */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SharedAgentRuntime;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -1259,18 +1259,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
 		};
-		DEPR00022A00000000PR001 /* PolicyRuntime */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = PolicyRuntime;
-		};
-		DESC00022A00000000SC001 /* ServiceContracts */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
-		};
-		DESC00042A00000000SC001 /* ServiceContracts */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
-		};
 		DEMC10202A00000000MC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ServiceContracts;
@@ -1294,6 +1282,18 @@
 		DEMC10252A00000000MC001 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DockerRunnerXPC;
+		};
+		DEPR00022A00000000PR001 /* PolicyRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PolicyRuntime;
+		};
+		DESC00022A00000000SC001 /* ServiceContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ServiceContracts;
+		};
+		DESC00042A00000000SC001 /* ServiceContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ServiceContracts;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

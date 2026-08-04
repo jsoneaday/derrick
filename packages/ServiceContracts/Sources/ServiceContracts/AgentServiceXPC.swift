@@ -7,6 +7,9 @@ import Foundation
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Bootstrap shared DB + service_logs. Safe to call repeatedly.
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Install MCPService peer listener endpoint (from UI, which obtained it over XPC).
+    /// AgentService uses this to open MCPService without `serviceName:` (sibling restriction).
+    func setMCPServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Start a conversation turn. Chunks stream via `AgentServiceClientSinkXPC`.
     /// `requestJSON` is `AgentTurnRequest`. Reply is `AgentTurnAccepted`.
     func startTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)

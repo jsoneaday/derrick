@@ -27,20 +27,13 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Default session for memory search when caller does not pass session (tools encode it in args).
-        let sessionKey = MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
-
+        // Direct docker CLI (UI prewarms warm containers). Egress mid-flight still via helper→UI.
+        // Policy / usage limits run in AgentService before XPC callTool.
         let made = try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
                 runner: DockerPythonScriptRunner(),
                 reviewer: nil,
-                networkPreflight: { _, allowNetwork in
-                    // Egress prompts remain UI-owned for now; MCPService fails open on allow_network
-                    // only after AgentService/UI preflight in v1. Block network unless pre-approved
-                    // via allowlist is future work — allow run; docker forced-egress still applies.
-                    _ = allowNetwork
-                    return nil
-                },
+                networkPreflight: { _, _ in nil },
                 logger: { message in
                     fputs("[MCPService] \(message)\n", stderr)
                     Task {
@@ -49,6 +42,8 @@ actor MCPServiceToolHost {
                 }
             )
             await server.registerSessionMemorySearchTool { arguments in
+                let sessionKey = MCPServiceCallSlots.shared.memorySessionKey
+                    ?? MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
                 let retrieval = try await coordinator.retrievePrior(
                     MemoryPriorRetrievalRequest(
                         sessionKey: sessionKey,
@@ -92,7 +87,6 @@ actor MCPServiceToolHost {
             detailJSON: #"{"requestID":"\#(request.requestID)"}"#
         )
 
-        // Orchestration tools must not run here.
         if request.toolName.hasPrefix("agents_") {
             return MCPToolCallResultDTO(
                 requestID: request.requestID,
@@ -103,14 +97,23 @@ actor MCPServiceToolHost {
             )
         }
 
+        let sessionKey: MemorySessionKey
+        switch request.principal {
+        case .agent(let sessionID, let agentID):
+            sessionKey = MemorySessionKey(sessionID: sessionID, agentID: agentID)
+        default:
+            sessionKey = MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
+        }
+        MCPServiceCallSlots.shared.install(memorySessionKey: sessionKey)
+        defer { MCPServiceCallSlots.shared.clear() }
+
         let args = try Self.decodeArgumentsJSON(request.argumentsJSON)
         let result = try await client.callTool(named: request.toolName, arguments: args)
-        let text = result.text
         return MCPToolCallResultDTO(
             requestID: request.requestID,
             ok: true,
             isError: result.isError,
-            text: text,
+            text: result.text,
             message: result.isError ? "tool reported error" : "ok"
         )
     }
@@ -143,7 +146,6 @@ actor MCPServiceToolHost {
         case let i as Int:
             return .int(i)
         case let n as NSNumber:
-            // Bool is NSNumber on Apple platforms — already handled above when typed as Bool.
             if CFGetTypeID(n) == CFBooleanGetTypeID() {
                 return .bool(n.boolValue)
             }
@@ -176,5 +178,33 @@ enum MCPServiceToolHostError: Error, LocalizedError {
         switch self {
         case .invalidArguments(let m): return m
         }
+    }
+}
+
+/// Process slots for MCP tool handlers (unstructured tasks do not inherit TaskLocal).
+private final class MCPServiceCallSlots: @unchecked Sendable {
+    static let shared = MCPServiceCallSlots()
+
+    private let lock = NSLock()
+    private var sessionKey: MemorySessionKey?
+
+    private init() {}
+
+    func install(memorySessionKey: MemorySessionKey) {
+        lock.lock()
+        sessionKey = memorySessionKey
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        sessionKey = nil
+        lock.unlock()
+    }
+
+    var memorySessionKey: MemorySessionKey? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionKey
     }
 }

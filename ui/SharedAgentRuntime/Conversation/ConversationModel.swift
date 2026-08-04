@@ -2,7 +2,6 @@ import Foundation
 import AgentRuntime
 import DBRepository
 import LLMAgentClient
-import MCPClient
 import MCPServer
 import MCPToolCatalog
 import MemorySystem
@@ -15,8 +14,9 @@ final class ConversationModel {
     let orchestrator: SessionOrchestrator
     let memoryCoordinator: MemoryCoordinator
     let policyStore: (any PolicyStore)?
-    let mcpBridge: MCPLocalBridge
-    let databaseDirectoryURL: URL
+    /// Retains local `agents_*` only. Effectors use `toolClient` → MCPService over XPC.
+    private let agentsBridge: MCPLocalBridge
+    let toolClient: any ConversationToolClient
     let ragInstructions: String
     let mcpToolInstructions: String
     let responseSchema: AgentSchema = AgentSchema(
@@ -60,8 +60,8 @@ final class ConversationModel {
         orchestrator: SessionOrchestrator,
         memoryCoordinator: MemoryCoordinator,
         policyStore: (any PolicyStore)?,
-        mcpBridge: MCPLocalBridge,
-        databaseDirectoryURL: URL,
+        agentsBridge: MCPLocalBridge,
+        toolClient: any ConversationToolClient,
         ragInstructions: String,
         mcpToolInstructions: String
     ) {
@@ -69,8 +69,8 @@ final class ConversationModel {
         self.orchestrator = orchestrator
         self.memoryCoordinator = memoryCoordinator
         self.policyStore = policyStore
-        self.mcpBridge = mcpBridge
-        self.databaseDirectoryURL = databaseDirectoryURL
+        self.agentsBridge = agentsBridge
+        self.toolClient = toolClient
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
     }
@@ -80,7 +80,6 @@ final class ConversationModel {
         let orchestrator = SessionOrchestrator(sessionID: sessionID)
         try await orchestrator.bootstrapUserFacingAgent()
         let sessionKey = orchestrator.memorySessionKey
-        let databaseDirectoryURL = await repository.databaseDirectoryURL
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
@@ -91,20 +90,18 @@ final class ConversationModel {
             systemPrompt: summarizerInstructions
         )
         debugLog("Memory bootstrap started")
-        debugLog("Database directory: \(databaseDirectoryURL.path)")
+        debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
 
-        let mcpBridge = try await makeLocalBridge(
-            memoryCoordinator: MemoryCoordinator(
-                store: repository,
-                summarizer: summarizer,
-                policy: TieredMemoryCompactionPolicy(),
-                budget: budget
-            ),
-            sessionKey: sessionKey,
-            orchestrator: orchestrator,
-            helperModelSettings: helperModelSettings
+        let agentsBridge = try await makeAgentsOnlyBridge(orchestrator: orchestrator)
+        let principal = ServicePrincipal.agent(
+            sessionID: sessionKey.sessionID,
+            agentID: sessionKey.agentID
         )
-        debugLog("MCP Bridge started")
+        let toolClient = XPCConversationToolClient(
+            principal: principal,
+            localAgentsClient: agentsBridge.client
+        )
+        debugLog("Tools: agents_* local; effectors → MCPService XPC (principal=\(principal.logLabel))")
         return ConversationModel(
             sessionKey: sessionKey,
             orchestrator: orchestrator,
@@ -115,8 +112,8 @@ final class ConversationModel {
                 budget: budget
             ),
             policyStore: repository,
-            mcpBridge: mcpBridge,
-            databaseDirectoryURL: databaseDirectoryURL,
+            agentsBridge: agentsBridge,
+            toolClient: toolClient,
             ragInstructions: ragInstructions,
             mcpToolInstructions: mcpToolInstructions
         )
@@ -166,7 +163,7 @@ final class ConversationModel {
         let sessionKey = self.sessionKey
         let memoryCoordinator = self.memoryCoordinator
         let policyStore = self.policyStore
-        let mcpClient = self.mcpBridge.client
+        let toolClient = self.toolClient
         let ragInstructions = self.ragInstructions
         let mcpToolInstructions = self.mcpToolInstructions
         let responseSchema = self.responseSchema
@@ -184,7 +181,7 @@ final class ConversationModel {
                 sessionKey: childKey,
                 memoryCoordinator: memoryCoordinator,
                 policyStore: policyStore,
-                mcpClient: mcpClient,
+                mcpClient: toolClient,
                 ragInstructions: rag,
                 mcpToolInstructions: mcpToolInstructions,
                 responseSchema: responseSchema,
@@ -211,7 +208,7 @@ final class ConversationModel {
                         sessionKey: sessionKey,
                         memoryCoordinator: memoryCoordinator,
                         policyStore: policyStore,
-                        mcpClient: mcpClient,
+                        mcpClient: toolClient,
                         ragInstructions: userRag,
                         mcpToolInstructions: mcpToolInstructions,
                         responseSchema: responseSchema,
@@ -240,7 +237,7 @@ final class ConversationModel {
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
         policyStore: (any PolicyStore)?,
-        mcpClient: MCPClient,
+        mcpClient: any ConversationToolClient,
         ragInstructions: String,
         mcpToolInstructions: String,
         responseSchema: AgentSchema,
@@ -302,49 +299,11 @@ final class ConversationModel {
         return DefaultPolicyInterceptor(policy: policy)
     }
 
-    /// True when this code is running inside the AgentService.xpc process.
-    private static var isAgentServiceProcess: Bool {
-        let id = Bundle.main.bundleIdentifier ?? ""
-        return id == DerrickServiceID.agent.rawValue || id.hasSuffix(".AgentService")
-    }
-
-    private static func makeLocalBridge(
-        memoryCoordinator: MemoryCoordinator,
-        sessionKey: MemorySessionKey,
-        orchestrator: SessionOrchestrator,
-        helperModelSettings: LLMModelSettings
+    /// Local bridge for multi-agent tools only (`agents_*`). Effectors run in MCPService.
+    private static func makeAgentsOnlyBridge(
+        orchestrator: SessionOrchestrator
     ) async throws -> MCPLocalBridge {
-        // Sandboxed UI must use the embedded DockerRunnerHelper XPC.
-        // AgentService is a sibling XPC process and cannot open that helper by service name;
-        // it is unsandboxed and uses direct docker CLI (warm containers prewarmed by the UI).
-        let runner: any PythonScriptRunner = Self.isAgentServiceProcess
-            ? DockerPythonScriptRunner()
-            : XPCDockerRunner.shared
-        debugLog("Python script runner: \(Self.isAgentServiceProcess ? "DockerPythonScriptRunner (AgentService)" : "XPCDockerRunner (UI)")")
-
-        return try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(
-                runner: runner,
-                reviewer: ConfiguredPythonScriptReviewer(settings: helperModelSettings),
-                networkPreflight: { script, allowNetwork in
-                    await EgressAllowlistService.shared.preflightPythonScriptNetwork(
-                        script: script,
-                        allowNetwork: allowNetwork
-                    )
-                },
-                logger: { message in debugLog(message) }
-            )
-            await server.registerSessionMemorySearchTool { arguments in
-                let retrieval = try await memoryCoordinator.retrievePrior(
-                    MemoryPriorRetrievalRequest(
-                        sessionKey: sessionKey,
-                        query: arguments.query,
-                        limit: arguments.limit,
-                        page: arguments.page
-                    )
-                )
-                return retrieval.context
-            }
+        try await MCPLocalBridge.make { server in
             await server.register(
                 AgentOrchestrationToolModule.spawnRegistration { goal, task, agentID in
                     try await orchestrator.spawnWorker(goal: goal, task: task, agentID: agentID)
