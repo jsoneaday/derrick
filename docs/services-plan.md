@@ -76,7 +76,7 @@ UI ─────────────────────────�
 | Phase | Status | Deliverable |
 | --- | --- | --- |
 | **P0** | done | This ADR + locked decisions |
-| **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC** (ConversationModel hosted in AgentService) |
+| **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | pending | MCPService extract + principal |
 | **P4** | pending | JobService |

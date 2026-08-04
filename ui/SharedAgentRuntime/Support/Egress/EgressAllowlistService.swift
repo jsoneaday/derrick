@@ -55,6 +55,11 @@ final class EgressAllowlistService: ObservableObject {
     }
 
     func pushToHelper() async {
+        // AgentService cannot open DockerRunnerHelper XPC; UI process owns helper sync.
+        let bid = Bundle.main.bundleIdentifier ?? ""
+        if bid == "derrick.ui.AgentService" || bid.hasSuffix(".AgentService") {
+            return
+        }
         await XPCDockerRunner.shared.pushEgressAllowedDomainSuffixes(enabledSuffixStrings())
     }
 

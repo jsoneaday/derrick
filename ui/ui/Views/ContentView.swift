@@ -242,7 +242,8 @@ struct ContentView: View {
     }
 
     @State private var repository: DBRepository?
-    @State private var conversation: ConversationModel?
+    /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
+    @State private var sessionReady = false
     @State private var prompt = "I need a short practical React guide. Split the research: one worker on hooks pitfalls (useEffect deps, stale closures, rules of hooks), another on component design (composition, controlled vs uncontrolled inputs, list keys, when to split components). Then pull both into one clean write-up with sections for Hooks, Components, and a five-item checklist."
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
@@ -263,7 +264,7 @@ struct ContentView: View {
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
 
     private var canSendPrompt: Bool {
-        conversation != nil
+        sessionReady
             && !isStreaming
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -489,65 +490,68 @@ struct ContentView: View {
 
             let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
             let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
-            
+
             do {
+                // UI client bootstrap only: shared DB + settings. No local ConversationModel
+                // (turns are hosted entirely in AgentService).
+                await MainActor.run {
+                    bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
+                }
                 let repo = try await ConversationModel.makeMemoryStore(
                     applicationName: "ui",
                     databaseDirectoryURL: databaseDirectoryURL
                 )
                 repository = repo
-                helperModelSettings = LLMModelSettings(repository: repo)
-                await helperModelSettings?.loadSettings()
+                let settings = LLMModelSettings(repository: repo)
+                await settings.loadSettings()
+                helperModelSettings = settings
                 await EgressAllowlistService.shared.configure(repository: repo)
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
-                conversation = try await ConversationModel.makeDefault(
-                    repository: repo,
-                    helperModelSettings: helperModelSettings!
-                )
-                // Ensure AgentService XPC (turn host) is up; bootstrap writes service_logs.
-                do {
-                    let health = try await AgentServiceClient.shared.ensureUpAndHealth()
-                    debugLog(
-                        "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
-                    )
-                } catch {
-                    debugLog("AgentService ensure-up failed (non-fatal): \(error.localizedDescription)")
-                }
-                // Helper connection is up via XPCDockerRunner.shared; re-push allowlist.
-                await EgressAllowlistService.shared.pushToHelper()
-                // Prewarm is owned by XPCDockerRunner (started from ConversationModel.makeDefault).
-                // Do not re-open the bootstrap modal here — prewarm often finishes *before*
-                // this point and markReady() already dismissed it; forcing connectingHelper
-                // again left the modal stuck with no second markReady.
+                // Docker helper stays in the UI process for mid-flight egress prompts.
                 await MainActor.run {
+                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker helper…")
+                }
+                _ = XPCDockerRunner.shared
+                await EgressAllowlistService.shared.pushToHelper()
+
+                await MainActor.run {
+                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting AgentService…")
+                }
+                let health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                debugLog(
+                    "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
+                )
+
+                sessionReady = true
+                await MainActor.run {
+                    // Docker prewarm may still be running; leave modal to XPCDockerRunner if so.
                     switch bootstrapStatus.phase {
                     case .ready, .failed:
                         break
-                    case .idle:
-                        // Prewarm never started (unexpected); do not leave the user spinning.
-                        bootstrapStatus.markReady()
-                    default:
-                        // Still initializing — XPCDockerRunner will markReady / markFailed.
+                    case .checkingDocker, .preparingVolumes, .preparingImage,
+                         .startingContainers, .verifyingEnvironment:
                         break
+                    default:
+                        bootstrapStatus.markReady()
+                    }
+                }
+                if isDebugEnabled {
+                    await MainActor.run {
+                        debugLogStore.log("UI client ready (AgentService hosts turns)")
                     }
                 }
             } catch {
+                sessionReady = false
                 errorMessage = error.localizedDescription
                 await MainActor.run {
-                    debugLog("Session store load failed: \(error)")
+                    debugLog("Client bootstrap failed: \(error)")
                     bootstrapStatus.markFailed(
-                        title: "Session Store Failed",
-                        message: "Derrick could not open its local database.\n\n\(error.localizedDescription)",
+                        title: "Startup Failed",
+                        message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
                         technicalDetail: String(describing: error)
                     )
-                }
-            }
-
-            if isDebugEnabled, conversation != nil {
-                await MainActor.run {
-                    debugLogStore.log("Session store ready")
                 }
             }
 
@@ -601,8 +605,8 @@ struct ContentView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
-                            if conversation == nil {
-                                ProgressView("Loading session store...")
+                            if !sessionReady {
+                                ProgressView("Connecting to AgentService…")
                                     .padding(.top, 8)
                             }
                             
@@ -715,7 +719,7 @@ struct ContentView: View {
                         startStreaming()
                     }, focusToken: promptFocusToken)
                     .frame(height: inputHeight)
-                    .disabled(conversation == nil || isStreaming)
+                    .disabled(!sessionReady || isStreaming)
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
@@ -869,7 +873,7 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
-        guard conversation != nil, !prompt.isEmpty else { return }
+        guard sessionReady, !prompt.isEmpty else { return }
 
         isStreaming = true
         let currentPrompt = prompt
