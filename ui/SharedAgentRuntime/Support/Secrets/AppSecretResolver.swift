@@ -1,4 +1,5 @@
 import Foundation
+import ServiceContracts
 
 enum SecretSourceMode: String, Sendable {
     case keychain
@@ -29,19 +30,14 @@ struct AppSecretResolver: Sendable {
     }
 
     func resolve(account: String, environmentKeys: [String]) -> String? {
-        print("AppSecretResolver: resolving account=\(account)")
         switch mode {
         case .keychain:
-            let val = keychainValue(for: account)
+            return keychainValue(for: account)
                 ?? environmentValue(for: environmentKeys)
                 ?? dotEnvValue(for: environmentKeys)
-            print("AppSecretResolver (keychain mode): found=\(val != nil)")
-            return val
         case .dotenv:
-            let val = dotEnvValue(for: environmentKeys)
+            return dotEnvValue(for: environmentKeys)
                 ?? environmentValue(for: environmentKeys)
-            print("AppSecretResolver (dotenv mode): found=\(val != nil)")
-            return val
         }
     }
 
@@ -66,8 +62,8 @@ struct AppSecretResolver: Sendable {
     }
 
     private func dotEnvValue(for keys: [String]) -> String? {
-        for url in dotEnvSearchURLs() {
-            guard let values = parseDotEnv(at: url) else {
+        for url in Self.dotEnvSearchURLs(currentDirectoryURL: currentDirectoryURL, bundleURL: bundleURL) {
+            guard let values = Self.parseDotEnv(at: url) else {
                 continue
             }
 
@@ -82,7 +78,7 @@ struct AppSecretResolver: Sendable {
         return nil
     }
 
-    private func parseDotEnv(at url: URL) -> [String: String]? {
+    private static func parseDotEnv(at url: URL) -> [String: String]? {
         guard FileManager.default.fileExists(atPath: url.path),
               let contents = try? String(contentsOf: url, encoding: .utf8) else {
             return nil
@@ -103,7 +99,9 @@ struct AppSecretResolver: Sendable {
         return values.isEmpty ? nil : values
     }
 
-    private func dotEnvSearchURLs() -> [URL] {
+    /// Search cwd ancestry, this process's Resources, and the **host app** Resources when
+    /// running as an embedded XPC service (`ui.app/.../XPCServices/AgentService.xpc`).
+    static func dotEnvSearchURLs(currentDirectoryURL: URL, bundleURL: URL) -> [URL] {
         var urls: [URL] = []
         var candidate = currentDirectoryURL
 
@@ -120,8 +118,33 @@ struct AppSecretResolver: Sendable {
             urls.append(resourceURL.appendingPathComponent("Resources/.env"))
         }
 
+        urls.append(contentsOf: hostAppDotEnvURLs(from: bundleURL))
         urls.append(bundleURL.deletingLastPathComponent().appendingPathComponent(".env"))
         urls.append(bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env"))
+
+        return urls
+    }
+
+    /// Walk up from an embedded XPC bundle to `Something.app/Contents/Resources/.env`.
+    static func hostAppDotEnvURLs(from bundleURL: URL) -> [URL] {
+        var urls: [URL] = []
+        var dir = bundleURL.standardizedFileURL
+
+        for _ in 0..<10 {
+            if dir.pathExtension == "app" {
+                urls.append(dir.appendingPathComponent("Contents/Resources/.env"))
+                urls.append(dir.appendingPathComponent("Contents/Resources/ui/.env"))
+                break
+            }
+            if dir.lastPathComponent == "XPCServices" {
+                // .../App.app/Contents/XPCServices → .../App.app/Contents/Resources/.env
+                let contents = dir.deletingLastPathComponent()
+                urls.append(contents.appendingPathComponent("Resources/.env"))
+            }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { break }
+            dir = parent
+        }
 
         return urls
     }
@@ -139,18 +162,40 @@ struct AppSecretResolver: Sendable {
             return mode
         }
 
+        // Prefer dotenv when a host-app or cwd .env is present (common for debug AgentService).
+        for url in dotEnvSearchURLs(currentDirectoryURL: currentDirectoryURL, bundleURL: bundleURL) {
+            if FileManager.default.fileExists(atPath: url.path) {
+                if let values = parseDotEnv(at: url), values["UI_SECRET_MODE"] == SecretSourceMode.dotenv.rawValue {
+                    return .dotenv
+                }
+                // Explicit file without mode still allows dotenv fallback after keychain in resolve().
+                break
+            }
+        }
+
         return .keychain
     }
 
     @MainActor
     private static func defaultKeychainLoader(_ account: String) -> String? {
-        do {
-            let service = Bundle.main.bundleIdentifier ?? "ui"
-            return try readKeychainSecret(service: service, account: account)
-        } catch {
-            print("AppSecretResolver keychain lookup failed for account=\(account): \(error.localizedDescription)")
-            return nil
+        // UI stores secrets under the main app id; AgentService's Bundle.main id is different.
+        let services = [
+            DerrickAppSupport.hostAppBundleIdentifier,
+            Bundle.main.bundleIdentifier,
+            "ui"
+        ].compactMap { $0 }
+
+        var seen = Set<String>()
+        for service in services where seen.insert(service).inserted {
+            do {
+                if let value = try readKeychainSecret(service: service, account: account) {
+                    return value
+                }
+            } catch {
+                // try next service id
+            }
         }
+        return nil
     }
 
     private static func dotEnvValue(
@@ -158,44 +203,14 @@ struct AppSecretResolver: Sendable {
         currentDirectoryURL: URL,
         bundleURL: URL
     ) -> String? {
-        var urls: [URL] = []
-        var candidate = currentDirectoryURL
-
-        for _ in 0..<4 {
-            urls.append(candidate.appendingPathComponent(".env"))
-            urls.append(candidate.appendingPathComponent("ui/.env"))
-            urls.append(candidate.appendingPathComponent("ui/ui/Resources/.env"))
-            candidate.deleteLastPathComponent()
-        }
-
-        urls.append(bundleURL.deletingLastPathComponent().appendingPathComponent(".env"))
-        urls.append(bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env"))
-
-        for url in urls {
-            guard FileManager.default.fileExists(atPath: url.path),
-                  let contents = try? String(contentsOf: url, encoding: .utf8) else {
-                continue
-            }
-
-            var values: [String: String] = [:]
-            for line in contents.split(whereSeparator: \.isNewline) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), let equals = trimmed.firstIndex(of: "=") else {
-                    continue
-                }
-
-                let key = String(trimmed[..<equals]).trimmingCharacters(in: .whitespaces)
-                let value = String(trimmed[trimmed.index(after: equals)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                values[key] = value
-            }
-
+        for url in dotEnvSearchURLs(currentDirectoryURL: currentDirectoryURL, bundleURL: bundleURL) {
+            guard let values = parseDotEnv(at: url) else { continue }
             for key in keys {
                 if let value = values[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
                     return value
                 }
             }
         }
-
         return nil
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import AppEvents
 import Combine
 import LLMAgentClient
 import SwiftUI
@@ -411,6 +412,74 @@ struct ContentView: View {
             await MainActor.run {
                 policyEventPresenter.start()
                 bootstrapStatus.beginLoadingSession()
+            }
+            // AgentService tool confirms + egress allows route through reverse XPC → UI modals.
+            let approvalModel = approvalPresentationModel
+            AgentServiceClient.shared.setApprovalHandler { requestDTO in
+                let request = ApprovalConfirmationRequest(
+                    id: requestDTO.approvalID,
+                    sessionID: requestDTO.sessionID,
+                    toolName: requestDTO.toolName,
+                    argumentsJSON: requestDTO.argumentsJSON,
+                    requiredFields: requestDTO.requiredFields
+                )
+                let decision = await approvalModel.confirm(request)
+                switch decision {
+                case .approved(let edited, let actor):
+                    return AgentApprovalDecisionDTO(
+                        approvalID: requestDTO.approvalID,
+                        approved: true,
+                        editedArgumentsJSON: edited,
+                        actor: actor ?? ""
+                    )
+                case .cancelled(let actor):
+                    return AgentApprovalDecisionDTO(
+                        approvalID: requestDTO.approvalID,
+                        approved: false,
+                        editedArgumentsJSON: requestDTO.argumentsJSON,
+                        actor: actor ?? ""
+                    )
+                }
+            }
+            AgentServiceClient.shared.setNetworkAccessHandler { requestDTO in
+                let event = PolicyUserEventFactory.egressAccessRequest(
+                    host: requestDTO.host,
+                    toolName: requestDTO.toolName
+                )
+                await MainActor.run {
+                    debugLog("[policy-ui] AgentService network access host=\(requestDTO.host)")
+                }
+                let decision = await AppEventBus.shared.initDecision(event)
+                // Apply on the UI process + Docker helper *before* replying so mid-flight
+                // CONNECT does not show a second modal after preflight "Always"/"Once".
+                await EgressAllowlistService.shared.applyUserNetworkDecision(
+                    host: requestDTO.host,
+                    decision: decision
+                )
+                let actor: String
+                let decisionCode: String
+                switch decision {
+                case .approved(let a), .approvedOnce(let a):
+                    decisionCode = "once"
+                    actor = a ?? ""
+                case .approvedPermanently(let a):
+                    decisionCode = "always"
+                    actor = a ?? ""
+                case .denied(let a):
+                    decisionCode = "deny"
+                    actor = a ?? ""
+                case .timedOut:
+                    decisionCode = "timeout"
+                    actor = "system-timeout"
+                case .dismissed:
+                    decisionCode = "dismissed"
+                    actor = "ui-user"
+                }
+                return AgentNetworkAccessDecisionDTO(
+                    requestID: requestDTO.requestID,
+                    decision: decisionCode,
+                    actor: actor
+                )
             }
             if isDebugEnabled {
                 await MainActor.run {

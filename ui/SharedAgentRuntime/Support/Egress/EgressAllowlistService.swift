@@ -130,6 +130,9 @@ final class EgressAllowlistService: ObservableObject {
                 let suffix = EgressHostExtractor.permanentSuffix(for: host)
                 do {
                     try await addSuffix(suffix, source: "user")
+                    // Session grant for exact host (mid-flight / www. vs apex) even if helper push fails.
+                    sessionGrants.append(host)
+                    localPolicy.grantSessionHosts([host])
                 } catch {
                     debugLog("Failed to persist egress suffix \(suffix): \(error.localizedDescription)")
                     PipelineTiming.log(
@@ -166,11 +169,44 @@ final class EgressAllowlistService: ObservableObject {
     }
 
     private func promptForHost(_ host: String, toolName: String) async -> PolicyUserDecision {
+        // AgentService-hosted turns: reverse XPC to UI (process-wide / TaskLocal; no AppEventBus in XPC).
+        if let remote = TurnProcessContext.effectiveNetworkAccessPrompt {
+            debugLog("Egress prompt via reverse XPC host=\(host)")
+            return await remote(host, toolName)
+        }
         let event = PolicyUserEventFactory.egressAccessRequest(
             host: host,
             toolName: toolName
         )
         return await AppEventBus.shared.initDecision(event)
+    }
+
+    /// Apply a user egress decision in **this** process (UI): memory + helper allowlist.
+    /// Call when the UI answers a reverse-XPC network prompt so mid-flight does not re-prompt.
+    func applyUserNetworkDecision(host: String, decision: PolicyUserDecision) async {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return }
+
+        switch decision {
+        case .approved(let actor), .approvedOnce(let actor):
+            debugLog("Egress UI apply once host=\(normalized) actor=\(actor ?? "?")")
+            localPolicy.grantSessionHosts([normalized])
+            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+        case .approvedPermanently(let actor):
+            debugLog("Egress UI apply always host=\(normalized) actor=\(actor ?? "?")")
+            let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
+            do {
+                try await addSuffix(suffix, source: "user")
+            } catch {
+                debugLog("Egress UI apply always persist failed: \(error.localizedDescription)")
+            }
+            // Exact host + permanent suffix so helper/mid-flight skip immediately.
+            localPolicy.grantSessionHosts([normalized])
+            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            await pushToHelper()
+        case .denied, .dismissed, .timedOut:
+            break
+        }
     }
 
     /// Mid-flight CONNECT hold from the helper (reverse XPC).
@@ -181,6 +217,14 @@ final class EgressAllowlistService: ObservableObject {
         if normalized.isEmpty {
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
+        // AgentService may have persisted "always" to the shared DB; reload before prompting.
+        if let repository {
+            do {
+                try await reload()
+            } catch {
+                debugLog("Egress mid-flight reload failed: \(error.localizedDescription)")
+            }
+        }
         if localPolicy.isHardBlockedHostname(normalized) {
             debugLog("Egress mid-flight hard-block for \(normalized)")
             PipelineTiming.log(
@@ -188,9 +232,11 @@ final class EgressAllowlistService: ObservableObject {
             )
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
-        // Already covered (race with preflight / permanent list).
+        // Already covered (preflight grant, permanent list, or shared DB).
         if localPolicy.isHostCoveredByAllowlist(normalized) {
             debugLog("Egress mid-flight already allowed for \(normalized)")
+            // Keep helper session allowlist in sync for this CONNECT.
+            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
             PipelineTiming.log(
                 "egress_midflight already_allowed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
             )

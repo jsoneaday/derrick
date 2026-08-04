@@ -1,6 +1,7 @@
 import Foundation
 import DBRepository
 import LLMAgentClient
+import PolicyUserInteraction
 import ServiceContracts
 
 private final class ChunkCounter: @unchecked Sendable {
@@ -130,29 +131,45 @@ actor AgentServiceTurnHost {
             code: "turn_start"
         )
         let counter = ChunkCounter()
+        let approvalPresenter = XPCRemoteApprovalPresenter(turnID: turnID) {
+            connectionContext.clientSink(logLabel: "approval")
+        }
+        let networkPrompt: @Sendable (String, String) async -> PolicyUserInteraction.PolicyUserDecision = { host, toolName in
+            await XPCRemoteNetworkAccess.prompt(
+                host: host,
+                toolName: toolName,
+                resolveSink: { connectionContext.clientSink(logLabel: "network") }
+            )
+        }
+        // Process-wide slots: MCP tool tasks do not inherit TaskLocal from the turn task.
+        TurnProcessContext.installProcessTurnContext(apiKey: apiKey, networkAccessPrompt: networkPrompt)
+        defer { TurnProcessContext.clearProcessTurnContext() }
         do {
-            // Prefer callback path (no outer AsyncThrowingStream cancel races).
-            try await conversation.runTurn(
-                prompt: prompt,
-                apiKey: apiKey,
-                model: model,
-                approvalPresenter: nil
-            ) { chunk in
-                let n = counter.increment()
-                let dto = AgentTurnChunkDTO(
-                    turnID: turnID,
-                    status: chunk.status.rawValue,
-                    chunk: chunk.chunk,
-                    toolName: chunk.toolName
-                )
-                guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
-                    fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
-                    return
-                }
-                if let sink = connectionContext.clientSink(logLabel: "chunk") {
-                    sink.turnDidEmitChunk(turnID, chunkJSON: data as NSData)
-                } else {
-                    fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
+            try await TurnProcessContext.$conversationAPIKey.withValue(apiKey) {
+                try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
+                    try await conversation.runTurn(
+                        prompt: prompt,
+                        apiKey: apiKey,
+                        model: model,
+                        approvalPresenter: approvalPresenter
+                    ) { chunk in
+                        let n = counter.increment()
+                        let dto = AgentTurnChunkDTO(
+                            turnID: turnID,
+                            status: chunk.status.rawValue,
+                            chunk: chunk.chunk,
+                            toolName: chunk.toolName
+                        )
+                        guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
+                            fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
+                            return
+                        }
+                        if let sink = connectionContext.clientSink(logLabel: "chunk") {
+                            sink.turnDidEmitChunk(turnID, chunkJSON: data as NSData)
+                        } else {
+                            fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
+                        }
+                    }
                 }
             }
 

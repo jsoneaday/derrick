@@ -67,6 +67,32 @@ import Testing
         #expect(decodedChunk.status == "complete")
     }
 
+    @Test func approvalDTORoundTrip() throws {
+        let request = AgentApprovalRequestDTO(
+            approvalID: "a1",
+            turnID: "t1",
+            sessionID: "s1",
+            toolName: "python_script_exec",
+            argumentsJSON: #"{"code":"print(1)"}"#,
+            requiredFields: ["review"]
+        )
+        let data = try AgentServiceXPCCodec.encodeApprovalRequest(request)
+        let decoded = try AgentServiceXPCCodec.decodeApprovalRequest(data)
+        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.requiredFields == ["review"])
+
+        let decision = AgentApprovalDecisionDTO(
+            approvalID: "a1",
+            approved: true,
+            editedArgumentsJSON: request.argumentsJSON,
+            actor: "user"
+        )
+        let dData = try AgentServiceXPCCodec.encodeApprovalDecision(decision)
+        let dDecoded = try AgentServiceXPCCodec.decodeApprovalDecision(dData)
+        #expect(dDecoded.approved == true)
+        #expect(dDecoded.actor == "user")
+    }
+
     @Test func messageSigningRoundTrip() {
         var msg = ServiceMessage(
             from: .job,

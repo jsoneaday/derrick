@@ -112,11 +112,15 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        await MainActor.run {
+        if let key = await MainActor.run(body: {
             AppSecretResolver().resolve(
                 account: model.provider.secretAccount,
                 environmentKeys: model.provider.apiKeyEnvironmentKeys
             )
+        }), !key.isEmpty {
+            return key
         }
+        // AgentService XPC process cannot read the UI keychain; use the turn-supplied key.
+        return TurnProcessContext.effectiveAPIKey
     }
 }

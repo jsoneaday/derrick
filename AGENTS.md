@@ -15,9 +15,10 @@ You are a careful and methodocial Swift and SwiftUI developer. Your job is to he
   - Having correct context is key. Do not assume. Do not make things up. Do not guess.
   - When coding build components and then reuse them.
   - First check your existing context and cache for needed data.
-- Always keep your code updates small and targeted, do not create monolithic structures.
+- Do not create monolithic structures. However think in terms of systems not features. Do not build features in isolation.
   - Larger components with many lines of code should be split and moved into multiple files within a parent folder.
   - Prioritize building reusable components and separate concerns
+  - New code should be tested through the entire code path, end to end.
 - Use Design Patterns throughout
   - Design Patterns like GoF patterns are super important. Use them when appropriate.
   - Use SOLID design principles and Protocol driven design.
@@ -26,23 +27,3 @@ You are a careful and methodocial Swift and SwiftUI developer. Your job is to he
   - Think holistically, "If I fix this issue at this level what are the knock-on effects of doing so?"
 - Use simple clear language devoid of jargon when explaining.
 - Be token efficient
-
-## Workflow
-- This project is on Xcode 27 and the app will eventually support MacOS 27.
-- Always review existing code and reuse existing code when starting a new task. Do not reinvent the wheel.
-- Some situations require knowledge of how that environment, sdk, framework, etc work. Make sure you get that relevant context before making a determination and writing code.
-- When given a task always create an internal todo list of items to finish and when complete review the list and make certain you've done them all!
-  - You should never skip todo items. However if an item cannot immediately be implemented, at the end of your run indicate what you skipped and why you had to do so.
-- App configurations are tricky. 
-  - Always implement app configs that will work on user machines without needing manual intervention.
-  - Do not invent clever work arounds, do not do one off fixes. 
-- When accessing files, system resources and network url always check that the path exists and is accessible first.
-  - If resource access fails always indicate the failure in the logs.
-- This app is sandboxed. It has limited system access. 
-  - The app uses a Docker container. Access to the docker container is via XPC. 
-  - Write checks and verify you have access to something. Do not assume.
-- Any section of code that handles or catches errors should include a log describing the error.
-- Always write unit tests with complete test coverage.
-- If you need to write a script always prefer Python 3, it saves me tokens. Keep it concise and to the point with no comments.
-- Remember every Apple app uses an info.plist for configuration. 
-  - Always check that file when encountering runtime failures

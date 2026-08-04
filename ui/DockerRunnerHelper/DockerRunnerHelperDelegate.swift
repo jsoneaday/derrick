@@ -9,8 +9,15 @@ final class DockerRunnerHelperDelegate: NSObject, NSXPCListenerDelegate {
         logger.log("XPC listener received a new connection request from the app.")
         HelperLogRelay.shared.log("XPC listener received a new connection request from the app.")
 
-        // Peer must be the signed main app (same team when Team ID is available).
-        let requirement = XPCPeerAuthentication.requirementString(for: .helperAcceptingApp)
+        // Peer must be the main app or another Derrick XPC service (same team when available).
+        let requirement = XPCPeerAuthentication.requirementString(
+            allowedPeerIdentifiers: [
+                XPCPeerAuthentication.mainAppIdentifier,
+                XPCPeerAuthentication.agentServiceIdentifier,
+                XPCPeerAuthentication.jobServiceIdentifier,
+                XPCPeerAuthentication.mcpServiceIdentifier
+            ]
+        )
         do {
             try XPCPeerAuthentication.apply(requirement: requirement, to: connection)
             HelperLogRelay.shared.log("XPC peer code-signing requirement applied: \(requirement)")

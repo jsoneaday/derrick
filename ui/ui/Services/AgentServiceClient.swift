@@ -13,6 +13,20 @@ public final class AgentServiceClient: @unchecked Sendable {
 
     private init() {}
 
+    /// Install the UI approval handler used when AgentService needs tool confirmation.
+    public func setApprovalHandler(
+        _ handler: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)?
+    ) {
+        sink.setApprovalHandler(handler)
+    }
+
+    /// Install the UI network/egress allow handler for AgentService-hosted script runs.
+    public func setNetworkAccessHandler(
+        _ handler: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)?
+    ) {
+        sink.setNetworkAccessHandler(handler)
+    }
+
     /// Connect (launch-on-demand), bootstrap DB/logs, return health. Retries a few times.
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
         var lastError: Error?
@@ -80,22 +94,21 @@ public final class AgentServiceClient: @unchecked Sendable {
             let turnID = request.turnID
             let finishGate = FinishGate()
 
-            sink.updateHandlers(
-                AgentServiceClientSink.Handlers(
-                    onChunk: { id, dto in
-                        guard id == turnID else { return }
-                        continuation.yield(dto)
-                    },
-                    onFinish: { id, errorDTO in
-                        guard id == turnID else { return }
-                        guard finishGate.markFinished() else { return }
-                        if let errorDTO {
-                            continuation.finish(throwing: AgentServiceClientError.turnFailed(errorDTO.message))
-                        } else {
-                            continuation.finish()
-                        }
+            // Preserve approval handler; only bind this turn's chunk/finish stream.
+            sink.updateTurnHandlers(
+                onChunk: { id, dto in
+                    guard id == turnID else { return }
+                    continuation.yield(dto)
+                },
+                onFinish: { id, errorDTO in
+                    guard id == turnID else { return }
+                    guard finishGate.markFinished() else { return }
+                    if let errorDTO {
+                        continuation.finish(throwing: AgentServiceClientError.turnFailed(errorDTO.message))
+                    } else {
+                        continuation.finish()
                     }
-                )
+                }
             )
 
             Task {

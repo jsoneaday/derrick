@@ -7,6 +7,7 @@ import MCPServer
 import MCPToolCatalog
 import MemorySystem
 import PolicyRuntime
+import ServiceContracts
 
 @MainActor
 final class ConversationModel {
@@ -301,15 +302,29 @@ final class ConversationModel {
         return DefaultPolicyInterceptor(policy: policy)
     }
 
+    /// True when this code is running inside the AgentService.xpc process.
+    private static var isAgentServiceProcess: Bool {
+        let id = Bundle.main.bundleIdentifier ?? ""
+        return id == DerrickServiceID.agent.rawValue || id.hasSuffix(".AgentService")
+    }
+
     private static func makeLocalBridge(
         memoryCoordinator: MemoryCoordinator,
         sessionKey: MemorySessionKey,
         orchestrator: SessionOrchestrator,
         helperModelSettings: LLMModelSettings
     ) async throws -> MCPLocalBridge {
+        // Sandboxed UI must use the embedded DockerRunnerHelper XPC.
+        // AgentService is a sibling XPC process and cannot open that helper by service name;
+        // it is unsandboxed and uses direct docker CLI (warm containers prewarmed by the UI).
+        let runner: any PythonScriptRunner = Self.isAgentServiceProcess
+            ? DockerPythonScriptRunner()
+            : XPCDockerRunner.shared
+        debugLog("Python script runner: \(Self.isAgentServiceProcess ? "DockerPythonScriptRunner (AgentService)" : "XPCDockerRunner (UI)")")
+
         return try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
-                runner: XPCDockerRunner.shared,
+                runner: runner,
                 reviewer: ConfiguredPythonScriptReviewer(settings: helperModelSettings),
                 networkPreflight: { script, allowNetwork in
                     await EgressAllowlistService.shared.preflightPythonScriptNetwork(

@@ -14,13 +14,19 @@ import Foundation
     func cancelTurn(turnID: String, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
-/// Reverse channel: UI exports this on the XPC connection for turn streaming / log relay.
+/// Reverse channel: UI exports this on the XPC connection for turn streaming / approvals / log relay.
 /// Note: avoid optional NSData parameters — they bridge poorly over NSXPC.
 @objc public protocol AgentServiceClientSinkXPC {
     func appendServiceLogLine(_ line: String)
     func turnDidEmitChunk(_ turnID: String, chunkJSON: NSData)
     /// `errorJSON` empty means success; otherwise encoded `AgentTurnErrorDTO`.
     func turnDidFinish(_ turnID: String, errorJSON: NSData)
+    /// Ask the UI to present an approval modal. `requestJSON` is `AgentApprovalRequestDTO`.
+    /// Reply payload is `AgentApprovalDecisionDTO` (always non-empty JSON).
+    func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Ask the UI to allow a network host (egress preflight / mid-flight).
+    /// `requestJSON` is `AgentNetworkAccessRequestDTO`; reply is `AgentNetworkAccessDecisionDTO`.
+    func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 /// Result of AgentService bootstrap.
@@ -83,6 +89,38 @@ public enum AgentServiceXPCCodec {
 
     public static func decodeTurnError(_ data: Data) throws -> AgentTurnErrorDTO {
         try JSONDecoder.service.decode(AgentTurnErrorDTO.self, from: data)
+    }
+
+    public static func encodeApprovalRequest(_ request: AgentApprovalRequestDTO) throws -> Data {
+        try JSONEncoder.service.encode(request)
+    }
+
+    public static func decodeApprovalRequest(_ data: Data) throws -> AgentApprovalRequestDTO {
+        try JSONDecoder.service.decode(AgentApprovalRequestDTO.self, from: data)
+    }
+
+    public static func encodeApprovalDecision(_ decision: AgentApprovalDecisionDTO) throws -> Data {
+        try JSONEncoder.service.encode(decision)
+    }
+
+    public static func decodeApprovalDecision(_ data: Data) throws -> AgentApprovalDecisionDTO {
+        try JSONDecoder.service.decode(AgentApprovalDecisionDTO.self, from: data)
+    }
+
+    public static func encodeNetworkAccessRequest(_ request: AgentNetworkAccessRequestDTO) throws -> Data {
+        try JSONEncoder.service.encode(request)
+    }
+
+    public static func decodeNetworkAccessRequest(_ data: Data) throws -> AgentNetworkAccessRequestDTO {
+        try JSONDecoder.service.decode(AgentNetworkAccessRequestDTO.self, from: data)
+    }
+
+    public static func encodeNetworkAccessDecision(_ decision: AgentNetworkAccessDecisionDTO) throws -> Data {
+        try JSONEncoder.service.encode(decision)
+    }
+
+    public static func decodeNetworkAccessDecision(_ data: Data) throws -> AgentNetworkAccessDecisionDTO {
+        try JSONDecoder.service.decode(AgentNetworkAccessDecisionDTO.self, from: data)
     }
 
     public static func encodeString(_ string: String) -> Data {

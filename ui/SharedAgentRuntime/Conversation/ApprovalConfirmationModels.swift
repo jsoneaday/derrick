@@ -31,7 +31,8 @@ public enum ApprovalConfirmationDecision: Equatable, Sendable {
     case cancelled(actor: String?)
 }
 
-@MainActor
+/// Not `@MainActor`: AgentService runs confirms off the main actor over XPC.
+/// UI presenters may hop to MainActor internally.
 public protocol ApprovalConfirmationPresenting: Sendable {
     func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision
 }
