@@ -14,17 +14,33 @@
 		DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DEAE00013010000000AE001 /* AppEvents in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00023010000000AE001 /* AppEvents */; };
 		DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00043010000000AE001 /* PolicyUserInteraction */; };
+		DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAR00022A00000000AR001 /* AgentRuntime */; };
+		DEAS100B2A00000000AS001 /* AgentService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAS10012A00000000AS001 /* AgentService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DEAS100F2A00000000AS001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
+		DEAS10102A00000000AS001 /* LLMAgentClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10112A00000000AS001 /* LLMAgentClient */; };
+		DEAS10122A00000000AS001 /* MCPClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10132A00000000AS001 /* MCPClient */; };
+		DEAS10142A00000000AS001 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10152A00000000AS001 /* MCPServer */; };
+		DEAS10162A00000000AS001 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10172A00000000AS001 /* MCPToolCatalog */; };
+		DEAS10182A00000000AS001 /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10192A00000000AS001 /* AgentRuntime */; };
+		DEAS101A2A00000000AS001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS101B2A00000000AS001 /* PolicyRuntime */; };
+		DEAS101C2A00000000AS001 /* AppEvents in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS101D2A00000000AS001 /* AppEvents */; };
+		DEAS101E2A00000000AS001 /* PolicyUserInteraction in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS101F2A00000000AS001 /* PolicyUserInteraction */; };
+		DEAS10202A00000000AS001 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10212A00000000AS001 /* PartialJSON */; };
+		DEAS10222A00000000AS001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10232A00000000AS001 /* Lib */; };
+		DEAS10242A00000000AS001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10252A00000000AS001 /* EgressProxy */; };
 		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
 		DED0C0052A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
 		DED0C0122A0000000042F240 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0112A0000000042F240 /* MCPToolCatalog */; };
+		DEDB00012A00000000DB001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEDB00022A00000000DB001 /* DBRepository */; };
 		DEE6B0013010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0023010000000E6B001 /* EgressProxy */; };
 		DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0053010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
-		DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAR00022A00000000AR001 /* AgentRuntime */; };
+		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
+		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +65,13 @@
 			remoteGlobalIDString = DEAA10062FFF00000042F228;
 			remoteInfo = DockerRunnerHelper;
 		};
+		DEAS100D2A00000000AS001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DE1B9EFE2FEB74250042F227 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DEAS10062A00000000AS001;
+			remoteInfo = AgentService;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -58,6 +81,7 @@
 			dstSubfolder = Product;
 			files = (
 				DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */,
+				DEAS100B2A00000000AS001 /* AgentService.xpc in Embed XPC Services */,
 			);
 			name = "Embed XPC Services";
 		};
@@ -68,6 +92,7 @@
 		DE1B9F132FEB74260042F227 /* uiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = uiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = uiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = DockerRunnerHelper.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
+		DEAS10012A00000000AS001 /* AgentService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = AgentService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -77,6 +102,13 @@
 				Info.plist,
 			);
 			target = DEAA10062FFF00000042F228 /* DockerRunnerHelper */;
+		};
+		DEAS100E2A00000000AS001 /* Exceptions for "AgentService" folder in "AgentService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DEAS10062A00000000AS001 /* AgentService */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -104,6 +136,19 @@
 			path = DockerRunnerHelper;
 			sourceTree = "<group>";
 		};
+		DEAS10022A00000000AS001 /* AgentService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DEAS100E2A00000000AS001 /* Exceptions for "AgentService" folder in "AgentService" target */,
+			);
+			path = AgentService;
+			sourceTree = "<group>";
+		};
+		DESH00012A00000000SH001 /* SharedAgentRuntime */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SharedAgentRuntime;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,6 +170,7 @@
 				DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */,
 				DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */,
 				DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */,
+				DESC00012A00000000SC001 /* ServiceContracts in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -144,6 +190,25 @@
 				DEE6B0013010000000E6B001 /* EgressProxy in Frameworks */,
 			);
 		};
+		DEAS10042A00000000AS001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				DESC00032A00000000SC001 /* ServiceContracts in Frameworks */,
+				DEAS100F2A00000000AS001 /* DockerRunnerXPC in Frameworks */,
+				DEDB00012A00000000DB001 /* DBRepository in Frameworks */,
+				DEAS10102A00000000AS001 /* LLMAgentClient in Frameworks */,
+				DEAS10122A00000000AS001 /* MCPClient in Frameworks */,
+				DEAS10142A00000000AS001 /* MCPServer in Frameworks */,
+				DEAS10162A00000000AS001 /* MCPToolCatalog in Frameworks */,
+				DEAS10182A00000000AS001 /* AgentRuntime in Frameworks */,
+				DEAS101A2A00000000AS001 /* PolicyRuntime in Frameworks */,
+				DEAS101C2A00000000AS001 /* AppEvents in Frameworks */,
+				DEAS101E2A00000000AS001 /* PolicyUserInteraction in Frameworks */,
+				DEAS10202A00000000AS001 /* PartialJSON in Frameworks */,
+				DEAS10222A00000000AS001 /* Lib in Frameworks */,
+				DEAS10242A00000000AS001 /* EgressProxy in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -152,6 +217,8 @@
 			children = (
 				DE1B9F082FEB74250042F227 /* ui */,
 				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
+				DEAS10022A00000000AS001 /* AgentService */,
+				DESH00012A00000000SH001 /* SharedAgentRuntime */,
 				DE1B9F162FEB74260042F227 /* uiTests */,
 				DE1B9F202FEB74260042F227 /* uiUITests */,
 				DE1B9F072FEB74250042F227 /* Products */,
@@ -163,6 +230,7 @@
 			children = (
 				DE1B9F062FEB74250042F227 /* ui.app */,
 				DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */,
+				DEAS10012A00000000AS001 /* AgentService.xpc */,
 				DE1B9F132FEB74260042F227 /* uiTests.xctest */,
 				DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */,
 			);
@@ -185,9 +253,11 @@
 			);
 			dependencies = (
 				DEAA100C2FFF00000042F228 /* PBXTargetDependency */,
+				DEAS100C2A00000000AS001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DE1B9F082FEB74250042F227 /* ui */,
+				DESH00012A00000000SH001 /* SharedAgentRuntime */,
 			);
 			name = ui;
 			packageProductDependencies = (
@@ -206,6 +276,7 @@
 				DEPR00022A00000000PR001 /* PolicyRuntime */,
 				DEE6B0053010000000E6B001 /* EgressProxy */,
 				DEAR00022A00000000AR001 /* AgentRuntime */,
+				DESC00022A00000000SC001 /* ServiceContracts */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -275,6 +346,41 @@
 			productReference = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */;
 			productType = "com.apple.product-type.xpc-service";
 		};
+		DEAS10062A00000000AS001 /* AgentService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DEAS10092A00000000AS001 /* Build configuration list for PBXNativeTarget "AgentService" */;
+			buildPhases = (
+				DEAS10032A00000000AS001 /* Sources */,
+				DEAS10042A00000000AS001 /* Frameworks */,
+				DEAS10052A00000000AS001 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				DEAS10022A00000000AS001 /* AgentService */,
+				DESH00012A00000000SH001 /* SharedAgentRuntime */,
+			);
+			name = AgentService;
+			packageProductDependencies = (
+				DESC00042A00000000SC001 /* ServiceContracts */,
+				DED0C0032A0000000042F230 /* DockerRunnerXPC */,
+				DEDB00022A00000000DB001 /* DBRepository */,
+				DEAS10112A00000000AS001 /* LLMAgentClient */,
+				DEAS10132A00000000AS001 /* MCPClient */,
+				DEAS10152A00000000AS001 /* MCPServer */,
+				DEAS10172A00000000AS001 /* MCPToolCatalog */,
+				DEAS10192A00000000AS001 /* AgentRuntime */,
+				DEAS101B2A00000000AS001 /* PolicyRuntime */,
+				DEAS101D2A00000000AS001 /* AppEvents */,
+				DEAS101F2A00000000AS001 /* PolicyUserInteraction */,
+				DEAS10212A00000000AS001 /* PartialJSON */,
+				DEAS10232A00000000AS001 /* Lib */,
+				DEAS10252A00000000AS001 /* EgressProxy */,
+			);
+			productName = AgentService;
+			productReference = DEAS10012A00000000AS001 /* AgentService.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -322,6 +428,7 @@
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
 				DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */,
 				DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */,
+				DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -330,6 +437,7 @@
 			targets = (
 				DE1B9F052FEB74250042F227 /* ui */,
 				DEAA10062FFF00000042F228 /* DockerRunnerHelper */,
+				DEAS10062A00000000AS001 /* AgentService */,
 				DE1B9F122FEB74260042F227 /* uiTests */,
 				DE1B9F1C2FEB74260042F227 /* uiUITests */,
 			);
@@ -357,6 +465,11 @@
 			files = (
 			);
 		};
+		DEAS10052A00000000AS001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -380,6 +493,11 @@
 			files = (
 			);
 		};
+		DEAS10032A00000000AS001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -397,6 +515,11 @@
 			isa = PBXTargetDependency;
 			target = DEAA10062FFF00000042F228 /* DockerRunnerHelper */;
 			targetProxy = DEAA100D2FFF00000042F228 /* PBXContainerItemProxy */;
+		};
+		DEAS100C2A00000000AS001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DEAS10062A00000000AS001 /* AgentService */;
+			targetProxy = DEAS100D2A00000000AS001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -725,6 +848,44 @@
 			};
 			name = Release;
 		};
+		DEAS10072A00000000AS001 /* Debug configuration for PBXNativeTarget "AgentService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AgentService/AgentService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.AgentService;
+				PRODUCT_NAME = AgentService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		DEAS10082A00000000AS001 /* Release configuration for PBXNativeTarget "AgentService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AgentService/AgentService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.AgentService;
+				PRODUCT_NAME = AgentService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -768,6 +929,14 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		DEAS10092A00000000AS001 /* Build configuration list for PBXNativeTarget "AgentService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEAS10072A00000000AS001 /* Debug configuration for PBXNativeTarget "AgentService" */,
+				DEAS10082A00000000AS001 /* Release configuration for PBXNativeTarget "AgentService" */,
+			);
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -795,6 +964,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/PolicyUserInteraction;
 		};
+		DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/AgentRuntime;
+		};
 		DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/DockerRunnerXPC;
@@ -819,9 +992,9 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/PolicyRuntime;
 		};
-		DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */ = {
+		DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../packages/AgentRuntime;
+			relativePath = ../packages/ServiceContracts;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -861,6 +1034,55 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = PolicyUserInteraction;
 		};
+		DEAR00022A00000000AR001 /* AgentRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentRuntime;
+		};
+		DEAS10112A00000000AS001 /* LLMAgentClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LLMAgentClient;
+		};
+		DEAS10132A00000000AS001 /* MCPClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPClient;
+		};
+		DEAS10152A00000000AS001 /* MCPServer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPServer;
+		};
+		DEAS10172A00000000AS001 /* MCPToolCatalog */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPToolCatalog;
+		};
+		DEAS10192A00000000AS001 /* AgentRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentRuntime;
+		};
+		DEAS101B2A00000000AS001 /* PolicyRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PolicyRuntime;
+		};
+		DEAS101D2A00000000AS001 /* AppEvents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppEvents;
+		};
+		DEAS101F2A00000000AS001 /* PolicyUserInteraction */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PolicyUserInteraction;
+		};
+		DEAS10212A00000000AS001 /* PartialJSON */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEF685FC30096EB600165A82 /* XCRemoteSwiftPackageReference "PartialJSON" */;
+			productName = PartialJSON;
+		};
+		DEAS10232A00000000AS001 /* Lib */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Lib;
+		};
+		DEAS10252A00000000AS001 /* EgressProxy */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EgressProxy;
+		};
 		DECF6280300ED94C00E1757D /* Plugin */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */;
@@ -883,6 +1105,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = MCPToolCatalog;
 		};
+		DEDB00022A00000000DB001 /* DBRepository */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DBRepository;
+		};
 		DEE6B0023010000000E6B001 /* EgressProxy */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EgressProxy;
@@ -904,9 +1130,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = PolicyRuntime;
 		};
-		DEAR00022A00000000AR001 /* AgentRuntime */ = {
+		DESC00022A00000000SC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = AgentRuntime;
+			productName = ServiceContracts;
+		};
+		DESC00042A00000000SC001 /* ServiceContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ServiceContracts;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

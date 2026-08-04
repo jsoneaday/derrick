@@ -36,8 +36,4 @@ final class DebugLogStore: ObservableObject {
     }
 }
 
-nonisolated func debugLog(_ message: String) {
-    Task { @MainActor in
-        DebugLogStore.shared.log(message)
-    }
-}
+

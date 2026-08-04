@@ -38,7 +38,6 @@ public extension DBRepository {
 
     func upsertMemoryRecord(_ record: MemoryRecord, applicationName: String) throws {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             try Self.execute("""
             INSERT INTO memory_sessions (
                 application_name, session_id, agent_id, created_at, updated_at
@@ -135,7 +134,6 @@ public extension DBRepository {
 
     func memoryRecord(id: UUID) throws -> MemoryRecord? {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             let sql = """
             SELECT *
             FROM memory_records
@@ -148,7 +146,6 @@ public extension DBRepository {
 
     func memoryRecords(sessionKey: MemorySessionKey, applicationName: String) throws -> [MemoryRecord] {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             let sql = """
             SELECT *
             FROM memory_records
@@ -188,7 +185,6 @@ public extension DBRepository {
         page: Int
     ) throws -> [MemoryRecord] {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
 
             let pageSize = min(max(limit, 1), 20)
             let pageIndex = max(page, 1)
@@ -278,26 +274,6 @@ extension DBRepository {
         return formatter
     }
 
-    func withDatabaseHandle<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE
-        let status = sqlite3_open_v2(databaseURL.path, &handle, flags, nil)
-        guard status == SQLITE_OK, let handle else {
-            let message = String(cString: sqlite3_errstr(status))
-            if let handle {
-                sqlite3_close(handle)
-            }
-            throw DBRepositoryError.sqliteOpenFailed(message)
-        }
-
-        defer {
-            sqlite3_close(handle)
-        }
-
-        try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
-        return try body(handle)
-    }
-
     static func schemaVersion(on handle: OpaquePointer) throws -> Int {
         let sql = "PRAGMA user_version;"
         var statement: OpaquePointer?
@@ -325,16 +301,6 @@ extension DBRepository {
         } catch {
             _ = try? Self.execute("ROLLBACK;", on: handle)
             throw error
-        }
-    }
-
-    static func execute(_ sql: String, on handle: OpaquePointer) throws {
-        var errorMessage: UnsafeMutablePointer<Int8>?
-        let status = sqlite3_exec(handle, sql, nil, nil, &errorMessage)
-        guard status == SQLITE_OK else {
-            let message = errorMessage.map { String(cString: $0) } ?? String(cString: sqlite3_errstr(status))
-            sqlite3_free(errorMessage)
-            throw DBRepositoryError.sqliteOperationFailed(message)
         }
     }
 
@@ -524,9 +490,5 @@ extension DBRepository {
 
     func quoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
-    }
-
-    static func sqliteError(handle: OpaquePointer, fallback: String) -> DBRepositoryError {
-        DBRepositoryError.sqliteOperationFailed(String(cString: sqlite3_errmsg(handle)).isEmpty ? fallback : String(cString: sqlite3_errmsg(handle)))
     }
 }

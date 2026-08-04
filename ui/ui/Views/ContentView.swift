@@ -4,6 +4,7 @@ import LLMAgentClient
 import SwiftUI
 import DBRepository
 import PolicyUserInteraction
+import ServiceContracts
 
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
@@ -436,14 +437,32 @@ struct ContentView: View {
                     repository: repo,
                     helperModelSettings: helperModelSettings!
                 )
+                // Ensure AgentService XPC (turn host) is up; bootstrap writes service_logs.
+                do {
+                    let health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                    debugLog(
+                        "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
+                    )
+                } catch {
+                    debugLog("AgentService ensure-up failed (non-fatal): \(error.localizedDescription)")
+                }
                 // Helper connection is up via XPCDockerRunner.shared; re-push allowlist.
                 await EgressAllowlistService.shared.pushToHelper()
-                // XPCDockerRunner starts Docker prewarm; bootstrap modal continues until that finishes.
+                // Prewarm is owned by XPCDockerRunner (started from ConversationModel.makeDefault).
+                // Do not re-open the bootstrap modal here — prewarm often finishes *before*
+                // this point and markReady() already dismissed it; forcing connectingHelper
+                // again left the modal stuck with no second markReady.
                 await MainActor.run {
-                    bootstrapStatus.update(
-                        phase: .connectingHelper,
-                        message: "Starting Docker environment setup…"
-                    )
+                    switch bootstrapStatus.phase {
+                    case .ready, .failed:
+                        break
+                    case .idle:
+                        // Prewarm never started (unexpected); do not leave the user spinning.
+                        bootstrapStatus.markReady()
+                    default:
+                        // Still initializing — XPCDockerRunner will markReady / markFailed.
+                        break
+                    }
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -781,7 +800,7 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
-        guard let conversation = conversation, !prompt.isEmpty else { return }
+        guard conversation != nil, !prompt.isEmpty else { return }
 
         isStreaming = true
         let currentPrompt = prompt
@@ -793,18 +812,22 @@ struct ContentView: View {
 
         requestTask = Task {
             do {
-                let stream = await conversation.stream(
+                _ = try await AgentServiceClient.shared.ensureUpAndHealth()
+                let modelJSON = try JSONEncoder().encode(currentModel)
+                let request = AgentTurnRequest(
                     prompt: currentPrompt,
                     apiKey: resolveAPIKey() ?? "",
-                    model: currentModel,
-                    approvalPresenter: approvalPresentationModel
+                    modelJSON: modelJSON
                 )
-                for try await chunk in stream {
+                let stream = AgentServiceClient.shared.streamTurn(request)
+                for try await dto in stream {
                     if let lastIndex = turns.indices.last {
-                        turns[lastIndex].response = turns[lastIndex].response.isEmpty ? chunk.chunk ?? "" : turns[lastIndex].response + (chunk.chunk ?? "")
-                        turns[lastIndex].status = chunk.status
-                        turns[lastIndex].toolName = chunk.toolName
-                        //debugLog("Last turn \(turns[lastIndex])")
+                        let status = AgentResponseStatus(rawValue: dto.status) ?? .thinking
+                        turns[lastIndex].response = turns[lastIndex].response.isEmpty
+                            ? (dto.chunk ?? "")
+                            : turns[lastIndex].response + (dto.chunk ?? "")
+                        turns[lastIndex].status = status
+                        turns[lastIndex].toolName = dto.toolName
                         scrollToBottomToken += 1
                     }
                 }

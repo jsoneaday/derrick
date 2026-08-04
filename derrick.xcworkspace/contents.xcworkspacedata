@@ -41,6 +41,9 @@
       location = "group:packages/AgentRuntime">
    </FileRef>
    <FileRef
+      location = "group:packages/ServiceContracts">
+   </FileRef>
+   <FileRef
       location = "group:packages/PolicyUserInteraction">
    </FileRef>
    <FileRef

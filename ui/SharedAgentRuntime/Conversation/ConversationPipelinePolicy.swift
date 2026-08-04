@@ -278,8 +278,8 @@ extension ConversationPipeline {
                         )
 
                         guard !completion.isEmpty else {
-                            debugLog("Completion is empty")
-                            PipelineTiming.log("\(roundLabel) empty_completion round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))")
+                            debugLog("Completion is empty (round \(round + 1), llm_chunks=\(chunkIndex), ttfb_ms=\(llmTtfbMS))")
+                            PipelineTiming.log("\(roundLabel) empty_completion llm_chunks=\(chunkIndex) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))")
                             break
                         }
                         await MainActor.run {
@@ -534,8 +534,11 @@ extension ConversationPipeline {
                 }
             }
 
-            continuation.onTermination = { _ in
-                task.cancel()
+            continuation.onTermination = { reason in
+                // Cancelling on normal finish races nested consumers and can drop all yields.
+                if case .cancelled = reason {
+                    task.cancel()
+                }
             }
         }
     }

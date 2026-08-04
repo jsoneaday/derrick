@@ -5,7 +5,6 @@ import SQLite3
 public extension DBRepository {
     func loadPolicyRules(applicationName: String, scope: String) throws -> [PolicyRule] {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             let sql = """
             SELECT id, application_name, name, scope, matcher_json, outcome_json, priority, enabled, created_at, updated_at
             FROM policy_rules
@@ -20,7 +19,6 @@ public extension DBRepository {
 
     func savePolicyRule(_ rule: PolicyRule) throws {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             try Self.execute("""
             INSERT INTO policy_rules (
                 id, application_name, name, scope, matcher_json, outcome_json, priority, enabled, created_at, updated_at
@@ -49,7 +47,6 @@ public extension DBRepository {
 
     func savePolicyApproval(_ approval: PolicyApproval) throws {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             try Self.execute("""
             INSERT INTO policy_approvals (
                 id, application_name, session_id, rule_id, request_type, request_payload_json, edited_payload_json, decision, actor, created_at, acted_at
@@ -72,7 +69,6 @@ public extension DBRepository {
 
     func loadPolicyApprovals(sessionID: String, applicationName: String, limit: Int) throws -> [PolicyApproval] {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             let sql = """
             SELECT id, application_name, session_id, rule_id, request_type, request_payload_json, edited_payload_json, decision, actor, created_at, acted_at
             FROM policy_approvals
@@ -87,7 +83,6 @@ public extension DBRepository {
 
     func logPolicyAuditEntry(_ entry: PolicyAuditLogEntry) throws {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             try Self.execute("""
             INSERT INTO policy_audit_log (
                 id, application_name, session_id, event_type, scope, request_json, decision, reason, actor, created_at
@@ -109,7 +104,6 @@ public extension DBRepository {
 
     func loadPolicyAuditLog(sessionID: String, applicationName: String, limit: Int, page: Int) throws -> [PolicyAuditLogEntry] {
         try withDatabaseHandle { handle in
-            try Self.execute("PRAGMA foreign_keys = ON;", on: handle)
             let pageSize = min(max(limit, 1), 100)
             let offset = max(page - 1, 0) * pageSize
             let sql = """

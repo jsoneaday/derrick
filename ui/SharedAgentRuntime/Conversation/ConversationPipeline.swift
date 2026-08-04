@@ -95,8 +95,10 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
                 }
             }
 
-            continuation.onTermination = { _ in
-                task.cancel()
+            continuation.onTermination = { reason in
+                if case .cancelled = reason {
+                    task.cancel()
+                }
             }
         }
     }

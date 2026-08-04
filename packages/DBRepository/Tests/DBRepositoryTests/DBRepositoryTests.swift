@@ -237,4 +237,64 @@ final class DBRepositoryTests: XCTestCase {
         )
         return MemoryRecord(id: pair.id, pair: pair)
     }
+
+    func testEnablesWALAndSurvivesConcurrentWriters() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let primary = DBRepository(configuration: configuration)
+        let url = try await primary.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        XCTAssertEqual(try journalMode(at: url).uppercased(), "WAL")
+
+        // Two independent repository instances (simulates UI + AgentService).
+        let uiRepo = DBRepository(configuration: configuration)
+        let agentRepo = DBRepository(configuration: configuration)
+
+        let records: [MemoryRecord] = (0..<20).map { i in
+            makeRecord(
+                sessionID: "s-\(i)",
+                createdAt: Date(timeIntervalSince1970: Double(i)),
+                prompt: "prompt \(i)"
+            )
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for (i, record) in records.enumerated() {
+                group.addTask {
+                    let repo = i.isMultiple(of: 2) ? uiRepo : agentRepo
+                    try await repo.upsert(record)
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let rows = try await uiRepo.records(sessionKey: MemorySessionKey(sessionID: "s-0", agentID: "ui"))
+        XCTAssertEqual(rows.count, 1)
+    }
+
+    private func journalMode(at url: URL) throws -> String {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle else {
+            throw NSError(domain: "DBRepositoryTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Unable to open SQLite database"])
+        }
+        defer { sqlite3_close(handle) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "PRAGMA journal_mode;", -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw NSError(domain: "DBRepositoryTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Unable to prepare journal_mode"])
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let c = sqlite3_column_text(statement, 0) else {
+            throw NSError(domain: "DBRepositoryTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Unable to read journal_mode"])
+        }
+        return String(cString: c)
+    }
 }

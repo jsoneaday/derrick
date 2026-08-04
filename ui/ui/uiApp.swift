@@ -11,6 +11,14 @@ import SwiftUI
 struct uiApp: App {
     @StateObject private var logStore = LogStore()
 
+    init() {
+        RuntimeLog.shared.addSink { message in
+            Task { @MainActor in
+                DebugLogStore.shared.log(message)
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

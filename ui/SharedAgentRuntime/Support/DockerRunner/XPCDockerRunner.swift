@@ -3,6 +3,7 @@ import AppEvents
 import DockerRunnerXPC
 import MCPServer
 import PolicyUserInteraction
+import ServiceContracts
 
 extension NSData: @unchecked @retroactive Sendable {}
 
@@ -399,6 +400,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
             prewarmState.markCompleted()
             debugLog("Docker environment pre-warming completed successfully.")
+
             await MainActor.run {
                 AppBootstrapStatus.shared.markReady()
             }

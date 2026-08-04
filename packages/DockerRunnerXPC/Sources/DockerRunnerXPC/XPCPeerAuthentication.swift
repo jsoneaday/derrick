@@ -10,6 +10,14 @@ public enum XPCPeerAuthentication: Sendable {
     public static let mainAppIdentifier = "derrick.ui"
     /// Embedded helper XPC service id (XPC server).
     public static let dockerHelperIdentifier = "derrick.ui.DockerRunnerHelper"
+    /// Agent runtime XPC service.
+    public static let agentServiceIdentifier = "derrick.ui.AgentService"
+    /// Job scheduler XPC service.
+    public static let jobServiceIdentifier = "derrick.ui.JobService"
+    /// MCP tools XPC service.
+    public static let mcpServiceIdentifier = "derrick.ui.MCPService"
+    /// Webhook ingress XPC service.
+    public static let webhookServiceIdentifier = "derrick.ui.WebhookService"
 
     public enum PeerRole: Sendable {
         /// Helper accepting connections — peer must be the main app.

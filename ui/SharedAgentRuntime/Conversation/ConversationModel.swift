@@ -127,6 +127,41 @@ final class ConversationModel {
         model: LLMModelChoice,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task { @MainActor in
+                do {
+                    try await self.runTurn(
+                        prompt: prompt,
+                        apiKey: apiKey,
+                        model: model,
+                        approvalPresenter: approvalPresenter
+                    ) { chunk in
+                        continuation.yield(chunk)
+                    }
+                    continuation.finish()
+                } catch {
+                    debugLog("AgentRuntime turn failed: \(error.localizedDescription)")
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { reason in
+                // Only cancel in-flight work on client cancel — not on normal finish
+                // (cancelling on .finished races nested pipeline streams → 0 chunks).
+                if case .cancelled = reason {
+                    task.cancel()
+                }
+            }
+        }
+    }
+
+    /// Runs one user-facing turn and delivers chunks via callback (preferred for XPC hosting).
+    func runTurn(
+        prompt: String,
+        apiKey: String,
+        model: LLMModelChoice,
+        approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
+        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
+    ) async throws {
         let sessionKey = self.sessionKey
         let memoryCoordinator = self.memoryCoordinator
         let policyStore = self.policyStore
@@ -137,70 +172,61 @@ final class ConversationModel {
         let interceptor = makeContentPolicyInterceptor()
         let orchestrator = self.orchestrator
 
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
-                        // Caller identity is set by HierarchicalOrchestrator via AgentCallContext (task-local).
-                        let childKey = MemorySessionKey(agentRef: child.ref)
-                        let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
-                        let rag = [ragInstructions, overlay].joined(separator: "\n\n")
-                        // Workers: use pipeline but do not yield to user UI.
-                        let stream = await Self.makePolicyStream(
-                            prompt: envelope.body,
-                            apiKey: apiKey,
-                            model: model,
-                            sessionKey: childKey,
-                            memoryCoordinator: memoryCoordinator,
-                            policyStore: policyStore,
-                            mcpClient: mcpClient,
-                            ragInstructions: rag,
-                            mcpToolInstructions: mcpToolInstructions,
-                            responseSchema: responseSchema,
-                            interceptor: interceptor,
-                            approvalPresenter: nil
-                        )
-                        var completeText = ""
-                        for try await chunk in stream {
-                            if chunk.status == .complete {
-                                completeText += chunk.chunk ?? ""
-                            }
-                        }
-                        return completeText
-                    }
-
-                    try await orchestrator.withWorkerRunner(workerRunner) {
-                        try await orchestrator.deliverUserMessage(prompt) { envelope in
-                            try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
-                                let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn].joined(separator: "\n\n")
-                                let pipelineStream = await Self.makePolicyStream(
-                                    prompt: envelope.body,
-                                    apiKey: apiKey,
-                                    model: model,
-                                    sessionKey: sessionKey,
-                                    memoryCoordinator: memoryCoordinator,
-                                    policyStore: policyStore,
-                                    mcpClient: mcpClient,
-                                    ragInstructions: userRag,
-                                    mcpToolInstructions: mcpToolInstructions,
-                                    responseSchema: responseSchema,
-                                    interceptor: interceptor,
-                                    approvalPresenter: approvalPresenter
-                                )
-                                for try await chunk in pipelineStream {
-                                    continuation.yield(chunk)
-                                }
-                            }
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    debugLog("AgentRuntime turn failed: \(error.localizedDescription)")
-                    continuation.finish(throwing: error)
+        let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
+            let childKey = MemorySessionKey(agentRef: child.ref)
+            let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
+            let rag = [ragInstructions, overlay].joined(separator: "\n\n")
+            let stream = await Self.makePolicyStream(
+                prompt: envelope.body,
+                apiKey: apiKey,
+                model: model,
+                sessionKey: childKey,
+                memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                mcpClient: mcpClient,
+                ragInstructions: rag,
+                mcpToolInstructions: mcpToolInstructions,
+                responseSchema: responseSchema,
+                interceptor: interceptor,
+                approvalPresenter: nil
+            )
+            var completeText = ""
+            for try await chunk in stream {
+                if chunk.status == .complete {
+                    completeText += chunk.chunk ?? ""
                 }
             }
-            continuation.onTermination = { _ in
-                task.cancel()
+            return completeText
+        }
+
+        try await orchestrator.withWorkerRunner(workerRunner) {
+            try await orchestrator.deliverUserMessage(prompt) { envelope in
+                try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
+                    let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn].joined(separator: "\n\n")
+                    let pipelineStream = await Self.makePolicyStream(
+                        prompt: envelope.body,
+                        apiKey: apiKey,
+                        model: model,
+                        sessionKey: sessionKey,
+                        memoryCoordinator: memoryCoordinator,
+                        policyStore: policyStore,
+                        mcpClient: mcpClient,
+                        ragInstructions: userRag,
+                        mcpToolInstructions: mcpToolInstructions,
+                        responseSchema: responseSchema,
+                        interceptor: interceptor,
+                        approvalPresenter: approvalPresenter
+                    )
+                    var yielded = 0
+                    for try await chunk in pipelineStream {
+                        yielded += 1
+                        onChunk(chunk)
+                    }
+                    debugLog("AgentRuntime user-facing pipeline finished yields=\(yielded)")
+                    if yielded == 0 {
+                        debugLog("AgentRuntime warning: pipeline produced 0 chunks for prompt chars=\(prompt.count)")
+                    }
+                }
             }
         }
     }

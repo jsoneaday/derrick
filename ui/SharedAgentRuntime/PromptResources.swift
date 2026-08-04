@@ -1,18 +1,18 @@
 import Foundation
 
-enum PromptResources {
-    static func conversationRAGInstructions(
+public enum PromptResources {
+    public static func conversationRAGInstructions(
         from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL,
         prefixTxt: String? = nil
     ) throws -> String {
         try load(named: "conversation_rag_instructions", from: resourceRoot, prefixTxt)
     }
 
-    static func memorySummarizerInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
+    public static func memorySummarizerInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
         try load(named: "memory_summarizer_instructions", from: resourceRoot)
     }
 
-    static func mcpToolInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
+    public static func mcpToolInstructions(from resourceRoot: URL = Bundle.main.resourceURL ?? Bundle.main.bundleURL) throws -> String {
         try load(named: "mcp_tool_instructions", from: resourceRoot)
     }
 
@@ -32,7 +32,7 @@ enum PromptResources {
         throw PromptResourcesError.missingResource(name: name, resourceRoot: resourceRoot)
     }
 
-    static func currentDatePrefix(date: Date = .now) -> String {
+    public static func currentDatePrefix(date: Date = .now) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
@@ -42,10 +42,10 @@ enum PromptResources {
     }
 }
 
-enum PromptResourcesError: Error, Equatable, LocalizedError {
+public enum PromptResourcesError: Error, Equatable, LocalizedError {
     case missingResource(name: String, resourceRoot: URL)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .missingResource(let name, let resourceRoot):
             return "Missing prompt resource \(name).md in \(resourceRoot.path)."
