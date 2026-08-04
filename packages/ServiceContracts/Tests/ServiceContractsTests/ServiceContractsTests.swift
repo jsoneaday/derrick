@@ -71,18 +71,29 @@ import Testing
         let request = MCPToolCallRequest(
             principal: .agent(sessionID: "s1", agentID: "ui"),
             toolName: "python_script_exec",
-            argumentsJSON: #"{"script":"print(1)"}"#
+            argumentsJSON: #"{"script":"print(1)"}"#,
+            helperAPIKey: "sk-test"
         )
         let data = try MCPServiceXPCCodec.encodeToolCallRequest(request)
         let decoded = try MCPServiceXPCCodec.decodeToolCallRequest(data)
         #expect(decoded.toolName == "python_script_exec")
         #expect(decoded.principal.logLabel.contains("agent:"))
+        #expect(decoded.helperAPIKey == "sk-test")
 
         let result = MCPToolCallResultDTO(requestID: decoded.requestID, ok: true, text: "ok")
         let rData = try MCPServiceXPCCodec.encodeToolCallResult(result)
         let rDecoded = try MCPServiceXPCCodec.decodeToolCallResult(rData)
         #expect(rDecoded.ok == true)
         #expect(rDecoded.text == "ok")
+    }
+
+    @Test func mcpServiceIDAndSearchRoundTrip() throws {
+        #expect(DerrickServiceID.mcp.xpcServiceName == "derrick.ui.MCPService")
+        let search = MCPToolSearchRequest(principal: .system, query: "python")
+        let data = try MCPServiceXPCCodec.encodeToolSearchRequest(search)
+        let decoded = try MCPServiceXPCCodec.decodeToolSearchRequest(data)
+        #expect(decoded.query == "python")
+        #expect(decoded.principal == .system)
     }
 
     @Test func approvalDTORoundTrip() throws {

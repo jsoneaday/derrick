@@ -521,13 +521,7 @@ struct ContentView: View {
                     try await XPCDockerRunner.shared.waitUntilPrewarmed()
                 }()
                 async let agentHealth = AgentServiceClient.shared.ensureUpAndHealth()
-                async let mcpHealthResult: Result<ServiceHealthReport, Error> = {
-                    do {
-                        return .success(try await MCPServiceClient.shared.ensureUpAndHealth())
-                    } catch {
-                        return .failure(error)
-                    }
-                }()
+                async let mcpHealthTask = MCPServiceClient.shared.ensureUpAndHealth()
 
                 // Docker must succeed before prompting is allowed.
                 try await dockerReady
@@ -537,22 +531,14 @@ struct ContentView: View {
                     "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
                 )
 
-                switch await mcpHealthResult {
-                case .success(let mcpHealth):
-                    debugLog(
-                        "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
-                    )
-                    // Pure XPC handoff: MCP peer endpoint only travels via NSXPCCoder (not disk).
-                    do {
-                        let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
-                        try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
-                        debugLog("MCPService peer endpoint handed to AgentService")
-                    } catch {
-                        debugLog("MCPService peer endpoint handoff failed: \(error.localizedDescription)")
-                    }
-                case .failure(let error):
-                    debugLog("MCPService ensure-up failed (non-fatal): \(error.localizedDescription)")
-                }
+                let mcpHealth = try await mcpHealthTask
+                debugLog(
+                    "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
+                )
+                // Required: peer endpoint only travels via NSXPCCoder (UI → Agent).
+                let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
+                try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
+                debugLog("MCPService peer endpoint handed to AgentService")
 
                 sessionReady = true
                 await MainActor.run {
@@ -560,7 +546,7 @@ struct ContentView: View {
                 }
                 if isDebugEnabled {
                     await MainActor.run {
-                        debugLogStore.log("UI client ready (Docker prewarm done; AgentService hosts turns)")
+                        debugLogStore.log("UI client ready (Docker + AgentService + MCPService peer handoff)")
                     }
                 }
             } catch {

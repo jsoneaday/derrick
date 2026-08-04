@@ -51,7 +51,6 @@ actor AgentServiceTurnHost {
         )
         conversation = model
         sessionID = model.sessionKey.sessionID
-        // Effectors: MCPService via peer endpoint (UI XPC handoff). agents_* stay local.
         await AgentServiceStore.shared.log(
             level: .info,
             message: "Turn host session ready session=\(model.sessionKey.sessionID)",

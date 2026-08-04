@@ -14,8 +14,8 @@ final class ConversationModel {
     let orchestrator: SessionOrchestrator
     let memoryCoordinator: MemoryCoordinator
     let policyStore: (any PolicyStore)?
-    /// Retains local `agents_*` only. Effectors use `toolClient` → MCPService over XPC.
-    private let agentsBridge: MCPLocalBridge
+    /// Local orchestration tools only (`agents_*`). Effectors never run here — MCPService XPC.
+    private let agentsOrchestrationHost: MCPLocalBridge
     let toolClient: any ConversationToolClient
     let ragInstructions: String
     let mcpToolInstructions: String
@@ -60,7 +60,7 @@ final class ConversationModel {
         orchestrator: SessionOrchestrator,
         memoryCoordinator: MemoryCoordinator,
         policyStore: (any PolicyStore)?,
-        agentsBridge: MCPLocalBridge,
+        agentsOrchestrationHost: MCPLocalBridge,
         toolClient: any ConversationToolClient,
         ragInstructions: String,
         mcpToolInstructions: String
@@ -69,7 +69,7 @@ final class ConversationModel {
         self.orchestrator = orchestrator
         self.memoryCoordinator = memoryCoordinator
         self.policyStore = policyStore
-        self.agentsBridge = agentsBridge
+        self.agentsOrchestrationHost = agentsOrchestrationHost
         self.toolClient = toolClient
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
@@ -92,16 +92,16 @@ final class ConversationModel {
         debugLog("Memory bootstrap started")
         debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
 
-        let agentsBridge = try await makeAgentsOnlyBridge(orchestrator: orchestrator)
+        let agentsHost = try await makeAgentsOrchestrationHost(orchestrator: orchestrator)
         let principal = ServicePrincipal.agent(
             sessionID: sessionKey.sessionID,
             agentID: sessionKey.agentID
         )
         let toolClient = XPCConversationToolClient(
             principal: principal,
-            localAgentsClient: agentsBridge.client
+            agentsClient: agentsHost.client
         )
-        debugLog("Tools: agents_* local; effectors → MCPService XPC (principal=\(principal.logLabel))")
+        debugLog("Tools: agents_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))")
         return ConversationModel(
             sessionKey: sessionKey,
             orchestrator: orchestrator,
@@ -112,7 +112,7 @@ final class ConversationModel {
                 budget: budget
             ),
             policyStore: repository,
-            agentsBridge: agentsBridge,
+            agentsOrchestrationHost: agentsHost,
             toolClient: toolClient,
             ragInstructions: ragInstructions,
             mcpToolInstructions: mcpToolInstructions
@@ -299,8 +299,8 @@ final class ConversationModel {
         return DefaultPolicyInterceptor(policy: policy)
     }
 
-    /// Local bridge for multi-agent tools only (`agents_*`). Effectors run in MCPService.
-    private static func makeAgentsOnlyBridge(
+    /// In-process host for multi-agent tools only. Not used for python/memory effectors.
+    private static func makeAgentsOrchestrationHost(
         orchestrator: SessionOrchestrator
     ) async throws -> MCPLocalBridge {
         try await MCPLocalBridge.make { server in

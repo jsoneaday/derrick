@@ -7,15 +7,15 @@ import MCPToolCatalog
 import MemorySystem
 import ServiceContracts
 
-/// In-process MCP server hosted by MCPService (python + catalog; no agent orchestration tools).
+/// MCP effectors hosted in MCPService (python + session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
 
-    private var bridge: MCPLocalBridge?
+    private var host: MCPLocalBridge?
     private var memoryCoordinator: MemoryCoordinator?
 
     func ensureReady() async throws -> MCPLocalBridge {
-        if let bridge { return bridge }
+        if let host { return host }
 
         let repo = try await MCPServiceStore.shared.sharedRepository()
         let budget = MemoryBudget(maxTokenCount: 200_000)
@@ -27,12 +27,12 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Direct docker CLI (UI prewarms warm containers). Egress mid-flight still via helper→UI.
-        // Policy / usage limits run in AgentService before XPC callTool.
+        // Direct docker CLI (UI prewarms containers). Network: mid-flight egress via helper→UI.
+        // Policy/usage limits still evaluated in AgentService before XPC callTool.
         let made = try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
                 runner: DockerPythonScriptRunner(),
-                reviewer: nil,
+                reviewer: MCPServicePythonReviewer(),
                 networkPreflight: { _, _ in nil },
                 logger: { message in
                     fputs("[MCPService] \(message)\n", stderr)
@@ -42,7 +42,7 @@ actor MCPServiceToolHost {
                 }
             )
             await server.registerSessionMemorySearchTool { arguments in
-                let sessionKey = MCPServiceCallSlots.shared.memorySessionKey
+                let sessionKey = MCPServiceCallContext.shared.memorySessionKey
                     ?? MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
                 let retrieval = try await coordinator.retrievePrior(
                     MemoryPriorRetrievalRequest(
@@ -54,9 +54,8 @@ actor MCPServiceToolHost {
                 )
                 return retrieval.context
             }
-            // agents_* stay on AgentService (need HierarchicalOrchestrator).
         }
-        bridge = made
+        host = made
         await MCPServiceStore.shared.log(
             level: .info,
             message: "MCP tool host ready (python + session_memory; no agents_*)",
@@ -104,8 +103,11 @@ actor MCPServiceToolHost {
         default:
             sessionKey = MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
         }
-        MCPServiceCallSlots.shared.install(memorySessionKey: sessionKey)
-        defer { MCPServiceCallSlots.shared.clear() }
+        MCPServiceCallContext.shared.install(
+            helperAPIKey: request.helperAPIKey,
+            memorySessionKey: sessionKey
+        )
+        defer { MCPServiceCallContext.shared.clear() }
 
         let args = try Self.decodeArgumentsJSON(request.argumentsJSON)
         let result = try await client.callTool(named: request.toolName, arguments: args)
@@ -178,33 +180,5 @@ enum MCPServiceToolHostError: Error, LocalizedError {
         switch self {
         case .invalidArguments(let m): return m
         }
-    }
-}
-
-/// Process slots for MCP tool handlers (unstructured tasks do not inherit TaskLocal).
-private final class MCPServiceCallSlots: @unchecked Sendable {
-    static let shared = MCPServiceCallSlots()
-
-    private let lock = NSLock()
-    private var sessionKey: MemorySessionKey?
-
-    private init() {}
-
-    func install(memorySessionKey: MemorySessionKey) {
-        lock.lock()
-        sessionKey = memorySessionKey
-        lock.unlock()
-    }
-
-    func clear() {
-        lock.lock()
-        sessionKey = nil
-        lock.unlock()
-    }
-
-    var memorySessionKey: MemorySessionKey? {
-        lock.lock()
-        defer { lock.unlock() }
-        return sessionKey
     }
 }

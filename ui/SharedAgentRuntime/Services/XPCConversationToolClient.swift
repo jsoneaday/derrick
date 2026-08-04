@@ -4,48 +4,37 @@ import MCP
 import MCPClient
 import ServiceContracts
 
-/// Routes effector tools to MCPService over XPC; keeps `agents_*` on a local bridge.
+/// Effector tools → MCPService over XPC. Orchestration tools (`agents_*`) stay on a local MCP client.
 public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     private let principal: ServicePrincipal
-    private let localAgentsClient: MCPClient?
+    private let agentsClient: MCPClient?
+    private let helperAPIKeyProvider: @Sendable () -> String?
 
     public init(
         principal: ServicePrincipal,
-        localAgentsClient: MCPClient? = nil
+        agentsClient: MCPClient? = nil,
+        helperAPIKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
     ) {
         self.principal = principal
-        self.localAgentsClient = localAgentsClient
+        self.agentsClient = agentsClient
+        self.helperAPIKeyProvider = helperAPIKeyProvider
     }
 
     public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
         var byName: [String: MCPToolDescriptor] = [:]
 
-        if let localAgentsClient {
-            let local = try await localAgentsClient.searchTools(matching: query)
-            for tool in local where tool.name.hasPrefix("agents_") {
+        if let agentsClient {
+            for tool in try await agentsClient.searchTools(matching: query) where tool.name.hasPrefix("agents_") {
                 byName[tool.name] = tool
             }
         }
 
-        do {
-            fputs("[XPCConversationToolClient] searchTools via MCPService…\n", stderr)
-            let remote = try await MCPServiceClient.shared.searchTools(principal: principal, query: query)
-            guard remote.ok else {
-                fputs("[XPCConversationToolClient] searchTools not ok: \(remote.message)\n", stderr)
-                await MainActor.run {
-                    debugLog("MCPService searchTools failed: \(remote.message)")
-                }
-                return Array(byName.values).sorted { $0.name < $1.name }
-            }
-            for dto in remote.tools where !dto.name.hasPrefix("agents_") {
-                byName[dto.name] = MCPToolDescriptor(name: dto.name, description: dto.description)
-            }
-            fputs("[XPCConversationToolClient] searchTools ok count=\(remote.tools.count)\n", stderr)
-        } catch {
-            fputs("[XPCConversationToolClient] searchTools error: \(error.localizedDescription)\n", stderr)
-            await MainActor.run {
-                debugLog("MCPService searchTools error: \(error.localizedDescription)")
-            }
+        let remote = try await MCPServiceClient.shared.searchTools(principal: principal, query: query)
+        guard remote.ok else {
+            throw MCPServiceClientError.bootstrapFailed(remote.message.isEmpty ? "searchTools failed" : remote.message)
+        }
+        for dto in remote.tools where !dto.name.hasPrefix("agents_") {
+            byName[dto.name] = MCPToolDescriptor(name: dto.name, description: dto.description)
         }
 
         return Array(byName.values).sorted { $0.name < $1.name }
@@ -53,20 +42,20 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
 
     public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
         if name.hasPrefix("agents_") {
-            guard let localAgentsClient else {
+            guard let agentsClient else {
                 return MCPToolResult(
-                    content: [.text("Agent orchestration tools unavailable (no local bridge).")],
+                    content: [.text("Agent orchestration tools unavailable.")],
                     isError: true
                 )
             }
-            return try await localAgentsClient.callTool(named: name, arguments: arguments)
+            return try await agentsClient.callTool(named: name, arguments: arguments)
         }
 
-        let argumentsJSON = try encodeArgumentsJSON(arguments)
         let request = MCPToolCallRequest(
             principal: principal,
             toolName: name,
-            argumentsJSON: argumentsJSON
+            argumentsJSON: try encodeArgumentsJSON(arguments),
+            helperAPIKey: helperAPIKeyProvider()
         )
         await MainActor.run {
             debugLog("MCPService XPC callTool tool=\(name) principal=\(principal.logLabel)")
@@ -87,8 +76,11 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             results.append(try await callTool(named: invocation.toolName, arguments: invocation.arguments))
         }
         let combined = results.map(\.text).joined(separator: "\n")
-        let isError = results.contains(where: \.isError)
-        return MCPToolBatchResult(results: results, combinedContent: combined, isError: isError)
+        return MCPToolBatchResult(
+            results: results,
+            combinedContent: combined,
+            isError: results.contains(where: \.isError)
+        )
     }
 
     private func encodeArgumentsJSON(_ arguments: [String: Value]) throws -> String {

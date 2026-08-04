@@ -33,17 +33,21 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
     public let toolName: String
     /// JSON object string of tool arguments (MCP Value map encoded as JSON object).
     public let argumentsJSON: String
+    /// Conversation API key for in-MCPService helper LLM (python security reviewer).
+    public let helperAPIKey: String?
 
     public init(
         requestID: String = UUID().uuidString,
         principal: ServicePrincipal,
         toolName: String,
-        argumentsJSON: String
+        argumentsJSON: String,
+        helperAPIKey: String? = nil
     ) {
         self.requestID = requestID
         self.principal = principal
         self.toolName = toolName
         self.argumentsJSON = argumentsJSON
+        self.helperAPIKey = helperAPIKey
     }
 }
 
