@@ -167,7 +167,12 @@ public final class AgentServiceClient: @unchecked Sendable {
                 if text == "ok" {
                     cont.resume()
                 } else {
-                    cont.resume(throwing: AgentServiceClientError.turnFailed(text.isEmpty ? "setMCPServicePeerEndpoint failed" : text))
+                    let detail = text.hasPrefix("error:") ? String(text.dropFirst(6)) : text
+                    cont.resume(
+                        throwing: AgentServiceClientError.turnFailed(
+                            detail.isEmpty ? "MCP peer mesh verification failed" : detail
+                        )
+                    )
                 }
             }
         }

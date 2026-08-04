@@ -739,19 +739,40 @@ public extension MCPServerHost {
     }
 
     private static func parsePythonScriptExecutionArguments(_ arguments: [String: Value]) throws -> PythonScriptExecutionArguments {
-        guard
-            let modeRaw = arguments["mode"]?.stringValue,
-            let mode = PythonScriptExecutionArguments.Mode(rawValue: modeRaw.lowercased()),
-            let description = arguments["description"]?.stringValue,
-            let reason = arguments["reason"]?.stringValue,
-            let script = arguments["script"]?.stringValue
+        // Hard requirements: mode + script. Models often omit description/reason; fill defaults
+        // so a valid script is not rejected at the service boundary.
+        let modeRaw = arguments["mode"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let script = arguments["script"]?.stringValue
+        let missing: [String] = [
+            modeRaw == nil || modeRaw?.isEmpty == true ? "mode" : nil,
+            script == nil || script?.isEmpty == true ? "script" : nil
+        ].compactMap { $0 }
+        guard missing.isEmpty,
+              let modeRaw,
+              let mode = PythonScriptExecutionArguments.Mode(rawValue: modeRaw.lowercased()),
+              let script
         else {
+            let keys = arguments.keys.sorted().joined(separator: ",")
             throw NSError(
                 domain: "MCPServer",
                 code: 400,
-                userInfo: [NSLocalizedDescriptionKey: "Missing required fields: mode, description, reason, script."]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Missing required fields: \(missing.isEmpty ? "mode (invalid), script" : missing.joined(separator: ", ")). Present keys: [\(keys)]"
+                ]
             )
         }
+
+        let description: String = {
+            let raw = arguments["description"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? "Execute python script for the user request." : raw
+        }()
+        let reason: String = {
+            let raw = arguments["reason"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? "User-requested automation or live data access." : raw
+        }()
 
         let userPrompt = arguments["user_prompt"]?.stringValue
         let expectedEffects = (arguments["expected_effects"]?.arrayValue ?? []).compactMap { $0.stringValue }

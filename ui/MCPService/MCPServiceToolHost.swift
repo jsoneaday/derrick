@@ -1,5 +1,6 @@
 import Foundation
 import DBRepository
+import Lib
 import MCP
 import MCPClient
 import MCPServer
@@ -109,7 +110,13 @@ actor MCPServiceToolHost {
         )
         defer { MCPServiceCallContext.shared.clear() }
 
-        let args = try Self.decodeArgumentsJSON(request.argumentsJSON)
+        // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
+        let args = try parseToolArgumentsObject(request.argumentsJSON)
+        if args.isEmpty, !request.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw MCPServiceToolHostError.invalidArguments(
+                "argumentsJSON did not parse (len=\(request.argumentsJSON.count))"
+            )
+        }
         let result = try await client.callTool(named: request.toolName, arguments: args)
         return MCPToolCallResultDTO(
             requestID: request.requestID,
@@ -118,58 +125,6 @@ actor MCPServiceToolHost {
             text: result.text,
             message: result.isError ? "tool reported error" : "ok"
         )
-    }
-
-    private static func decodeArgumentsJSON(_ json: String) throws -> [String: Value] {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "{}" {
-            return [:]
-        }
-        guard let data = trimmed.data(using: .utf8) else {
-            throw MCPServiceToolHostError.invalidArguments("argumentsJSON is not UTF-8")
-        }
-        let any = try JSONSerialization.jsonObject(with: data)
-        guard let dict = any as? [String: Any] else {
-            throw MCPServiceToolHostError.invalidArguments("argumentsJSON must be a JSON object")
-        }
-        var out: [String: Value] = [:]
-        for (key, value) in dict {
-            out[key] = try valueToMCP(value)
-        }
-        return out
-    }
-
-    private static func valueToMCP(_ any: Any) throws -> Value {
-        switch any {
-        case is NSNull:
-            return .null
-        case let b as Bool:
-            return .bool(b)
-        case let i as Int:
-            return .int(i)
-        case let n as NSNumber:
-            if CFGetTypeID(n) == CFBooleanGetTypeID() {
-                return .bool(n.boolValue)
-            }
-            if n.doubleValue.rounded() == n.doubleValue,
-               n.doubleValue >= Double(Int.min),
-               n.doubleValue <= Double(Int.max) {
-                return .int(n.intValue)
-            }
-            return .double(n.doubleValue)
-        case let s as String:
-            return .string(s)
-        case let arr as [Any]:
-            return .array(try arr.map { try valueToMCP($0) })
-        case let obj as [String: Any]:
-            var map: [String: Value] = [:]
-            for (k, v) in obj {
-                map[k] = try valueToMCP(v)
-            }
-            return .object(map)
-        default:
-            throw MCPServiceToolHostError.invalidArguments("unsupported JSON value type \(type(of: any))")
-        }
     }
 }
 

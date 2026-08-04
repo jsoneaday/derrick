@@ -2,31 +2,40 @@ import Foundation
 import DockerRunnerXPC
 import ServiceContracts
 
-/// Client for MCPService XPC (shared tools with principal).
+/// Client for MCPService over XPC.
 ///
-/// - **UI** connects with `NSXPCConnection(serviceName:)` (launches the service).
-/// - **AgentService** uses a peer `NSXPCListenerEndpoint` handed off over XPC
-///   (UI fetches endpoint from MCPService, then `setMCPServicePeerEndpoint` on AgentService).
+/// System roles:
+/// - **UI process**: `serviceName:` launches Application XPC; used for ensure-up + peer endpoint fetch.
+/// - **AgentService process**: connects with a peer `NSXPCListenerEndpoint` installed via handoff.
+///   Handoff must **verify** Agent→MCP RPCs before UI marks session ready.
 public final class MCPServiceClient: @unchecked Sendable {
     public static let shared = MCPServiceClient()
 
     private let serviceName = DerrickServiceID.mcp.xpcServiceName
     private let lock = NSLock()
     private var connection: NSXPCConnection?
-    /// Installed in AgentService process via UI XPC handoff.
     private var peerEndpoint: NSXPCListenerEndpoint?
-    private let callTimeoutNanoseconds: UInt64 = 30_000_000_000
+    private let callTimeoutNanoseconds: UInt64 = 15_000_000_000
 
     private init() {}
 
-    /// Called in AgentService when UI delivers MCPService's peer listener endpoint.
+    /// Install peer endpoint in AgentService. Does not prove connectivity — use `verifyPeerMesh()`.
     public func installPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) {
         lock.lock()
         peerEndpoint = endpoint
         connection?.invalidate()
         connection = nil
         lock.unlock()
-        fputs("[MCPServiceClient] peer endpoint installed in-process\n", stderr)
+        fputs("[MCPServiceClient] peer endpoint installed\n", stderr)
+    }
+
+    /// AgentService: after install, prove searchTools works over the peer link.
+    public func verifyPeerMesh() async throws {
+        let result = try await searchTools(principal: .system, query: "")
+        guard result.ok else {
+            throw MCPServiceClientError.meshUnverified(result.message.isEmpty ? "searchTools not ok" : result.message)
+        }
+        fputs("[MCPServiceClient] peer mesh verified tools=\(result.tools.count)\n", stderr)
     }
 
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
@@ -34,7 +43,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         for attempt in 0..<max(1, retries) {
             do {
                 nonisolated(unsafe) let proxy = try remoteProxy()
-                let boot: MCPServiceBootstrapResult = try await withTimeout(callTimeoutNanoseconds) {
+                let boot: MCPServiceBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<MCPServiceBootstrapResult, Error>) in
                         proxy.bootstrap { data in
                             do {
@@ -51,7 +60,7 @@ public final class MCPServiceClient: @unchecked Sendable {
                 guard boot.ok else {
                     throw MCPServiceClientError.bootstrapFailed(boot.message)
                 }
-                let report: ServiceHealthReport = try await withTimeout(callTimeoutNanoseconds) {
+                let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
                         proxy.health { data in
                             do {
@@ -80,10 +89,9 @@ public final class MCPServiceClient: @unchecked Sendable {
         throw lastError ?? MCPServiceClientError.unavailable
     }
 
-    /// UI only: fetch peer listener endpoint over Application XPC for handoff to AgentService.
     public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
         nonisolated(unsafe) let proxy = try remoteProxy()
-        return try await withTimeout(callTimeoutNanoseconds) {
+        return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
                 proxy.peerListenerEndpoint { endpoint in
                     cont.resume(returning: endpoint)
@@ -95,7 +103,7 @@ public final class MCPServiceClient: @unchecked Sendable {
     public func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
         nonisolated(unsafe) let proxy = try remoteProxy()
         let payload = try MCPServiceXPCCodec.encodeToolCallRequest(request) as NSData
-        return try await withTimeout(callTimeoutNanoseconds) {
+        return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.callTool(requestJSON: payload) { data in
                     do {
@@ -112,7 +120,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         nonisolated(unsafe) let proxy = try remoteProxy()
         let request = MCPToolSearchRequest(principal: principal, query: query)
         let payload = try MCPServiceXPCCodec.encodeToolSearchRequest(request) as NSData
-        return try await withTimeout(callTimeoutNanoseconds) {
+        return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.searchTools(requestJSON: payload) { data in
                     do {
@@ -141,41 +149,44 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     private var isHostApp: Bool {
-        let id = Bundle.main.bundleIdentifier ?? ""
-        return id == DerrickServiceID.ui.rawValue
+        (Bundle.main.bundleIdentifier ?? "") == DerrickServiceID.ui.rawValue
     }
 
     private func makeConnection() throws -> NSXPCConnection {
         if isHostApp {
             let conn = NSXPCConnection(serviceName: serviceName)
-            configure(conn)
+            // Host→Application XPC: require MCPService identity.
+            configure(conn, codeSignPeerAsMCPService: true)
             conn.resume()
-            fputs("[MCPServiceClient] connected via serviceName=\(serviceName)\n", stderr)
+            fputs("[MCPServiceClient] host connected serviceName=\(serviceName)\n", stderr)
             return conn
         }
 
         guard let endpoint = peerEndpoint else {
-            fputs("[MCPServiceClient] no peer endpoint (UI must hand off via AgentService XPC)\n", stderr)
             throw MCPServiceClientError.peerEndpointMissing
         }
         let conn = NSXPCConnection(listenerEndpoint: endpoint)
-        configure(conn)
+        // Anonymous peer listener: do not set client code-sign requirement.
+        // Team/identifier checks on anonymous endpoints reject valid sibling links.
+        configure(conn, codeSignPeerAsMCPService: false)
         conn.resume()
-        fputs("[MCPServiceClient] connected via peer endpoint\n", stderr)
+        fputs("[MCPServiceClient] peer connected via listener endpoint\n", stderr)
         return conn
     }
 
-    private func configure(_ conn: NSXPCConnection) {
+    private func configure(_ conn: NSXPCConnection, codeSignPeerAsMCPService: Bool) {
         conn.remoteObjectInterface = NSXPCInterface(with: MCPServiceXPC.self)
-        do {
-            try XPCPeerAuthentication.apply(
-                requirement: XPCPeerAuthentication.requirementString(
-                    allowedPeerIdentifiers: [DerrickServiceID.mcp.rawValue]
-                ),
-                to: conn
-            )
-        } catch {
-            fputs("[MCPServiceClient] peer auth soft-fail: \(error.localizedDescription)\n", stderr)
+        if codeSignPeerAsMCPService {
+            do {
+                try XPCPeerAuthentication.apply(
+                    requirement: XPCPeerAuthentication.requirementString(
+                        allowedPeerIdentifiers: [DerrickServiceID.mcp.rawValue]
+                    ),
+                    to: conn
+                )
+            } catch {
+                fputs("[MCPServiceClient] code-sign soft-fail: \(error.localizedDescription)\n", stderr)
+            }
         }
         conn.interruptionHandler = { [weak self] in self?.invalidate() }
         conn.invalidationHandler = { [weak self] in self?.invalidate() }
@@ -188,21 +199,17 @@ public final class MCPServiceClient: @unchecked Sendable {
         lock.unlock()
     }
 
-    private func withTimeout<T: Sendable>(
-        _ nanoseconds: UInt64,
+    private func invoke<T: Sendable>(
+        timeout nanoseconds: UInt64,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
-            }
+            group.addTask { try await operation() }
             group.addTask {
                 try await Task.sleep(nanoseconds: nanoseconds)
                 throw MCPServiceClientError.timeout
             }
-            guard let first = try await group.next() else {
-                throw MCPServiceClientError.timeout
-            }
+            guard let first = try await group.next() else { throw MCPServiceClientError.timeout }
             group.cancelAll()
             return first
         }
@@ -213,6 +220,7 @@ public enum MCPServiceClientError: Error, LocalizedError {
     case unavailable
     case bootstrapFailed(String)
     case peerEndpointMissing
+    case meshUnverified(String)
     case timeout
 
     public var errorDescription: String? {
@@ -222,7 +230,9 @@ public enum MCPServiceClientError: Error, LocalizedError {
         case .bootstrapFailed(let message):
             return "MCPService bootstrap failed: \(message)"
         case .peerEndpointMissing:
-            return "MCPService peer endpoint not installed (UI handoff missing)."
+            return "MCPService peer endpoint not installed."
+        case .meshUnverified(let message):
+            return "Agent→MCPService mesh failed verification: \(message)"
         case .timeout:
             return "MCPService XPC call timed out."
         }

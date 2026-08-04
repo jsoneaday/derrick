@@ -31,10 +31,17 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
 
         let remote = try await MCPServiceClient.shared.searchTools(principal: principal, query: query)
         guard remote.ok else {
-            throw MCPServiceClientError.bootstrapFailed(remote.message.isEmpty ? "searchTools failed" : remote.message)
+            throw MCPServiceClientError.meshUnverified(
+                remote.message.isEmpty ? "searchTools failed" : remote.message
+            )
         }
         for dto in remote.tools where !dto.name.hasPrefix("agents_") {
             byName[dto.name] = MCPToolDescriptor(name: dto.name, description: dto.description)
+        }
+        // Effector catalog must be non-empty; agents_* alone is not a working mesh.
+        let effectors = byName.keys.filter { !$0.hasPrefix("agents_") }
+        guard !effectors.isEmpty else {
+            throw MCPServiceClientError.meshUnverified("MCPService returned no effector tools")
         }
 
         return Array(byName.values).sorted { $0.name < $1.name }
@@ -51,14 +58,17 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             return try await agentsClient.callTool(named: name, arguments: arguments)
         }
 
+        let argumentsJSON = try toolArgumentsToJSON(arguments)
         let request = MCPToolCallRequest(
             principal: principal,
             toolName: name,
-            argumentsJSON: try encodeArgumentsJSON(arguments),
+            argumentsJSON: argumentsJSON,
             helperAPIKey: helperAPIKeyProvider()
         )
         await MainActor.run {
-            debugLog("MCPService XPC callTool tool=\(name) principal=\(principal.logLabel)")
+            debugLog(
+                "MCPService XPC callTool tool=\(name) principal=\(principal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ","))"
+            )
         }
         let dto = try await MCPServiceClient.shared.callTool(request)
         if !dto.ok && dto.text.isEmpty {
@@ -81,24 +91,5 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             combinedContent: combined,
             isError: results.contains(where: \.isError)
         )
-    }
-
-    private func encodeArgumentsJSON(_ arguments: [String: Value]) throws -> String {
-        let jsonDict = arguments.mapValues { toolValueToJSON($0) }
-        let data = try JSONSerialization.data(withJSONObject: jsonDict, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
-
-    private func toolValueToJSON(_ val: Value) -> Any {
-        switch val {
-        case .string(let s): return s
-        case .int(let i): return i
-        case .double(let d): return d
-        case .bool(let b): return b
-        case .array(let arr): return arr.map { toolValueToJSON($0) }
-        case .object(let obj): return obj.mapValues { toolValueToJSON($0) }
-        case .null: return NSNull()
-        case .data(_, let data): return data.base64EncodedString()
-        }
     }
 }

@@ -48,7 +48,7 @@ extension ConversationPipeline {
                         let memoryMS = PipelineTiming.elapsedMS(from: memoryStarted)
 
                         let catalogStarted = Date()
-                        let toolCatalog = await toolCatalogContext()
+                        let toolCatalog = try await toolCatalogContext()
                         let catalogMS = PipelineTiming.elapsedMS(from: catalogStarted)
 
                         let promptBuildStarted = Date()

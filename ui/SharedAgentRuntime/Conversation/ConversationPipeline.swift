@@ -65,7 +65,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let toolCatalog = await toolCatalogContext()
+                    let toolCatalog = try await toolCatalogContext()
                     let request = AgentRequest.prompt(prompt, system: systemPrompt(from: retrieval, toolCatalog: toolCatalog))
                     let upstream = client.stream(request, model: model)
                     var completion = ""
@@ -134,38 +134,28 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         return retrieval.context
     }
 
-    func toolCatalogContext() async -> String {
+    func toolCatalogContext() async throws -> String {
         guard let mcpClient else {
-            return "Available MCP tools: none."
+            throw ConversationPipelineError.toolCatalogUnavailable("No tool client configured.")
         }
 
-        do {
-            await MainActor.run {
-                debugLog("Loading tool catalog…")
-            }
-            let tools = try await mcpClient.searchTools(matching: "")
-            guard !tools.isEmpty else {
-                await MainActor.run {
-                    debugLog("Tool catalog empty")
-                }
-                return "Available MCP tools: none."
-            }
-            await MainActor.run {
-                debugLog("Tool catalog loaded: \(tools.map(\.name).joined(separator: ", "))")
-            }
-
-            let lines = tools.map { tool in
-                let description = tool.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "No description."
-                let schema = tool.inputSchema.map { Self.describe(value: $0) } ?? "{}"
-                return "- \(tool.name): \(description)\n  input_schema: \(schema)"
-            }
-            return "Available MCP tools:\n" + lines.joined(separator: "\n")
-        } catch {
-            await MainActor.run {
-                debugLog("Tool catalog load failed: \(error)")
-            }
-            return "Available MCP tools: unavailable."
+        await MainActor.run {
+            debugLog("Loading tool catalog…")
         }
+        let tools = try await mcpClient.searchTools(matching: "")
+        guard !tools.isEmpty else {
+            throw ConversationPipelineError.toolCatalogUnavailable("Tool catalog empty (MCP mesh or agents host).")
+        }
+        await MainActor.run {
+            debugLog("Tool catalog loaded: \(tools.map(\.name).joined(separator: ", "))")
+        }
+
+        let lines = tools.map { tool in
+            let description = tool.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "No description."
+            let schema = tool.inputSchema.map { Self.describe(value: $0) } ?? "{}"
+            return "- \(tool.name): \(description)\n  input_schema: \(schema)"
+        }
+        return "Available MCP tools:\n" + lines.joined(separator: "\n")
     }
 
     private static func describe(value: Value) -> String {
@@ -189,6 +179,17 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
                 "\"\(key)\": \(describe(value: object[key] ?? .null))"
             }
             return "{\(pairs.joined(separator: ", "))}"
+        }
+    }
+}
+
+enum ConversationPipelineError: Error, LocalizedError {
+    case toolCatalogUnavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .toolCatalogUnavailable(let message):
+            return message
         }
     }
 }

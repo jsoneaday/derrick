@@ -114,16 +114,29 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         _ endpoint: NSXPCListenerEndpoint,
         withReply reply: @escaping @Sendable (NSData) -> Void
     ) {
-        MCPServiceClient.shared.installPeerEndpoint(endpoint)
-        fputs("[AgentService] MCPService peer endpoint installed\n", stderr)
+        // System invariant: handoff is not complete until Agent can RPC MCPService.
         Task {
-            await AgentServiceStore.shared.log(
-                level: .info,
-                message: "MCPService peer endpoint installed",
-                code: "mcp_peer_endpoint"
-            )
+            do {
+                MCPServiceClient.shared.installPeerEndpoint(endpoint)
+                try await MCPServiceClient.shared.verifyPeerMesh()
+                await AgentServiceStore.shared.log(
+                    level: .info,
+                    message: "MCPService peer mesh verified (Agent→MCP searchTools ok)",
+                    code: "mcp_peer_mesh_ok"
+                )
+                fputs("[AgentService] MCPService peer mesh verified\n", stderr)
+                reply(AgentServiceXPCCodec.encodeString("ok") as NSData)
+            } catch {
+                let message = error.localizedDescription
+                await AgentServiceStore.shared.log(
+                    level: .error,
+                    message: "MCPService peer mesh failed: \(message)",
+                    code: "mcp_peer_mesh_failed"
+                )
+                fputs("[AgentService] MCPService peer mesh failed: \(message)\n", stderr)
+                reply(AgentServiceXPCCodec.encodeString("error:\(message)") as NSData)
+            }
         }
-        reply(AgentServiceXPCCodec.encodeString("ok") as NSData)
     }
 
     func startTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {

@@ -41,6 +41,26 @@ public func toolArgumentsFromJSON(_ json: String) throws -> [String: Value] {
     return [:]
 }
 
+/// Encode MCP tool arguments for transport (e.g. MCPService XPC `argumentsJSON`).
+public func toolArgumentsToJSON(_ arguments: [String: Value]) throws -> String {
+    let jsonDict = arguments.mapValues { toolValueToJSONObject($0) }
+    let jsonData = try JSONSerialization.data(withJSONObject: jsonDict, options: [.sortedKeys])
+    return String(data: jsonData, encoding: .utf8) ?? "{}"
+}
+
+private func toolValueToJSONObject(_ val: Value) -> Any {
+    switch val {
+    case .string(let s): return s
+    case .int(let i): return i
+    case .double(let d): return d
+    case .bool(let b): return b
+    case .array(let arr): return arr.map { toolValueToJSONObject($0) }
+    case .object(let obj): return obj.mapValues { toolValueToJSONObject($0) }
+    case .null: return NSNull()
+    case .data(_, let data): return data.base64EncodedString()
+    }
+}
+
 // MARK: - Re-escape after outer JSON decode
 
 /// Rebuild a JSON document so string values are legal JSON after outer unescaping.

@@ -45,6 +45,7 @@
 		DEMC10132A00000000MC001 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10232A00000000MC001 /* MCPServer */; };
 		DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10242A00000000MC001 /* MCPToolCatalog */; };
 		DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10252A00000000MC001 /* DockerRunnerXPC */; };
+		DEMC10162A00000000MC001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10262A00000000MC001 /* Lib */; };
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
 		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
 		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
@@ -249,6 +250,7 @@
 				DEMC10132A00000000MC001 /* MCPServer in Frameworks */,
 				DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */,
 				DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */,
+				DEMC10162A00000000MC001 /* Lib in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -447,6 +449,7 @@
 				DEMC10232A00000000MC001 /* MCPServer */,
 				DEMC10242A00000000MC001 /* MCPToolCatalog */,
 				DEMC10252A00000000MC001 /* DockerRunnerXPC */,
+				DEMC10262A00000000MC001 /* Lib */,
 			);
 			productName = MCPService;
 			productReference = DEMC10012A00000000MC001 /* MCPService.xpc */;
@@ -1282,6 +1285,10 @@
 		DEMC10252A00000000MC001 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DockerRunnerXPC;
+		};
+		DEMC10262A00000000MC001 /* Lib */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Lib;
 		};
 		DEPR00022A00000000PR001 /* PolicyRuntime */ = {
 			isa = XCSwiftPackageProductDependency;
