@@ -14,12 +14,25 @@ extension ConversationPipeline {
         named name: String,
         arguments: [String: Value],
         sessionID: String,
+        userPrompt: String? = nil,
         interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolResult {
         let toolOverallStarted = Date()
         await MainActor.run {
             debugLog("Tool request given: \(name)")
+        }
+        // Models often omit user_prompt; inject conversation prompt so the security reviewer
+        // can align script intent (empty prompt → false deny on intent checks).
+        var arguments = arguments
+        if name == "python_script_exec" {
+            let existing = arguments["user_prompt"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if existing.isEmpty,
+               let userPrompt,
+               !userPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                arguments["user_prompt"] = .string(userPrompt)
+            }
         }
         let encodeStarted = Date()
         let event = ToolInvocationEvent(
@@ -301,6 +314,7 @@ extension ConversationPipeline {
     func batchCallToolsWithPolicyInterception(
         _ request: MCPToolBatchRequest,
         sessionID: String,
+        userPrompt: String? = nil,
         interceptor: ToolRequestInterceptor? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolBatchResult {
@@ -318,6 +332,7 @@ extension ConversationPipeline {
                             named: invocation.toolName,
                             arguments: invocation.arguments,
                             sessionID: sessionID,
+                            userPrompt: userPrompt,
                             interceptor: interceptor,
                             approvalPresenter: approvalPresenter
                         )

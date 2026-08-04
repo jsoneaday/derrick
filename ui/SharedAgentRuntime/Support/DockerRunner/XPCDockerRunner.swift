@@ -63,17 +63,55 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     private final class PrewarmState: @unchecked Sendable {
         private let lock = NSLock()
         private var completed = false
+        private var failure: Error?
+        private var waiters: [CheckedContinuation<Void, Error>] = []
 
         func isCompleted() -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            return completed
+            return completed && failure == nil
         }
 
         func markCompleted() {
             lock.lock()
-            defer { lock.unlock() }
             completed = true
+            failure = nil
+            let pending = waiters
+            waiters = []
+            lock.unlock()
+            for waiter in pending {
+                waiter.resume()
+            }
+        }
+
+        func markFailed(_ error: Error) {
+            lock.lock()
+            completed = true
+            failure = error
+            let pending = waiters
+            waiters = []
+            lock.unlock()
+            for waiter in pending {
+                waiter.resume(throwing: error)
+            }
+        }
+
+        func wait() async throws {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if completed {
+                    let err = failure
+                    lock.unlock()
+                    if let err {
+                        cont.resume(throwing: err)
+                    } else {
+                        cont.resume()
+                    }
+                    return
+                }
+                waiters.append(cont)
+                lock.unlock()
+            }
         }
     }
 
@@ -129,10 +167,19 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 message: "Connecting to Docker helper…"
             )
         }
+        // Kick prewarm immediately; callers await via `waitUntilPrewarmed()`.
         Task {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
             await prewarmEnvironment()
         }
+    }
+
+    /// Wait until docker volumes/image/warm containers are ready (or throw if prewarm failed).
+    public func waitUntilPrewarmed() async throws {
+        try await prewarmState.wait()
+    }
+
+    public var isPrewarmCompleted: Bool {
+        prewarmState.isCompleted()
     }
 
     /// - Parameter dockerArguments: Args after `docker` (not including the docker token).
@@ -400,13 +447,11 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
             prewarmState.markCompleted()
             debugLog("Docker environment pre-warming completed successfully.")
-
-            await MainActor.run {
-                AppBootstrapStatus.shared.markReady()
-            }
+            // Do not markReady here — UI bootstrap awaits prewarm, then enables prompting.
         } catch {
             let detail = error.localizedDescription
             debugLog("Docker environment pre-warming failed or was skipped: \(detail)")
+            prewarmState.markFailed(error)
             let classified = await MainActor.run {
                 AppBootstrapStatus.classifyError(error)
             }

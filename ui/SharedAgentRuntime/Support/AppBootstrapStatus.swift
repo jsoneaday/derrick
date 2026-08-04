@@ -51,6 +51,12 @@ final class AppBootstrapStatus: ObservableObject {
     }
 
     func update(phase: Phase, message: String) {
+        // Never re-open the modal after a successful ready — parallel prewarm + later
+        // "Starting MCPService…" updates were flashing a second stuck modal.
+        if self.phase == .ready, phase != .failed, phase != .ready {
+            debugLog("[bootstrap] ignore phase=\(phase.rawValue) (already ready): \(message)")
+            return
+        }
         self.phase = phase
         self.statusMessage = message
         isModalPresented = true

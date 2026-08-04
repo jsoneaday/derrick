@@ -51,6 +51,9 @@ actor AgentServiceTurnHost {
         )
         conversation = model
         sessionID = model.sessionKey.sessionID
+        // Do not ensure-up MCPService from AgentService: sibling XPC services cannot open
+        // each other via NSXPCConnection(serviceName:). UI launches MCPService; tool
+        // routing over XPC from Agent→MCP needs a shared endpoint (next slice).
         await AgentServiceStore.shared.log(
             level: .info,
             message: "Turn host session ready session=\(model.sessionKey.sessionID)",

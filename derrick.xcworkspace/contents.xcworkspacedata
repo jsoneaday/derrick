@@ -2,63 +2,66 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "group:ui/ui.xcodeproj">
+      location = "absolute:/Users/davidchoi/Work/derrick/ui/ui.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:packages/DBRepository">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/AgentRuntime">
    </FileRef>
    <FileRef
-      location = "group:packages/LLMAgentClient">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/AppEvents">
    </FileRef>
    <FileRef
-      location = "group:packages/PolicyEngine">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/DBRepository">
    </FileRef>
    <FileRef
-      location = "group:packages/MCPClient">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/DockerRunnerXPC">
    </FileRef>
    <FileRef
-      location = "group:packages/MCPServer">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/EgressProxy">
    </FileRef>
    <FileRef
-      location = "group:packages/MCPToolCatalog">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/LLMAgentClient">
    </FileRef>
    <FileRef
-      location = "group:packages/MemorySystem">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/Lib">
    </FileRef>
    <FileRef
-      location = "group:packages/Lib">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/MCPClient">
    </FileRef>
    <FileRef
-      location = "group:packages/DockerRunnerXPC">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/MCPServer">
    </FileRef>
    <FileRef
-      location = "group:packages/Plugin">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/MCPToolCatalog">
    </FileRef>
    <FileRef
-      location = "group:packages/AppEvents">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/MemorySystem">
    </FileRef>
    <FileRef
-      location = "group:packages/AgentRuntime">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/Plugin">
    </FileRef>
    <FileRef
-      location = "group:packages/ServiceContracts">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/PolicyEngine">
    </FileRef>
    <FileRef
-      location = "group:packages/PolicyUserInteraction">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/PolicyRuntime">
    </FileRef>
    <FileRef
-      location = "group:packages/PolicyRuntime">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/PolicyUserInteraction">
    </FileRef>
    <FileRef
-      location = "group:packages/EgressProxy">
+      location = "absolute:/Users/davidchoi/Work/derrick/packages/ServiceContracts">
    </FileRef>
    <FileRef
-      location = "group:AGENTS.md">
+      location = "absolute:/Users/davidchoi/Work/derrick/AGENTS.md">
    </FileRef>
    <FileRef
-      location = "group:readme.md">
+      location = "absolute:/Users/davidchoi/Work/derrick/readme.md">
    </FileRef>
    <FileRef
-      location = "group:.gitignore">
+      location = "absolute:/Users/davidchoi/Work/derrick/.gitignore">
+   </FileRef>
+   <FileRef
+      location = "absolute:/Users/davidchoi/Work/derrick/docs">
    </FileRef>
 </Workspace>

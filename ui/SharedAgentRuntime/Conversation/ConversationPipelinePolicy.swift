@@ -451,6 +451,7 @@ extension ConversationPipeline {
                             let toolExecution = try await executeToolRequest(
                                 parsedTool,
                                 sessionID: sessionID,
+                                userPrompt: prompt,
                                 approvalPresenter: approvalPresenter
                             )
                             let toolWallMS = PipelineTiming.elapsedMS(from: toolStarted)
@@ -607,6 +608,7 @@ extension ConversationPipeline {
     private func executeToolRequest(
         _ request: ParsedToolRequest?,
         sessionID: String,
+        userPrompt: String?,
         approvalPresenter: (any ApprovalConfirmationPresenting)?
     ) async throws -> (summary: String, records: [ToolCallRecord]) {
         guard let request else {
@@ -622,6 +624,7 @@ extension ConversationPipeline {
                 named: single.toolName,
                 arguments: single.arguments ?? [:],
                 sessionID: sessionID,
+                userPrompt: userPrompt,
                 approvalPresenter: approvalPresenter
             )
             
@@ -636,6 +639,7 @@ extension ConversationPipeline {
             let batchResult = try await batchCallToolsWithPolicyInterception(
                 batchRequest,
                 sessionID: sessionID,
+                userPrompt: userPrompt,
                 approvalPresenter: approvalPresenter
             )
             let records = zip(batchRequest.invocations, batchResult.results).map { invocation, result in

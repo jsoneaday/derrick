@@ -1,7 +1,12 @@
 import Foundation
 
-// Fan SharedAgentRuntime debugLog into stderr + service_logs.
+// Fan SharedAgentRuntime debugLog into stderr + service_logs (skip high-volume noise).
 RuntimeLog.shared.addSink { message in
+    if message.contains("Memory DB migrations")
+        || message.contains("Policy seed skipped")
+        || message.contains("Egress allowlist seed skipped") {
+        return
+    }
     Task {
         await AgentServiceStore.shared.log(
             level: .debug,

@@ -509,37 +509,50 @@ struct ContentView: View {
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
-                // Docker helper stays in the UI process for mid-flight egress prompts.
+                // Parallel: Docker prewarm (required before prompts) + AgentService + MCPService.
+                // Modal stays up until Docker finishes; sessionReady only then.
                 await MainActor.run {
-                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker helper…")
+                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and services…")
                 }
                 _ = XPCDockerRunner.shared
                 await EgressAllowlistService.shared.pushToHelper()
 
-                await MainActor.run {
-                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting AgentService…")
-                }
-                let health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                async let dockerReady: Void = {
+                    try await XPCDockerRunner.shared.waitUntilPrewarmed()
+                }()
+                async let agentHealth = AgentServiceClient.shared.ensureUpAndHealth()
+                async let mcpHealthResult: Result<ServiceHealthReport, Error> = {
+                    do {
+                        return .success(try await MCPServiceClient.shared.ensureUpAndHealth())
+                    } catch {
+                        return .failure(error)
+                    }
+                }()
+
+                // Docker must succeed before prompting is allowed.
+                try await dockerReady
+
+                let health = try await agentHealth
                 debugLog(
                     "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
                 )
 
+                switch await mcpHealthResult {
+                case .success(let mcpHealth):
+                    debugLog(
+                        "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
+                    )
+                case .failure(let error):
+                    debugLog("MCPService ensure-up failed (non-fatal): \(error.localizedDescription)")
+                }
+
                 sessionReady = true
                 await MainActor.run {
-                    // Docker prewarm may still be running; leave modal to XPCDockerRunner if so.
-                    switch bootstrapStatus.phase {
-                    case .ready, .failed:
-                        break
-                    case .checkingDocker, .preparingVolumes, .preparingImage,
-                         .startingContainers, .verifyingEnvironment:
-                        break
-                    default:
-                        bootstrapStatus.markReady()
-                    }
+                    bootstrapStatus.markReady()
                 }
                 if isDebugEnabled {
                     await MainActor.run {
-                        debugLogStore.log("UI client ready (AgentService hosts turns)")
+                        debugLogStore.log("UI client ready (Docker prewarm done; AgentService hosts turns)")
                     }
                 }
             } catch {

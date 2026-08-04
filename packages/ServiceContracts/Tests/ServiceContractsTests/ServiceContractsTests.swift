@@ -67,6 +67,24 @@ import Testing
         #expect(decodedChunk.status == "complete")
     }
 
+    @Test func mcpToolCallRoundTrip() throws {
+        let request = MCPToolCallRequest(
+            principal: .agent(sessionID: "s1", agentID: "ui"),
+            toolName: "python_script_exec",
+            argumentsJSON: #"{"script":"print(1)"}"#
+        )
+        let data = try MCPServiceXPCCodec.encodeToolCallRequest(request)
+        let decoded = try MCPServiceXPCCodec.decodeToolCallRequest(data)
+        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.principal.logLabel.contains("agent:"))
+
+        let result = MCPToolCallResultDTO(requestID: decoded.requestID, ok: true, text: "ok")
+        let rData = try MCPServiceXPCCodec.encodeToolCallResult(result)
+        let rDecoded = try MCPServiceXPCCodec.decodeToolCallResult(rData)
+        #expect(rDecoded.ok == true)
+        #expect(rDecoded.text == "ok")
+    }
+
     @Test func approvalDTORoundTrip() throws {
         let request = AgentApprovalRequestDTO(
             approvalID: "a1",

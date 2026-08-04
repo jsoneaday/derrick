@@ -41,6 +41,13 @@
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
 		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
 		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
+		DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEMC10012A00000000MC001 /* MCPService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* ServiceContracts */; };
+		DEMC10112A00000000MC001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10212A00000000MC001 /* DBRepository */; };
+		DEMC10122A00000000MC001 /* MCPClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10222A00000000MC001 /* MCPClient */; };
+		DEMC10132A00000000MC001 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10232A00000000MC001 /* MCPServer */; };
+		DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10242A00000000MC001 /* MCPToolCatalog */; };
+		DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10252A00000000MC001 /* DockerRunnerXPC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +79,13 @@
 			remoteGlobalIDString = DEAS10062A00000000AS001;
 			remoteInfo = AgentService;
 		};
+		DEMC100D2A00000000MC001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DE1B9EFE2FEB74250042F227 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DEMC10062A00000000MC001;
+			remoteInfo = MCPService;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -82,6 +96,7 @@
 			files = (
 				DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */,
 				DEAS100B2A00000000AS001 /* AgentService.xpc in Embed XPC Services */,
+				DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */,
 			);
 			name = "Embed XPC Services";
 		};
@@ -93,6 +108,7 @@
 		DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = uiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = DockerRunnerHelper.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAS10012A00000000AS001 /* AgentService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = AgentService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
+		DEMC10012A00000000MC001 /* MCPService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = MCPService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -109,6 +125,13 @@
 				Info.plist,
 			);
 			target = DEAS10062A00000000AS001 /* AgentService */;
+		};
+		DEMC100E2A00000000MC001 /* Exceptions for "MCPService" folder in "MCPService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DEMC10062A00000000MC001 /* MCPService */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -147,6 +170,14 @@
 		DESH00012A00000000SH001 /* SharedAgentRuntime */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SharedAgentRuntime;
+			sourceTree = "<group>";
+		};
+		DEMC10022A00000000MC001 /* MCPService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DEMC100E2A00000000MC001 /* Exceptions for "MCPService" folder in "MCPService" target */,
+			);
+			path = MCPService;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -209,6 +240,17 @@
 				DEAS10242A00000000AS001 /* EgressProxy in Frameworks */,
 			);
 		};
+		DEMC10042A00000000MC001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */,
+				DEMC10112A00000000MC001 /* DBRepository in Frameworks */,
+				DEMC10122A00000000MC001 /* MCPClient in Frameworks */,
+				DEMC10132A00000000MC001 /* MCPServer in Frameworks */,
+				DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */,
+				DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -218,6 +260,7 @@
 				DE1B9F082FEB74250042F227 /* ui */,
 				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
 				DEAS10022A00000000AS001 /* AgentService */,
+				DEMC10022A00000000MC001 /* MCPService */,
 				DESH00012A00000000SH001 /* SharedAgentRuntime */,
 				DE1B9F162FEB74260042F227 /* uiTests */,
 				DE1B9F202FEB74260042F227 /* uiUITests */,
@@ -231,6 +274,7 @@
 				DE1B9F062FEB74250042F227 /* ui.app */,
 				DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */,
 				DEAS10012A00000000AS001 /* AgentService.xpc */,
+				DEMC10012A00000000MC001 /* MCPService.xpc */,
 				DE1B9F132FEB74260042F227 /* uiTests.xctest */,
 				DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */,
 			);
@@ -254,6 +298,7 @@
 			dependencies = (
 				DEAA100C2FFF00000042F228 /* PBXTargetDependency */,
 				DEAS100C2A00000000AS001 /* PBXTargetDependency */,
+				DEMC100C2A00000000MC001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DE1B9F082FEB74250042F227 /* ui */,
@@ -381,6 +426,32 @@
 			productReference = DEAS10012A00000000AS001 /* AgentService.xpc */;
 			productType = "com.apple.product-type.xpc-service";
 		};
+		DEMC10062A00000000MC001 /* MCPService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DEMC10092A00000000MC001 /* Build configuration list for PBXNativeTarget "MCPService" */;
+			buildPhases = (
+				DEMC10032A00000000MC001 /* Sources */,
+				DEMC10042A00000000MC001 /* Frameworks */,
+				DEMC10052A00000000MC001 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				DEMC10022A00000000MC001 /* MCPService */,
+			);
+			name = MCPService;
+			packageProductDependencies = (
+				DEMC10202A00000000MC001 /* ServiceContracts */,
+				DEMC10212A00000000MC001 /* DBRepository */,
+				DEMC10222A00000000MC001 /* MCPClient */,
+				DEMC10232A00000000MC001 /* MCPServer */,
+				DEMC10242A00000000MC001 /* MCPToolCatalog */,
+				DEMC10252A00000000MC001 /* DockerRunnerXPC */,
+			);
+			productName = MCPService;
+			productReference = DEMC10012A00000000MC001 /* MCPService.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -438,6 +509,7 @@
 				DE1B9F052FEB74250042F227 /* ui */,
 				DEAA10062FFF00000042F228 /* DockerRunnerHelper */,
 				DEAS10062A00000000AS001 /* AgentService */,
+				DEMC10062A00000000MC001 /* MCPService */,
 				DE1B9F122FEB74260042F227 /* uiTests */,
 				DE1B9F1C2FEB74260042F227 /* uiUITests */,
 			);
@@ -470,6 +542,11 @@
 			files = (
 			);
 		};
+		DEMC10052A00000000MC001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -498,6 +575,11 @@
 			files = (
 			);
 		};
+		DEMC10032A00000000MC001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -520,6 +602,11 @@
 			isa = PBXTargetDependency;
 			target = DEAS10062A00000000AS001 /* AgentService */;
 			targetProxy = DEAS100D2A00000000AS001 /* PBXContainerItemProxy */;
+		};
+		DEMC100C2A00000000MC001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DEMC10062A00000000MC001 /* MCPService */;
+			targetProxy = DEMC100D2A00000000MC001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -886,6 +973,44 @@
 			};
 			name = Release;
 		};
+		DEMC10072A00000000MC001 /* Debug configuration for PBXNativeTarget "MCPService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MCPService/MCPService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MCPService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.MCPService;
+				PRODUCT_NAME = MCPService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		DEMC10082A00000000MC001 /* Release configuration for PBXNativeTarget "MCPService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MCPService/MCPService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MCPService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.MCPService;
+				PRODUCT_NAME = MCPService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -934,6 +1059,14 @@
 			buildConfigurations = (
 				DEAS10072A00000000AS001 /* Debug configuration for PBXNativeTarget "AgentService" */,
 				DEAS10082A00000000AS001 /* Release configuration for PBXNativeTarget "AgentService" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		DEMC10092A00000000MC001 /* Build configuration list for PBXNativeTarget "MCPService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEMC10072A00000000MC001 /* Debug configuration for PBXNativeTarget "MCPService" */,
+				DEMC10082A00000000MC001 /* Release configuration for PBXNativeTarget "MCPService" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -1137,6 +1270,30 @@
 		DESC00042A00000000SC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ServiceContracts;
+		};
+		DEMC10202A00000000MC001 /* ServiceContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ServiceContracts;
+		};
+		DEMC10212A00000000MC001 /* DBRepository */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DBRepository;
+		};
+		DEMC10222A00000000MC001 /* MCPClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPClient;
+		};
+		DEMC10232A00000000MC001 /* MCPServer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPServer;
+		};
+		DEMC10242A00000000MC001 /* MCPToolCatalog */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MCPToolCatalog;
+		};
+		DEMC10252A00000000MC001 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
