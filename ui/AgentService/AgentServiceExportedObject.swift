@@ -42,6 +42,12 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
 
     func bind(connection: NSXPCConnection) {
         connectionContext.attach(connection)
+        AgentServiceLogRelay.shared.attach(connection: connection)
+        connection.invalidationHandler = { [weak connection] in
+            if let connection {
+                AgentServiceLogRelay.shared.detach(connection: connection)
+            }
+        }
     }
 
     func health(withReply reply: @escaping @Sendable (NSData) -> Void) {

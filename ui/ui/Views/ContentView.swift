@@ -244,7 +244,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "I need a short practical React guide. Split the research: one worker on hooks pitfalls (useEffect deps, stale closures, rules of hooks), another on component design (composition, controlled vs uncontrolled inputs, list keys, when to split components). Then pull both into one clean write-up with sections for Hooks, Components, and a five-item checklist."
+    @State private var prompt = "tell me what's on apple.com"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -892,7 +892,8 @@ struct ContentView: View {
 
         requestTask = Task {
             do {
-                _ = try await AgentServiceClient.shared.ensureUpAndHealth()
+                // App bootstrap already ensure-up'd Agent; only reconnect if the link died.
+                try await AgentServiceClient.shared.ensureReadyForTurn()
                 let modelJSON = try JSONEncoder().encode(currentModel)
                 let request = AgentTurnRequest(
                     prompt: currentPrompt,

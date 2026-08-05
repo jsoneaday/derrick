@@ -477,9 +477,13 @@ public enum PythonScriptExecutionVerifier {
         findings.append(contentsOf: packagesVolumeViolations(in: args.script))
 
         if let prompt = args.userPrompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let score = relevanceScore(prompt: prompt, details: "\(args.description) \(args.reason)")
+            // Include script: models often put the real intent in code, not description/reason.
+            let score = relevanceScore(
+                prompt: prompt,
+                details: "\(args.description) \(args.reason) \(args.script)"
+            )
             if score < 0.05 {
-                findings.append("Low prompt relevance score; description/reason do not align with user request.")
+                findings.append("Low prompt relevance score; description/reason/script do not align with user request.")
             }
         }
 
@@ -763,18 +767,28 @@ public extension MCPServerHost {
             )
         }
 
+        let userPrompt = arguments["user_prompt"]?.stringValue
+        let promptSnippet = userPrompt?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let description: String = {
             let raw = arguments["description"]?.stringValue?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return raw.isEmpty ? "Execute python script for the user request." : raw
+            if !raw.isEmpty { return raw }
+            if !promptSnippet.isEmpty {
+                return "Carry out user request: \(promptSnippet)"
+            }
+            return "Execute python script for the user request."
         }()
         let reason: String = {
             let raw = arguments["reason"]?.stringValue?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return raw.isEmpty ? "User-requested automation or live data access." : raw
+            if !raw.isEmpty { return raw }
+            if !promptSnippet.isEmpty {
+                return "User asked: \(promptSnippet)"
+            }
+            return "User-requested automation or live data access."
         }()
 
-        let userPrompt = arguments["user_prompt"]?.stringValue
         let expectedEffects = (arguments["expected_effects"]?.arrayValue ?? []).compactMap { $0.stringValue }
         let pythonPackages = (arguments["python_packages"]?.arrayValue ?? []).compactMap { $0.stringValue }
         let allowDependencyInstall = arguments["allow_dependency_install"]?.boolValue ?? false

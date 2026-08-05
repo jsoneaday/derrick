@@ -1,7 +1,11 @@
 import Foundation
 
-// Fan SharedAgentRuntime debugLog into stderr + service_logs (skip high-volume noise).
+// Fan SharedAgentRuntime debugLog → stderr + service_logs + UI (when reverse XPC is up).
 RuntimeLog.shared.addSink { message in
+    if AgentServiceLogRelay.shouldRelayToUI(message) {
+        AgentServiceLogRelay.shared.publish(message)
+    }
+    // Persist a slightly broader set to SQLite (still skip pure seed spam).
     if message.contains("Memory DB migrations")
         || message.contains("Policy seed skipped")
         || message.contains("Egress allowlist seed skipped") {

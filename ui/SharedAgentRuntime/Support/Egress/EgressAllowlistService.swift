@@ -5,6 +5,7 @@ import DockerRunnerXPC
 import EgressProxy
 import AppEvents
 import PolicyUserInteraction
+import ServiceContracts
 
 /// App-owned egress allowlist: DB persistence + helper sync + preflight prompts.
 /// Not exposed as MCP. Not part of tool/content policy rules.
@@ -54,13 +55,28 @@ final class EgressAllowlistService: ObservableObject {
         suffixes.filter(\.enabled).map(\.suffix)
     }
 
+    /// UI embeds DockerRunnerHelper; AgentService cannot open that sibling XPC.
+    private var isAgentServiceProcess: Bool {
+        let bid = Bundle.main.bundleIdentifier ?? ""
+        return bid == DerrickServiceID.agent.rawValue || bid.hasSuffix(".AgentService")
+    }
+
     func pushToHelper() async {
         // AgentService cannot open DockerRunnerHelper XPC; UI process owns helper sync.
-        let bid = Bundle.main.bundleIdentifier ?? ""
-        if bid == "derrick.ui.AgentService" || bid.hasSuffix(".AgentService") {
+        if isAgentServiceProcess { return }
+        await XPCDockerRunner.shared.pushEgressAllowedDomainSuffixes(enabledSuffixStrings())
+    }
+
+    /// Push session host grants to the helper only from the UI process.
+    private func grantSessionHostsToHelper(_ hosts: [String]) async {
+        guard !hosts.isEmpty else { return }
+        if isAgentServiceProcess {
+            debugLog(
+                "Skipping helper session grant from AgentService (UI already applied via reverse XPC)"
+            )
             return
         }
-        await XPCDockerRunner.shared.pushEgressAllowedDomainSuffixes(enabledSuffixStrings())
+        await XPCDockerRunner.shared.grantEgressSessionHosts(hosts)
     }
 
     func addSuffix(_ raw: String, source: String = "user") async throws {
@@ -165,7 +181,7 @@ final class EgressAllowlistService: ObservableObject {
         }
 
         if !sessionGrants.isEmpty {
-            await XPCDockerRunner.shared.grantEgressSessionHosts(sessionGrants)
+            await grantSessionHostsToHelper(sessionGrants)
         }
         PipelineTiming.log(
             "egress_preflight ok hosts=\(hosts.count) prompted=\(promptedHosts) session_grants=\(sessionGrants.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
@@ -196,7 +212,7 @@ final class EgressAllowlistService: ObservableObject {
         case .approved(let actor), .approvedOnce(let actor):
             debugLog("Egress UI apply once host=\(normalized) actor=\(actor ?? "?")")
             localPolicy.grantSessionHosts([normalized])
-            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            await grantSessionHostsToHelper([normalized])
         case .approvedPermanently(let actor):
             debugLog("Egress UI apply always host=\(normalized) actor=\(actor ?? "?")")
             let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
@@ -207,7 +223,7 @@ final class EgressAllowlistService: ObservableObject {
             }
             // Exact host + permanent suffix so helper/mid-flight skip immediately.
             localPolicy.grantSessionHosts([normalized])
-            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            await grantSessionHostsToHelper([normalized])
             await pushToHelper()
         case .denied, .dismissed, .timedOut:
             break
@@ -241,7 +257,7 @@ final class EgressAllowlistService: ObservableObject {
         if localPolicy.isHostCoveredByAllowlist(normalized) {
             debugLog("Egress mid-flight already allowed for \(normalized)")
             // Keep helper session allowlist in sync for this CONNECT.
-            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            await grantSessionHostsToHelper([normalized])
             PipelineTiming.log(
                 "egress_midflight already_allowed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
             )
@@ -255,7 +271,7 @@ final class EgressAllowlistService: ObservableObject {
         case .approved(let actor), .approvedOnce(let actor):
             debugLog("Egress mid-flight allow once for \(normalized) by \(actor ?? "user")")
             localPolicy.grantSessionHosts([normalized])
-            await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+            await grantSessionHostsToHelper([normalized])
             PipelineTiming.log(
                 "egress_midflight once host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
             )
@@ -267,7 +283,7 @@ final class EgressAllowlistService: ObservableObject {
                 try await addSuffix(suffix, source: "user")
                 // Session grant covers the exact host while permanent suffix propagates.
                 localPolicy.grantSessionHosts([normalized])
-                await XPCDockerRunner.shared.grantEgressSessionHosts([normalized])
+                await grantSessionHostsToHelper([normalized])
                 PipelineTiming.log(
                     "egress_midflight always host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
                 )

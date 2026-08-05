@@ -166,6 +166,18 @@ extension ConversationPipeline {
                                 )
                             }
                         }
+                        // Preflight before MCPService/docker: extract hosts, allowlist, reverse-XPC prompt.
+                        // Mid-flight egress remains a backstop for hosts not present in the script text.
+                        let script = interceptedArguments["script"]?.stringValue ?? ""
+                        if let blockedJSON = await EgressAllowlistService.shared.preflightPythonScriptNetwork(
+                            script: script,
+                            allowNetwork: allowNetwork
+                        ) {
+                            await MainActor.run {
+                                debugLog("Egress preflight blocked \(interceptedEvent.toolName) before MCPService")
+                            }
+                            return MCPToolResult(content: [.text(blockedJSON)], isError: true)
+                        }
                     }
                     await MainActor.run {
                         debugLog("Executing tool: \(interceptedEvent.toolName)")

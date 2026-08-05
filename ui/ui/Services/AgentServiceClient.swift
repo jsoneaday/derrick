@@ -9,6 +9,8 @@ public final class AgentServiceClient: @unchecked Sendable {
     private let serviceName = DerrickServiceID.agent.xpcServiceName
     private let lock = NSLock()
     private var connection: NSXPCConnection?
+    /// True after a successful full ensure-up; cleared when the XPC link dies.
+    private var isReady = false
     private let sink = AgentServiceClientSink()
 
     private init() {}
@@ -27,7 +29,20 @@ public final class AgentServiceClient: @unchecked Sendable {
         sink.setNetworkAccessHandler(handler)
     }
 
+    /// For chat turns after app bootstrap: reuse the live XPC link; full ensure-up only if down.
+    public func ensureReadyForTurn() async throws {
+        if hasLiveReadyConnection() { return }
+        _ = try await ensureUpAndHealth()
+    }
+
+    private nonisolated func hasLiveReadyConnection() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return connection != nil && isReady
+    }
+
     /// Connect (launch-on-demand), bootstrap DB/logs, return health. Retries a few times.
+    /// Use at app startup (and when `ensureReadyForTurn` finds the link dead).
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
@@ -65,6 +80,7 @@ public final class AgentServiceClient: @unchecked Sendable {
                         "AgentService health: status=\(report.status.rawValue) pid=\(report.pid) detail=\(report.detail ?? "")"
                     )
                 }
+                markReady()
                 return report
             } catch {
                 lastError = error
@@ -76,6 +92,12 @@ public final class AgentServiceClient: @unchecked Sendable {
             }
         }
         throw lastError ?? AgentServiceClientError.unavailable
+    }
+
+    private nonisolated func markReady() {
+        lock.lock()
+        isReady = true
+        lock.unlock()
     }
 
     public func ping(_ text: String) async throws -> String {
@@ -229,11 +251,14 @@ public final class AgentServiceClient: @unchecked Sendable {
         return proxy
     }
 
-    private func invalidate() {
+    private nonisolated func invalidate() {
         lock.lock()
-        connection?.invalidate()
+        let conn = connection
         connection = nil
+        isReady = false
         lock.unlock()
+        // Invalidate outside the lock to avoid re-entrancy with invalidationHandler.
+        conn?.invalidate()
     }
 }
 

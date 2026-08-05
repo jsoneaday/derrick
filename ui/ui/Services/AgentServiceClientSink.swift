@@ -73,8 +73,9 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         let onLog = handlers.onLog
         lock.unlock()
         onLog?(line)
+        // UI process: surface Agent runtime/tool path in the debug panel (not only service_logs).
         Task { @MainActor in
-            debugLog("[AgentService] \(line)")
+            DebugLogStore.shared.log("[AgentService] \(line)")
         }
     }
 

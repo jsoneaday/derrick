@@ -15,7 +15,8 @@ final class DebugLogStore: ObservableObject {
     @Published private(set) var entries: [DebugLogEntry] = []
 
     private let formatter: DateFormatter
-    private let maximumEntries = 200
+    /// Raised so Agent reverse-XPC tool/runtime lines are not flushed by seed/bootstrap noise alone.
+    private let maximumEntries = 500
 
     private init() {
         let formatter = DateFormatter()
