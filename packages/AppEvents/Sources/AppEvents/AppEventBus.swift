@@ -50,9 +50,19 @@ public actor AppEventBus {
         return typed
     }
 
-    /// Complete a pending `requestDecision` wait.
+    /// Complete a pending `requestDecision` wait. Idempotent if already completed.
     public func completeDecision<D: Sendable>(id: UUID, decision: D) {
         guard let waiter = decisionWaiters.removeValue(forKey: id) else { return }
         waiter.resume(returning: decision)
+    }
+
+    /// Number of active decision waiters (tests / diagnostics).
+    public var pendingDecisionCount: Int {
+        decisionWaiters.count
+    }
+
+    /// Number of subscribers (tests / diagnostics).
+    public var subscriberCount: Int {
+        handlers.count
     }
 }
