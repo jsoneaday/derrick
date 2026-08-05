@@ -100,6 +100,31 @@ public final class MCPServiceClient: @unchecked Sendable {
         }
     }
 
+    /// Deliver DockerRunnerHelper peer endpoint into MCPService (pure XPC handoff).
+    public func setDockerHelperPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.setDockerHelperPeerEndpoint(endpoint) { data in
+                    let text = MCPServiceXPCCodec.decodeString(data as Data)
+                    if text == "ok" {
+                        cont.resume()
+                    } else {
+                        let detail = text.hasPrefix("error:") ? String(text.dropFirst(6)) : text
+                        cont.resume(
+                            throwing: MCPServiceClientError.meshUnverified(
+                                detail.isEmpty ? "Docker helper peer mesh verification failed" : detail
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("MCPService Docker helper peer endpoint handoff ok")
+        }
+    }
+
     public func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
         nonisolated(unsafe) let proxy = try remoteProxy()
         let payload = try MCPServiceXPCCodec.encodeToolCallRequest(request) as NSData
@@ -175,7 +200,15 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     private func configure(_ conn: NSXPCConnection, codeSignPeerAsMCPService: Bool) {
-        conn.remoteObjectInterface = NSXPCInterface(with: MCPServiceXPC.self)
+        let remote = NSXPCInterface(with: MCPServiceXPC.self)
+        // Allow NSXPCListenerEndpoint argument on setDockerHelperPeerEndpoint:
+        remote.setClasses(
+            NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        conn.remoteObjectInterface = remote
         if codeSignPeerAsMCPService {
             do {
                 try XPCPeerAuthentication.apply(

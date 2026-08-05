@@ -540,13 +540,20 @@ struct ContentView: View {
                 try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
                 debugLog("MCPService peer endpoint handed to AgentService")
 
+                // Required: Docker helper peer for MCP docker exec (not direct CLI).
+                let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
+                try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
+                debugLog("Docker helper peer endpoint handed to MCPService")
+
                 sessionReady = true
                 await MainActor.run {
                     bootstrapStatus.markReady()
                 }
                 if isDebugEnabled {
                     await MainActor.run {
-                        debugLogStore.log("UI client ready (Docker + AgentService + MCPService peer handoff)")
+                        debugLogStore.log(
+                            "UI client ready (Docker + AgentService + MCPService peer + Docker helper→MCP)"
+                        )
                     }
                 }
             } catch {

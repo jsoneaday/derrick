@@ -21,7 +21,14 @@ final class MCPServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
             return false
         }
 
-        connection.exportedInterface = NSXPCInterface(with: MCPServiceXPC.self)
+        let exportedInterface = NSXPCInterface(with: MCPServiceXPC.self)
+        exportedInterface.setClasses(
+            NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        connection.exportedInterface = exportedInterface
         connection.exportedObject = MCPServiceExportedObject()
         connection.resume()
         fputs("[MCPService] accepted connection\n", stderr)

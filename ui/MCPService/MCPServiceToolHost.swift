@@ -28,12 +28,12 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Direct docker CLI (UI prewarms containers).
+        // Docker via DockerRunnerHelper peer XPC only (UI prewarms + hands peer endpoint).
         // Network host preflight runs in AgentService (has reverse-XPC to UI) before callTool.
-        // Mid-flight egress via helper→UI remains a backstop for dynamic hosts.
+        // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
         let made = try await MCPLocalBridge.make { server in
             await server.registerPythonScriptExecutionTool(
-                runner: DockerPythonScriptRunner(),
+                runner: MCPServiceDockerHelperRunner.shared,
                 reviewer: MCPServicePythonReviewer(),
                 networkPreflight: { _, _ in nil },
                 logger: { message in

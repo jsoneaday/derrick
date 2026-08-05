@@ -66,6 +66,34 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         reply(endpoint)
     }
 
+    func setDockerHelperPeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    ) {
+        Task {
+            do {
+                MCPServiceDockerHelperRunner.shared.installPeerEndpoint(endpoint)
+                try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
+                await MCPServiceStore.shared.log(
+                    level: .info,
+                    message: "Docker helper peer mesh verified (MCP→helper)",
+                    code: "docker_helper_peer_ok"
+                )
+                fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
+                reply(MCPServiceXPCCodec.encodeString("ok") as NSData)
+            } catch {
+                let message = error.localizedDescription
+                await MCPServiceStore.shared.log(
+                    level: .error,
+                    message: "Docker helper peer mesh failed: \(message)",
+                    code: "docker_helper_peer_failed"
+                )
+                fputs("[MCPService] Docker helper peer mesh failed: \(message)\n", stderr)
+                reply(MCPServiceXPCCodec.encodeString("error:\(message)") as NSData)
+            }
+        }
+    }
+
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let data = requestJSON as Data
         Task {

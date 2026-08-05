@@ -56,6 +56,9 @@ public struct DockerRunResponse: Codable, Sendable {
     func setEgressAllowedDomainSuffixes(suffixesJSON: NSData, withReply reply: @escaping @Sendable (Bool) -> Void)
     /// JSON array of exact hosts granted for this app session only (Allow once).
     func grantEgressSessionHosts(hostsJSON: NSData, withReply reply: @escaping @Sendable (Bool) -> Void)
+    /// Anonymous peer listener endpoint for sibling services (MCPService).
+    /// Must travel over XPC (`NSXPCCoder`); UI fetches this then hands it to MCPService.
+    func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
 }
 
 /// XPC protocol used by the helper to talk back to the app (logs + mid-flight egress prompts).

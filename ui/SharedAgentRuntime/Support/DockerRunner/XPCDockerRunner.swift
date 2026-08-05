@@ -182,6 +182,28 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         prewarmState.isCompleted()
     }
 
+    /// Fetch helper anonymous peer endpoint for handoff to MCPService (UI→MCP only).
+    public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
+        try await withCheckedThrowingContinuation { continuation in
+            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                continuation.resume(throwing: error)
+            }
+            guard let service = proxy as? any DockerProcessRunnerXPC else {
+                continuation.resume(
+                    throwing: NSError(
+                        domain: "XPCDockerRunner",
+                        code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]
+                    )
+                )
+                return
+            }
+            service.peerListenerEndpoint { endpoint in
+                continuation.resume(returning: endpoint)
+            }
+        }
+    }
+
     /// - Parameter dockerArguments: Args after `docker` (not including the docker token).
     private func runXPCCommand(dockerArguments: [String], stdinData: Data = Data(), timeoutSeconds: Int) async throws -> DockerRunResponse {
         let request = DockerHostLaunch.makeRequest(

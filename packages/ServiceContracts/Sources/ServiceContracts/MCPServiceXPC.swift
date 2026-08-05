@@ -8,6 +8,9 @@ import Foundation
     /// Anonymous peer listener endpoint for sibling services (AgentService).
     /// Must travel over XPC (`NSXPCCoder`); cannot be NSKeyedArchived to disk.
     func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
+    /// DockerRunnerHelper peer endpoint (UI→MCP handoff). MCP runs docker via helper XPC only.
+    /// Reply is plain UTF-8 `"ok"` or `"error:…"`.
+    func setDockerHelperPeerEndpoint(_ endpoint: NSXPCListenerEndpoint, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// `requestJSON` is `MCPToolCallRequest`. Reply is `MCPToolCallResultDTO`.
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// `queryJSON` is `MCPToolSearchRequest`. Reply is `MCPToolSearchResultDTO`.

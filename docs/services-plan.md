@@ -78,7 +78,7 @@ UI ─────────────────────────�
 | **P0** | done | This ADR + locked decisions |
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
-| **P3** | mostly done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop). Residual: MCPService still direct docker CLI (not helper XPC). |
+| **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
 | **P4** | pending | JobService |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |

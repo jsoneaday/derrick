@@ -34,7 +34,14 @@ final class MCPServicePeerEndpoint: NSObject, NSXPCListenerDelegate, @unchecked 
         // Anonymous peer mesh (Agent/Job/Webhook). Do not setCodeSigningRequirement here:
         // Debug ad-hoc signing + anonymous endpoints fail closed and break the mesh.
         // Application XPC (UI→MCP serviceName) still uses peer auth on the service listener.
-        connection.exportedInterface = NSXPCInterface(with: MCPServiceXPC.self)
+        let exportedInterface = NSXPCInterface(with: MCPServiceXPC.self)
+        exportedInterface.setClasses(
+            NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        connection.exportedInterface = exportedInterface
         connection.exportedObject = exportedObject
         connection.resume()
         fputs("[MCPService] peer accepted connection pid=\(connection.processIdentifier)\n", stderr)

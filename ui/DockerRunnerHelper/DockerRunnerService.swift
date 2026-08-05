@@ -168,4 +168,10 @@ final class DockerRunnerService: NSObject, DockerProcessRunnerXPC, @unchecked Se
             reply(false)
         }
     }
+
+    nonisolated func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
+        let endpoint = DockerHelperPeerEndpoint.shared.endpointForHandoff()
+        HelperLogRelay.shared.log("Docker helper peerListenerEndpoint handoff")
+        reply(endpoint)
+    }
 }
