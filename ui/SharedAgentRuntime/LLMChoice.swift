@@ -1,5 +1,6 @@
 import Foundation
 import LLMAgentClient
+import ServiceContracts
 
 enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
     case google
@@ -124,5 +125,19 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         case .openai(let model):
             return model.tokenPricing
         }
+    }
+
+    /// Wire format for MCPService / cross-process helper model handoff.
+    var helperModelWire: HelperModelWire {
+        switch self {
+        case .gemini(let model):
+            return HelperModelWire(provider: LLMProviderChoice.google.rawValue, model: model.rawValue)
+        case .openai(let model):
+            return HelperModelWire(provider: LLMProviderChoice.openai.rawValue, model: model.rawValue)
+        }
+    }
+
+    func encodeHelperModelWireJSON() throws -> String {
+        try HelperModelWire.encodeJSON(helperModelWire)
     }
 }

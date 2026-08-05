@@ -9,7 +9,10 @@ import Foundation
 import DockerRunnerXPC
 
 /// Utilities for preparing docker run arguments and Python execution scripts.
-/// Used by both `DockerPythonScriptRunner` and the XPC-based runner in the main app.
+/// Shared by:
+/// - UI prewarm / exec via `XPCDockerRunner` (helper Application XPC)
+/// - MCPService exec via `MCPServiceDockerHelperRunner` (helper peer XPC)
+/// - package tests / non-sandboxed `DockerPythonScriptRunner` (direct CLI only)
 public enum DockerScriptPreparer {
     /// Parent image used when building the local baseline image.
     public static let parentImage = "ghcr.io/astral-sh/uv:debian"
@@ -391,8 +394,14 @@ exec /bin/sleep infinity
     }
 }
 
-/// Direct-process docker runner. Used in tests and non-sandboxed contexts.
-/// In the sandboxed app, use `XPCDockerRunner` from the main target instead.
+/// Direct-process docker CLI runner (`Process` → `env docker …`).
+///
+/// **Not used by production Derrick processes.** MCPService and the UI app must
+/// not spawn docker themselves (sandbox + single helper egress path).
+///
+/// - Production MCP: `MCPServiceDockerHelperRunner` (helper peer XPC)
+/// - Production UI prewarm: `XPCDockerRunner` (helper Application XPC)
+/// - This type: MCPServer package tests and intentional non-sandboxed tooling only
 public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Sendable {
     private final class EnsureState: @unchecked Sendable {
         private let lock = NSLock()

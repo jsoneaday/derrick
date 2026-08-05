@@ -38,19 +38,24 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
     public let argumentsJSON: String
     /// Conversation API key for in-MCPService helper LLM (python security reviewer).
     public let helperAPIKey: String?
+    /// JSON `HelperModelWire` for python security reviewer model selection.
+    /// When nil, MCPService uses the default helper model.
+    public let helperReviewerModelJSON: String?
 
     public init(
         requestID: String = UUID().uuidString,
         principal: ServicePrincipal,
         toolName: String,
         argumentsJSON: String,
-        helperAPIKey: String? = nil
+        helperAPIKey: String? = nil,
+        helperReviewerModelJSON: String? = nil
     ) {
         self.requestID = requestID
         self.principal = principal
         self.toolName = toolName
         self.argumentsJSON = argumentsJSON
         self.helperAPIKey = helperAPIKey
+        self.helperReviewerModelJSON = helperReviewerModelJSON
     }
 }
 

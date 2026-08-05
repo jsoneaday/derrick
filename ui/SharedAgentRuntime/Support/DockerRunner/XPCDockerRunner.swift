@@ -51,8 +51,11 @@ public final class XPCDockerRunnerState: @unchecked Sendable {
     }
 }
 
-/// PythonScriptRunner that delegates docker execution to the DockerRunnerHelper XPC service.
-/// The XPC service runs outside the app sandbox and has full access to the Docker socket.
+/// UI-process docker path: prewarm + allowlist push + optional script exec via DockerRunnerHelper
+/// Application XPC (`serviceName:`). Outside the sandbox; owns the helper reverse log/egress sink.
+///
+/// MCPService does **not** use this type — it uses `MCPServiceDockerHelperRunner` over the
+/// helper peer endpoint handed off by the UI after prewarm.
 public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     public static let shared = XPCDockerRunner()
 

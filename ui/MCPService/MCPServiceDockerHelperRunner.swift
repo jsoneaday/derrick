@@ -27,18 +27,19 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         fputs("[MCPService] Docker helper peer endpoint installed\n", stderr)
     }
 
-    /// Prove MCP→helper RPCs work (light egress push round-trip).
+    /// Prove MCP→helper RPCs work without mutating egress allowlist.
+    /// Uses `docker version` (same validation path as real runs).
     func verifyPeerMesh() async throws {
-        let data = try JSONEncoder().encode([String]())
-        let ok: Bool = try await withProxy { proxy in
-            try await withCheckedThrowingContinuation { cont in
-                proxy.setEgressAllowedDomainSuffixes(suffixesJSON: data as NSData) { success in
-                    cont.resume(returning: success)
-                }
-            }
+        let response = try await runDocker(["version", "--format", "{{.Server.Version}}"], timeoutSeconds: 20)
+        if let launchError = response.launchError {
+            throw MCPServiceDockerHelperError.meshUnverified(launchError)
         }
-        guard ok else {
-            throw MCPServiceDockerHelperError.meshUnverified("setEgressAllowedDomainSuffixes returned false")
+        // exit 0 with empty stdout can still mean daemon not ready; non-zero is hard fail.
+        if response.exitCode != 0 {
+            let stderr = String(decoding: response.stderr, as: UTF8.self)
+            throw MCPServiceDockerHelperError.meshUnverified(
+                stderr.isEmpty ? "docker version exit=\(response.exitCode)" : stderr
+            )
         }
         fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
     }

@@ -68,17 +68,24 @@ import Testing
     }
 
     @Test func mcpToolCallRoundTrip() throws {
+        let wire = HelperModelWire(provider: "openai", model: "gpt-5.6-luna")
+        let wireJSON = try HelperModelWire.encodeJSON(wire)
         let request = MCPToolCallRequest(
             principal: .agent(sessionID: "s1", agentID: "ui"),
             toolName: "python_script_exec",
             argumentsJSON: #"{"script":"print(1)"}"#,
-            helperAPIKey: "sk-test"
+            helperAPIKey: "sk-test",
+            helperReviewerModelJSON: wireJSON
         )
         let data = try MCPServiceXPCCodec.encodeToolCallRequest(request)
         let decoded = try MCPServiceXPCCodec.decodeToolCallRequest(data)
         #expect(decoded.toolName == "python_script_exec")
         #expect(decoded.principal.logLabel.contains("agent:"))
         #expect(decoded.helperAPIKey == "sk-test")
+        #expect(decoded.helperReviewerModelJSON == wireJSON)
+        let decodedWire = try HelperModelWire.decodeJSON(decoded.helperReviewerModelJSON!)
+        #expect(decodedWire.provider == "openai")
+        #expect(decodedWire.model == "gpt-5.6-luna")
 
         let result = MCPToolCallResultDTO(requestID: decoded.requestID, ok: true, text: "ok")
         let rData = try MCPServiceXPCCodec.encodeToolCallResult(result)

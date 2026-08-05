@@ -410,10 +410,36 @@ struct ContentView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            await MainActor.run {
-                policyEventPresenter.start()
-                bootstrapStatus.beginLoadingSession()
+            // Single-flight: SwiftUI may re-enter `.task` (sidebar appear / identity churn).
+            // A second beginLoadingSession after ready left an undismissable modal and dead UI.
+            await MainActor.run { policyEventPresenter.start() }
+            await bootstrapStatus.runClientBootstrap {
+                await self.performClientBootstrap()
             }
+        }
+        .onChange(of: selectedProvider) { _, newProvider in
+            if selectedModel.provider != newProvider {
+                selectedModel = newProvider.defaultModel
+            }
+        }
+        .onChange(of: selectedModel) { _, newModel in
+            if selectedProvider != newModel.provider {
+                selectedProvider = newModel.provider
+            }
+        }
+        .background(WindowConfigurator())
+    }
+
+    /// Full UI client bootstrap (DB, Docker prewarm, Agent/MCP mesh). MainActor for `@State`.
+    @MainActor
+    private func performClientBootstrap() async {
+            guard bootstrapStatus.beginLoadingSession() || bootstrapStatus.isInitializing else {
+                if bootstrapStatus.phase == .ready {
+                    sessionReady = true
+                }
+                return
+            }
+
             // AgentService tool confirms + egress allows route through reverse XPC → UI modals.
             let approvalModel = approvalPresentationModel
             AgentServiceClient.shared.setApprovalHandler { requestDTO in
@@ -549,6 +575,8 @@ struct ContentView: View {
                 await MainActor.run {
                     bootstrapStatus.markReady()
                 }
+                // Mesh verify used to wipe helper allowlist; restore after peer handoff.
+                await EgressAllowlistService.shared.pushToHelper()
                 if isDebugEnabled {
                     await MainActor.run {
                         debugLogStore.log(
@@ -556,34 +584,38 @@ struct ContentView: View {
                         )
                     }
                 }
-            } catch {
-                sessionReady = false
-                errorMessage = error.localizedDescription
+            } catch is CancellationError {
                 await MainActor.run {
-                    debugLog("Client bootstrap failed: \(error)")
-                    bootstrapStatus.markFailed(
-                        title: "Startup Failed",
-                        message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
-                        technicalDetail: String(describing: error)
-                    )
+                    // Do not wipe a concurrent task that already reached ready.
+                    if !sessionReady {
+                        bootstrapStatus.noteBootstrapCancelled()
+                    }
+                    debugLog("Client bootstrap cancelled")
+                }
+                return
+            } catch {
+                // Racing re-entrant task must not clear a successful session.
+                if sessionReady || bootstrapStatus.phase == .ready {
+                    await MainActor.run {
+                        debugLog("Client bootstrap late error ignored (already ready): \(error)")
+                    }
+                } else {
+                    sessionReady = false
+                    errorMessage = error.localizedDescription
+                    await MainActor.run {
+                        debugLog("Client bootstrap failed: \(error)")
+                        bootstrapStatus.markFailed(
+                            title: "Startup Failed",
+                            message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
+                            technicalDetail: String(describing: error)
+                        )
+                    }
                 }
             }
 
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
-        }
-        .onChange(of: selectedProvider) { _, newProvider in
-            if selectedModel.provider != newProvider {
-                selectedModel = newProvider.defaultModel
-            }
-        }
-        .onChange(of: selectedModel) { _, newModel in
-            if selectedProvider != newModel.provider {
-                selectedProvider = newModel.provider
-            }
-        }
-        .background(WindowConfigurator())
     }
 
     var mainPanel: some View {

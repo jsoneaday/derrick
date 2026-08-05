@@ -99,7 +99,12 @@ final class ConversationModel {
         )
         let toolClient = XPCConversationToolClient(
             principal: principal,
-            agentsClient: agentsHost.client
+            agentsClient: agentsHost.client,
+            helperReviewerModelJSONProvider: {
+                await MainActor.run {
+                    try? helperModelSettings.pythonScriptReviewerModel.encodeHelperModelWireJSON()
+                }
+            }
         )
         debugLog("Tools: agents_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))")
         return ConversationModel(

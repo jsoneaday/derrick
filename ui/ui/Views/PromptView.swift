@@ -26,6 +26,7 @@ struct PromptInputView: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     let focusToken: Int
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text)
@@ -51,6 +52,8 @@ struct PromptInputView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
+        textView.isEditable = isEnabled
+        textView.isSelectable = true
 
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -68,12 +71,15 @@ struct PromptInputView: NSViewRepresentable {
         }
 
         textView.onSubmit = onSubmit
+        textView.isEditable = isEnabled
+        // Allow select/copy even when send is disabled; block typing via isEditable.
+        textView.isSelectable = true
 
         if textView.string != text {
             textView.string = text
         }
 
-        if context.coordinator.lastFocusedToken != focusToken {
+        if isEnabled, context.coordinator.lastFocusedToken != focusToken {
             context.coordinator.lastFocusedToken = focusToken
             DispatchQueue.main.async {
                 scrollView.window?.makeFirstResponder(textView)

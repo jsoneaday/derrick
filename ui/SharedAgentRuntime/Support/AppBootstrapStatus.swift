@@ -26,7 +26,36 @@ final class AppBootstrapStatus: ObservableObject {
     /// When true, modal is visible (in progress or failure awaiting dismiss).
     @Published private(set) var isModalPresented: Bool = false
 
+    /// Single-flight handle so concurrent SwiftUI `.task` entries join one bootstrap.
+    private var inFlightBootstrap: Task<Void, Never>?
+
     private init() {}
+
+    /// Run client bootstrap once; concurrent callers await the same flight.
+    /// After cancel, a later caller may start a new flight (modal was cleared).
+    func runClientBootstrap(_ body: @escaping @MainActor () async -> Void) async {
+        if phase == .ready { return }
+
+        if let existing = inFlightBootstrap {
+            await existing.value
+            if phase == .ready || phase == .failed { return }
+            // Prior flight cancelled without ready — fall through to start a new one.
+        }
+
+        if phase == .ready { return }
+        // Another waiter may have started a flight while we awaited above.
+        if let existing = inFlightBootstrap {
+            await existing.value
+            return
+        }
+
+        let task = Task { @MainActor in
+            await body()
+        }
+        inFlightBootstrap = task
+        await task.value
+        inFlightBootstrap = nil
+    }
 
     var isInitializing: Bool {
         switch phase {
@@ -41,13 +70,25 @@ final class AppBootstrapStatus: ObservableObject {
         isInitializing
     }
 
-    func beginLoadingSession() {
+    /// Start bootstrap UI. Idempotent while initializing; no-ops after ready
+    /// (SwiftUI may re-enter `.task` — must not re-open an undismissable modal).
+    @discardableResult
+    func beginLoadingSession() -> Bool {
+        if phase == .ready {
+            debugLog("[bootstrap] beginLoadingSession ignored (already ready)")
+            return false
+        }
+        if isInitializing {
+            debugLog("[bootstrap] beginLoadingSession ignored (already initializing)")
+            return false
+        }
         phase = .loadingSession
         statusMessage = "Loading session store…"
         failureTitle = nil
         failureMessage = nil
         isModalPresented = true
         debugLog("[bootstrap] phase=\(phase.rawValue) \(statusMessage)")
+        return true
     }
 
     func update(phase: Phase, message: String) {
@@ -56,6 +97,7 @@ final class AppBootstrapStatus: ObservableObject {
             debugLog("[bootstrap] ignore phase=\(phase.rawValue) (already ready): \(message)")
             return
         }
+        // Don't let a cancelled re-entrant task demote ready via failed paths above.
         self.phase = phase
         self.statusMessage = message
         isModalPresented = true
@@ -72,6 +114,11 @@ final class AppBootstrapStatus: ObservableObject {
     }
 
     func markFailed(title: String, message: String, technicalDetail: String? = nil) {
+        // Never replace a successful ready state with a late failure from a racing task.
+        if phase == .ready {
+            debugLog("[bootstrap] markFailed ignored (already ready): \(title) \(message)")
+            return
+        }
         phase = .failed
         statusMessage = message
         failureTitle = title
@@ -82,6 +129,18 @@ final class AppBootstrapStatus: ObservableObject {
         } else {
             debugLog("[bootstrap] FAILED title=\(title) user_message=\(message)")
         }
+    }
+
+    /// SwiftUI cancelled the bootstrap task — clear modal if we never reached ready
+    /// so a later `.task` entry can run again (do not leave an undismissable overlay).
+    func noteBootstrapCancelled() {
+        guard phase != .ready, phase != .failed else { return }
+        phase = .idle
+        statusMessage = "Starting…"
+        failureTitle = nil
+        failureMessage = nil
+        isModalPresented = false
+        debugLog("[bootstrap] cancelled — modal cleared for retry")
     }
 
     func dismissFailure() {

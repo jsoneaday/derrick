@@ -9,15 +9,19 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     private let principal: ServicePrincipal
     private let agentsClient: MCPClient?
     private let helperAPIKeyProvider: @Sendable () -> String?
+    /// JSON `HelperModelWire` for MCP python security reviewer (from `LLMModelSettings`).
+    private let helperReviewerModelJSONProvider: @Sendable () async -> String?
 
     public init(
         principal: ServicePrincipal,
         agentsClient: MCPClient? = nil,
-        helperAPIKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
+        helperAPIKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
+        helperReviewerModelJSONProvider: @escaping @Sendable () async -> String? = { nil }
     ) {
         self.principal = principal
         self.agentsClient = agentsClient
         self.helperAPIKeyProvider = helperAPIKeyProvider
+        self.helperReviewerModelJSONProvider = helperReviewerModelJSONProvider
     }
 
     public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
@@ -59,15 +63,17 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
         }
 
         let argumentsJSON = try toolArgumentsToJSON(arguments)
+        let reviewerModelJSON = await helperReviewerModelJSONProvider()
         let request = MCPToolCallRequest(
             principal: principal,
             toolName: name,
             argumentsJSON: argumentsJSON,
-            helperAPIKey: helperAPIKeyProvider()
+            helperAPIKey: helperAPIKeyProvider(),
+            helperReviewerModelJSON: reviewerModelJSON
         )
         await MainActor.run {
             debugLog(
-                "MCPService XPC callTool tool=\(name) principal=\(principal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ","))"
+                "MCPService XPC callTool tool=\(name) principal=\(principal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ",")) reviewerModel=\(reviewerModelJSON ?? "default")"
             )
         }
         let dto = try await MCPServiceClient.shared.callTool(request)

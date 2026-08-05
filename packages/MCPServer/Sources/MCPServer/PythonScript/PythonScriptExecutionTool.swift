@@ -580,9 +580,13 @@ public enum PythonScriptExecutionVerifier {
 public typealias PythonScriptNetworkPreflight = @Sendable (_ script: String, _ allowNetwork: Bool) async -> String?
 
 public extension MCPServerHost {
+    /// Register `python_script_exec`.
+    /// - Parameter runner: Required. Production Derrick uses helper XPC
+    ///   (`MCPServiceDockerHelperRunner` / `XPCDockerRunner`), not direct docker CLI.
+    ///   Pass `DockerPythonScriptRunner` only for package tests or non-sandboxed tools.
     func registerPythonScriptExecutionTool(
         description: String? = nil,
-        runner: any PythonScriptRunner = DockerPythonScriptRunner(),
+        runner: any PythonScriptRunner,
         reviewer: (any PythonScriptReviewer)? = GeminiPythonScriptReviewer.fromEnvironment(),
         networkPreflight: PythonScriptNetworkPreflight? = nil,
         logger: @escaping @Sendable (String) -> Void = { _ in }

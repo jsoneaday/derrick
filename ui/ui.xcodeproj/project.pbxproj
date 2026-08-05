@@ -46,6 +46,7 @@
 		DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10242A00000000MC001 /* MCPToolCatalog */; };
 		DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10252A00000000MC001 /* DockerRunnerXPC */; };
 		DEMC10162A00000000MC001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10262A00000000MC001 /* Lib */; };
+		DEMC10172A00000000MC001 /* LLMAgentClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10272A00000000MC001 /* LLMAgentClient */; };
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
 		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
 		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
@@ -251,6 +252,7 @@
 				DEMC10142A00000000MC001 /* MCPToolCatalog in Frameworks */,
 				DEMC10152A00000000MC001 /* DockerRunnerXPC in Frameworks */,
 				DEMC10162A00000000MC001 /* Lib in Frameworks */,
+				DEMC10172A00000000MC001 /* LLMAgentClient in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -450,6 +452,7 @@
 				DEMC10242A00000000MC001 /* MCPToolCatalog */,
 				DEMC10252A00000000MC001 /* DockerRunnerXPC */,
 				DEMC10262A00000000MC001 /* Lib */,
+				DEMC10272A00000000MC001 /* LLMAgentClient */,
 			);
 			productName = MCPService;
 			productReference = DEMC10012A00000000MC001 /* MCPService.xpc */;
@@ -1289,6 +1292,11 @@
 		DEMC10262A00000000MC001 /* Lib */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
+		};
+		DEMC10272A00000000MC001 /* LLMAgentClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE1B9F342FEB7AE80042F227 /* XCLocalSwiftPackageReference "../packages/LLMAgentClient" */;
+			productName = LLMAgentClient;
 		};
 		DEPR00022A00000000PR001 /* PolicyRuntime */ = {
 			isa = XCSwiftPackageProductDependency;

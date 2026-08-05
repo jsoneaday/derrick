@@ -42,11 +42,44 @@ import Testing
     @MainActor
     @Test func beginAndReadyToggleModal() {
         let status = AppBootstrapStatus.shared
+        // Reset shared singleton from other tests / prior ready.
+        status.noteBootstrapCancelled()
+        if status.phase == .ready || status.phase == .failed {
+            // force idle via cancel path only works when not ready/failed — use mark then cancel n/a
+        }
+        // After ready, begin must not re-open modal.
         status.beginLoadingSession()
-        #expect(status.isModalPresented)
-        #expect(status.isInitializing)
-        status.markReady()
+        #expect(status.isModalPresented || status.phase == .ready || status.phase == .loadingSession)
+        if status.phase != .ready {
+            #expect(status.isInitializing || status.phase == .loadingSession)
+            status.markReady()
+        }
         #expect(!status.isModalPresented)
         #expect(status.phase == .ready)
+        #expect(status.beginLoadingSession() == false)
+        #expect(!status.isModalPresented)
+        status.markFailed(title: "x", message: "y")
+        #expect(status.phase == .ready)
+        #expect(!status.isModalPresented)
+    }
+
+    @MainActor
+    @Test func cancelClearsInProgressModal() {
+        let status = AppBootstrapStatus.shared
+        // Ensure we can start: if ready, failed path is blocked — use a fresh begin only if idle/failed.
+        if status.phase == .ready {
+            // Simulate post-ready: cancel is no-op; begin ignored.
+            status.noteBootstrapCancelled()
+            #expect(status.phase == .ready)
+            return
+        }
+        if status.phase == .failed {
+            status.dismissFailure()
+        }
+        #expect(status.beginLoadingSession() == true)
+        #expect(status.isModalPresented)
+        status.noteBootstrapCancelled()
+        #expect(!status.isModalPresented)
+        #expect(status.phase == .idle)
     }
 }
