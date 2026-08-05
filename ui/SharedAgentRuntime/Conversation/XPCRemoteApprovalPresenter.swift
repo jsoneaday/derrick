@@ -29,7 +29,7 @@ public final class XPCRemoteApprovalPresenter: ApprovalConfirmationPresenting, @
             requiredFields: request.requiredFields
         )
 
-        guard let requestData = try? AgentServiceXPCCodec.encodeApprovalRequest(dto) else {
+        guard let requestData = try? AgentServiceXPCCodec.encodeSignedApprovalRequest(dto) else {
             debugLog("XPC approval: failed to encode request id=\(request.id)")
             return .cancelled(actor: "system-encode-failed")
         }
@@ -66,7 +66,7 @@ public final class XPCRemoteApprovalPresenter: ApprovalConfirmationPresenting, @
                 return first
             }
 
-            let decision = try AgentServiceXPCCodec.decodeApprovalDecision(responseData)
+            let decision = try AgentServiceXPCCodec.decodeSignedApprovalDecision(responseData)
             if decision.approved {
                 let args = decision.editedArgumentsJSON.isEmpty
                     ? originalArgs

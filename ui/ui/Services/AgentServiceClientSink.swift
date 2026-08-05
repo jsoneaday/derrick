@@ -122,7 +122,7 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         Task {
             let decisionDTO: AgentApprovalDecisionDTO
             do {
-                let request = try AgentServiceXPCCodec.decodeApprovalRequest(data)
+                let request = try AgentServiceXPCCodec.decodeSignedApprovalRequest(data)
                 if let onApproval {
                     decisionDTO = await onApproval(request)
                 } else {
@@ -147,8 +147,8 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
                     actor: "system-decode-failed"
                 )
             }
-            let payload = (try? AgentServiceXPCCodec.encodeApprovalDecision(decisionDTO))
-                ?? Data(#"{"approvalID":"","approved":false,"editedArgumentsJSON":"","actor":"system-encode-failed"}"#.utf8)
+            let payload = (try? AgentServiceXPCCodec.encodeSignedApprovalDecision(decisionDTO))
+                ?? Data()
             reply(payload as NSData)
         }
     }
@@ -162,7 +162,7 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         Task {
             let decisionDTO: AgentNetworkAccessDecisionDTO
             do {
-                let request = try AgentServiceXPCCodec.decodeNetworkAccessRequest(data)
+                let request = try AgentServiceXPCCodec.decodeSignedNetworkAccessRequest(data)
                 if let onNetwork {
                     decisionDTO = await onNetwork(request)
                 } else {
@@ -185,8 +185,8 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
                     actor: "system-decode-failed"
                 )
             }
-            let payload = (try? AgentServiceXPCCodec.encodeNetworkAccessDecision(decisionDTO))
-                ?? Data(#"{"requestID":"","decision":"deny","actor":"system-encode-failed"}"#.utf8)
+            let payload = (try? AgentServiceXPCCodec.encodeSignedNetworkAccessDecision(decisionDTO))
+                ?? Data()
             reply(payload as NSData)
         }
     }

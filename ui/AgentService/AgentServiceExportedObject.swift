@@ -68,16 +68,25 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let payloadData = payload as Data
         Task {
-            let text = AgentServiceXPCCodec.decodeString(payloadData)
-            let snippet = String(text.prefix(80))
-            await AgentServiceStore.shared.log(
-                level: .debug,
-                message: "ping",
-                code: "ping",
-                detailJSON: #"{"payload":"\#(snippet)"}"#
-            )
-            let response = AgentServiceXPCCodec.encodeString("pong:\(text)")
-            reply(response as NSData)
+            do {
+                let ping = try AgentServiceXPCCodec.decodeSignedPing(payloadData, expectedTo: .agent)
+                let snippet = String(ping.text.prefix(80))
+                await AgentServiceStore.shared.log(
+                    level: .debug,
+                    message: "ping",
+                    code: "ping",
+                    detailJSON: #"{"payload":"\#(snippet)"}"#
+                )
+                let response = try AgentServiceXPCCodec.encodeSignedPing(
+                    "pong:\(ping.text)",
+                    from: .agent,
+                    to: .ui
+                )
+                reply(response as NSData)
+            } catch {
+                fputs("[AgentService] ping failed: \(error.localizedDescription)\n", stderr)
+                reply(Data() as NSData)
+            }
         }
     }
 
@@ -118,11 +127,17 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
 
     func setMCPServicePeerEndpoint(
         _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
         withReply reply: @escaping @Sendable (NSData) -> Void
     ) {
         // System invariant: handoff is not complete until Agent can RPC MCPService.
         Task {
             do {
+                _ = try AgentServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                    authJSON as Data,
+                    expectedTo: .agent,
+                    expectedKind: .installMCPPeer
+                )
                 MCPServiceClient.shared.installPeerEndpoint(endpoint)
                 try await MCPServiceClient.shared.verifyPeerMesh()
                 await AgentServiceStore.shared.log(
@@ -131,7 +146,8 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
                     code: "mcp_peer_mesh_ok"
                 )
                 fputs("[AgentService] MCPService peer mesh verified\n", stderr)
-                reply(AgentServiceXPCCodec.encodeString("ok") as NSData)
+                let ack = try AgentServiceXPCCodec.encodeSignedAck(.ok, from: .agent, to: .ui)
+                reply(ack as NSData)
             } catch {
                 let message = error.localizedDescription
                 await AgentServiceStore.shared.log(
@@ -140,7 +156,12 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
                     code: "mcp_peer_mesh_failed"
                 )
                 fputs("[AgentService] MCPService peer mesh failed: \(message)\n", stderr)
-                reply(AgentServiceXPCCodec.encodeString("error:\(message)") as NSData)
+                let ack = (try? AgentServiceXPCCodec.encodeSignedAck(
+                    .error(message),
+                    from: .agent,
+                    to: .ui
+                )) ?? Data()
+                reply(ack as NSData)
             }
         }
     }
@@ -150,7 +171,8 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         let context = connectionContext
         Task {
             do {
-                let request = try AgentServiceXPCCodec.decodeTurnRequest(data)
+                // Require signed ServiceMessage envelope (HMAC).
+                let request = try AgentServiceXPCCodec.decodeSignedTurnRequest(data)
                 // Probe sink before starting so we log nil early.
                 let probe = context.clientSink(logLabel: "startTurn")
                 fputs(
@@ -164,6 +186,7 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
                 let response = try AgentServiceXPCCodec.encodeTurnAccepted(accepted)
                 reply(response as NSData)
             } catch {
+                fputs("[AgentService] startTurn failed: \(error.localizedDescription)\n", stderr)
                 let accepted = AgentTurnAccepted(
                     ok: false,
                     turnID: "",
@@ -176,15 +199,27 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         }
     }
 
-    func cancelTurn(turnID: String, withReply reply: @escaping @Sendable (NSData) -> Void) {
+    func cancelTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         Task {
-            await AgentServiceTurnHost.shared.cancelTurn(turnID: turnID)
-            await AgentServiceStore.shared.log(
-                level: .info,
-                message: "cancelTurn \(turnID)",
-                code: "turn_cancel"
-            )
-            reply(AgentServiceXPCCodec.encodeString("ok") as NSData)
+            do {
+                let request = try AgentServiceXPCCodec.decodeSignedCancelTurn(requestJSON as Data)
+                await AgentServiceTurnHost.shared.cancelTurn(turnID: request.turnID)
+                await AgentServiceStore.shared.log(
+                    level: .info,
+                    message: "cancelTurn \(request.turnID)",
+                    code: "turn_cancel"
+                )
+                let ack = try AgentServiceXPCCodec.encodeSignedAck(.ok, from: .agent, to: .ui)
+                reply(ack as NSData)
+            } catch {
+                fputs("[AgentService] cancelTurn failed: \(error.localizedDescription)\n", stderr)
+                let ack = (try? AgentServiceXPCCodec.encodeSignedAck(
+                    .error(error.localizedDescription),
+                    from: .agent,
+                    to: .ui
+                )) ?? Data()
+                reply(ack as NSData)
+            }
         }
     }
 }

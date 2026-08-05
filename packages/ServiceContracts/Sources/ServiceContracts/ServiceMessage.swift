@@ -2,8 +2,10 @@ import Foundation
 
 /// Cross-service command/event types (payload is JSON object as Data).
 public enum ServiceMessageType: String, Codable, Sendable, Hashable {
-    // Health / control
+    // Health / control (health/bootstrap stay unsigned on the wire)
     case health
+    case ping
+    case peerHandoff
     // Jobs
     case createJob
     case cancelJob
@@ -12,11 +14,67 @@ public enum ServiceMessageType: String, Codable, Sendable, Hashable {
     // Agents
     case wakeAgent
     case injectUserMessage
+    case cancelTurn
+    case approvalRequest
+    case approvalDecision
+    case networkAccessRequest
+    case networkAccessDecision
     // MCP
     case runTool
+    case searchTools
     // Webhook ack
     case webhookAccepted
     case webhookRejected
+}
+
+/// Generic ack payload for signed control replies (`ok` / error text).
+public struct ServiceAckDTO: Codable, Sendable, Hashable {
+    public let ok: Bool
+    public let message: String
+
+    public init(ok: Bool, message: String = "ok") {
+        self.ok = ok
+        self.message = message
+    }
+
+    public static let ok = ServiceAckDTO(ok: true, message: "ok")
+
+    public static func error(_ message: String) -> ServiceAckDTO {
+        ServiceAckDTO(ok: false, message: message)
+    }
+}
+
+/// Auth payload for peer endpoint handoff (endpoint travels as NSXPC object separately).
+public struct PeerHandoffAuthDTO: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable {
+        case fetchMCPPeer
+        case installMCPPeer
+        case installDockerHelperPeer
+    }
+
+    public let kind: Kind
+
+    public init(kind: Kind) {
+        self.kind = kind
+    }
+}
+
+/// Cancel an in-flight Agent turn.
+public struct CancelTurnRequestDTO: Codable, Sendable, Hashable {
+    public let turnID: String
+
+    public init(turnID: String) {
+        self.turnID = turnID
+    }
+}
+
+/// Connectivity ping body.
+public struct ServicePingDTO: Codable, Sendable, Hashable {
+    public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
 }
 
 /// Authenticated envelope. `signature` is HMAC-SHA256 hex over canonical bytes (v1).

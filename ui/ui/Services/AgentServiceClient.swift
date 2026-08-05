@@ -136,7 +136,8 @@ public final class AgentServiceClient: @unchecked Sendable {
             Task {
                 do {
                     let proxy = try remoteProxy()
-                    let payload = try AgentServiceXPCCodec.encodeTurnRequest(request) as NSData
+                    // Signed ServiceMessage envelope (HMAC) — UI → Agent injectUserMessage.
+                    let payload = try AgentServiceXPCCodec.encodeSignedTurnRequest(request) as NSData
                     let accepted = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AgentTurnAccepted, Error>) in
                         proxy.startTurn(requestJSON: payload) { data in
                             do {
@@ -173,28 +174,46 @@ public final class AgentServiceClient: @unchecked Sendable {
 
     public func cancelTurn(turnID: String) async throws {
         let proxy = try remoteProxy()
+        let payload = try AgentServiceXPCCodec.encodeSignedCancelTurn(turnID: turnID) as NSData
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            proxy.cancelTurn(turnID: turnID) { _ in
-                cont.resume()
+            proxy.cancelTurn(requestJSON: payload) { data in
+                do {
+                    let ack = try AgentServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                    if ack.ok {
+                        cont.resume()
+                    } else {
+                        cont.resume(throwing: AgentServiceClientError.turnFailed(ack.message))
+                    }
+                } catch {
+                    cont.resume(throwing: error)
+                }
             }
         }
     }
 
-    /// Deliver MCPService peer listener endpoint into AgentService (pure XPC handoff).
+    /// Deliver MCPService peer listener endpoint into AgentService (pure XPC handoff + signed auth).
     public func setMCPServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
         nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try AgentServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installMCPPeer),
+            from: .ui,
+            to: .agent
+        ) as NSData
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            proxy.setMCPServicePeerEndpoint(endpoint) { data in
-                let text = AgentServiceXPCCodec.decodeString(data as Data)
-                if text == "ok" {
-                    cont.resume()
-                } else {
-                    let detail = text.hasPrefix("error:") ? String(text.dropFirst(6)) : text
-                    cont.resume(
-                        throwing: AgentServiceClientError.turnFailed(
-                            detail.isEmpty ? "MCP peer mesh verification failed" : detail
+            proxy.setMCPServicePeerEndpoint(endpoint, authJSON: auth) { data in
+                do {
+                    let ack = try AgentServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                    if ack.ok {
+                        cont.resume()
+                    } else {
+                        cont.resume(
+                            throwing: AgentServiceClientError.turnFailed(
+                                ack.message.isEmpty ? "MCP peer mesh verification failed" : ack.message
+                            )
                         )
-                    )
+                    }
+                } catch {
+                    cont.resume(throwing: error)
                 }
             }
         }
@@ -212,7 +231,7 @@ public final class AgentServiceClient: @unchecked Sendable {
             // Allow NSXPCListenerEndpoint argument on setMCPServicePeerEndpoint:
             remote.setClasses(
                 NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
-                for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:withReply:)),
+                for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
                 argumentIndex: 0,
                 ofReply: false
             )

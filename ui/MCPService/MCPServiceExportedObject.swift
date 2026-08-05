@@ -19,10 +19,20 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
     }
 
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        let text = MCPServiceXPCCodec.decodeString(payload as Data)
         Task {
-            await MCPServiceStore.shared.log(level: .debug, message: "ping", code: "ping")
-            reply(MCPServiceXPCCodec.encodeString("pong:\(text)") as NSData)
+            do {
+                let ping = try MCPServiceXPCCodec.decodeSignedPing(payload as Data, expectedTo: .mcp)
+                await MCPServiceStore.shared.log(level: .debug, message: "ping", code: "ping")
+                let response = try MCPServiceXPCCodec.encodeSignedPing(
+                    "pong:\(ping.text)",
+                    from: .mcp,
+                    to: .ui
+                )
+                reply(response as NSData)
+            } catch {
+                fputs("[MCPService] ping failed: \(error.localizedDescription)\n", stderr)
+                reply(Data() as NSData)
+            }
         }
     }
 
@@ -60,18 +70,38 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         }
     }
 
-    func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
-        let endpoint = MCPServicePeerEndpoint.shared.endpointForHandoff()
-        fputs("[MCPService] peerListenerEndpoint handoff\n", stderr)
-        reply(endpoint)
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
+        do {
+            _ = try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                authJSON as Data,
+                expectedTo: .mcp,
+                expectedKind: .fetchMCPPeer
+            )
+            let endpoint = MCPServicePeerEndpoint.shared.endpointForHandoff()
+            fputs("[MCPService] peerListenerEndpoint handoff\n", stderr)
+            reply(endpoint)
+        } catch {
+            fputs("[MCPService] peerListenerEndpoint auth failed: \(error.localizedDescription)\n", stderr)
+            // Still need a reply of correct type; hand empty anonymous endpoint would be wrong.
+            // Fail closed: return our real endpoint only after auth — on failure create a dead anonymous listener once? 
+            // Prefer not to leak endpoint. Reply with a fresh anonymous endpoint that has no delegate (useless).
+            let dead = NSXPCListener.anonymous()
+            reply(dead.endpoint)
+        }
     }
 
     func setDockerHelperPeerEndpoint(
         _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
         withReply reply: @escaping @Sendable (NSData) -> Void
     ) {
         Task {
             do {
+                _ = try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                    authJSON as Data,
+                    expectedTo: .mcp,
+                    expectedKind: .installDockerHelperPeer
+                )
                 MCPServiceDockerHelperRunner.shared.installPeerEndpoint(endpoint)
                 try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
                 await MCPServiceStore.shared.log(
@@ -80,7 +110,8 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
                     code: "docker_helper_peer_ok"
                 )
                 fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
-                reply(MCPServiceXPCCodec.encodeString("ok") as NSData)
+                let ack = try MCPServiceXPCCodec.encodeSignedAck(.ok, from: .mcp, to: .ui)
+                reply(ack as NSData)
             } catch {
                 let message = error.localizedDescription
                 await MCPServiceStore.shared.log(
@@ -89,7 +120,12 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
                     code: "docker_helper_peer_failed"
                 )
                 fputs("[MCPService] Docker helper peer mesh failed: \(message)\n", stderr)
-                reply(MCPServiceXPCCodec.encodeString("error:\(message)") as NSData)
+                let ack = (try? MCPServiceXPCCodec.encodeSignedAck(
+                    .error(message),
+                    from: .mcp,
+                    to: .ui
+                )) ?? Data()
+                reply(ack as NSData)
             }
         }
     }
@@ -98,10 +134,11 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         let data = requestJSON as Data
         Task {
             do {
-                let request = try MCPServiceXPCCodec.decodeToolCallRequest(data)
+                let request = try MCPServiceXPCCodec.decodeSignedToolCallRequest(data)
                 let result = try await MCPServiceToolHost.shared.callTool(request: request)
                 reply((try MCPServiceXPCCodec.encodeToolCallResult(result)) as NSData)
             } catch {
+                fputs("[MCPService] callTool failed: \(error.localizedDescription)\n", stderr)
                 let result = MCPToolCallResultDTO(
                     requestID: "",
                     ok: false,
@@ -118,7 +155,7 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         let data = requestJSON as Data
         Task {
             do {
-                let request = try MCPServiceXPCCodec.decodeToolSearchRequest(data)
+                let request = try MCPServiceXPCCodec.decodeSignedToolSearchRequest(data)
                 let tools = try await MCPServiceToolHost.shared.searchTools(
                     query: request.query,
                     principal: request.principal
@@ -126,6 +163,7 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
                 let result = MCPToolSearchResultDTO(ok: true, tools: tools, message: "ok")
                 reply((try MCPServiceXPCCodec.encodeToolSearchResult(result)) as NSData)
             } catch {
+                fputs("[MCPService] searchTools failed: \(error.localizedDescription)\n", stderr)
                 let result = MCPToolSearchResultDTO(ok: false, tools: [], message: error.localizedDescription)
                 reply((try? MCPServiceXPCCodec.encodeToolSearchResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
             }

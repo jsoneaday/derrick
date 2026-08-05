@@ -1,20 +1,23 @@
 import Foundation
+import CryptoKit
 
 /// XPC interface for AgentService.
 @objc public protocol AgentServiceXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Echo for connectivity tests. `payload` is UTF-8 text.
+    /// Signed `ping` envelope. Reply signed ping.
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Bootstrap shared DB + service_logs. Safe to call repeatedly.
+    /// Bootstrap shared DB + service_logs. Safe to call repeatedly. (unsigned)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Install MCPService peer listener endpoint (from UI, which obtained it over XPC).
-    /// AgentService uses this to open MCPService without `serviceName:` (sibling restriction).
-    func setMCPServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Start a conversation turn. Chunks stream via `AgentServiceClientSinkXPC`.
-    /// `requestJSON` is `AgentTurnRequest`. Reply is `AgentTurnAccepted`.
+    /// MCP peer endpoint + signed `installMCPPeer` auth. Reply signed ack.
+    func setMCPServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    )
+    /// Signed `injectUserMessage`. Reply is `AgentTurnAccepted`.
     func startTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Cancel an in-flight turn.
-    func cancelTurn(turnID: String, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Signed `cancelTurn` (payload `CancelTurnRequestDTO`). Reply signed ack.
+    func cancelTurn(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 /// Reverse channel: UI exports this on the XPC connection for turn streaming / approvals / log relay.
@@ -24,11 +27,9 @@ import Foundation
     func turnDidEmitChunk(_ turnID: String, chunkJSON: NSData)
     /// `errorJSON` empty means success; otherwise encoded `AgentTurnErrorDTO`.
     func turnDidFinish(_ turnID: String, errorJSON: NSData)
-    /// Ask the UI to present an approval modal. `requestJSON` is `AgentApprovalRequestDTO`.
-    /// Reply payload is `AgentApprovalDecisionDTO` (always non-empty JSON).
+    /// Signed `approvalRequest` → reply signed `approvalDecision`.
     func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Ask the UI to allow a network host (egress preflight / mid-flight).
-    /// `requestJSON` is `AgentNetworkAccessRequestDTO`; reply is `AgentNetworkAccessDecisionDTO`.
+    /// Signed `networkAccessRequest` → reply signed `networkAccessDecision`.
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
@@ -70,6 +71,38 @@ public enum AgentServiceXPCCodec {
         try JSONDecoder.service.decode(AgentTurnRequest.self, from: data)
     }
 
+    /// Signed envelope: UI → Agent `injectUserMessage` (payload = `AgentTurnRequest`).
+    public static func encodeSignedTurnRequest(
+        _ request: AgentTurnRequest,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: .ui,
+            to: .agent,
+            type: .injectUserMessage,
+            principal: .ui,
+            correlationId: request.turnID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedTurnRequest(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> AgentTurnRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        let (_, dto) = try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: AgentTurnRequest.self,
+            expectedType: .injectUserMessage,
+            expectedTo: .agent,
+            key: key
+        )
+        return dto
+    }
+
     public static func encodeTurnAccepted(_ accepted: AgentTurnAccepted) throws -> Data {
         try JSONEncoder.service.encode(accepted)
     }
@@ -102,12 +135,72 @@ public enum AgentServiceXPCCodec {
         try JSONDecoder.service.decode(AgentApprovalRequestDTO.self, from: data)
     }
 
+    public static func encodeSignedApprovalRequest(
+        _ request: AgentApprovalRequestDTO,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: .agent,
+            to: .ui,
+            type: .approvalRequest,
+            principal: .system,
+            correlationId: request.approvalID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedApprovalRequest(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> AgentApprovalRequestDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: AgentApprovalRequestDTO.self,
+            expectedType: .approvalRequest,
+            expectedTo: .ui,
+            key: key
+        ).dto
+    }
+
     public static func encodeApprovalDecision(_ decision: AgentApprovalDecisionDTO) throws -> Data {
         try JSONEncoder.service.encode(decision)
     }
 
     public static func decodeApprovalDecision(_ data: Data) throws -> AgentApprovalDecisionDTO {
         try JSONDecoder.service.decode(AgentApprovalDecisionDTO.self, from: data)
+    }
+
+    public static func encodeSignedApprovalDecision(
+        _ decision: AgentApprovalDecisionDTO,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            decision,
+            from: .ui,
+            to: .agent,
+            type: .approvalDecision,
+            principal: .ui,
+            correlationId: decision.approvalID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedApprovalDecision(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> AgentApprovalDecisionDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: AgentApprovalDecisionDTO.self,
+            expectedType: .approvalDecision,
+            expectedTo: .agent,
+            key: key
+        ).dto
     }
 
     public static func encodeNetworkAccessRequest(_ request: AgentNetworkAccessRequestDTO) throws -> Data {
@@ -118,12 +211,159 @@ public enum AgentServiceXPCCodec {
         try JSONDecoder.service.decode(AgentNetworkAccessRequestDTO.self, from: data)
     }
 
+    public static func encodeSignedNetworkAccessRequest(
+        _ request: AgentNetworkAccessRequestDTO,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: .agent,
+            to: .ui,
+            type: .networkAccessRequest,
+            principal: .system,
+            correlationId: request.requestID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedNetworkAccessRequest(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> AgentNetworkAccessRequestDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: AgentNetworkAccessRequestDTO.self,
+            expectedType: .networkAccessRequest,
+            expectedTo: .ui,
+            key: key
+        ).dto
+    }
+
     public static func encodeNetworkAccessDecision(_ decision: AgentNetworkAccessDecisionDTO) throws -> Data {
         try JSONEncoder.service.encode(decision)
     }
 
     public static func decodeNetworkAccessDecision(_ data: Data) throws -> AgentNetworkAccessDecisionDTO {
         try JSONDecoder.service.decode(AgentNetworkAccessDecisionDTO.self, from: data)
+    }
+
+    public static func encodeSignedNetworkAccessDecision(
+        _ decision: AgentNetworkAccessDecisionDTO,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            decision,
+            from: .ui,
+            to: .agent,
+            type: .networkAccessDecision,
+            principal: .ui,
+            correlationId: decision.requestID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedNetworkAccessDecision(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> AgentNetworkAccessDecisionDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: AgentNetworkAccessDecisionDTO.self,
+            expectedType: .networkAccessDecision,
+            expectedTo: .agent,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedCancelTurn(
+        turnID: String,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            CancelTurnRequestDTO(turnID: turnID),
+            from: .ui,
+            to: .agent,
+            type: .cancelTurn,
+            principal: .ui,
+            correlationId: turnID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedCancelTurn(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> CancelTurnRequestDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: CancelTurnRequestDTO.self,
+            expectedType: .cancelTurn,
+            expectedTo: .agent,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedPeerHandoffAuth(
+        _ auth: PeerHandoffAuthDTO,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        try MCPServiceXPCCodec.encodeSignedPeerHandoffAuth(auth, from: from, to: to, key: key)
+    }
+
+    public static func decodeSignedPeerHandoffAuth(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        expectedKind: PeerHandoffAuthDTO.Kind,
+        key: SymmetricKey? = nil
+    ) throws -> PeerHandoffAuthDTO {
+        try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
+            data,
+            expectedTo: expectedTo,
+            expectedKind: expectedKind,
+            key: key
+        )
+    }
+
+    public static func encodeSignedAck(
+        _ ack: ServiceAckDTO,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        try MCPServiceXPCCodec.encodeSignedAck(ack, from: from, to: to, key: key)
+    }
+
+    public static func decodeSignedAck(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> ServiceAckDTO {
+        try MCPServiceXPCCodec.decodeSignedAck(data, expectedTo: expectedTo, key: key)
+    }
+
+    public static func encodeSignedPing(
+        _ text: String,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        try MCPServiceXPCCodec.encodeSignedPing(text, from: from, to: to, key: key)
+    }
+
+    public static func decodeSignedPing(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> ServicePingDTO {
+        try MCPServiceXPCCodec.decodeSignedPing(data, expectedTo: expectedTo, key: key)
     }
 
     public static func encodeString(_ string: String) -> Data {

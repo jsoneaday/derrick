@@ -11,7 +11,7 @@ public enum XPCRemoteNetworkAccess {
         timeoutSeconds: UInt64 = 300
     ) async -> PolicyUserDecision {
         let request = AgentNetworkAccessRequestDTO(host: host, toolName: toolName)
-        guard let requestData = try? AgentServiceXPCCodec.encodeNetworkAccessRequest(request) else {
+        guard let requestData = try? AgentServiceXPCCodec.encodeSignedNetworkAccessRequest(request) else {
             debugLog("XPC network: encode failed host=\(host)")
             return .denied(actor: "system-encode-failed")
         }
@@ -42,7 +42,7 @@ public enum XPCRemoteNetworkAccess {
                 group.cancelAll()
                 return first
             }
-            let dto = try AgentServiceXPCCodec.decodeNetworkAccessDecision(responseData)
+            let dto = try AgentServiceXPCCodec.decodeSignedNetworkAccessDecision(responseData)
             let actor = dto.actor.isEmpty ? nil : dto.actor
             switch dto.decision.lowercased() {
             case "once":

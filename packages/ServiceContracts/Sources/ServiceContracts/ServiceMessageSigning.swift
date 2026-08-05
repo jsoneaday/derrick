@@ -40,12 +40,17 @@ public enum ServiceMessageSigning: Sendable {
         let data = canonicalBytes(for: message)
         let mac = HMAC<SHA256>.authenticationCode(for: data, using: key)
         let expected = Data(mac).map { String(format: "%02x", $0) }.joined()
-        return expected == signature
+        // Constant-time compare on equal-length hex strings.
+        guard signature.utf8.count == expected.utf8.count else { return false }
+        var diff: UInt8 = 0
+        for (a, b) in zip(signature.utf8, expected.utf8) {
+            diff |= a ^ b
+        }
+        return diff == 0
     }
 
-    /// Dev/default key material derivation (replace with Keychain/app-group secret in production).
+    /// Dev-only fixed seed (tests). Production uses `MessagesSecretKey`.
     public static func developmentKey(seed: String = "derrick.service.v1") -> SymmetricKey {
-        let digest = SHA256.hash(data: Data(seed.utf8))
-        return SymmetricKey(data: Data(digest))
+        MessagesSecretKey.keyFromSecretString(seed)
     }
 }

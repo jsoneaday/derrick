@@ -48,7 +48,12 @@ UI ─────────────────────────�
 
 ## Auth (locked direction)
 - **Peer:** code-sign requirement on XPC (extend `XPCPeerAuthentication`).
-- **Message:** signed envelopes (`id`, `ts`, `from`, `to`, `type`, `payload`, `sig`) — HMAC with app-group key v1; upgrade path to asymmetric later.
+- **Message:** signed envelopes (`id`, `ts`, `from`, `to`, `type`, `payload`, `sig`) — HMAC-SHA256 v1.
+  - **Debug** (`IS_DEBUG=true`): `MESSAGES_SECRET_KEY` from environment / `.env` (no Keychain).
+  - **Release**: Keychain get-or-create random secret (`MessagesSecretKey`).
+  - Live signed paths: UI→Agent `startTurn` / `cancelTurn` / peer install auth; Agent→MCP `callTool` / `searchTools`; reverse UI `approval` / `networkAccess`; peer fetch/install auth + acks; `ping`.
+  - Unsigned: `health`, `bootstrap`, turn chunk stream, docker helper Application-XPC process runs.
+  - Upgrade path to asymmetric later.
 - Webhook: separate external auth; only WebhookService listens publicly.
 
 ## Logging + DB (locked)
@@ -67,7 +72,7 @@ UI ─────────────────────────�
 | --- | --- | --- |
 | 1 | Packaging | **XPC services** embedded in app (LaunchAgent later if needed) |
 | 2 | DB | **One shared SQLite**; multi-table ownership; WAL |
-| 3 | Message auth | **HMAC app-group key** v1 + XPC peer identity |
+| 3 | Message auth | **HMAC** v1 (`MESSAGES_SECRET_KEY` in debug / Keychain in release) + XPC peer identity |
 | 4 | Idle | **Stay up while work**; may idle-exit after quiet period (v2) |
 | 5 | Approval, UI absent | **Queue decision-needed**; job/agent wait with timeout → fail |
 

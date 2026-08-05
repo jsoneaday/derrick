@@ -20,7 +20,7 @@ final class AgentServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
         let exportedInterface = NSXPCInterface(with: AgentServiceXPC.self)
         exportedInterface.setClasses(
             NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
-            for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:withReply:)),
+            for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )

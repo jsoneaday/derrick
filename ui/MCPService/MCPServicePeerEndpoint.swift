@@ -37,7 +37,7 @@ final class MCPServicePeerEndpoint: NSObject, NSXPCListenerDelegate, @unchecked 
         let exportedInterface = NSXPCInterface(with: MCPServiceXPC.self)
         exportedInterface.setClasses(
             NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
-            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:withReply:)),
+            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )

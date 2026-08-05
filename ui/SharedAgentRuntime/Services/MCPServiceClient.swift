@@ -91,31 +91,44 @@ public final class MCPServiceClient: @unchecked Sendable {
 
     public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
         nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try MCPServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .fetchMCPPeer),
+            from: .ui,
+            to: .mcp
+        ) as NSData
         return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
-                proxy.peerListenerEndpoint { endpoint in
+                proxy.peerListenerEndpoint(authJSON: auth) { endpoint in
                     cont.resume(returning: endpoint)
                 }
             }
         }
     }
 
-    /// Deliver DockerRunnerHelper peer endpoint into MCPService (pure XPC handoff).
+    /// Deliver DockerRunnerHelper peer endpoint into MCPService (pure XPC handoff + signed auth).
     public func setDockerHelperPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
         nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try MCPServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installDockerHelperPeer),
+            from: .ui,
+            to: .mcp
+        ) as NSData
         try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                proxy.setDockerHelperPeerEndpoint(endpoint) { data in
-                    let text = MCPServiceXPCCodec.decodeString(data as Data)
-                    if text == "ok" {
-                        cont.resume()
-                    } else {
-                        let detail = text.hasPrefix("error:") ? String(text.dropFirst(6)) : text
-                        cont.resume(
-                            throwing: MCPServiceClientError.meshUnverified(
-                                detail.isEmpty ? "Docker helper peer mesh verification failed" : detail
+                proxy.setDockerHelperPeerEndpoint(endpoint, authJSON: auth) { data in
+                    do {
+                        let ack = try MCPServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                        if ack.ok {
+                            cont.resume()
+                        } else {
+                            cont.resume(
+                                throwing: MCPServiceClientError.meshUnverified(
+                                    ack.message.isEmpty ? "Docker helper peer mesh verification failed" : ack.message
+                                )
                             )
-                        )
+                        }
+                    } catch {
+                        cont.resume(throwing: error)
                     }
                 }
             }
@@ -127,7 +140,8 @@ public final class MCPServiceClient: @unchecked Sendable {
 
     public func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
         nonisolated(unsafe) let proxy = try remoteProxy()
-        let payload = try MCPServiceXPCCodec.encodeToolCallRequest(request) as NSData
+        // Signed ServiceMessage envelope (HMAC) — Agent → MCP runTool.
+        let payload = try MCPServiceXPCCodec.encodeSignedToolCallRequest(request) as NSData
         return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.callTool(requestJSON: payload) { data in
@@ -144,7 +158,7 @@ public final class MCPServiceClient: @unchecked Sendable {
     public func searchTools(principal: ServicePrincipal, query: String = "") async throws -> MCPToolSearchResultDTO {
         nonisolated(unsafe) let proxy = try remoteProxy()
         let request = MCPToolSearchRequest(principal: principal, query: query)
-        let payload = try MCPServiceXPCCodec.encodeToolSearchRequest(request) as NSData
+        let payload = try MCPServiceXPCCodec.encodeSignedToolSearchRequest(request) as NSData
         return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.searchTools(requestJSON: payload) { data in
@@ -204,7 +218,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         // Allow NSXPCListenerEndpoint argument on setDockerHelperPeerEndpoint:
         remote.setClasses(
             NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
-            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:withReply:)),
+            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )

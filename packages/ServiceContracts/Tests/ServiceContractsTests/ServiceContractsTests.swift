@@ -144,4 +144,67 @@ import Testing
         msg.signature = "deadbeef"
         #expect(ServiceMessageSigning.verify(msg, key: key) == false)
     }
+
+    @Test func signedToolCallEnvelopeRoundTrip() throws {
+        let key = ServiceMessageSigning.developmentKey(seed: "test-messages-secret")
+        let request = MCPToolCallRequest(
+            principal: .agent(sessionID: "s1", agentID: "ui"),
+            toolName: "python_script_exec",
+            argumentsJSON: #"{"script":"print(1)"}"#,
+            helperAPIKey: "sk-test"
+        )
+        let data = try MCPServiceXPCCodec.encodeSignedToolCallRequest(request, key: key)
+        let decoded = try MCPServiceXPCCodec.decodeSignedToolCallRequest(data, key: key)
+        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.helperAPIKey == "sk-test")
+
+        // Tamper fails verify
+        var message = try JSONDecoder.service.decode(ServiceMessage.self, from: data)
+        message = ServiceMessage(
+            id: message.id,
+            createdAt: message.createdAt,
+            from: message.from,
+            to: message.to,
+            type: message.type,
+            principal: message.principal,
+            correlationId: message.correlationId,
+            payloadJSON: Data(#"{"toolName":"evil"}"#.utf8),
+            signature: message.signature
+        )
+        let tampered = try JSONEncoder.service.encode(message)
+        #expect(throws: ServiceMessageEnvelope.Error.invalidSignature) {
+            _ = try MCPServiceXPCCodec.decodeSignedToolCallRequest(tampered, key: key)
+        }
+    }
+
+    @Test func signedTurnEnvelopeRoundTrip() throws {
+        let key = ServiceMessageSigning.developmentKey(seed: "test-messages-secret")
+        let request = AgentTurnRequest(
+            prompt: "hello",
+            apiKey: "sk",
+            modelJSON: Data(#"{"openai":{"_0":"gpt-5.6-luna"}}"#.utf8)
+        )
+        let data = try AgentServiceXPCCodec.encodeSignedTurnRequest(request, key: key)
+        let decoded = try AgentServiceXPCCodec.decodeSignedTurnRequest(data, key: key)
+        #expect(decoded.prompt == "hello")
+    }
+
+    @Test func debugModeRequiresMessagesSecretKey() throws {
+        MessagesSecretKey.resetCacheForTesting()
+        #expect(throws: MessagesSecretKeyError.missingDebugSecret) {
+            _ = try MessagesSecretKey.resolveSecretString(
+                environment: ["IS_DEBUG": "true"],
+                bundleURL: URL(fileURLWithPath: "/tmp"),
+                currentDirectoryURL: URL(fileURLWithPath: "/tmp")
+            )
+        }
+        MessagesSecretKey.resetCacheForTesting()
+        let secret = try MessagesSecretKey.resolveSecretString(
+            environment: ["IS_DEBUG": "true", "MESSAGES_SECRET_KEY": "dev-secret-xyz"],
+            bundleURL: URL(fileURLWithPath: "/tmp"),
+            currentDirectoryURL: URL(fileURLWithPath: "/tmp")
+        )
+        #expect(secret == "dev-secret-xyz")
+        MessagesSecretKey.resetCacheForTesting()
+    }
 }

@@ -1,19 +1,23 @@
 import Foundation
+import CryptoKit
 
 /// XPC interface for MCPService (shared tool execution with principal).
 @objc public protocol MCPServiceXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// `payload` is signed `ServiceMessage` (type `ping`, payload `ServicePingDTO`). Reply signed ping.
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Anonymous peer listener endpoint for sibling services (AgentService).
-    /// Must travel over XPC (`NSXPCCoder`); cannot be NSKeyedArchived to disk.
-    func peerListenerEndpoint(withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
-    /// DockerRunnerHelper peer endpoint (UI→MCP handoff). MCP runs docker via helper XPC only.
-    /// Reply is plain UTF-8 `"ok"` or `"error:…"`.
-    func setDockerHelperPeerEndpoint(_ endpoint: NSXPCListenerEndpoint, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// `requestJSON` is `MCPToolCallRequest`. Reply is `MCPToolCallResultDTO`.
+    /// `authJSON` is signed `peerHandoff` / `fetchMCPPeer`. Endpoint travels via NSXPCCoder only.
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
+    /// Docker helper peer endpoint + signed `installDockerHelperPeer` auth. Reply signed ack.
+    func setDockerHelperPeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    )
+    /// Signed `runTool` envelope. Reply is `MCPToolCallResultDTO` (unsigned result body for now).
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// `queryJSON` is `MCPToolSearchRequest`. Reply is `MCPToolSearchResultDTO`.
+    /// Signed `searchTools` envelope. Reply is `MCPToolSearchResultDTO`.
     func searchTools(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
@@ -138,6 +142,39 @@ public enum MCPServiceXPCCodec {
         try JSONDecoder.service.decode(MCPToolCallRequest.self, from: data)
     }
 
+    /// Signed envelope: Agent → MCP `runTool` (payload = `MCPToolCallRequest`).
+    public static func encodeSignedToolCallRequest(
+        _ request: MCPToolCallRequest,
+        from: DerrickServiceID = .agent,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .mcp,
+            type: .runTool,
+            principal: request.principal,
+            correlationId: request.requestID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedToolCallRequest(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> MCPToolCallRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        let (_, dto) = try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: MCPToolCallRequest.self,
+            expectedType: .runTool,
+            expectedTo: .mcp,
+            key: key
+        )
+        return dto
+    }
+
     public static func encodeToolCallResult(_ result: MCPToolCallResultDTO) throws -> Data {
         try JSONEncoder.service.encode(result)
     }
@@ -160,6 +197,139 @@ public enum MCPServiceXPCCodec {
 
     public static func decodeToolSearchResult(_ data: Data) throws -> MCPToolSearchResultDTO {
         try JSONDecoder.service.decode(MCPToolSearchResultDTO.self, from: data)
+    }
+
+    public static func encodeSignedToolSearchRequest(
+        _ request: MCPToolSearchRequest,
+        from: DerrickServiceID = .agent,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .mcp,
+            type: .searchTools,
+            principal: request.principal,
+            key: key
+        )
+    }
+
+    public static func decodeSignedToolSearchRequest(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> MCPToolSearchRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: MCPToolSearchRequest.self,
+            expectedType: .searchTools,
+            expectedTo: .mcp,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedPing(
+        _ text: String,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            ServicePingDTO(text: text),
+            from: from,
+            to: to,
+            type: .ping,
+            principal: .system,
+            key: key
+        )
+    }
+
+    public static func decodeSignedPing(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> ServicePingDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: ServicePingDTO.self,
+            expectedType: .ping,
+            expectedTo: expectedTo,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedPeerHandoffAuth(
+        _ auth: PeerHandoffAuthDTO,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            auth,
+            from: from,
+            to: to,
+            type: .peerHandoff,
+            principal: .system,
+            correlationId: auth.kind.rawValue,
+            key: key
+        )
+    }
+
+    public static func decodeSignedPeerHandoffAuth(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        expectedKind: PeerHandoffAuthDTO.Kind,
+        key: SymmetricKey? = nil
+    ) throws -> PeerHandoffAuthDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        let dto = try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: PeerHandoffAuthDTO.self,
+            expectedType: .peerHandoff,
+            expectedTo: expectedTo,
+            key: key
+        ).dto
+        guard dto.kind == expectedKind else {
+            throw ServiceMessageEnvelope.Error.unexpectedType(
+                expected: expectedKind.rawValue,
+                got: dto.kind.rawValue
+            )
+        }
+        return dto
+    }
+
+    public static func encodeSignedAck(
+        _ ack: ServiceAckDTO,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeAck(
+            ack,
+            from: from,
+            to: to,
+            type: .peerHandoff,
+            key: key
+        )
+    }
+
+    public static func decodeSignedAck(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> ServiceAckDTO {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeAck(
+            data,
+            expectedType: .peerHandoff,
+            expectedTo: expectedTo,
+            key: key
+        )
     }
 
     public static func encodeString(_ string: String) -> Data {
