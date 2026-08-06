@@ -7,7 +7,10 @@ final class AgentServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
         do {
             try XPCPeerAuthentication.apply(
                 requirement: XPCPeerAuthentication.requirementString(
-                    allowedPeerIdentifiers: [XPCPeerAuthentication.mainAppIdentifier]
+                    allowedPeerIdentifiers: [
+                        XPCPeerAuthentication.mainAppIdentifier,
+                        XPCPeerAuthentication.jobServiceIdentifier
+                    ]
                 ),
                 to: connection
             )

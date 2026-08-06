@@ -38,6 +38,11 @@
 		DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0053010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
+		DEJB100B2A00000000JB001 /* JobService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEJB10012A00000000JB001 /* JobService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DEJB10102A00000000JB001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10202A00000000JB001 /* ServiceContracts */; };
+		DEJB10112A00000000JB001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10212A00000000JB001 /* DBRepository */; };
+		DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10222A00000000JB001 /* DockerRunnerXPC */; };
+		DEJB10132A00000000JB001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10232A00000000JB001 /* ServiceEnsureUp */; };
 		DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEMC10012A00000000MC001 /* MCPService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* ServiceContracts */; };
 		DEMC10112A00000000MC001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10212A00000000MC001 /* DBRepository */; };
@@ -81,6 +86,13 @@
 			remoteGlobalIDString = DEAS10062A00000000AS001;
 			remoteInfo = AgentService;
 		};
+		DEJB100D2A00000000JB001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DE1B9EFE2FEB74250042F227 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DEJB10062A00000000JB001;
+			remoteInfo = JobService;
+		};
 		DEMC100D2A00000000MC001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DE1B9EFE2FEB74250042F227 /* Project object */;
@@ -99,6 +111,7 @@
 				DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */,
 				DEAS100B2A00000000AS001 /* AgentService.xpc in Embed XPC Services */,
 				DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */,
+				DEJB100B2A00000000JB001 /* JobService.xpc in Embed XPC Services */,
 			);
 			name = "Embed XPC Services";
 		};
@@ -110,6 +123,7 @@
 		DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = uiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = DockerRunnerHelper.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAS10012A00000000AS001 /* AgentService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = AgentService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
+		DEJB10012A00000000JB001 /* JobService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = JobService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEMC10012A00000000MC001 /* MCPService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = MCPService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -127,6 +141,13 @@
 				Info.plist,
 			);
 			target = DEAS10062A00000000AS001 /* AgentService */;
+		};
+		DEJB100E2A00000000JB001 /* Exceptions for "JobService" folder in "JobService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DEJB10062A00000000JB001 /* JobService */;
 		};
 		DEMC100E2A00000000MC001 /* Exceptions for "MCPService" folder in "MCPService" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -167,6 +188,14 @@
 				DEAS100E2A00000000AS001 /* Exceptions for "AgentService" folder in "AgentService" target */,
 			);
 			path = AgentService;
+			sourceTree = "<group>";
+		};
+		DEJB10022A00000000JB001 /* JobService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DEJB100E2A00000000JB001 /* Exceptions for "JobService" folder in "JobService" target */,
+			);
+			path = JobService;
 			sourceTree = "<group>";
 		};
 		DEMC10022A00000000MC001 /* MCPService */ = {
@@ -242,6 +271,15 @@
 				DEAS10242A00000000AS001 /* EgressProxy in Frameworks */,
 			);
 		};
+		DEJB10042A00000000JB001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				DEJB10102A00000000JB001 /* ServiceContracts in Frameworks */,
+				DEJB10112A00000000JB001 /* DBRepository in Frameworks */,
+				DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */,
+				DEJB10132A00000000JB001 /* ServiceEnsureUp in Frameworks */,
+			);
+		};
 		DEMC10042A00000000MC001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
@@ -265,6 +303,7 @@
 				DEAA10022FFF00000042F228 /* DockerRunnerHelper */,
 				DEAS10022A00000000AS001 /* AgentService */,
 				DEMC10022A00000000MC001 /* MCPService */,
+				DEJB10022A00000000JB001 /* JobService */,
 				DESH00012A00000000SH001 /* SharedAgentRuntime */,
 				DE1B9F162FEB74260042F227 /* uiTests */,
 				DE1B9F202FEB74260042F227 /* uiUITests */,
@@ -279,6 +318,7 @@
 				DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */,
 				DEAS10012A00000000AS001 /* AgentService.xpc */,
 				DEMC10012A00000000MC001 /* MCPService.xpc */,
+				DEJB10012A00000000JB001 /* JobService.xpc */,
 				DE1B9F132FEB74260042F227 /* uiTests.xctest */,
 				DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */,
 			);
@@ -303,6 +343,7 @@
 				DEAA100C2FFF00000042F228 /* PBXTargetDependency */,
 				DEAS100C2A00000000AS001 /* PBXTargetDependency */,
 				DEMC100C2A00000000MC001 /* PBXTargetDependency */,
+				DEJB100C2A00000000JB001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DE1B9F082FEB74250042F227 /* ui */,
@@ -430,6 +471,30 @@
 			productReference = DEAS10012A00000000AS001 /* AgentService.xpc */;
 			productType = "com.apple.product-type.xpc-service";
 		};
+		DEJB10062A00000000JB001 /* JobService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DEJB10092A00000000JB001 /* Build configuration list for PBXNativeTarget "JobService" */;
+			buildPhases = (
+				DEJB10032A00000000JB001 /* Sources */,
+				DEJB10042A00000000JB001 /* Frameworks */,
+				DEJB10052A00000000JB001 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				DEJB10022A00000000JB001 /* JobService */,
+			);
+			name = JobService;
+			packageProductDependencies = (
+				DEJB10202A00000000JB001 /* ServiceContracts */,
+				DEJB10212A00000000JB001 /* DBRepository */,
+				DEJB10222A00000000JB001 /* DockerRunnerXPC */,
+				DEJB10232A00000000JB001 /* ServiceEnsureUp */,
+			);
+			productName = JobService;
+			productReference = DEJB10012A00000000JB001 /* JobService.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
 		DEMC10062A00000000MC001 /* MCPService */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DEMC10092A00000000MC001 /* Build configuration list for PBXNativeTarget "MCPService" */;
@@ -506,6 +571,7 @@
 				DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */,
 				DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */,
 				DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */,
+				DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -516,6 +582,7 @@
 				DEAA10062FFF00000042F228 /* DockerRunnerHelper */,
 				DEAS10062A00000000AS001 /* AgentService */,
 				DEMC10062A00000000MC001 /* MCPService */,
+				DEJB10062A00000000JB001 /* JobService */,
 				DE1B9F122FEB74260042F227 /* uiTests */,
 				DE1B9F1C2FEB74260042F227 /* uiUITests */,
 			);
@@ -544,6 +611,11 @@
 			);
 		};
 		DEAS10052A00000000AS001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		DEJB10052A00000000JB001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -581,6 +653,11 @@
 			files = (
 			);
 		};
+		DEJB10032A00000000JB001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 		DEMC10032A00000000MC001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
@@ -608,6 +685,11 @@
 			isa = PBXTargetDependency;
 			target = DEAS10062A00000000AS001 /* AgentService */;
 			targetProxy = DEAS100D2A00000000AS001 /* PBXContainerItemProxy */;
+		};
+		DEJB100C2A00000000JB001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DEJB10062A00000000JB001 /* JobService */;
+			targetProxy = DEJB100D2A00000000JB001 /* PBXContainerItemProxy */;
 		};
 		DEMC100C2A00000000MC001 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -979,6 +1061,44 @@
 			};
 			name = Release;
 		};
+		DEJB10072A00000000JB001 /* Debug configuration for PBXNativeTarget "JobService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = JobService/JobService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JobService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.JobService;
+				PRODUCT_NAME = JobService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		DEJB10082A00000000JB001 /* Release configuration for PBXNativeTarget "JobService" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = JobService/JobService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JobService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.JobService;
+				PRODUCT_NAME = JobService;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 		DEMC10072A00000000MC001 /* Debug configuration for PBXNativeTarget "MCPService" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1068,6 +1188,14 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		DEJB10092A00000000JB001 /* Build configuration list for PBXNativeTarget "JobService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEJB10072A00000000JB001 /* Debug configuration for PBXNativeTarget "JobService" */,
+				DEJB10082A00000000JB001 /* Release configuration for PBXNativeTarget "JobService" */,
+			);
+			defaultConfigurationName = Release;
+		};
 		DEMC10092A00000000MC001 /* Build configuration list for PBXNativeTarget "MCPService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1122,6 +1250,10 @@
 		DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Lib;
+		};
+		DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/ServiceEnsureUp;
 		};
 		DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -1264,6 +1396,23 @@
 		DEF68600300A71F600165A82 /* Lib */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
+		};
+		DEJB10202A00000000JB001 /* ServiceContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ServiceContracts;
+		};
+		DEJB10212A00000000JB001 /* DBRepository */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DBRepository;
+		};
+		DEJB10222A00000000JB001 /* DockerRunnerXPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DockerRunnerXPC;
+		};
+		DEJB10232A00000000JB001 /* ServiceEnsureUp */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */;
+			productName = ServiceEnsureUp;
 		};
 		DEMC10202A00000000MC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -535,7 +535,7 @@ struct ContentView: View {
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
-                // Parallel: Docker prewarm (required before prompts) + AgentService + MCPService.
+                // Parallel: Docker prewarm (required before prompts) + Agent + MCP + Job services.
                 // Modal stays up until Docker finishes; sessionReady only then.
                 await MainActor.run {
                     bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and services…")
@@ -548,6 +548,7 @@ struct ContentView: View {
                 }()
                 async let agentHealth = AgentServiceClient.shared.ensureUpAndHealth()
                 async let mcpHealthTask = MCPServiceClient.shared.ensureUpAndHealth()
+                async let jobHealthTask = JobServiceClient.shared.ensureUpAndHealth()
 
                 // Docker must succeed before prompting is allowed.
                 try await dockerReady
@@ -561,6 +562,12 @@ struct ContentView: View {
                 debugLog(
                     "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
                 )
+
+                let jobHealth = try await jobHealthTask
+                debugLog(
+                    "JobService ensure-up ok status=\(jobHealth.status.rawValue) pid=\(jobHealth.pid) detail=\(jobHealth.detail ?? "")"
+                )
+
                 // Required: peer endpoint only travels via NSXPCCoder (UI → Agent).
                 let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
                 try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
@@ -580,7 +587,7 @@ struct ContentView: View {
                 if isDebugEnabled {
                     await MainActor.run {
                         debugLogStore.log(
-                            "UI client ready (Docker + AgentService + MCPService peer + Docker helper→MCP)"
+                            "UI client ready (Docker + Agent + MCP + JobService + peer mesh)"
                         )
                     }
                 }

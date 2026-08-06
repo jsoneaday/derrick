@@ -189,6 +189,25 @@ import Testing
         #expect(decoded.prompt == "hello")
     }
 
+    @Test func jobStepSpecsEncode() throws {
+        let tool = try CreateJobStepSpec.runTool(
+            JobRunToolPayload(toolName: "python_script_exec", argumentsJSON: #"{"mode":"readonly"}"#)
+        )
+        #expect(tool.kind == .runTool)
+        let wake = try CreateJobStepSpec.wakeAgent(JobWakeAgentPayload(prompt: "hello"))
+        #expect(wake.kind == .wakeAgent)
+        let req = CreateJobRequest(
+            principal: .system,
+            source: .webhook,
+            runAt: nil,
+            steps: [tool, wake]
+        )
+        #expect(req.steps.count == 2)
+        let data = try JobServiceXPCCodec.encodeCreateJobRequest(req)
+        let decoded = try JobServiceXPCCodec.decodeCreateJobRequest(data)
+        #expect(decoded.source == .webhook)
+    }
+
     @Test func debugModeRequiresMessagesSecretKey() throws {
         MessagesSecretKey.resetCacheForTesting()
         #expect(throws: MessagesSecretKeyError.missingDebugSecret) {

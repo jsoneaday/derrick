@@ -33,10 +33,18 @@ UI ─────────────────────────�
 - JobService / WebhookService never run LLM turns.
 - Every MCP call carries a **principal** for policy.
 
-### Job fire types
-1. **RunTool** — frozen tool+args (+ approval ref); 0 LLM at fire.
-2. **WakeAgent** — envelope → agent turn (may call MCP).
-3. **RunToolThenWake** — tool then wake with result.
+### Job model
+- **Job** = durable container: schedule (`runAt`), principal, source, status, steps.
+- **Step kinds:** `runTool` | `runToolBatch` | `wakeAgent` | `runToolThenWake`.
+- Notify-after-tool = `runToolThenWake` or graph `runTool` → `wakeAgent` (not a silent side-effect).
+- Heartbeat / decision alerts = **schedules** that fire `wakeAgent` (or notify) steps, not a vague “event” step type.
+- **ServiceEnsureUp** shared library: ensure Agent / MCP / Job are up (health+bootstrap). Job/Webhook/UI reuse it.
+
+### Job fire types (step kinds)
+1. **runTool** — frozen tool+args; 0 LLM at fire.
+2. **runToolBatch** — several tools in one step.
+3. **wakeAgent** — prompt/envelope → agent turn (may call MCP).
+4. **runToolThenWake** — tool then wake with result.
 
 ### AgentService
 - May call **MCPService** immediately, or **JobService** to schedule.
@@ -84,7 +92,7 @@ UI ─────────────────────────�
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
-| **P4** | pending | JobService |
+| **P4** | in progress | JobService XPC + jobs/job_steps + scheduler; runTool via MCP; **wakeAgent via AgentService**; JobServiceClient + UI bootstrap ensure-up; ServiceEnsureUp lib. **Always-on** still needs LaunchAgent (item 8). |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |
 

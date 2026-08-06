@@ -9,6 +9,8 @@ public enum ServiceMessageType: String, Codable, Sendable, Hashable {
     // Jobs
     case createJob
     case cancelJob
+    case getJob
+    case listJobs
     case jobDue
     case jobTerminal
     // Agents
@@ -112,9 +114,4 @@ public struct ServiceMessage: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// Job fire modes owned by JobService.
-public enum JobFireKind: String, Codable, Sendable, Hashable {
-    case runTool
-    case wakeAgent
-    case runToolThenWake
-}
+// JobFireKind is a typealias of JobStepKind (see JobModels.swift).
