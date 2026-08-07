@@ -568,6 +568,24 @@ struct ContentView: View {
                     "JobService ensure-up ok status=\(jobHealth.status.rawValue) pid=\(jobHealth.pid) detail=\(jobHealth.detail ?? "")"
                 )
 
+                // Login agent: keep JobService up for the user session (schedules while UI quit).
+                // SMAppService must run on the main actor; status .notFound still requires register().
+                do {
+                    let result = try await MainActor.run {
+                        let paths = JobServiceLoginAgent.preflightPaths()
+                        debugLog(
+                            "JobKeepAlive preflight plistExists=\(FileManager.default.fileExists(atPath: paths.plist.path)) exeExists=\(FileManager.default.fileExists(atPath: paths.executable.path)) sm=\(JobServiceLoginAgent.smStatusDescription) bundle=\(Bundle.main.bundlePath)"
+                        )
+                        return try JobServiceLoginAgent.ensureRegistered()
+                    }
+                    debugLog(
+                        "JobKeepAlive registered method=\(result.method.rawValue) enabled=\(result.isRunningOrEnabled) status=\(result.statusDescription) — \(result.detail)"
+                    )
+                } catch {
+                    debugLog("JobKeepAlive register failed: \(error.localizedDescription)")
+                    // Do not fail whole bootstrap — jobs still work while UI is up.
+                }
+
                 // Required: peer endpoint only travels via NSXPCCoder (UI → Agent).
                 let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
                 try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)

@@ -18,7 +18,7 @@
 | **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent |
 | **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained process runner (existing) |
 
-**Packaging (locked):** Embedded **XPC services** in the app bundle first (same pattern as DockerHelper). Promote to LaunchAgents later if keep-alive without any app launch is required.
+**Packaging (locked):** Embedded **XPC services** in the app bundle. **JobKeepAlive** login LaunchAgent (`SMAppService`, RunAtLoad + KeepAlive) holds an XPC connection to JobService for the **user session** (not system boot — no HITL/Keychain without login). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
 
 ## Call rules
 
@@ -78,11 +78,11 @@ UI ─────────────────────────�
 
 | # | Decision | Lock |
 | --- | --- | --- |
-| 1 | Packaging | **XPC services** embedded in app (LaunchAgent later if needed) |
+| 1 | Packaging | **XPC services** embedded; **JobKeepAlive login LaunchAgent** holds JobService for user session |
 | 2 | DB | **One shared SQLite**; multi-table ownership; WAL |
 | 3 | Message auth | **HMAC** v1 (`MESSAGES_SECRET_KEY` in debug / Keychain in release) + XPC peer identity |
-| 4 | Idle | **Stay up while work**; may idle-exit after quiet period (v2) |
-| 5 | Approval, UI absent | **Queue decision-needed**; job/agent wait with timeout → fail |
+| 4 | Idle / sleep | Keep-alive while logged in; **idle sleep allowed** when no job runs; **PreventUserIdleSystemSleep** only while a job is executing |
+| 5 | Policy, UI absent | **HITL queue** + UserNotifications (next); wait with timeout → fail closed |
 
 ## Phases
 
@@ -92,7 +92,7 @@ UI ─────────────────────────�
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
-| **P4** | in progress | JobService XPC + jobs/job_steps + scheduler; runTool via MCP; **wakeAgent via AgentService**; JobServiceClient + UI bootstrap ensure-up; ServiceEnsureUp lib. **Always-on** still needs LaunchAgent (item 8). |
+| **P4** | partial | JobService + schedules; **JobKeepAlive login LaunchAgent**; structured job failures (`error_code` / `Last attempt failed due to…`); late-start `status_detail` after sleep. **Jobs UI** / **HITL queue** / webhook still open. |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |
 

@@ -157,11 +157,18 @@ public struct JobRecord: Codable, Sendable, Hashable, Identifiable {
     public let principal: ServicePrincipal
     public let source: JobSource
     public let correlationId: String?
+    /// Schedule that spawned this run (nil for ad-hoc jobs).
+    public let scheduleID: String?
     /// When nil, job is runnable as soon as claimed (pending).
     public var runAt: Date?
     public let createdAt: Date
     public var updatedAt: Date
+    /// Terminal failure text (`Last attempt failed due to: …`).
     public var errorMessage: String?
+    /// `JobFailureReason.rawValue` when failed.
+    public var errorCode: String?
+    /// Non-terminal note (e.g. started late after sleep).
+    public var statusDetail: String?
     public var steps: [JobStepRecord]
 
     public init(
@@ -170,10 +177,13 @@ public struct JobRecord: Codable, Sendable, Hashable, Identifiable {
         principal: ServicePrincipal,
         source: JobSource,
         correlationId: String? = nil,
+        scheduleID: String? = nil,
         runAt: Date? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         errorMessage: String? = nil,
+        errorCode: String? = nil,
+        statusDetail: String? = nil,
         steps: [JobStepRecord] = []
     ) {
         self.id = id
@@ -181,10 +191,13 @@ public struct JobRecord: Codable, Sendable, Hashable, Identifiable {
         self.principal = principal
         self.source = source
         self.correlationId = correlationId
+        self.scheduleID = scheduleID
         self.runAt = runAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.errorMessage = errorMessage
+        self.errorCode = errorCode
+        self.statusDetail = statusDetail
         self.steps = steps
     }
 }
@@ -225,6 +238,7 @@ public struct CreateJobRequest: Codable, Sendable, Hashable {
     public let principal: ServicePrincipal
     public let source: JobSource
     public let correlationId: String?
+    public let scheduleID: String?
     /// Schedule; nil = run ASAP.
     public let runAt: Date?
     public let steps: [CreateJobStepSpec]
@@ -233,12 +247,14 @@ public struct CreateJobRequest: Codable, Sendable, Hashable {
         principal: ServicePrincipal,
         source: JobSource,
         correlationId: String? = nil,
+        scheduleID: String? = nil,
         runAt: Date? = nil,
         steps: [CreateJobStepSpec]
     ) {
         self.principal = principal
         self.source = source
         self.correlationId = correlationId
+        self.scheduleID = scheduleID
         self.runAt = runAt
         self.steps = steps
     }
@@ -275,10 +291,12 @@ public struct GetJobRequest: Codable, Sendable, Hashable {
 public struct ListJobsRequest: Codable, Sendable, Hashable {
     public let limit: Int
     public let status: JobStatus?
+    public let scheduleID: String?
 
-    public init(limit: Int = 50, status: JobStatus? = nil) {
+    public init(limit: Int = 50, status: JobStatus? = nil, scheduleID: String? = nil) {
         self.limit = limit
         self.status = status
+        self.scheduleID = scheduleID
     }
 }
 

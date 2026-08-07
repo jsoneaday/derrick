@@ -10,7 +10,8 @@ final class JobServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
                     allowedPeerIdentifiers: [
                         XPCPeerAuthentication.mainAppIdentifier,
                         XPCPeerAuthentication.agentServiceIdentifier,
-                        XPCPeerAuthentication.webhookServiceIdentifier
+                        XPCPeerAuthentication.webhookServiceIdentifier,
+                        XPCPeerAuthentication.jobKeepAliveIdentifier
                     ]
                 ),
                 to: connection

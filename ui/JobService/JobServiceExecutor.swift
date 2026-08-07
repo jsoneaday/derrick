@@ -8,6 +8,10 @@ actor JobServiceExecutor {
     static let shared = JobServiceExecutor()
 
     func execute(job: JobRow, steps: [JobStepRow]) async {
+        // Prevent idle system sleep only while this job runs (released on all exit paths).
+        let sleepToken = JobServiceSleepAssertion.shared.begin(jobID: job.id)
+        defer { sleepToken.end() }
+
         let repo: DBRepository
         do {
             repo = try await JobServiceStore.shared.sharedRepository()
@@ -25,7 +29,12 @@ actor JobServiceExecutor {
                 continue
             }
             guard let kind = JobStepKind(rawValue: step.kind) else {
-                await failJob(repo: repo, jobID: job.id, message: "unknown step kind \(step.kind)")
+                await failJob(
+                    repo: repo,
+                    jobID: job.id,
+                    reason: .invalidRecord,
+                    detail: "unknown step kind \(step.kind)"
+                )
                 return
             }
 
@@ -65,11 +74,13 @@ actor JobServiceExecutor {
                 }
                 ordered[index] = step
             } catch {
+                let reason = JobFailureReason.classify(error)
+                let userMessage = reason.lastAttemptMessage(detail: error.localizedDescription)
                 step.status = JobStepStatus.failed.rawValue
-                step.errorMessage = error.localizedDescription
+                step.errorMessage = userMessage
                 step.finishedAt = Date()
                 try? await repo.updateStep(step)
-                await failJob(repo: repo, jobID: job.id, message: error.localizedDescription)
+                await failJob(repo: repo, jobID: job.id, reason: reason, detail: error.localizedDescription)
                 return
             }
         }
@@ -82,11 +93,22 @@ actor JobServiceExecutor {
         )
     }
 
-    private func failJob(repo: DBRepository, jobID: String, message: String) async {
-        try? await repo.updateJobStatus(id: jobID, status: JobStatus.failed.rawValue, errorMessage: message)
+    private func failJob(
+        repo: DBRepository,
+        jobID: String,
+        reason: JobFailureReason,
+        detail: String? = nil
+    ) async {
+        let message = reason.lastAttemptMessage(detail: detail)
+        try? await repo.updateJobStatus(
+            id: jobID,
+            status: JobStatus.failed.rawValue,
+            errorMessage: message,
+            errorCode: reason.rawValue
+        )
         await JobServiceStore.shared.log(
             level: .error,
-            message: "job failed id=\(jobID): \(message)",
+            message: "job failed id=\(jobID) code=\(reason.rawValue): \(message)",
             code: "job_failed"
         )
     }

@@ -18,6 +18,8 @@ public enum XPCPeerAuthentication: Sendable {
     public static let mcpServiceIdentifier = "derrick.ui.MCPService"
     /// Webhook ingress XPC service.
     public static let webhookServiceIdentifier = "derrick.ui.WebhookService"
+    /// Login LaunchAgent that holds JobService open for the user session.
+    public static let jobKeepAliveIdentifier = "derrick.ui.JobKeepAlive"
 
     public enum PeerRole: Sendable {
         /// Helper accepting connections — peer must be the main app.

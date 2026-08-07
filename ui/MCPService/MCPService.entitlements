@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>VUSK4B2YKQ.derrick.shared</string>
+	</array>
 </dict>
 </plist>

@@ -38,12 +38,17 @@ import Testing
         #expect(DerrickServiceID.job.xpcServiceName == "derrick.ui.JobService")
     }
 
-    @Test func databaseDirectoryPrefersHostContainerFirst() {
+    @Test func databaseDirectoryPrefersAppGroupThenHostContainer() {
         let parents = DerrickAppSupport.preferredDatabaseParentDirectories()
         #expect(!parents.isEmpty)
-        let first = parents[0].path
-        #expect(first.contains("Containers/\(DerrickAppSupport.hostAppBundleIdentifier)"))
-        #expect(first.hasSuffix("Application Support") || first.contains("Application Support"))
+        // App Group (when available) first; host container always present as a candidate.
+        let paths = parents.map(\.path)
+        #expect(paths.contains { $0.contains("Containers/\(DerrickAppSupport.hostAppBundleIdentifier)") })
+        if let group = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier
+        ) {
+            #expect(parents[0].path.hasPrefix(group.path))
+        }
     }
 
     @Test func turnRequestRoundTrip() throws {
@@ -206,6 +211,53 @@ import Testing
         let data = try JobServiceXPCCodec.encodeCreateJobRequest(req)
         let decoded = try JobServiceXPCCodec.decodeCreateJobRequest(data)
         #expect(decoded.source == .webhook)
+    }
+
+    @Test func jobFailureReasonLastAttemptMessage() {
+        let msg = JobFailureReason.interruptedDeviceUnavailable.lastAttemptMessage()
+        #expect(msg.hasPrefix("Last attempt failed due to:"))
+        #expect(msg.contains("sleep") || msg.contains("JobService stopped"))
+        let withDetail = JobFailureReason.stepFailed.lastAttemptMessage(detail: "tool denied")
+        #expect(withDetail.contains("tool denied"))
+        let late = JobStatusDetail.startedLate(
+            scheduledAt: Date(timeIntervalSince1970: 0),
+            startedAt: Date(timeIntervalSince1970: 3600)
+        )
+        #expect(late.contains("late"))
+        #expect(late.contains("asleep") || late.contains("not running"))
+    }
+
+    @Test func scheduleTimingAndSignedCRUD() throws {
+        let fired = Date(timeIntervalSince1970: 1_700_000_000)
+        #expect(JobScheduleTiming.nextFireDate(after: fired, recurrence: .once) == nil)
+        let next = JobScheduleTiming.nextFireDate(after: fired, recurrence: .every(hours: 1))
+        #expect(next == fired.addingTimeInterval(3600))
+
+        let key = ServiceMessageSigning.developmentKey(seed: "test-messages-secret")
+        let step = try CreateJobStepSpec.wakeAgent(JobWakeAgentPayload(prompt: "heartbeat"))
+        let create = CreateScheduleRequest(
+            name: "hourly-wake",
+            principal: .system,
+            source: .ui,
+            recurrence: .every(hours: 1),
+            steps: [step],
+            nextFireAt: fired,
+            enabled: true
+        )
+        let data = try JobServiceXPCCodec.encodeSignedCreateSchedule(create, from: .ui, key: key)
+        let decoded = try JobServiceXPCCodec.decodeSignedCreateSchedule(data, key: key)
+        #expect(decoded.name == "hourly-wake")
+        #expect(decoded.recurrence.kind == .interval)
+        #expect(decoded.source == .ui)
+
+        let listData = try JobServiceXPCCodec.encodeSignedListSchedules(
+            ListSchedulesRequest(limit: 10, enabledOnly: true),
+            from: .agent,
+            key: key
+        )
+        let listReq = try JobServiceXPCCodec.decodeSignedListSchedules(listData, key: key)
+        #expect(listReq.enabledOnly == true)
+        #expect(listReq.limit == 10)
     }
 
     @Test func debugModeRequiresMessagesSecretKey() throws {

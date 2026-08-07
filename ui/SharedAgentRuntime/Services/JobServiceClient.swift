@@ -146,6 +146,142 @@ public final class JobServiceClient: @unchecked Sendable {
         return result.jobs
     }
 
+    // MARK: - Schedules
+
+    public func createSchedule(
+        _ request: CreateScheduleRequest,
+        from: DerrickServiceID = .ui
+    ) async throws -> JobScheduleRecord {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedCreateSchedule(request, from: from) as NSData
+        let result: ScheduleResult = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.createSchedule(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeScheduleResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard result.ok, let schedule = result.schedule else {
+            throw JobServiceClientError.requestFailed(result.message)
+        }
+        return schedule
+    }
+
+    public func updateSchedule(
+        _ request: UpdateScheduleRequest,
+        from: DerrickServiceID = .ui
+    ) async throws -> JobScheduleRecord {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedUpdateSchedule(request, from: from) as NSData
+        let result: ScheduleResult = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.updateSchedule(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeScheduleResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard result.ok, let schedule = result.schedule else {
+            throw JobServiceClientError.requestFailed(result.message)
+        }
+        return schedule
+    }
+
+    public func setScheduleEnabled(
+        scheduleID: String,
+        enabled: Bool,
+        from: DerrickServiceID = .ui
+    ) async throws -> JobScheduleRecord {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedSetScheduleEnabled(
+            SetScheduleEnabledRequest(scheduleID: scheduleID, enabled: enabled),
+            from: from
+        ) as NSData
+        let result: ScheduleResult = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.setScheduleEnabled(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeScheduleResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard result.ok, let schedule = result.schedule else {
+            throw JobServiceClientError.requestFailed(result.message)
+        }
+        return schedule
+    }
+
+    public func deleteSchedule(scheduleID: String, from: DerrickServiceID = .ui) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedDeleteSchedule(scheduleID: scheduleID, from: from) as NSData
+        try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.deleteSchedule(requestJSON: payload) { data in
+                    do {
+                        let ack = try JobServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: from)
+                        if ack.ok { cont.resume() }
+                        else { cont.resume(throwing: JobServiceClientError.requestFailed(ack.message)) }
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
+    public func getSchedule(scheduleID: String, from: DerrickServiceID = .ui) async throws -> JobScheduleRecord {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedGetSchedule(scheduleID: scheduleID, from: from) as NSData
+        let result: ScheduleResult = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.getSchedule(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeScheduleResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard result.ok, let schedule = result.schedule else {
+            throw JobServiceClientError.requestFailed(result.message)
+        }
+        return schedule
+    }
+
+    public func listSchedules(
+        _ request: ListSchedulesRequest = ListSchedulesRequest(),
+        from: DerrickServiceID = .ui
+    ) async throws -> [JobScheduleRecord] {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = try JobServiceXPCCodec.encodeSignedListSchedules(request, from: from) as NSData
+        let result: ListSchedulesResult = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.listSchedules(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeListSchedulesResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard result.ok else {
+            throw JobServiceClientError.requestFailed(result.message)
+        }
+        return result.schedules
+    }
+
     // MARK: - Connection
 
     private func markReady() {

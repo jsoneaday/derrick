@@ -4,9 +4,22 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>VUSK4B2YKQ.derrick.shared</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<string>/Library/LaunchAgents/</string>
+	</array>
 	<key>com.apple.security.temporary-exception.xpc-service-name</key>
-	<string>derrick.ui.DockerRunnerHelper</string>
+	<array>
+		<string>derrick.ui.DockerRunnerHelper</string>
+		<string>derrick.ui.AgentService</string>
+		<string>derrick.ui.MCPService</string>
+		<string>derrick.ui.JobService</string>
+	</array>
 </dict>
 </plist>

@@ -112,4 +112,103 @@ final class JobServiceExportedObject: NSObject, JobServiceXPC {
             }
         }
     }
+
+    // MARK: - Schedules
+
+    func createSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedCreateSchedule(data)
+                let schedule = try await JobServiceHost.shared.createSchedule(request)
+                let result = ScheduleResult(ok: true, schedule: schedule, message: "ok")
+                reply((try JobServiceXPCCodec.encodeScheduleResult(result)) as NSData)
+            } catch {
+                fputs("[JobService] createSchedule failed: \(error.localizedDescription)\n", stderr)
+                let result = ScheduleResult(ok: false, message: error.localizedDescription)
+                reply((try? JobServiceXPCCodec.encodeScheduleResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
+
+    func updateSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedUpdateSchedule(data)
+                let schedule = try await JobServiceHost.shared.updateSchedule(request)
+                let result = ScheduleResult(ok: true, schedule: schedule, message: "ok")
+                reply((try JobServiceXPCCodec.encodeScheduleResult(result)) as NSData)
+            } catch {
+                fputs("[JobService] updateSchedule failed: \(error.localizedDescription)\n", stderr)
+                let result = ScheduleResult(ok: false, message: error.localizedDescription)
+                reply((try? JobServiceXPCCodec.encodeScheduleResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
+
+    func setScheduleEnabled(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedSetScheduleEnabled(data)
+                let schedule = try await JobServiceHost.shared.setScheduleEnabled(
+                    scheduleID: request.scheduleID,
+                    enabled: request.enabled
+                )
+                let result = ScheduleResult(ok: true, schedule: schedule, message: "ok")
+                reply((try JobServiceXPCCodec.encodeScheduleResult(result)) as NSData)
+            } catch {
+                fputs("[JobService] setScheduleEnabled failed: \(error.localizedDescription)\n", stderr)
+                let result = ScheduleResult(ok: false, message: error.localizedDescription)
+                reply((try? JobServiceXPCCodec.encodeScheduleResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
+
+    func deleteSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedDeleteSchedule(data)
+                try await JobServiceHost.shared.deleteSchedule(scheduleID: request.scheduleID)
+                let ack = try JobServiceXPCCodec.encodeSignedAck(.ok, to: .ui)
+                reply(ack as NSData)
+            } catch {
+                let ack = (try? JobServiceXPCCodec.encodeSignedAck(.error(error.localizedDescription), to: .ui))
+                    ?? Data()
+                reply(ack as NSData)
+            }
+        }
+    }
+
+    func getSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedGetSchedule(data)
+                let schedule = try await JobServiceHost.shared.getSchedule(scheduleID: request.scheduleID)
+                let result = ScheduleResult(ok: true, schedule: schedule, message: "ok")
+                reply((try JobServiceXPCCodec.encodeScheduleResult(result)) as NSData)
+            } catch {
+                let result = ScheduleResult(ok: false, message: error.localizedDescription)
+                reply((try? JobServiceXPCCodec.encodeScheduleResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
+
+    func listSchedules(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let request = try JobServiceXPCCodec.decodeSignedListSchedules(data)
+                let schedules = try await JobServiceHost.shared.listSchedules(request: request)
+                let result = ListSchedulesResult(ok: true, schedules: schedules, message: "ok")
+                reply((try JobServiceXPCCodec.encodeListSchedulesResult(result)) as NSData)
+            } catch {
+                let result = ListSchedulesResult(ok: false, message: error.localizedDescription)
+                reply((try? JobServiceXPCCodec.encodeListSchedulesResult(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
 }

@@ -5,7 +5,7 @@ import CryptoKit
 @objc public protocol JobServiceXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Signed `createJob` envelope. Reply `CreateJobResult` JSON (unsigned body for now).
+    /// Signed `createJob`. Reply `CreateJobResult`.
     func createJob(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed cancel. Reply `ServiceAckDTO` signed.
     func cancelJob(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
@@ -13,6 +13,13 @@ import CryptoKit
     func getJob(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed list. Reply `ListJobsResult`.
     func listJobs(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Signed schedule CRUD.
+    func createSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    func updateSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    func setScheduleEnabled(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    func deleteSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    func getSchedule(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    func listSchedules(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 public struct JobServiceBootstrapResult: Codable, Sendable, Hashable {
@@ -206,5 +213,216 @@ public enum JobServiceXPCCodec {
         key: SymmetricKey? = nil
     ) throws -> ServiceAckDTO {
         try MCPServiceXPCCodec.decodeSignedAck(data, expectedTo: expectedTo, key: key)
+    }
+
+    // MARK: - Schedules
+
+    public static func encodeScheduleResult(_ result: ScheduleResult) throws -> Data {
+        try JSONEncoder.service.encode(result)
+    }
+
+    public static func decodeScheduleResult(_ data: Data) throws -> ScheduleResult {
+        try JSONDecoder.service.decode(ScheduleResult.self, from: data)
+    }
+
+    public static func encodeListSchedulesResult(_ result: ListSchedulesResult) throws -> Data {
+        try JSONEncoder.service.encode(result)
+    }
+
+    public static func decodeListSchedulesResult(_ data: Data) throws -> ListSchedulesResult {
+        try JSONDecoder.service.decode(ListSchedulesResult.self, from: data)
+    }
+
+    public static func encodeSignedCreateSchedule(
+        _ request: CreateScheduleRequest,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .job,
+            type: .createSchedule,
+            principal: request.principal,
+            key: key
+        )
+    }
+
+    public static func decodeSignedCreateSchedule(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> CreateScheduleRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: CreateScheduleRequest.self,
+            expectedType: .createSchedule,
+            expectedTo: .job,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedUpdateSchedule(
+        _ request: UpdateScheduleRequest,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .job,
+            type: .updateSchedule,
+            principal: .system,
+            correlationId: request.scheduleID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedUpdateSchedule(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> UpdateScheduleRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: UpdateScheduleRequest.self,
+            expectedType: .updateSchedule,
+            expectedTo: .job,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedSetScheduleEnabled(
+        _ request: SetScheduleEnabledRequest,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .job,
+            type: .updateSchedule,
+            principal: .system,
+            correlationId: request.scheduleID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedSetScheduleEnabled(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> SetScheduleEnabledRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        // Payload type differs from UpdateScheduleRequest; decode after verify.
+        let message = try JSONDecoder.service.decode(ServiceMessage.self, from: data)
+        guard message.to == .job else {
+            throw ServiceMessageEnvelope.Error.unexpectedRecipient(
+                expected: DerrickServiceID.job.rawValue,
+                got: message.to.rawValue
+            )
+        }
+        guard ServiceMessageSigning.verify(message, key: key) else {
+            throw ServiceMessageEnvelope.Error.invalidSignature
+        }
+        return try JSONDecoder.service.decode(SetScheduleEnabledRequest.self, from: message.payloadJSON)
+    }
+
+    public static func encodeSignedDeleteSchedule(
+        scheduleID: String,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            DeleteScheduleRequest(scheduleID: scheduleID),
+            from: from,
+            to: .job,
+            type: .deleteSchedule,
+            principal: .system,
+            correlationId: scheduleID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedDeleteSchedule(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> DeleteScheduleRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: DeleteScheduleRequest.self,
+            expectedType: .deleteSchedule,
+            expectedTo: .job,
+            key: key
+        ).dto
+    }
+
+    public static func encodeSignedGetSchedule(
+        scheduleID: String,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            GetScheduleRequest(scheduleID: scheduleID),
+            from: from,
+            to: .job,
+            type: .listSchedules,
+            principal: .system,
+            correlationId: scheduleID,
+            key: key
+        )
+    }
+
+    public static func decodeSignedGetSchedule(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> GetScheduleRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        let message = try JSONDecoder.service.decode(ServiceMessage.self, from: data)
+        guard message.to == .job else {
+            throw ServiceMessageEnvelope.Error.unexpectedRecipient(
+                expected: DerrickServiceID.job.rawValue,
+                got: message.to.rawValue
+            )
+        }
+        guard ServiceMessageSigning.verify(message, key: key) else {
+            throw ServiceMessageEnvelope.Error.invalidSignature
+        }
+        return try JSONDecoder.service.decode(GetScheduleRequest.self, from: message.payloadJSON)
+    }
+
+    public static func encodeSignedListSchedules(
+        _ request: ListSchedulesRequest,
+        from: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.encodeSignedDTO(
+            request,
+            from: from,
+            to: .job,
+            type: .listSchedules,
+            principal: .system,
+            key: key
+        )
+    }
+
+    public static func decodeSignedListSchedules(
+        _ data: Data,
+        key: SymmetricKey? = nil
+    ) throws -> ListSchedulesRequest {
+        let key = try key ?? MessagesSecretKey.symmetricKey()
+        return try ServiceMessageEnvelope.decodeSignedDTO(
+            data,
+            as: ListSchedulesRequest.self,
+            expectedType: .listSchedules,
+            expectedTo: .job,
+            key: key
+        ).dto
     }
 }

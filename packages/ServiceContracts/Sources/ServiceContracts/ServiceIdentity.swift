@@ -8,6 +8,8 @@ public enum DerrickServiceID: String, Codable, Sendable, CaseIterable, Hashable 
     case mcp = "derrick.ui.MCPService"
     case webhook = "derrick.ui.WebhookService"
     case dockerHelper = "derrick.ui.DockerRunnerHelper"
+    /// Login LaunchAgent that keeps JobService connected for the user session.
+    case jobKeepAlive = "derrick.ui.JobKeepAlive"
 
     /// NSXPC `serviceName` for embedded XPC helpers.
     public var xpcServiceName: String { rawValue }
@@ -20,6 +22,7 @@ public enum DerrickServiceID: String, Codable, Sendable, CaseIterable, Hashable 
         case .mcp: return "mcp"
         case .webhook: return "webhook"
         case .dockerHelper: return "docker"
+        case .jobKeepAlive: return "job-keepalive"
         }
     }
 }

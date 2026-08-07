@@ -8,10 +8,15 @@ public struct JobRow: Sendable, Hashable {
     public let principalJSON: String
     public let source: String
     public let correlationID: String?
+    public let scheduleID: String?
     public var runAt: Date?
     public let createdAt: Date
     public var updatedAt: Date
     public var errorMessage: String?
+    /// Stable code (e.g. JobFailureReason.rawValue).
+    public var errorCode: String?
+    /// Non-terminal note (e.g. started late after sleep).
+    public var statusDetail: String?
 
     public init(
         id: String,
@@ -19,20 +24,69 @@ public struct JobRow: Sendable, Hashable {
         principalJSON: String,
         source: String,
         correlationID: String?,
+        scheduleID: String? = nil,
         runAt: Date?,
         createdAt: Date,
         updatedAt: Date,
-        errorMessage: String?
+        errorMessage: String?,
+        errorCode: String? = nil,
+        statusDetail: String? = nil
     ) {
         self.id = id
         self.status = status
         self.principalJSON = principalJSON
         self.source = source
         self.correlationID = correlationID
+        self.scheduleID = scheduleID
         self.runAt = runAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.errorMessage = errorMessage
+        self.errorCode = errorCode
+        self.statusDetail = statusDetail
+    }
+}
+
+public struct JobScheduleRow: Sendable, Hashable {
+    public let id: String
+    public var name: String
+    public var enabled: Bool
+    public let principalJSON: String
+    public let source: String
+    public var recurrenceKind: String
+    public var intervalSeconds: Int?
+    public var stepsJSON: String
+    public var nextFireAt: Date?
+    public var lastFiredAt: Date?
+    public let createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        enabled: Bool,
+        principalJSON: String,
+        source: String,
+        recurrenceKind: String,
+        intervalSeconds: Int?,
+        stepsJSON: String,
+        nextFireAt: Date?,
+        lastFiredAt: Date?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.name = name
+        self.enabled = enabled
+        self.principalJSON = principalJSON
+        self.source = source
+        self.recurrenceKind = recurrenceKind
+        self.intervalSeconds = intervalSeconds
+        self.stepsJSON = stepsJSON
+        self.nextFireAt = nextFireAt
+        self.lastFiredAt = lastFiredAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -80,18 +134,21 @@ public extension DBRepository {
             do {
                 try Self.execute("""
                 INSERT INTO jobs (
-                    id, status, principal_json, source, correlation_id,
-                    run_at, created_at, updated_at, error_message
+                    id, status, principal_json, source, correlation_id, schedule_id,
+                    run_at, created_at, updated_at, error_message, error_code, status_detail
                 ) VALUES (
                     \(quoted(job.id)),
                     \(quoted(job.status)),
                     \(quoted(job.principalJSON)),
                     \(quoted(job.source)),
                     \(sqlValue(job.correlationID)),
+                    \(sqlValue(job.scheduleID)),
                     \(sqlValue(job.runAt.map { Self.iso8601Formatter().string(from: $0) })),
                     \(quoted(Self.iso8601Formatter().string(from: job.createdAt))),
                     \(quoted(Self.iso8601Formatter().string(from: job.updatedAt))),
-                    \(sqlValue(job.errorMessage))
+                    \(sqlValue(job.errorMessage)),
+                    \(sqlValue(job.errorCode)),
+                    \(sqlValue(job.statusDetail))
                 );
                 """, on: handle)
                 for step in steps {
@@ -125,8 +182,8 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let jobs = try Self.fetchJobs(
                 sql: """
-                SELECT id, status, principal_json, source, correlation_id,
-                       run_at, created_at, updated_at, error_message
+                SELECT id, status, principal_json, source, correlation_id, schedule_id,
+                       run_at, created_at, updated_at, error_message, error_code, status_detail
                 FROM jobs WHERE id = \(quoted(id)) LIMIT 1;
                 """,
                 on: handle
@@ -145,25 +202,24 @@ public extension DBRepository {
         }
     }
 
-    func listJobs(status: String? = nil, limit: Int = 50) throws -> [(JobRow, [JobStepRow])] {
+    func listJobs(status: String? = nil, scheduleID: String? = nil, limit: Int = 50) throws -> [(JobRow, [JobStepRow])] {
         let cap = max(1, min(limit, 500))
         return try withDatabaseHandle { handle in
-            let sql: String
+            var clauses: [String] = []
             if let status, !status.isEmpty {
-                sql = """
-                SELECT id, status, principal_json, source, correlation_id,
-                       run_at, created_at, updated_at, error_message
-                FROM jobs WHERE status = \(quoted(status))
-                ORDER BY created_at DESC LIMIT \(cap);
-                """
-            } else {
-                sql = """
-                SELECT id, status, principal_json, source, correlation_id,
-                       run_at, created_at, updated_at, error_message
-                FROM jobs
-                ORDER BY created_at DESC LIMIT \(cap);
-                """
+                clauses.append("status = \(quoted(status))")
             }
+            if let scheduleID, !scheduleID.isEmpty {
+                clauses.append("schedule_id = \(quoted(scheduleID))")
+            }
+            let whereSQL = clauses.isEmpty ? "" : "WHERE " + clauses.joined(separator: " AND ")
+            let sql = """
+                SELECT id, status, principal_json, source, correlation_id, schedule_id,
+                       run_at, created_at, updated_at, error_message, error_code, status_detail
+                FROM jobs
+                \(whereSQL)
+                ORDER BY created_at DESC LIMIT \(cap);
+                """
             let jobs = try Self.fetchJobs(sql: sql, on: handle)
             return try jobs.map { job in
                 let steps = try Self.fetchSteps(
@@ -189,8 +245,8 @@ public extension DBRepository {
             do {
                 let jobs = try Self.fetchJobs(
                     sql: """
-                    SELECT id, status, principal_json, source, correlation_id,
-                           run_at, created_at, updated_at, error_message
+                    SELECT id, status, principal_json, source, correlation_id, schedule_id,
+                           run_at, created_at, updated_at, error_message, error_code, status_detail
                     FROM jobs
                     WHERE status IN ('pending', 'scheduled')
                       AND (run_at IS NULL OR run_at <= \(quoted(nowStr)))
@@ -228,12 +284,51 @@ public extension DBRepository {
         }
     }
 
-    func updateJobStatus(id: String, status: String, errorMessage: String? = nil, updatedAt: Date = .now) throws {
+    func updateJobStatus(
+        id: String,
+        status: String,
+        errorMessage: String? = nil,
+        errorCode: String? = nil,
+        statusDetail: String? = nil,
+        updatedAt: Date = .now
+    ) throws {
         try withDatabaseHandle { handle in
             try Self.execute("""
             UPDATE jobs SET
                 status = \(quoted(status)),
                 error_message = \(sqlValue(errorMessage)),
+                error_code = \(sqlValue(errorCode)),
+                status_detail = COALESCE(\(sqlValue(statusDetail)), status_detail),
+                updated_at = \(quoted(Self.iso8601Formatter().string(from: updatedAt)))
+            WHERE id = \(quoted(id));
+            """, on: handle)
+        }
+    }
+
+    /// Mark jobs left in `running` after process death / sleep as failed.
+    func failInterruptedRunningJobs(
+        errorMessage: String,
+        errorCode: String,
+        updatedAt: Date = .now
+    ) throws -> Int {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE jobs SET
+                status = 'failed',
+                error_message = \(quoted(errorMessage)),
+                error_code = \(quoted(errorCode)),
+                updated_at = \(quoted(Self.iso8601Formatter().string(from: updatedAt)))
+            WHERE status = 'running';
+            """, on: handle)
+            return Int(sqlite3_changes(handle))
+        }
+    }
+
+    func updateJobStatusDetail(id: String, statusDetail: String, updatedAt: Date = .now) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE jobs SET
+                status_detail = \(quoted(statusDetail)),
                 updated_at = \(quoted(Self.iso8601Formatter().string(from: updatedAt)))
             WHERE id = \(quoted(id));
             """, on: handle)
@@ -269,10 +364,181 @@ public extension DBRepository {
                     principalJSON: columnText(statement, 2),
                     source: columnText(statement, 3),
                     correlationID: columnOptionalText(statement, 4),
-                    runAt: columnOptionalText(statement, 5).flatMap { iso8601Formatter().date(from: $0) },
-                    createdAt: iso8601Formatter().date(from: columnText(statement, 6)) ?? .now,
-                    updatedAt: iso8601Formatter().date(from: columnText(statement, 7)) ?? .now,
-                    errorMessage: columnOptionalText(statement, 8)
+                    scheduleID: columnOptionalText(statement, 5),
+                    runAt: columnOptionalText(statement, 6).flatMap { iso8601Formatter().date(from: $0) },
+                    createdAt: iso8601Formatter().date(from: columnText(statement, 7)) ?? .now,
+                    updatedAt: iso8601Formatter().date(from: columnText(statement, 8)) ?? .now,
+                    errorMessage: columnOptionalText(statement, 9),
+                    errorCode: columnOptionalText(statement, 10),
+                    statusDetail: columnOptionalText(statement, 11)
+                )
+            )
+        }
+        return rows
+    }
+
+    // MARK: - Schedules
+
+    func insertSchedule(_ row: JobScheduleRow) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            INSERT INTO job_schedules (
+                id, name, enabled, principal_json, source,
+                recurrence_kind, interval_seconds, steps_json,
+                next_fire_at, last_fired_at, created_at, updated_at
+            ) VALUES (
+                \(quoted(row.id)),
+                \(quoted(row.name)),
+                \(row.enabled ? 1 : 0),
+                \(quoted(row.principalJSON)),
+                \(quoted(row.source)),
+                \(quoted(row.recurrenceKind)),
+                \(sqlValue(row.intervalSeconds)),
+                \(quoted(row.stepsJSON)),
+                \(sqlValue(row.nextFireAt.map { Self.iso8601Formatter().string(from: $0) })),
+                \(sqlValue(row.lastFiredAt.map { Self.iso8601Formatter().string(from: $0) })),
+                \(quoted(Self.iso8601Formatter().string(from: row.createdAt))),
+                \(quoted(Self.iso8601Formatter().string(from: row.updatedAt)))
+            );
+            """, on: handle)
+        }
+    }
+
+    func updateSchedule(_ row: JobScheduleRow) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE job_schedules SET
+                name = \(quoted(row.name)),
+                enabled = \(row.enabled ? 1 : 0),
+                recurrence_kind = \(quoted(row.recurrenceKind)),
+                interval_seconds = \(sqlValue(row.intervalSeconds)),
+                steps_json = \(quoted(row.stepsJSON)),
+                next_fire_at = \(sqlValue(row.nextFireAt.map { Self.iso8601Formatter().string(from: $0) })),
+                last_fired_at = \(sqlValue(row.lastFiredAt.map { Self.iso8601Formatter().string(from: $0) })),
+                updated_at = \(quoted(Self.iso8601Formatter().string(from: row.updatedAt)))
+            WHERE id = \(quoted(row.id));
+            """, on: handle)
+        }
+    }
+
+    func deleteSchedule(id: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("DELETE FROM job_schedules WHERE id = \(quoted(id));", on: handle)
+        }
+    }
+
+    func fetchSchedule(id: String) throws -> JobScheduleRow? {
+        try withDatabaseHandle { handle in
+            let rows = try Self.fetchSchedules(
+                sql: """
+                SELECT id, name, enabled, principal_json, source,
+                       recurrence_kind, interval_seconds, steps_json,
+                       next_fire_at, last_fired_at, created_at, updated_at
+                FROM job_schedules WHERE id = \(quoted(id)) LIMIT 1;
+                """,
+                on: handle
+            )
+            return rows.first
+        }
+    }
+
+    func listSchedules(enabledOnly: Bool = false, limit: Int = 100) throws -> [JobScheduleRow] {
+        let cap = max(1, min(limit, 500))
+        return try withDatabaseHandle { handle in
+            let whereSQL = enabledOnly ? "WHERE enabled = 1" : ""
+            return try Self.fetchSchedules(
+                sql: """
+                SELECT id, name, enabled, principal_json, source,
+                       recurrence_kind, interval_seconds, steps_json,
+                       next_fire_at, last_fired_at, created_at, updated_at
+                FROM job_schedules
+                \(whereSQL)
+                ORDER BY name ASC
+                LIMIT \(cap);
+                """,
+                on: handle
+            )
+        }
+    }
+
+    /// Claim due schedules: enabled and next_fire_at <= now. Advances next_fire_at in same transaction.
+    /// Returns claimed rows **before** advance (caller spawns jobs from template).
+    func claimDueSchedules(
+        limit: Int = 10,
+        now: Date = .now,
+        nextFire: @Sendable (JobScheduleRow, Date) -> (enabled: Bool, nextFireAt: Date?)
+    ) throws -> [JobScheduleRow] {
+        let cap = max(1, min(limit, 50))
+        let nowStr = Self.iso8601Formatter().string(from: now)
+        return try withDatabaseHandle { handle in
+            try Self.execute("BEGIN IMMEDIATE;", on: handle)
+            do {
+                let due = try Self.fetchSchedules(
+                    sql: """
+                    SELECT id, name, enabled, principal_json, source,
+                           recurrence_kind, interval_seconds, steps_json,
+                           next_fire_at, last_fired_at, created_at, updated_at
+                    FROM job_schedules
+                    WHERE enabled = 1
+                      AND next_fire_at IS NOT NULL
+                      AND next_fire_at <= \(quoted(nowStr))
+                    ORDER BY next_fire_at ASC
+                    LIMIT \(cap);
+                    """,
+                    on: handle
+                )
+                var claimed: [JobScheduleRow] = []
+                for row in due {
+                    let advanced = nextFire(row, now)
+                    var updated = row
+                    updated.enabled = advanced.enabled
+                    updated.nextFireAt = advanced.nextFireAt
+                    updated.lastFiredAt = now
+                    updated.updatedAt = now
+                    try Self.execute("""
+                    UPDATE job_schedules SET
+                        enabled = \(updated.enabled ? 1 : 0),
+                        next_fire_at = \(sqlValue(updated.nextFireAt.map { Self.iso8601Formatter().string(from: $0) })),
+                        last_fired_at = \(quoted(nowStr)),
+                        updated_at = \(quoted(nowStr))
+                    WHERE id = \(quoted(row.id)) AND enabled = 1
+                      AND next_fire_at IS NOT NULL AND next_fire_at <= \(quoted(nowStr));
+                    """, on: handle)
+                    claimed.append(row)
+                }
+                try Self.execute("COMMIT;", on: handle)
+                return claimed
+            } catch {
+                try? Self.execute("ROLLBACK;", on: handle)
+                throw error
+            }
+        }
+    }
+
+    private static func fetchSchedules(sql: String, on handle: OpaquePointer) throws -> [JobScheduleRow] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw DBRepositoryError.sqliteOperationFailed(String(cString: sqlite3_errmsg(handle)))
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [JobScheduleRow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            rows.append(
+                JobScheduleRow(
+                    id: columnText(statement, 0),
+                    name: columnText(statement, 1),
+                    enabled: sqlite3_column_int(statement, 2) != 0,
+                    principalJSON: columnText(statement, 3),
+                    source: columnText(statement, 4),
+                    recurrenceKind: columnText(statement, 5),
+                    intervalSeconds: sqlite3_column_type(statement, 6) == SQLITE_NULL
+                        ? nil
+                        : Int(sqlite3_column_int(statement, 6)),
+                    stepsJSON: columnText(statement, 7),
+                    nextFireAt: columnOptionalText(statement, 8).flatMap { iso8601Formatter().date(from: $0) },
+                    lastFiredAt: columnOptionalText(statement, 9).flatMap { iso8601Formatter().date(from: $0) },
+                    createdAt: iso8601Formatter().date(from: columnText(statement, 10)) ?? .now,
+                    updatedAt: iso8601Formatter().date(from: columnText(statement, 11)) ?? .now
                 )
             )
         }

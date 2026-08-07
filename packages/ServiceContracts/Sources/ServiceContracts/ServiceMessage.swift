@@ -11,6 +11,10 @@ public enum ServiceMessageType: String, Codable, Sendable, Hashable {
     case cancelJob
     case getJob
     case listJobs
+    case createSchedule
+    case updateSchedule
+    case deleteSchedule
+    case listSchedules
     case jobDue
     case jobTerminal
     // Agents

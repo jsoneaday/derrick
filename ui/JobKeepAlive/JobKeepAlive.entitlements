@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  Do NOT enable app-sandbox on this LaunchAgent.
+	  Bare sandboxed executables launched by launchd crash with Trace/BPT trap (no app container).
+	  Host UI is sandboxed; JobKeepAlive is a keep-alive XPC client only (code-sign peer auth).
+	-->
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.application-groups</key>

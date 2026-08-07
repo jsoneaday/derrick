@@ -1,50 +1,50 @@
 import Foundation
 
-/// Shared app-support paths (UI and XPC services use the same directory for SQLite).
+/// Shared app-support paths (UI, XPC services, JobKeepAlive use the same SQLite file).
 ///
-/// The main app is sandboxed (`derrick.ui`), so its Application Support lives under
-/// `Library/Containers/derrick.ui/...`. Embedded XPC services are often *not* sandboxed
-/// and would otherwise resolve a different path and a different empty database
-/// (policy deny-by-default). Always prefer the host app container when present.
+/// Prefer the **App Group** container so processes that are not the sandboxed UI
+/// (JobService, JobKeepAlive LaunchAgent, etc.) can open the same database.
+/// Legacy host-container DB is migrated into the group on first use.
 public enum DerrickAppSupport {
     public static let defaultApplicationName = "ui"
     /// Host app bundle id (must match PRODUCT_BUNDLE_IDENTIFIER of the UI target).
     public static let hostAppBundleIdentifier = "derrick.ui"
+    /// Shared group for multi-process SQLite (must match entitlements on all targets that touch the DB).
+    public static let applicationGroupIdentifier = "VUSK4B2YKQ.derrick.shared"
 
     public static func databaseDirectory(applicationName: String = defaultApplicationName) throws -> URL {
         let fm = FileManager.default
         let candidates = preferredDatabaseParentDirectories()
-        for parent in candidates {
-            let directoryURL = parent.appendingPathComponent(applicationName, isDirectory: true)
-            do {
-                try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-                // Prefer an existing shared DB when present so we do not create a parallel empty one.
-                let dbFile = directoryURL.appendingPathComponent("derrick.sqlite3")
-                if fm.fileExists(atPath: dbFile.path) {
-                    return directoryURL
-                }
-            } catch {
-                continue
-            }
-        }
-        // Create in the highest-priority writable parent (host container when available).
         guard let parent = candidates.first else {
             throw CocoaError(.fileNoSuchFile)
         }
         let directoryURL = parent.appendingPathComponent(applicationName, isDirectory: true)
         try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        try migrateLegacyDatabaseIfNeeded(into: directoryURL)
         return directoryURL
     }
 
-    /// Ordered: host app container Application Support, then process Application Support.
+    /// Ordered: App Group Application Support, host app container, process Application Support.
     public static func preferredDatabaseParentDirectories() -> [URL] {
         var urls: [URL] = []
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let fm = FileManager.default
+
+        if let groupRoot = fm.containerURL(forSecurityApplicationGroupIdentifier: applicationGroupIdentifier) {
+            urls.append(
+                groupRoot.appendingPathComponent("Library/Application Support", isDirectory: true)
+            )
+        }
+
+        let home = fm.homeDirectoryForCurrentUser
         let containerSupport = home
-            .appendingPathComponent("Library/Containers/\(hostAppBundleIdentifier)/Data/Library/Application Support", isDirectory: true)
+            .appendingPathComponent(
+                "Library/Containers/\(hostAppBundleIdentifier)/Data/Library/Application Support",
+                isDirectory: true
+            )
         urls.append(containerSupport)
-        if let processSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            // Avoid duplicating when process is already the sandboxed app (same path).
+
+        if let processSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             if processSupport.standardizedFileURL != containerSupport.standardizedFileURL {
                 urls.append(processSupport)
             }
@@ -52,4 +52,48 @@ public enum DerrickAppSupport {
         return urls
     }
 
+    /// Copy `derrick.sqlite3` (+ WAL/SHM) from host container into the group directory when
+    /// the destination is missing or clearly a smaller/empty placeholder.
+    private static func migrateLegacyDatabaseIfNeeded(into directoryURL: URL) throws {
+        let fm = FileManager.default
+        let destDB = directoryURL.appendingPathComponent("derrick.sqlite3")
+
+        let home = fm.homeDirectoryForCurrentUser
+        let legacyDir = home
+            .appendingPathComponent(
+                "Library/Containers/\(hostAppBundleIdentifier)/Data/Library/Application Support/\(defaultApplicationName)",
+                isDirectory: true
+            )
+        let legacyDB = legacyDir.appendingPathComponent("derrick.sqlite3")
+        guard fm.fileExists(atPath: legacyDB.path) else { return }
+
+        let legacySize = (try? fm.attributesOfItem(atPath: legacyDB.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let destSize = fm.fileExists(atPath: destDB.path)
+            ? ((try? fm.attributesOfItem(atPath: destDB.path)[.size] as? NSNumber)?.int64Value ?? 0)
+            : 0
+        // Skip if dest already holds a full copy (same size or larger).
+        if destSize >= legacySize, destSize > 0 { return }
+
+        try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        for name in ["derrick.sqlite3", "derrick.sqlite3-wal", "derrick.sqlite3-shm"] {
+            let src = legacyDir.appendingPathComponent(name)
+            let dst = directoryURL.appendingPathComponent(name)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            if fm.fileExists(atPath: dst.path) {
+                try? fm.removeItem(at: dst)
+            }
+            do {
+                try fm.copyItem(at: src, to: dst)
+            } catch {
+                fputs(
+                    "[DerrickAppSupport] migrate copy failed \(name): \(error.localizedDescription)\n",
+                    stderr
+                )
+            }
+        }
+        fputs(
+            "[DerrickAppSupport] migrated DB from host container → \(directoryURL.path)\n",
+            stderr
+        )
+    }
 }
