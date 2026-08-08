@@ -166,9 +166,9 @@ final class DBRepositoryTests: XCTestCase {
         let repository = DBRepository(configuration: configuration)
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
 
-        try await repository.upsert(makeRecord(sessionID: "older", createdAt: Date(timeIntervalSince1970: 10), prompt: "older prompt"))
-        try await repository.upsert(makeRecord(sessionID: "newer", createdAt: Date(timeIntervalSince1970: 20), prompt: "newer prompt"))
-        try await repository.upsert(makeRecord(sessionID: "current", createdAt: Date(timeIntervalSince1970: 30), prompt: "current prompt"))
+        try await repository.upsert(makeRecord(sessionID: "older", createdAt: Calendar.current.date(byAdding: .day, value: -2, to: Date())!, prompt: "older prompt"))
+        try await repository.upsert(makeRecord(sessionID: "newer", createdAt: Calendar.current.date(byAdding: .day, value: -1, to: Date())!, prompt: "newer prompt"))
+        try await repository.upsert(makeRecord(sessionID: "current", createdAt: Date(), prompt: "current prompt"))
 
         let results = try await repository.searchPrior(
             sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
@@ -188,6 +188,77 @@ final class DBRepositoryTests: XCTestCase {
         )
 
         XCTAssertEqual(queryResults.map(\.pair.prompt), ["older prompt"])
+    }
+
+    func testSearchPriorExcludesArchivedOlderThanSixMonthsUnlessRequested() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let archivedDate = Calendar.current.date(byAdding: .month, value: -7, to: Date())!
+        try await repository.upsert(makeRecord(sessionID: "archived", createdAt: archivedDate, prompt: "archived prompt"))
+        try await repository.upsert(makeRecord(sessionID: "current", createdAt: Date(), prompt: "current prompt"))
+
+        let defaultResults = try await repository.searchPrior(
+            sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
+            query: nil,
+            limit: 10,
+            page: 1
+        )
+        XCTAssertTrue(defaultResults.isEmpty)
+
+        let archivedResults = try await repository.searchPrior(
+            sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
+            query: nil,
+            limit: 10,
+            page: 1,
+            includeArchived: true
+        )
+        XCTAssertEqual(archivedResults.map(\.pair.prompt), ["archived prompt"])
+    }
+
+    func testSearchPriorClampsLimitToMaxRows() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        for index in 0..<150 {
+            try await repository.upsert(
+                makeRecord(
+                    sessionID: "past-\(index)",
+                    createdAt: Calendar.current.date(byAdding: .minute, value: -index, to: Date())!,
+                    prompt: "prompt \(index)"
+                )
+            )
+        }
+
+        let results = try await repository.searchPrior(
+            sessionKey: MemorySessionKey(sessionID: "current", agentID: "ui"),
+            query: nil,
+            limit: 500,
+            page: 1
+        )
+        XCTAssertEqual(results.count, MemoryQueryPolicy.maxRowsPerRequest)
     }
 
     private func schemaVersion(at url: URL) throws -> Int {
@@ -261,7 +332,7 @@ final class DBRepositoryTests: XCTestCase {
         let records: [MemoryRecord] = (0..<20).map { i in
             makeRecord(
                 sessionID: "s-\(i)",
-                createdAt: Date(timeIntervalSince1970: Double(i)),
+                createdAt: Date().addingTimeInterval(-Double(i)),
                 prompt: "prompt \(i)"
             )
         }

@@ -120,14 +120,18 @@ public actor MCPToolRegistry {
 }
 
 public struct SessionMemorySearchArguments: Sendable {
+    public static let maxRowsPerRequest = 100
+
     public let query: String?
     public let limit: Int
     public let page: Int
+    public let includeArchived: Bool
 
-    public init(query: String? = nil, limit: Int = 10, page: Int = 1) {
+    public init(query: String? = nil, limit: Int = 10, page: Int = 1, includeArchived: Bool = false) {
         self.query = query
-        self.limit = limit
-        self.page = page
+        self.limit = min(max(limit, 1), Self.maxRowsPerRequest)
+        self.page = max(page, 1)
+        self.includeArchived = includeArchived
     }
 }
 

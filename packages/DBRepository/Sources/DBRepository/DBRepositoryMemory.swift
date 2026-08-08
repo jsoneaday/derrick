@@ -156,23 +156,32 @@ public extension DBRepository {
         }
     }
 
-    func memoryRecords(sessionKey: MemorySessionKey, applicationName: String) throws -> [MemoryRecord] {
+    func memoryRecords(sessionKey: MemorySessionKey, applicationName: String, includeArchived: Bool = false) throws -> [MemoryRecord] {
         try withDatabaseHandle { handle in
+            let retentionClause = Self.retentionSQLClause(includeArchived: includeArchived)
             let sql = """
             SELECT *
             FROM memory_records
             WHERE application_name = \(quoted(applicationName))
               AND session_id = \(quoted(sessionKey.sessionID))
               AND agent_id = \(quoted(sessionKey.agentID))
+              \(retentionClause)
             ORDER BY created_at DESC;
             """
             return try allMemoryRecords(from: sql, on: handle)
         }
     }
 
-    func searchMemoryRecords(sessionKey: MemorySessionKey, applicationName: String, query: String, limit: Int) throws -> [MemoryRecord] {
+    func searchMemoryRecords(
+        sessionKey: MemorySessionKey,
+        applicationName: String,
+        query: String,
+        limit: Int,
+        includeArchived: Bool = false
+    ) throws -> [MemoryRecord] {
+        let pageSize = MemoryQueryPolicy.clampedRowLimit(limit)
         let tokens = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
-        let records = try memoryRecords(sessionKey: sessionKey, applicationName: applicationName)
+        let records = try memoryRecords(sessionKey: sessionKey, applicationName: applicationName, includeArchived: includeArchived)
         let ranked = records
             .map { record in
                 (record, Self.score(record: record, tokens: tokens))
@@ -184,7 +193,7 @@ public extension DBRepository {
                 }
                 return lhs.1 > rhs.1
             }
-            .prefix(limit)
+            .prefix(pageSize)
 
         return ranked.map(\.0)
     }
@@ -194,11 +203,12 @@ public extension DBRepository {
         applicationName: String,
         query: String?,
         limit: Int,
-        page: Int
+        page: Int,
+        includeArchived: Bool = false
     ) throws -> [MemoryRecord] {
         try withDatabaseHandle { handle in
 
-            let pageSize = min(max(limit, 1), 20)
+            let pageSize = MemoryQueryPolicy.clampedRowLimit(limit)
             let pageIndex = max(page, 1)
             let offset = (pageIndex - 1) * pageSize
 
@@ -220,11 +230,14 @@ public extension DBRepository {
                 whereClause = ""
             }
 
+            let retentionClause = Self.retentionSQLClause(includeArchived: includeArchived)
+
             let sql = """
             SELECT *
             FROM memory_records
             WHERE application_name = \(quoted(applicationName))
               AND NOT (session_id = \(quoted(sessionKey.sessionID)) AND agent_id = \(quoted(sessionKey.agentID)))
+              \(retentionClause)
               \(whereClause)
             ORDER BY created_at DESC
             LIMIT \(pageSize) OFFSET \(offset);
@@ -260,26 +273,52 @@ extension DBRepository: MemoryStore {
         try memoryRecord(id: id)
     }
 
-    public func records(sessionKey: MemorySessionKey) async throws -> [MemoryRecord] {
-        try memoryRecords(sessionKey: sessionKey, applicationName: applicationName)
+    public func records(sessionKey: MemorySessionKey, includeArchived: Bool = false) async throws -> [MemoryRecord] {
+        try memoryRecords(sessionKey: sessionKey, applicationName: applicationName, includeArchived: includeArchived)
     }
 
-    public func search(sessionKey: MemorySessionKey, query: String, limit: Int) async throws -> [MemoryRecord] {
-        try searchMemoryRecords(sessionKey: sessionKey, applicationName: applicationName, query: query, limit: limit)
+    public func search(
+        sessionKey: MemorySessionKey,
+        query: String,
+        limit: Int,
+        includeArchived: Bool = false
+    ) async throws -> [MemoryRecord] {
+        try searchMemoryRecords(
+            sessionKey: sessionKey,
+            applicationName: applicationName,
+            query: query,
+            limit: limit,
+            includeArchived: includeArchived
+        )
     }
 
-    public func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord] {
+    public func searchPrior(
+        sessionKey: MemorySessionKey,
+        query: String?,
+        limit: Int,
+        page: Int,
+        includeArchived: Bool = false
+    ) async throws -> [MemoryRecord] {
         try searchPriorMemoryRecords(
             sessionKey: sessionKey,
             applicationName: applicationName,
             query: query,
             limit: limit,
-            page: page
+            page: page,
+            includeArchived: includeArchived
         )
     }
 }
 
 extension DBRepository {
+    static func retentionSQLClause(includeArchived: Bool, now: Date = .now) -> String {
+        guard let cutoff = MemoryQueryPolicy.retentionCutoff(includeArchived: includeArchived, now: now) else {
+            return ""
+        }
+        let iso = iso8601Formatter().string(from: cutoff)
+        return "AND created_at >= '\(iso.replacingOccurrences(of: "'", with: "''"))'"
+    }
+
     static func iso8601Formatter() -> ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

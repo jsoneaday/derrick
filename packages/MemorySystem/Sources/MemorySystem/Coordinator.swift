@@ -76,7 +76,11 @@ public actor MemoryCoordinator {
 
     public func retrieve(_ request: MemoryRetrievalRequest) async throws -> MemoryRetrievalResult {
         let local = workingSets[request.sessionKey, default: []]
-        let persisted = try await store.records(sessionKey: request.sessionKey)
+            .filter { MemoryQueryPolicy.isWithinRetention($0.createdAt, includeArchived: request.includeArchived) }
+        let persisted = try await store.records(
+            sessionKey: request.sessionKey,
+            includeArchived: request.includeArchived
+        )
             .map { record in
                 MemoryWorkingEntry(
                     id: record.id,
@@ -108,7 +112,8 @@ public actor MemoryCoordinator {
             sessionKey: request.sessionKey,
             query: request.query,
             limit: request.limit,
-            page: request.page
+            page: request.page,
+            includeArchived: request.includeArchived
         )
 
         let entries = records.map { record in

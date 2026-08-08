@@ -21,6 +21,10 @@ public enum SessionMemorySearchToolModule: MCPToolModule {
                 "page": .object([
                     "type": .string("number"),
                     "description": .string("Page number, starting at 1.")
+                ]),
+                "include_archived": .object([
+                    "type": .string("boolean"),
+                    "description": .string("When true, include memory older than 6 months. Default false.")
                 ])
             ]),
             "required": .array([.string("limit"), .string("page")])
@@ -41,7 +45,8 @@ public enum SessionMemorySearchToolModule: MCPToolModule {
             let searchArguments = SessionMemorySearchArguments(
                 query: payload["query"] as? String,
                 limit: integerValue(from: payload["limit"]) ?? 10,
-                page: integerValue(from: payload["page"]) ?? 1
+                page: integerValue(from: payload["page"]) ?? 1,
+                includeArchived: boolValue(from: payload["include_archived"]) ?? false
             )
             return try await handler(searchArguments)
         }
@@ -52,6 +57,17 @@ public enum SessionMemorySearchToolModule: MCPToolModule {
         if let double = value as? Double { return Int(double) }
         if let number = value as? NSNumber { return number.intValue }
         if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func boolValue(from value: Any?) -> Bool? {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        if let string = value as? String {
+            let lowered = string.lowercased()
+            if lowered == "true" || lowered == "1" { return true }
+            if lowered == "false" || lowered == "0" { return false }
+        }
         return nil
     }
 }

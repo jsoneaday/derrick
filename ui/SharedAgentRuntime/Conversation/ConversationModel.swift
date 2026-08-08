@@ -477,7 +477,7 @@ final class ConversationModel {
         iso.formatOptions = [.withInternetDateTime]
         let runAtStr = job.runAt.map { iso.string(from: $0) } ?? "asap"
         return """
-        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. Result will open in a modal when it finishes (not in this chat thread)."}
+        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. You'll get a macOS notification when it finishes—tap the notification to view the result (it won't appear in this chat)."}
         """
     }
 

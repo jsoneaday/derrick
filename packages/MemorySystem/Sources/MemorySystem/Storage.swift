@@ -3,9 +3,15 @@ import Foundation
 public protocol MemoryStore: Sendable {
     func upsert(_ record: MemoryRecord) async throws
     func record(id: UUID) async throws -> MemoryRecord?
-    func records(sessionKey: MemorySessionKey) async throws -> [MemoryRecord]
-    func search(sessionKey: MemorySessionKey, query: String, limit: Int) async throws -> [MemoryRecord]
-    func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord]
+    func records(sessionKey: MemorySessionKey, includeArchived: Bool) async throws -> [MemoryRecord]
+    func search(sessionKey: MemorySessionKey, query: String, limit: Int, includeArchived: Bool) async throws -> [MemoryRecord]
+    func searchPrior(
+        sessionKey: MemorySessionKey,
+        query: String?,
+        limit: Int,
+        page: Int,
+        includeArchived: Bool
+    ) async throws -> [MemoryRecord]
 }
 
 public actor InMemoryMemoryStore: MemoryStore {
@@ -25,15 +31,23 @@ public actor InMemoryMemoryStore: MemoryStore {
         recordsByID[id]
     }
 
-    public func records(sessionKey: MemorySessionKey) async throws -> [MemoryRecord] {
+    public func records(sessionKey: MemorySessionKey, includeArchived: Bool = false) async throws -> [MemoryRecord] {
         recordOrder.compactMap { recordsByID[$0] }.filter {
-            $0.pair.sessionID == sessionKey.sessionID && $0.pair.agentID == sessionKey.agentID
+            $0.pair.sessionID == sessionKey.sessionID
+                && $0.pair.agentID == sessionKey.agentID
+                && MemoryQueryPolicy.isWithinRetention($0.pair.createdAt, includeArchived: includeArchived)
         }
     }
 
-    public func search(sessionKey: MemorySessionKey, query: String, limit: Int) async throws -> [MemoryRecord] {
+    public func search(
+        sessionKey: MemorySessionKey,
+        query: String,
+        limit: Int,
+        includeArchived: Bool = false
+    ) async throws -> [MemoryRecord] {
+        let pageSize = MemoryQueryPolicy.clampedRowLimit(limit)
         let tokens = query.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
-        let ranked = try await records(sessionKey: sessionKey).map { record in
+        let ranked = try await records(sessionKey: sessionKey, includeArchived: includeArchived).map { record in
             (record, Self.score(record: record, tokens: tokens))
         }
 
@@ -45,13 +59,20 @@ public actor InMemoryMemoryStore: MemoryStore {
                 }
                 return lhs.1 > rhs.1
             }
-            .prefix(limit)
+            .prefix(pageSize)
             .map(\.0)
     }
 
-    public func searchPrior(sessionKey: MemorySessionKey, query: String?, limit: Int, page: Int) async throws -> [MemoryRecord] {
+    public func searchPrior(
+        sessionKey: MemorySessionKey,
+        query: String?,
+        limit: Int,
+        page: Int,
+        includeArchived: Bool = false
+    ) async throws -> [MemoryRecord] {
         let filtered = recordOrder.compactMap { recordsByID[$0] }.filter {
-            $0.pair.sessionID != sessionKey.sessionID || $0.pair.agentID != sessionKey.agentID
+            ($0.pair.sessionID != sessionKey.sessionID || $0.pair.agentID != sessionKey.agentID)
+                && MemoryQueryPolicy.isWithinRetention($0.pair.createdAt, includeArchived: includeArchived)
         }
 
         let matching: [MemoryRecord]
@@ -64,7 +85,7 @@ public actor InMemoryMemoryStore: MemoryStore {
             matching = filtered
         }
 
-        let pageSize = min(max(limit, 1), 20)
+        let pageSize = MemoryQueryPolicy.clampedRowLimit(limit)
         let pageIndex = max(page, 1)
         let start = (pageIndex - 1) * pageSize
         guard start < matching.count else {

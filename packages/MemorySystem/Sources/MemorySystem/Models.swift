@@ -222,6 +222,7 @@ public struct MemoryRetrievalRequest: Hashable, Codable, Sendable {
     public let limit: Int
     public let includeShared: Bool
     public let includeParentLineage: Bool
+    public let includeArchived: Bool
     public let idealTokenCount: Int
     public let maxSupportedTokenCount: Int
 
@@ -231,14 +232,16 @@ public struct MemoryRetrievalRequest: Hashable, Codable, Sendable {
         limit: Int = 10,
         includeShared: Bool = true,
         includeParentLineage: Bool = true,
+        includeArchived: Bool = false,
         idealTokenCount: Int = MemoryBudget.defaultMaxTokenCount,
         maxSupportedTokenCount: Int = MemoryBudget.defaultMaxTokenCount
     ) {
         self.sessionKey = sessionKey
         self.query = query
-        self.limit = limit
+        self.limit = MemoryQueryPolicy.clampedRowLimit(limit)
         self.includeShared = includeShared
         self.includeParentLineage = includeParentLineage
+        self.includeArchived = includeArchived
         self.idealTokenCount = idealTokenCount
         self.maxSupportedTokenCount = maxSupportedTokenCount
     }
@@ -249,17 +252,20 @@ public struct MemoryPriorRetrievalRequest: Hashable, Codable, Sendable {
     public let query: String?
     public let limit: Int
     public let page: Int
+    public let includeArchived: Bool
 
     public init(
         sessionKey: MemorySessionKey,
         query: String? = nil,
         limit: Int = 10,
-        page: Int = 1
+        page: Int = 1,
+        includeArchived: Bool = false
     ) {
         self.sessionKey = sessionKey
         self.query = query
-        self.limit = limit
-        self.page = page
+        self.limit = MemoryQueryPolicy.clampedRowLimit(limit)
+        self.page = max(page, 1)
+        self.includeArchived = includeArchived
     }
 }
 

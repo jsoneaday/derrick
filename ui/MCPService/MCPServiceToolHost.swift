@@ -52,7 +52,8 @@ actor MCPServiceToolHost {
                         sessionKey: sessionKey,
                         query: arguments.query,
                         limit: arguments.limit,
-                        page: arguments.page
+                        page: arguments.page,
+                        includeArchived: arguments.includeArchived
                     )
                 )
                 return retrieval.context

@@ -81,6 +81,14 @@ import Testing
         #expect(result.entries.first?.rawPair != nil)
     }
 
+    @Test func memoryQueryPolicyClampsRowLimit() {
+        #expect(MemoryQueryPolicy.clampedRowLimit(0) == 1)
+        #expect(MemoryQueryPolicy.clampedRowLimit(5) == 5)
+        #expect(MemoryQueryPolicy.clampedRowLimit(20) == 20)
+        #expect(MemoryQueryPolicy.clampedRowLimit(100) == 100)
+        #expect(MemoryQueryPolicy.clampedRowLimit(999) == MemoryQueryPolicy.maxRowsPerRequest)
+    }
+
     @Test func priorRetrievalReturnsNewestPastSessionsWithPaging() async throws {
         let store = InMemoryMemoryStore()
         let coordinator = MemoryCoordinator(
@@ -90,23 +98,24 @@ import Testing
             budget: MemoryBudget(maxTokenCount: 1)
         )
         let currentSession = MemorySessionKey(sessionID: "current", agentID: "a")
+        let now = Date()
 
         try await store.upsert(makeRecord(
             sessionID: "older",
             agentID: "a",
-            createdAt: Date(timeIntervalSince1970: 10),
+            createdAt: Calendar.current.date(byAdding: .day, value: -2, to: now)!,
             prompt: "older prompt"
         ))
         try await store.upsert(makeRecord(
             sessionID: "newer",
             agentID: "a",
-            createdAt: Date(timeIntervalSince1970: 20),
+            createdAt: Calendar.current.date(byAdding: .day, value: -1, to: now)!,
             prompt: "newer prompt"
         ))
         try await store.upsert(makeRecord(
             sessionID: "current",
             agentID: "a",
-            createdAt: Date(timeIntervalSince1970: 30),
+            createdAt: now,
             prompt: "current prompt"
         ))
 
@@ -120,6 +129,70 @@ import Testing
 
         #expect(result.entries.count == 1)
         #expect(result.entries.first?.rawPair?.prompt == "older prompt")
+    }
+
+    @Test func priorRetrievalExcludesRecordsOlderThanSixMonthsByDefault() async throws {
+        let store = InMemoryMemoryStore()
+        let coordinator = MemoryCoordinator(
+            store: store,
+            summarizer: StubMemorySummarizer(),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 1)
+        )
+        let currentSession = MemorySessionKey(sessionID: "current", agentID: "a")
+        let archivedDate = Calendar.current.date(byAdding: .month, value: -7, to: Date())!
+
+        try await store.upsert(makeRecord(
+            sessionID: "archived",
+            agentID: "a",
+            createdAt: archivedDate,
+            prompt: "archived prompt"
+        ))
+
+        let result = try await coordinator.retrievePrior(
+            MemoryPriorRetrievalRequest(sessionKey: currentSession, limit: 10, page: 1)
+        )
+
+        #expect(result.entries.isEmpty)
+    }
+
+    @Test func priorRetrievalIncludeArchivedReturnsOlderRecords() async throws {
+        let store = InMemoryMemoryStore()
+        let coordinator = MemoryCoordinator(
+            store: store,
+            summarizer: StubMemorySummarizer(),
+            policy: TieredMemoryCompactionPolicy(),
+            budget: MemoryBudget(maxTokenCount: 1)
+        )
+        let currentSession = MemorySessionKey(sessionID: "current", agentID: "a")
+        let archivedDate = Calendar.current.date(byAdding: .month, value: -7, to: Date())!
+
+        try await store.upsert(makeRecord(
+            sessionID: "archived",
+            agentID: "a",
+            createdAt: archivedDate,
+            prompt: "archived prompt"
+        ))
+
+        let result = try await coordinator.retrievePrior(
+            MemoryPriorRetrievalRequest(
+                sessionKey: currentSession,
+                limit: 10,
+                page: 1,
+                includeArchived: true
+            )
+        )
+
+        #expect(result.entries.count == 1)
+        #expect(result.entries.first?.rawPair?.prompt == "archived prompt")
+    }
+
+    @Test func priorRetrievalRequestClampsLimit() async throws {
+        let request = MemoryPriorRetrievalRequest(
+            sessionKey: MemorySessionKey(sessionID: "s", agentID: "a"),
+            limit: 500
+        )
+        #expect(request.limit == MemoryQueryPolicy.maxRowsPerRequest)
     }
 
     @Test func retrievalProjectsOlderEntriesToSummariesAsContextGrows() async throws {
