@@ -29,6 +29,14 @@ public final class AgentServiceClient: @unchecked Sendable {
         sink.setNetworkAccessHandler(handler)
     }
 
+    /// Job wakeAgent turns stream here (not the active user `streamTurn`).
+    public func setBackgroundTurnHandlers(
+        onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?,
+        onFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)?
+    ) {
+        sink.setBackgroundTurnHandlers(onChunk: onChunk, onFinish: onFinish)
+    }
+
     /// For chat turns after app bootstrap: reuse the live XPC link; full ensure-up only if down.
     public func ensureReadyForTurn() async throws {
         if hasLiveReadyConnection() { return }
@@ -116,14 +124,16 @@ public final class AgentServiceClient: @unchecked Sendable {
             let turnID = request.turnID
             let finishGate = FinishGate()
 
-            // Preserve approval handler; only bind this turn's chunk/finish stream.
+            // Preserve approval + background handlers; bind this turn's chunk/finish stream.
+            sink.beginForegroundTurn(turnID)
             sink.updateTurnHandlers(
                 onChunk: { id, dto in
                     guard id == turnID else { return }
                     continuation.yield(dto)
                 },
-                onFinish: { id, errorDTO in
+                onFinish: { [weak sink] id, errorDTO in
                     guard id == turnID else { return }
+                    sink?.endForegroundTurn(turnID)
                     guard finishGate.markFinished() else { return }
                     if let errorDTO {
                         continuation.finish(throwing: AgentServiceClientError.turnFailed(errorDTO.message))
@@ -148,6 +158,7 @@ public final class AgentServiceClient: @unchecked Sendable {
                         }
                     }
                     guard accepted.ok else {
+                        sink.endForegroundTurn(turnID)
                         guard finishGate.markFinished() else { return }
                         continuation.finish(throwing: AgentServiceClientError.turnFailed(accepted.message))
                         return
@@ -156,18 +167,35 @@ public final class AgentServiceClient: @unchecked Sendable {
                         debugLog("AgentService turn accepted id=\(accepted.turnID) session=\(accepted.sessionID)")
                     }
                 } catch {
+                    sink.endForegroundTurn(turnID)
                     guard finishGate.markFinished() else { return }
                     continuation.finish(throwing: error)
                 }
             }
 
             // Only cancel in-flight work on client cancel — not after a normal finish.
-            continuation.onTermination = { @Sendable [weak self] terminal in
+            continuation.onTermination = { @Sendable [weak self, weak sink] terminal in
                 if case .cancelled = terminal {
+                    sink?.endForegroundTurn(turnID)
                     Task {
                         try? await self?.cancelTurn(turnID: turnID)
                     }
                 }
+            }
+        }
+    }
+
+    /// Fetch AgentService anonymous peer endpoint (for JobService handoff).
+    public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try AgentServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .fetchAgentPeer),
+            from: .ui,
+            to: .agent
+        ) as NSData
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
+            proxy.peerListenerEndpoint(authJSON: auth) { endpoint in
+                cont.resume(returning: endpoint)
             }
         }
     }
@@ -222,16 +250,60 @@ public final class AgentServiceClient: @unchecked Sendable {
         }
     }
 
+    /// Deliver JobService peer listener endpoint into AgentService (pure XPC handoff + signed auth).
+    public func setJobServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try AgentServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installJobPeer),
+            from: .ui,
+            to: .agent
+        ) as NSData
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            proxy.setJobServicePeerEndpoint(endpoint, authJSON: auth) { data in
+                do {
+                    let ack = try AgentServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                    if ack.ok {
+                        cont.resume()
+                    } else {
+                        cont.resume(
+                            throwing: AgentServiceClientError.turnFailed(
+                                ack.message.isEmpty ? "Job peer mesh verification failed" : ack.message
+                            )
+                        )
+                    }
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("AgentService JobService peer endpoint handoff ok")
+        }
+    }
+
     private func remoteProxy() throws -> AgentServiceXPC {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
             let conn = NSXPCConnection(serviceName: serviceName)
             let remote = NSXPCInterface(with: AgentServiceXPC.self)
-            // Allow NSXPCListenerEndpoint argument on setMCPServicePeerEndpoint:
+            // Allow NSXPCListenerEndpoint on peer install / fetch selectors:
+            let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
             remote.setClasses(
-                NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
+                endpointClasses,
+                for: #selector(AgentServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
+                argumentIndex: 0,
+                ofReply: true
+            )
+            remote.setClasses(
+                endpointClasses,
                 for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
+                argumentIndex: 0,
+                ofReply: false
+            )
+            remote.setClasses(
+                endpointClasses,
+                for: #selector(AgentServiceXPC.setJobServicePeerEndpoint(_:authJSON:withReply:)),
                 argumentIndex: 0,
                 ofReply: false
             )

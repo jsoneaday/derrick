@@ -130,6 +130,61 @@ import Testing
         #expect(script.contains("BeautifulSoup"))
     }
 
+    @Test func repairsNestedJobsCreateWithRealNewlinesInScript() throws {
+        // Simulates jobs_create after outer AgentResponse decode: real newlines in nested script.
+        var broken = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        broken += "import random\nprint(random.randint(1, 1000000))"
+        broken += #""},"wake_after":true,"wake_prompt":"Return the random number in chat"}"#
+        #expect(strictParse(broken) == false)
+
+        let args = try parseToolArgumentsObject(broken)
+        #expect(args["tool_name"] != nil)
+        #expect(args["tool_arguments"] != nil)
+        #expect(args["run_after_seconds"] != nil)
+        if case .object(let ta)? = args["tool_arguments"], case .string(let script)? = ta["script"] {
+            #expect(script.contains("random"))
+            #expect(script.contains("print"))
+        } else {
+            Issue.record("expected nested tool_arguments.script")
+        }
+    }
+
+    @Test func validNestedJobsCreateParses() throws {
+        let json = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the random number in chat"}"#
+        let args = try parseToolArgumentsObject(json)
+        #expect(args["tool_arguments"] != nil)
+    }
+
+    @Test func repairsTruncatedJobsCreateWakePrompt() throws {
+        // Production failure shape: stream cut mid wake_prompt (prefix ~200 of log).
+        let trunc = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the ran"#
+        #expect(strictParse(trunc) == false)
+
+        let args = try parseToolArgumentsObject(trunc)
+        #expect(args["tool_name"] != nil)
+        #expect(args["tool_arguments"] != nil)
+        #expect(args["run_after_seconds"] != nil)
+        if case .object(let ta)? = args["tool_arguments"], case .string(let script)? = ta["script"] {
+            #expect(script.contains("random"))
+        } else {
+            Issue.record("expected nested tool_arguments.script after truncate repair")
+        }
+    }
+
+    @Test func repairsTruncatedNestedScriptWithRealNewlines() throws {
+        var trunc = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        trunc += "import random\nprint(random.randint(1, 1000000))"
+        // cut before closing script / rest of object
+        #expect(strictParse(trunc) == false)
+        let args = try parseToolArgumentsObject(trunc)
+        #expect(args["tool_name"] != nil)
+        if case .object(let ta)? = args["tool_arguments"], case .string(let script)? = ta["script"] {
+            #expect(script.contains("import random"))
+        } else {
+            Issue.record("expected recovered nested script")
+        }
+    }
+
     /// Build invalid tool-arguments JSON: `script` contains raw `"` and real newlines.
     private func brokenArguments(script: String, includePackages: Bool = false) -> String {
         var s = #"{"mode":"readonly","allow_network":true,"script":""#

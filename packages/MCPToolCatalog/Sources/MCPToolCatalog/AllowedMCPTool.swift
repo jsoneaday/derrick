@@ -12,6 +12,10 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case agentsList = "agents_list"
     case agentsSend = "agents_send"
     case agentsCancel = "agents_cancel"
+    /// One-shot durable job (optional delay). Local orchestration → JobService.
+    case jobsCreate = "jobs_create"
+    /// Recurring or one-shot schedule template. Local orchestration → JobService.
+    case jobsScheduleCreate = "jobs_schedule_create"
 
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
@@ -32,6 +36,10 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "Send a message to a parent or child agent only (no peer messaging)."
         case .agentsCancel:
             return "Cancel a child agent (or self) in the current session."
+        case .jobsCreate:
+            return "Create a one-shot background job (optional delay). Freezes a tool call; optional wake of this agent after the tool runs."
+        case .jobsScheduleCreate:
+            return "Create a recurring or one-shot schedule that spawns job runs (interval or once). Freezes a tool template; optional wake after each fire."
         }
     }
 }

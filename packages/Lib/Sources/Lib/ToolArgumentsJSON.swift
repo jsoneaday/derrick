@@ -19,8 +19,17 @@ public func parseToolArgumentsObject(_ json: String) throws -> [String: Value] {
         return dict.mapValues { jsonToToolValue($0) }
     }
 
+    // After outer AgentResponse decode, string values often contain raw newlines / bare quotes.
     let repaired = reescapeJSONDocumentAfterOuterDecode(trimmed)
     if let dict = tryParseJSONObject(repaired) {
+        return dict.mapValues { jsonToToolValue($0) }
+    }
+
+    // Model output often truncates mid-string (nested jobs_create + script is large when
+    // double-encoded). Close open strings/containers then re-escape again.
+    let closed = closeIncompleteJSONDocument(repaired)
+    let closedRescued = reescapeJSONDocumentAfterOuterDecode(closed)
+    if let dict = tryParseJSONObject(closedRescued) ?? tryParseJSONObject(closed) {
         return dict.mapValues { jsonToToolValue($0) }
     }
 
@@ -207,6 +216,61 @@ public func sanitizeIllegalJSONEscapes(in input: String) -> String {
 
 public func escapeBareQuotesInsideJSONStrings(_ input: String) -> String {
     reescapeJSONDocumentAfterOuterDecode(input)
+}
+
+/// Append missing `"` / `}` / `]` so a truncated JSON document can be parsed.
+/// Used when the model hits token limits mid tool-arguments string.
+public func closeIncompleteJSONDocument(_ input: String) -> String {
+    var inString = false
+    var escaped = false
+    var stack: [ContainerKind] = []
+
+    for ch in input {
+        if !inString {
+            switch ch {
+            case "{": stack.append(.object)
+            case "[": stack.append(.array)
+            case "}":
+                if stack.last == .object { stack.removeLast() }
+            case "]":
+                if stack.last == .array { stack.removeLast() }
+            case "\"":
+                inString = true
+                escaped = false
+            default:
+                break
+            }
+            continue
+        }
+
+        if escaped {
+            escaped = false
+            continue
+        }
+        if ch == "\\" {
+            escaped = true
+            continue
+        }
+        if ch == "\"" {
+            inString = false
+        }
+    }
+
+    var output = input
+    if inString {
+        // Dangling backslash at end would escape the closing quote.
+        if escaped, output.last == "\\" {
+            output.removeLast()
+        }
+        output.append("\"")
+    }
+    while let kind = stack.popLast() {
+        switch kind {
+        case .object: output.append("}")
+        case .array: output.append("]")
+        }
+    }
+    return output
 }
 
 // MARK: - Private

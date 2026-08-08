@@ -8,8 +8,17 @@ import CryptoKit
     func ping(payload: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Bootstrap shared DB + service_logs. Safe to call repeatedly. (unsigned)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// `authJSON` is signed `peerHandoff` / `fetchAgentPeer`. Endpoint via NSXPCCoder only.
+    /// Used so JobService can wake agents without `serviceName:` launch.
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
     /// MCP peer endpoint + signed `installMCPPeer` auth. Reply signed ack.
     func setMCPServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    )
+    /// JobService peer endpoint + signed `installJobPeer` auth. Reply signed ack.
+    func setJobServicePeerEndpoint(
         _ endpoint: NSXPCListenerEndpoint,
         authJSON: NSData,
         withReply reply: @escaping @Sendable (NSData) -> Void

@@ -24,8 +24,9 @@
 
 ```
 AgentService ──execute now──► MCPService
-AgentService ──schedule─────► JobService ──at fire──► MCPService (RunTool)
-                              JobService ──at fire──► AgentService (WakeAgent)
+AgentService ──jobs_* tools──► JobService (create job / schedule; local orchestration)
+JobService ──at fire──► MCPService (RunTool)
+JobService ──at fire──► AgentService (WakeAgent)
 WebhookService ─────────────► JobService | AgentService | MCPService (bound intents only)
 UI ─────────────────────────► Agent | Job | Webhook | health/start
 ```

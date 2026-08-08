@@ -23,6 +23,8 @@ RuntimeLog.shared.addSink { message in
 let delegate = AgentServiceListenerDelegate()
 let processInfo = ProcessInfo.processInfo
 fputs("[AgentService] main starting pid=\(processInfo.processIdentifier)\n", stderr)
+// Peer listener for JobService mesh (wakeAgent without serviceName launch).
+_ = AgentServicePeerEndpoint.shared.endpointForHandoff()
 let listener = NSXPCListener.service()
 listener.delegate = delegate
 listener.resume()

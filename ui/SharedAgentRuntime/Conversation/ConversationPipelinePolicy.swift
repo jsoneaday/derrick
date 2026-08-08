@@ -443,8 +443,12 @@ extension ConversationPipeline {
                             if parsedTool == nil {
                                 await MainActor.run {
                                     let name = agentResponse?.toolCall?.toolName ?? agentResponse?.toolBatch?.tools?.first?.toolName ?? "(unknown)"
-                                    let argsPreview = agentResponse?.toolCall?.arguments.map { String($0.prefix(200)) } ?? "(nil)"
-                                    debugLog("Tool payload parse failed for status=\(agentResponse?.status.rawValue ?? "?") name=\(name) argsPreview=\(argsPreview)")
+                                    let rawArgs = agentResponse?.toolCall?.arguments ?? ""
+                                    let head = String(rawArgs.prefix(240))
+                                    let tail = rawArgs.count > 240 ? String(rawArgs.suffix(120)) : ""
+                                    debugLog(
+                                        "Tool payload parse failed for status=\(agentResponse?.status.rawValue ?? "?") name=\(name) argsLen=\(rawArgs.count) head=\(head) tail=\(tail)"
+                                    )
                                 }
                             }
                             let toolStarted = Date()

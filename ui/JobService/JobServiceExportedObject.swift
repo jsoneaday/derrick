@@ -33,6 +33,8 @@ final class JobServiceExportedObject: NSObject, JobServiceXPC {
                     )
                 )
                 JobServiceScheduler.shared.start()
+                // Peer listener ready for AgentService handoff (idempotent).
+                _ = JobServicePeerEndpoint.shared.endpointForHandoff()
                 let result = JobServiceBootstrapResult(ok: true, databasePath: path, message: "ok")
                 reply((try JobServiceXPCCodec.encodeBootstrap(result)) as NSData)
             } catch {
@@ -47,6 +49,100 @@ final class JobServiceExportedObject: NSObject, JobServiceXPC {
                     message: error.localizedDescription
                 )
                 reply((try? JobServiceXPCCodec.encodeBootstrap(result)) as NSData? ?? Data("{}".utf8) as NSData)
+            }
+        }
+    }
+
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
+        do {
+            _ = try JobServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                authJSON as Data,
+                expectedTo: .job,
+                expectedKind: .fetchJobPeer
+            )
+            let endpoint = JobServicePeerEndpoint.shared.endpointForHandoff()
+            fputs("[JobService] peerListenerEndpoint handoff\n", stderr)
+            reply(endpoint)
+        } catch {
+            fputs("[JobService] peerListenerEndpoint auth failed: \(error.localizedDescription)\n", stderr)
+            let fallback = NSXPCListener.anonymous()
+            fallback.resume()
+            reply(fallback.endpoint)
+        }
+    }
+
+    func setMCPServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    ) {
+        nonisolated(unsafe) let endpoint = endpoint
+        nonisolated(unsafe) let authData = authJSON as Data
+        Task {
+            do {
+                _ = try JobServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                    authData,
+                    expectedTo: .job,
+                    expectedKind: .installMCPPeerToJob
+                )
+                JobMCPClient.shared.installPeerEndpoint(endpoint)
+                try await JobMCPClient.shared.verifyPeerMesh()
+                await JobServiceStore.shared.log(
+                    level: .info,
+                    message: "MCPService peer mesh verified (Job→MCP health ok)",
+                    code: "mcp_peer_mesh_ok"
+                )
+                fputs("[JobService] MCPService peer mesh verified\n", stderr)
+                let ack = try JobServiceXPCCodec.encodeSignedAck(.ok, to: .ui)
+                reply(ack as NSData)
+            } catch {
+                let message = error.localizedDescription
+                await JobServiceStore.shared.log(
+                    level: .error,
+                    message: "MCPService peer mesh failed: \(message)",
+                    code: "mcp_peer_mesh_failed"
+                )
+                fputs("[JobService] MCPService peer mesh failed: \(message)\n", stderr)
+                let ack = (try? JobServiceXPCCodec.encodeSignedAck(.error(message), to: .ui)) ?? Data()
+                reply(ack as NSData)
+            }
+        }
+    }
+
+    func setAgentServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    ) {
+        nonisolated(unsafe) let endpoint = endpoint
+        nonisolated(unsafe) let authData = authJSON as Data
+        Task {
+            do {
+                _ = try JobServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                    authData,
+                    expectedTo: .job,
+                    expectedKind: .installAgentPeer
+                )
+                JobAgentClient.shared.installPeerEndpoint(endpoint)
+                try await JobAgentClient.shared.verifyPeerMesh()
+                await JobServiceStore.shared.log(
+                    level: .info,
+                    message: "AgentService peer mesh verified (Job→Agent health ok)",
+                    code: "agent_peer_mesh_ok"
+                )
+                fputs("[JobService] AgentService peer mesh verified\n", stderr)
+                let ack = try JobServiceXPCCodec.encodeSignedAck(.ok, to: .ui)
+                reply(ack as NSData)
+            } catch {
+                let message = error.localizedDescription
+                await JobServiceStore.shared.log(
+                    level: .error,
+                    message: "AgentService peer mesh failed: \(message)",
+                    code: "agent_peer_mesh_failed"
+                )
+                fputs("[JobService] AgentService peer mesh failed: \(message)\n", stderr)
+                let ack = (try? JobServiceXPCCodec.encodeSignedAck(.error(message), to: .ui)) ?? Data()
+                reply(ack as NSData)
             }
         }
     }

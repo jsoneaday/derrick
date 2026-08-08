@@ -7,6 +7,9 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         public var onLog: (@Sendable (String) -> Void)?
         public var onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?
         public var onFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)?
+        /// Chunks for turns not owned by the active `streamTurn` (e.g. job wakeAgent).
+        public var onBackgroundChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?
+        public var onBackgroundFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)?
         /// Present approval UI; return decision DTO (runs off main if needed by caller).
         public var onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)?
         /// Present network/egress allow UI.
@@ -16,12 +19,16 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             onLog: (@Sendable (String) -> Void)? = nil,
             onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)? = nil,
             onFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)? = nil,
+            onBackgroundChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)? = nil,
+            onBackgroundFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)? = nil,
             onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)? = nil,
             onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)? = nil
         ) {
             self.onLog = onLog
             self.onChunk = onChunk
             self.onFinish = onFinish
+            self.onBackgroundChunk = onBackgroundChunk
+            self.onBackgroundFinish = onBackgroundFinish
             self.onApproval = onApproval
             self.onNetworkAccess = onNetworkAccess
         }
@@ -29,13 +36,15 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
 
     private let lock = NSLock()
     private var handlers: Handlers
+    /// Turn IDs currently owned by an in-flight `streamTurn` (not background).
+    private var foregroundTurnIDs: Set<String> = []
 
     public init(handlers: Handlers = Handlers()) {
         self.handlers = handlers
         super.init()
     }
 
-    /// Replaces turn stream handlers while preserving a previously installed approval handler.
+    /// Replaces turn stream handlers while preserving approval + background handlers.
     public func updateTurnHandlers(
         onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?,
         onFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)?
@@ -43,6 +52,28 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         lock.lock()
         handlers.onChunk = onChunk
         handlers.onFinish = onFinish
+        lock.unlock()
+    }
+
+    public func setBackgroundTurnHandlers(
+        onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?,
+        onFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)?
+    ) {
+        lock.lock()
+        handlers.onBackgroundChunk = onChunk
+        handlers.onBackgroundFinish = onFinish
+        lock.unlock()
+    }
+
+    public func beginForegroundTurn(_ turnID: String) {
+        lock.lock()
+        foregroundTurnIDs.insert(turnID)
+        lock.unlock()
+    }
+
+    public func endForegroundTurn(_ turnID: String) {
+        lock.lock()
+        foregroundTurnIDs.remove(turnID)
         lock.unlock()
     }
 
@@ -87,9 +118,15 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             return
         }
         lock.lock()
+        let isForeground = foregroundTurnIDs.contains(turnID)
         let onChunk = handlers.onChunk
+        let onBackground = handlers.onBackgroundChunk
         lock.unlock()
-        onChunk?(turnID, dto)
+        if isForeground {
+            onChunk?(turnID, dto)
+        } else {
+            onBackground?(turnID, dto)
+        }
     }
 
     public func turnDidFinish(_ turnID: String, errorJSON: NSData) {
@@ -108,9 +145,15 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             }
         }
         lock.lock()
+        let isForeground = foregroundTurnIDs.contains(turnID)
         let onFinish = handlers.onFinish
+        let onBackground = handlers.onBackgroundFinish
         lock.unlock()
-        onFinish?(turnID, errorDTO)
+        if isForeground {
+            onFinish?(turnID, errorDTO)
+        } else {
+            onBackground?(turnID, errorDTO)
+        }
     }
 
     public func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {

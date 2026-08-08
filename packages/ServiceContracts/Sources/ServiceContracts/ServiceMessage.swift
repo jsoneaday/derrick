@@ -56,6 +56,16 @@ public struct PeerHandoffAuthDTO: Codable, Sendable, Hashable {
         case fetchMCPPeer
         case installMCPPeer
         case installDockerHelperPeer
+        /// UI → JobService: fetch anonymous peer listener endpoint for AgentService.
+        case fetchJobPeer
+        /// UI → AgentService: install JobService peer endpoint + verify mesh.
+        case installJobPeer
+        /// UI → AgentService: fetch anonymous peer listener endpoint for JobService.
+        case fetchAgentPeer
+        /// UI → JobService: install AgentService peer endpoint + verify mesh.
+        case installAgentPeer
+        /// UI → JobService: install MCPService peer endpoint + verify mesh.
+        case installMCPPeerToJob
     }
 
     public let kind: Kind

@@ -21,7 +21,28 @@ final class JobServiceListenerDelegate: NSObject, NSXPCListenerDelegate {
             return false
         }
 
-        connection.exportedInterface = NSXPCInterface(with: JobServiceXPC.self)
+        let exported = NSXPCInterface(with: JobServiceXPC.self)
+        let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
+        // peerListenerEndpoint reply is NSXPCListenerEndpoint
+        exported.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: true
+        )
+        exported.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        exported.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.setAgentServicePeerEndpoint(_:authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        connection.exportedInterface = exported
         connection.exportedObject = JobServiceExportedObject()
         connection.resume()
         fputs("[JobService] accepted connection\n", stderr)

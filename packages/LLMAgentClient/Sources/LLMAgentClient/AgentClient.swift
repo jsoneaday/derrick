@@ -158,7 +158,16 @@ public struct AgentResponse: Decodable, Encodable, Sendable {
             toolName =
                 try container.decodeIfPresent(String.self, forKey: .toolName)
                 ?? container.decodeIfPresent(String.self, forKey: .name)
-            arguments = try container.decodeIfPresent(String.self, forKey: .arguments)
+            // Schema requires a JSON-formatted *string*, but models often emit a nested object
+            // for complex tools (jobs_create). Accept either and normalize to a JSON string.
+            // decodeIfPresent(String) *throws* on object (typeMismatch) — must use try?.
+            if let asString = try? container.decode(String.self, forKey: .arguments) {
+                arguments = asString
+            } else if let value = try? container.decode(FlexibleJSON.self, forKey: .arguments) {
+                arguments = value.jsonString
+            } else {
+                arguments = nil
+            }
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -195,6 +204,78 @@ public struct AgentResponse: Decodable, Encodable, Sendable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             // Prefer schema key when re-encoding.
             try container.encodeIfPresent(tools, forKey: .invocations)
+        }
+    }
+}
+
+/// Untyped JSON tree for tool_call.arguments when the model emits an object instead of a string.
+private enum FlexibleJSON: Decodable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: FlexibleJSON])
+    case array([FlexibleJSON])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+            return
+        }
+        if let b = try? container.decode(Bool.self) {
+            self = .bool(b)
+            return
+        }
+        if let i = try? container.decode(Int.self) {
+            self = .number(Double(i))
+            return
+        }
+        if let d = try? container.decode(Double.self) {
+            self = .number(d)
+            return
+        }
+        if let s = try? container.decode(String.self) {
+            self = .string(s)
+            return
+        }
+        if let o = try? container.decode([String: FlexibleJSON].self) {
+            self = .object(o)
+            return
+        }
+        if let a = try? container.decode([FlexibleJSON].self) {
+            self = .array(a)
+            return
+        }
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+    }
+
+    var jsonString: String? {
+        let any = toAny()
+        // Objects/arrays are the expected shape for tool arguments.
+        if JSONSerialization.isValidJSONObject(any),
+           let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) {
+            return String(data: data, encoding: .utf8)
+        }
+        // Fragments (rare): string / number / bool / null.
+        if let data = try? JSONSerialization.data(withJSONObject: any, options: [.fragmentsAllowed]) {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+
+    private func toAny() -> Any {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .number(let d):
+            if d.rounded() == d, d >= Double(Int.min), d <= Double(Int.max) {
+                return Int(d)
+            }
+            return d
+        case .string(let s): return s
+        case .array(let a): return a.map { $0.toAny() }
+        case .object(let o): return o.mapValues { $0.toAny() }
         }
     }
 }

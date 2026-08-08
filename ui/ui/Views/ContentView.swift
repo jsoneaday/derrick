@@ -10,12 +10,35 @@ import ServiceContracts
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
 
+extension Notification.Name {
+    static let agentBackgroundTurnChunk = Notification.Name("derrick.agentBackgroundTurnChunk")
+    static let agentBackgroundTurnFinish = Notification.Name("derrick.agentBackgroundTurnFinish")
+}
+
 struct ChatTurn: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let prompt: String
     var response: String
     var status: AgentResponseStatus?
     var toolName: String?
+    /// AgentService turn id for background (job wake) turns.
+    var agentTurnID: String?
+
+    init(
+        id: UUID = UUID(),
+        prompt: String,
+        response: String = "",
+        status: AgentResponseStatus? = nil,
+        toolName: String? = nil,
+        agentTurnID: String? = nil
+    ) {
+        self.id = id
+        self.prompt = prompt
+        self.response = response
+        self.status = status
+        self.toolName = toolName
+        self.agentTurnID = agentTurnID
+    }
 }
 
 private struct SelectableDebugLogView: NSViewRepresentable {
@@ -244,7 +267,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "tell me what's on apple.com"
+    @State private var prompt = "create a job that runs in 7 seconds that generates a random number. Once that number is generated show it to me in chat"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -417,6 +440,45 @@ struct ContentView: View {
                 await self.performClientBootstrap()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .agentBackgroundTurnChunk)) { note in
+            guard let turnID = note.userInfo?["turnID"] as? String else { return }
+            let chunk = note.userInfo?["chunk"] as? String ?? ""
+            let statusRaw = note.userInfo?["status"] as? String ?? ""
+            let toolName = note.userInfo?["toolName"] as? String
+            let status = AgentResponseStatus(rawValue: statusRaw) ?? .thinking
+            if let idx = turns.firstIndex(where: { $0.agentTurnID == turnID }) {
+                turns[idx].response = turns[idx].response.isEmpty
+                    ? chunk
+                    : turns[idx].response + chunk
+                turns[idx].status = status
+                turns[idx].toolName = toolName
+            } else {
+                turns.append(
+                    ChatTurn(
+                        prompt: "(scheduled job)",
+                        response: chunk,
+                        status: status,
+                        toolName: toolName,
+                        agentTurnID: turnID
+                    )
+                )
+            }
+            scrollToBottomToken += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .agentBackgroundTurnFinish)) { note in
+            guard let turnID = note.userInfo?["turnID"] as? String else { return }
+            let error = note.userInfo?["error"] as? String
+            if let idx = turns.firstIndex(where: { $0.agentTurnID == turnID }) {
+                if let error {
+                    turns[idx].response += turns[idx].response.isEmpty
+                        ? "Error: \(error)"
+                        : "\nError: \(error)"
+                }
+                turns[idx].status = .complete
+            }
+            debugLog("Background turn \(turnID) finished\(error.map { " error=\($0)" } ?? " ok")")
+            scrollToBottomToken += 1
+        }
         .onChange(of: selectedProvider) { _, newProvider in
             if selectedModel.provider != newProvider {
                 selectedModel = newProvider.defaultModel
@@ -439,6 +501,32 @@ struct ContentView: View {
                 }
                 return
             }
+
+            // Job wakeAgent results: stream into chat as background turns (via notification → @State).
+            AgentServiceClient.shared.setBackgroundTurnHandlers(
+                onChunk: { turnID, dto in
+                    NotificationCenter.default.post(
+                        name: .agentBackgroundTurnChunk,
+                        object: nil,
+                        userInfo: [
+                            "turnID": turnID,
+                            "status": dto.status,
+                            "chunk": dto.chunk ?? "",
+                            "toolName": dto.toolName as Any
+                        ]
+                    )
+                },
+                onFinish: { turnID, errorDTO in
+                    NotificationCenter.default.post(
+                        name: .agentBackgroundTurnFinish,
+                        object: nil,
+                        userInfo: [
+                            "turnID": turnID,
+                            "error": errorDTO?.message as Any
+                        ]
+                    )
+                }
+            )
 
             // AgentService tool confirms + egress allows route through reverse XPC → UI modals.
             let approvalModel = approvalPresentationModel
@@ -590,6 +678,19 @@ struct ContentView: View {
                 let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
                 try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
                 debugLog("MCPService peer endpoint handed to AgentService")
+
+                // Required: JobService peer so Agent can place jobs_* orders (sibling XPC cannot serviceName-launch JobService).
+                let jobPeer = try await JobServiceClient.shared.fetchPeerListenerEndpoint()
+                try await AgentServiceClient.shared.setJobServicePeerEndpoint(jobPeer)
+                debugLog("JobService peer endpoint handed to AgentService")
+
+                // Required: JobService → MCPService (runTool) and JobService → AgentService (wakeAgent).
+                // Same sibling-XPC rule: Job cannot serviceName-launch MCP/Agent.
+                try await JobServiceClient.shared.setMCPServicePeerEndpoint(peer)
+                debugLog("MCPService peer endpoint handed to JobService")
+                let agentPeer = try await AgentServiceClient.shared.fetchPeerListenerEndpoint()
+                try await JobServiceClient.shared.setAgentServicePeerEndpoint(agentPeer)
+                debugLog("AgentService peer endpoint handed to JobService")
 
                 // Required: Docker helper peer for MCP docker exec (not direct CLI).
                 let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()

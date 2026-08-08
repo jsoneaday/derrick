@@ -66,6 +66,38 @@ struct ModelTests {
         #expect(response.toolBatch?.tools?.first?.toolName == "agents_list")
     }
 
+    @Test func toolCallAcceptsObjectArguments() throws {
+        // Models often emit nested object instead of a JSON string for jobs_create.
+        let json = """
+        {
+          "status": "tool_call",
+          "tool_call": {
+            "tool_name": "jobs_create",
+            "arguments": {
+              "run_after_seconds": 5,
+              "tool_name": "python_script_exec",
+              "tool_arguments": {
+                "mode": "readonly",
+                "script": "import random\\nprint(1)"
+              },
+              "wake_after": true,
+              "wake_prompt": "Return the number"
+            }
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(AgentResponse.self, from: Data(json.utf8))
+        #expect(response.status == .toolCall)
+        #expect(response.toolCall?.toolName == "jobs_create")
+        let args = response.toolCall?.arguments ?? ""
+        #expect(args.contains("python_script_exec"))
+        #expect(args.contains("run_after_seconds"))
+        // Must be parseable as a JSON object string.
+        let data = Data(args.utf8)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        #expect(obj?["tool_name"] as? String == "python_script_exec")
+    }
+
     @Test func openAIModelContextBudgetsArePresent() {
         #expect(OpenAIModel.gpt56Luna.maxSupportedContextTokens > OpenAIModel.gpt56Luna.maxIdealContextTokens)
     }

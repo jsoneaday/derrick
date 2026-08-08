@@ -29,7 +29,10 @@ final class ConversationModel {
                 type: .object,
                 properties: [
                     "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
-                    "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                    "arguments": AgentSchema(
+                        type: .string,
+                        description: "Single-line JSON object string of tool arguments. Escape newlines as \\n and quotes as \\\". Keep compact; nested scripts must use \\n not real line breaks."
+                    )
                 ],
                 required: ["tool_name", "arguments"]
             ),
@@ -42,7 +45,10 @@ final class ConversationModel {
                             type: .object,
                             properties: [
                                 "tool_name": AgentSchema(type: .string, description: "Name of the tool to execute"),
-                                "arguments": AgentSchema(type: .string, description: "JSON-formatted string of tool arguments")
+                                "arguments": AgentSchema(
+                                    type: .string,
+                                    description: "Single-line JSON object string of tool arguments. Escape newlines as \\n and quotes as \\\"."
+                                )
                             ],
                             required: ["tool_name", "arguments"]
                         ),
@@ -92,7 +98,12 @@ final class ConversationModel {
         debugLog("Memory bootstrap started")
         debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
 
-        let agentsHost = try await makeAgentsOrchestrationHost(orchestrator: orchestrator)
+        let agentsHost = try await makeAgentsOrchestrationHost(
+            orchestrator: orchestrator,
+            sessionID: sessionKey.sessionID,
+            agentID: sessionKey.agentID,
+            helperModelSettings: helperModelSettings
+        )
         let principal = ServicePrincipal.agent(
             sessionID: sessionKey.sessionID,
             agentID: sessionKey.agentID
@@ -106,7 +117,9 @@ final class ConversationModel {
                 }
             }
         )
-        debugLog("Tools: agents_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))")
+        debugLog(
+            "Tools: agents_* + jobs_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))"
+        )
         return ConversationModel(
             sessionKey: sessionKey,
             orchestrator: orchestrator,
@@ -304,11 +317,22 @@ final class ConversationModel {
         return DefaultPolicyInterceptor(policy: policy)
     }
 
-    /// In-process host for multi-agent tools only. Not used for python/memory effectors.
-    private static func makeAgentsOrchestrationHost(
-        orchestrator: SessionOrchestrator
+    /// In-process host for orchestration tools (`agents_*`, `jobs_*`). Not used for MCP effectors.
+    /// `nonisolated`: tool handlers must not hop to MainActor while the turn awaits the MCP local bridge
+    /// (that pattern deadlocks when runTurn is MainActor-isolated).
+    nonisolated private static func makeAgentsOrchestrationHost(
+        orchestrator: SessionOrchestrator,
+        sessionID: String,
+        agentID: String,
+        helperModelSettings: LLMModelSettings
     ) async throws -> MCPLocalBridge {
-        try await MCPLocalBridge.make { server in
+        let principal = ServicePrincipal.agent(sessionID: sessionID, agentID: agentID)
+        let placer: any JobOrderPlacing = JobServiceClientOrderPlacer(from: .agent)
+        // Snapshot reviewer wire JSON once at host build — never read MainActor settings inside a tool call.
+        let reviewerJSON: String? = await MainActor.run {
+            try? helperModelSettings.pythonScriptReviewerModel.encodeHelperModelWireJSON()
+        }
+        return try await MCPLocalBridge.make { server in
             await server.register(
                 AgentOrchestrationToolModule.spawnRegistration { goal, task, agentID in
                     try await orchestrator.spawnWorker(goal: goal, task: task, agentID: agentID)
@@ -334,7 +358,151 @@ final class ConversationModel {
                     try await orchestrator.cancel(agentID: agentID)
                 }
             )
+            await server.register(
+                JobOrchestrationToolModule.createJobRegistration {
+                    runAfterSeconds, runAtString, toolName, toolArgumentsJSON, wakeAfter, wakePrompt, description
+                in
+                    try await placeJobCreate(
+                        placer: placer,
+                        principal: principal,
+                        sessionID: sessionID,
+                        agentID: agentID,
+                        reviewerJSON: reviewerJSON,
+                        runAfterSeconds: runAfterSeconds,
+                        runAtString: runAtString,
+                        toolName: toolName,
+                        toolArgumentsJSON: toolArgumentsJSON,
+                        wakeAfter: wakeAfter,
+                        wakePrompt: wakePrompt,
+                        description: description
+                    )
+                }
+            )
+            await server.register(
+                JobOrchestrationToolModule.createScheduleRegistration {
+                    name, recurrence, intervalSeconds, runAfterSeconds, nextFireAt, toolName, toolArgumentsJSON,
+                        wakeAfter, wakePrompt
+                in
+                    try await placeScheduleCreate(
+                        placer: placer,
+                        principal: principal,
+                        sessionID: sessionID,
+                        agentID: agentID,
+                        reviewerJSON: reviewerJSON,
+                        name: name,
+                        recurrence: recurrence,
+                        intervalSeconds: intervalSeconds,
+                        runAfterSeconds: runAfterSeconds,
+                        nextFireAtString: nextFireAt,
+                        toolName: toolName,
+                        toolArgumentsJSON: toolArgumentsJSON,
+                        wakeAfter: wakeAfter,
+                        wakePrompt: wakePrompt
+                    )
+                }
+            )
         }
+    }
+
+    nonisolated private static func placeJobCreate(
+        placer: any JobOrderPlacing,
+        principal: ServicePrincipal,
+        sessionID: String,
+        agentID: String,
+        reviewerJSON: String?,
+        runAfterSeconds: Int?,
+        runAtString: String?,
+        toolName: String,
+        toolArgumentsJSON: String,
+        wakeAfter: Bool,
+        wakePrompt: String?,
+        description: String?
+    ) async throws -> String {
+        debugLog("[jobs_create] begin tool=\(toolName) run_after=\(runAfterSeconds.map(String.init) ?? "nil")")
+        let runAt = runAtString.flatMap { JobOrderBuilder.parseRunAtString($0) }
+        let input = JobCreateOrderInput(
+            runAfterSeconds: runAfterSeconds,
+            runAt: runAt,
+            toolName: toolName,
+            toolArgumentsJSON: toolArgumentsJSON,
+            wakeAfter: wakeAfter,
+            wakePrompt: wakePrompt,
+            description: description
+        )
+        let request = try JobOrderBuilder.createJobRequest(
+            from: input,
+            principal: principal,
+            source: .agent,
+            sessionID: sessionID,
+            agentID: agentID,
+            helperAPIKey: TurnProcessContext.effectiveAPIKey,
+            helperReviewerModelJSON: reviewerJSON
+        )
+        debugLog("[jobs_create] calling JobService createJob…")
+        let job = try await placer.createJob(request)
+        debugLog("[jobs_create] ok id=\(job.id) status=\(job.status.rawValue)")
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let runAtStr = job.runAt.map { iso.string(from: $0) } ?? "asap"
+        return """
+        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created."}
+        """
+    }
+
+    nonisolated private static func placeScheduleCreate(
+        placer: any JobOrderPlacing,
+        principal: ServicePrincipal,
+        sessionID: String,
+        agentID: String,
+        reviewerJSON: String?,
+        name: String,
+        recurrence: String,
+        intervalSeconds: Int?,
+        runAfterSeconds: Int?,
+        nextFireAtString: String?,
+        toolName: String,
+        toolArgumentsJSON: String,
+        wakeAfter: Bool,
+        wakePrompt: String?
+    ) async throws -> String {
+        debugLog("[jobs_schedule_create] begin name=\(name) recurrence=\(recurrence)")
+        let kind: JobRecurrenceKind
+        switch recurrence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "interval": kind = .interval
+        case "once", "": kind = .once
+        default:
+            throw JobOrderBuilderError.invalidRecurrence
+        }
+        let nextFire = nextFireAtString.flatMap { JobOrderBuilder.parseRunAtString($0) }
+        let input = JobScheduleOrderInput(
+            name: name,
+            recurrenceKind: kind,
+            intervalSeconds: intervalSeconds,
+            runAfterSeconds: runAfterSeconds,
+            nextFireAt: nextFire,
+            toolName: toolName,
+            toolArgumentsJSON: toolArgumentsJSON,
+            wakeAfter: wakeAfter,
+            wakePrompt: wakePrompt,
+            enabled: true
+        )
+        let request = try JobOrderBuilder.createScheduleRequest(
+            from: input,
+            principal: principal,
+            source: .agent,
+            sessionID: sessionID,
+            agentID: agentID,
+            helperAPIKey: TurnProcessContext.effectiveAPIKey,
+            helperReviewerModelJSON: reviewerJSON
+        )
+        let schedule = try await placer.createSchedule(request)
+        debugLog("[jobs_schedule_create] ok id=\(schedule.id)")
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let next = schedule.nextFireAt.map { iso.string(from: $0) } ?? "asap"
+        return """
+        {"ok":true,"schedule_id":"\(schedule.id)","name":"\(schedule.name)","recurrence":"\(schedule.recurrence.kind.rawValue)","next_fire_at":"\(next)","enabled":\(schedule.enabled),"message":"Schedule created."}
+        """
     }
 
     /// Opens the app DB and always seeds baseline policy rules when missing.

@@ -1,9 +1,8 @@
 import Foundation
 import DBRepository
 import ServiceContracts
-import ServiceEnsureUp
 
-/// Runs claimed job steps. Tool execution uses MCP ensure-up + XPC callTool (signed).
+/// Runs claimed job steps. Tool execution uses peer-mesh MCP XPC callTool (signed).
 actor JobServiceExecutor {
     static let shared = JobServiceExecutor()
 
@@ -122,7 +121,14 @@ actor JobServiceExecutor {
             ServicePrincipal.self,
             from: Data(principalJSON.utf8)
         )
-        _ = try await ServiceEnsureUp.shared.ensureMCP()
+        // Do not ServiceEnsureUp.ensureMCP() here: sibling XPC cannot serviceName-launch MCPService
+        // and that path hangs. UI installs MCP peer before jobs run.
+        guard JobMCPClient.shared.hasPeerEndpoint else {
+            throw JobServiceError.stepFailed(
+                "MCP peer mesh not installed on this JobService (UI handoff required)"
+            )
+        }
+        fputs("[JobService] runTool \(payload.toolName)\n", stderr)
         let request = MCPToolCallRequest(
             principal: principal,
             toolName: payload.toolName,
@@ -131,6 +137,10 @@ actor JobServiceExecutor {
             helperReviewerModelJSON: payload.helperReviewerModelJSON
         )
         let result = try await JobMCPClient.shared.callTool(request)
+        fputs(
+            "[JobService] runTool done tool=\(payload.toolName) ok=\(result.ok) isError=\(result.isError)\n",
+            stderr
+        )
         let data = try JSONEncoder.service.encode(result)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
@@ -160,13 +170,20 @@ actor JobServiceExecutor {
             JobWakeAgentPayload.self,
             from: Data(payloadJSON.utf8)
         )
-        _ = try await ServiceEnsureUp.shared.ensureAgent()
+        // Do not ServiceEnsureUp.ensureAgent() — sibling XPC hang; require peer mesh.
+        guard JobAgentClient.shared.hasPeerEndpoint else {
+            throw JobServiceError.stepFailed(
+                "Agent peer mesh not installed on this JobService (UI handoff required)"
+            )
+        }
+        fputs("[JobService] wakeAgent session=\(payload.sessionID ?? "?")\n", stderr)
         let accepted = try await JobAgentClient.shared.wakeAgent(payload: payload)
         guard accepted.ok else {
             throw JobServiceError.stepFailed(
                 accepted.message.isEmpty ? "AgentService rejected wakeAgent turn" : accepted.message
             )
         }
+        fputs("[JobService] wakeAgent accepted turn=\(accepted.turnID)\n", stderr)
         let data = try JSONEncoder.service.encode(accepted)
         return String(data: data, encoding: .utf8) ?? "{}"
     }

@@ -96,6 +96,9 @@ final class JobServiceScheduler: @unchecked Sendable {
     }
 
     private func runDueJobs() async {
+        // Avoid claiming jobs in a KeepAlive/stale process that never received peer mesh.
+        // Claiming without MCP/Agent peers leaves steps stuck in `running`.
+        guard JobServiceMeshState.shared.isReady else { return }
         do {
             let repo = try await JobServiceStore.shared.sharedRepository()
             let claimed = try await repo.claimDueJobs(limit: 5)

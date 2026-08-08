@@ -3,16 +3,132 @@ import DockerRunnerXPC
 import ServiceContracts
 
 /// Client for JobService (create/cancel/list jobs + ensure-up).
+///
+/// System roles:
+/// - **UI process**: `serviceName:` launches Application XPC; used for ensure-up + peer endpoint fetch.
+/// - **AgentService process**: connects with a peer `NSXPCListenerEndpoint` installed via handoff.
 public final class JobServiceClient: @unchecked Sendable {
     public static let shared = JobServiceClient()
 
     private let serviceName = DerrickServiceID.job.xpcServiceName
     private let lock = NSLock()
     private var connection: NSXPCConnection?
+    private var peerEndpoint: NSXPCListenerEndpoint?
     private var isReady = false
     private let callTimeoutNanoseconds: UInt64 = 15_000_000_000
 
     private init() {}
+
+    /// Install peer endpoint in AgentService. Does not prove connectivity — use `verifyPeerMesh()`.
+    public func installPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) {
+        lock.lock()
+        peerEndpoint = endpoint
+        connection?.invalidate()
+        connection = nil
+        lock.unlock()
+        fputs("[JobServiceClient] peer endpoint installed\n", stderr)
+    }
+
+    /// AgentService: after install, prove health works over the peer link.
+    public func verifyPeerMesh() async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.health { data in
+                    do {
+                        cont.resume(returning: try JobServiceXPCCodec.decodeHealth(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard report.status == .ok else {
+            throw JobServiceClientError.meshUnverified(report.detail ?? "health not ok")
+        }
+        fputs("[JobServiceClient] peer mesh verified status=\(report.status.rawValue) pid=\(report.pid)\n", stderr)
+    }
+
+    /// UI host: fetch anonymous peer endpoint from JobService for Agent handoff.
+    public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try JobServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .fetchJobPeer),
+            from: .ui,
+            to: .job
+        ) as NSData
+        return try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
+                proxy.peerListenerEndpoint(authJSON: auth) { endpoint in
+                    cont.resume(returning: endpoint)
+                }
+            }
+        }
+    }
+
+    /// UI host: install MCPService peer into JobService (Job→MCP tool exec).
+    public func setMCPServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try JobServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installMCPPeerToJob),
+            from: .ui,
+            to: .job
+        ) as NSData
+        try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.setMCPServicePeerEndpoint(endpoint, authJSON: auth) { data in
+                    do {
+                        let ack = try JobServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                        if ack.ok { cont.resume() }
+                        else {
+                            cont.resume(
+                                throwing: JobServiceClientError.meshUnverified(
+                                    ack.message.isEmpty ? "Job→MCP mesh failed" : ack.message
+                                )
+                            )
+                        }
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("JobService MCPService peer endpoint handoff ok")
+        }
+    }
+
+    /// UI host: install AgentService peer into JobService (Job→Agent wake).
+    public func setAgentServicePeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let auth = try JobServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installAgentPeer),
+            from: .ui,
+            to: .job
+        ) as NSData
+        try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.setAgentServicePeerEndpoint(endpoint, authJSON: auth) { data in
+                    do {
+                        let ack = try JobServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                        if ack.ok { cont.resume() }
+                        else {
+                            cont.resume(
+                                throwing: JobServiceClientError.meshUnverified(
+                                    ack.message.isEmpty ? "Job→Agent mesh failed" : ack.message
+                                )
+                            )
+                        }
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("JobService AgentService peer endpoint handoff ok")
+        }
+    }
 
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
         var lastError: Error?
@@ -294,23 +410,7 @@ public final class JobServiceClient: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
-            let conn = NSXPCConnection(serviceName: serviceName)
-            conn.remoteObjectInterface = NSXPCInterface(with: JobServiceXPC.self)
-            do {
-                try XPCPeerAuthentication.apply(
-                    requirement: XPCPeerAuthentication.requirementString(
-                        allowedPeerIdentifiers: [DerrickServiceID.job.rawValue]
-                    ),
-                    to: conn
-                )
-            } catch {
-                fputs("[JobServiceClient] code-sign soft-fail: \(error.localizedDescription)\n", stderr)
-            }
-            conn.interruptionHandler = { [weak self] in self?.invalidate() }
-            conn.invalidationHandler = { [weak self] in self?.invalidate() }
-            conn.resume()
-            connection = conn
-            fputs("[JobServiceClient] connected serviceName=\(serviceName)\n", stderr)
+            connection = try makeConnection()
         }
         guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ [weak self] error in
             fputs("[JobServiceClient] proxy error: \(error.localizedDescription)\n", stderr)
@@ -319,6 +419,69 @@ public final class JobServiceClient: @unchecked Sendable {
             throw JobServiceClientError.unavailable
         }
         return proxy
+    }
+
+    private var isAgentServiceProcess: Bool {
+        (Bundle.main.bundleIdentifier ?? "") == DerrickServiceID.agent.rawValue
+    }
+
+    private func makeConnection() throws -> NSXPCConnection {
+        // Prefer peer endpoint when installed (AgentService mesh).
+        if let endpoint = peerEndpoint {
+            let conn = NSXPCConnection(listenerEndpoint: endpoint)
+            // Anonymous peer: no client code-sign requirement (same as MCPServiceClient).
+            conn.remoteObjectInterface = NSXPCInterface(with: JobServiceXPC.self)
+            conn.interruptionHandler = { [weak self] in self?.invalidate() }
+            conn.invalidationHandler = { [weak self] in self?.invalidate() }
+            conn.resume()
+            fputs("[JobServiceClient] peer connected via listener endpoint\n", stderr)
+            return conn
+        }
+
+        // AgentService must not use serviceName (sibling XPC cannot launch JobService).
+        if isAgentServiceProcess {
+            throw JobServiceClientError.peerEndpointMissing
+        }
+
+        // UI host + JobKeepAlive LaunchAgent: Application XPC serviceName.
+        let conn = NSXPCConnection(serviceName: serviceName)
+        let remote = NSXPCInterface(with: JobServiceXPC.self)
+        let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
+        // peerListenerEndpoint reply carries NSXPCListenerEndpoint
+        remote.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: true
+        )
+        remote.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        remote.setClasses(
+            endpointClasses,
+            for: #selector(JobServiceXPC.setAgentServicePeerEndpoint(_:authJSON:withReply:)),
+            argumentIndex: 0,
+            ofReply: false
+        )
+        conn.remoteObjectInterface = remote
+        do {
+            try XPCPeerAuthentication.apply(
+                requirement: XPCPeerAuthentication.requirementString(
+                    allowedPeerIdentifiers: [DerrickServiceID.job.rawValue]
+                ),
+                to: conn
+            )
+        } catch {
+            fputs("[JobServiceClient] code-sign soft-fail: \(error.localizedDescription)\n", stderr)
+        }
+        conn.interruptionHandler = { [weak self] in self?.invalidate() }
+        conn.invalidationHandler = { [weak self] in self?.invalidate() }
+        conn.resume()
+        fputs("[JobServiceClient] connected serviceName=\(serviceName)\n", stderr)
+        return conn
     }
 
     private func invalidate() {
@@ -351,6 +514,8 @@ public enum JobServiceClientError: Error, LocalizedError {
     case bootstrapFailed(String)
     case requestFailed(String)
     case timeout
+    case peerEndpointMissing
+    case meshUnverified(String)
 
     public var errorDescription: String? {
         switch self {
@@ -358,6 +523,10 @@ public enum JobServiceClientError: Error, LocalizedError {
         case .bootstrapFailed(let m): return "JobService bootstrap failed: \(m)"
         case .requestFailed(let m): return "JobService request failed: \(m)"
         case .timeout: return "JobService XPC call timed out."
+        case .peerEndpointMissing:
+            return "JobService peer endpoint not installed (UI handoff required for AgentService)."
+        case .meshUnverified(let m):
+            return "Agent→JobService mesh failed verification: \(m)"
         }
     }
 }

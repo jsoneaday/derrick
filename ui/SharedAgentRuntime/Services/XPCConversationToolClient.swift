@@ -4,7 +4,8 @@ import MCP
 import MCPClient
 import ServiceContracts
 
-/// Effector tools → MCPService over XPC. Orchestration tools (`agents_*`) stay on a local MCP client.
+/// Effector tools → MCPService over XPC.
+/// Orchestration tools (`agents_*`, `jobs_*`) stay on a local MCP client.
 public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     private let principal: ServicePrincipal
     private let agentsClient: MCPClient?
@@ -24,11 +25,17 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
         self.helperReviewerModelJSONProvider = helperReviewerModelJSONProvider
     }
 
+    private static func isOrchestrationTool(_ name: String) -> Bool {
+        name.hasPrefix("agents_") || name.hasPrefix("jobs_")
+    }
+
     public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
         var byName: [String: MCPToolDescriptor] = [:]
 
         if let agentsClient {
-            for tool in try await agentsClient.searchTools(matching: query) where tool.name.hasPrefix("agents_") {
+            for tool in try await agentsClient.searchTools(matching: query)
+                where Self.isOrchestrationTool(tool.name)
+            {
                 byName[tool.name] = tool
             }
         }
@@ -39,11 +46,11 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
                 remote.message.isEmpty ? "searchTools failed" : remote.message
             )
         }
-        for dto in remote.tools where !dto.name.hasPrefix("agents_") {
+        for dto in remote.tools where !Self.isOrchestrationTool(dto.name) {
             byName[dto.name] = MCPToolDescriptor(name: dto.name, description: dto.description)
         }
-        // Effector catalog must be non-empty; agents_* alone is not a working mesh.
-        let effectors = byName.keys.filter { !$0.hasPrefix("agents_") }
+        // Effector catalog must be non-empty; orchestration alone is not a working mesh.
+        let effectors = byName.keys.filter { !Self.isOrchestrationTool($0) }
         guard !effectors.isEmpty else {
             throw MCPServiceClientError.meshUnverified("MCPService returned no effector tools")
         }
@@ -52,7 +59,7 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     }
 
     public func callTool(named name: String, arguments: [String: Value]) async throws -> MCPToolResult {
-        if name.hasPrefix("agents_") {
+        if Self.isOrchestrationTool(name) {
             guard let agentsClient else {
                 return MCPToolResult(
                     content: [.text("Agent orchestration tools unavailable.")],

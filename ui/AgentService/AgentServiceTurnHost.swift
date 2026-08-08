@@ -164,9 +164,12 @@ actor AgentServiceTurnHost {
                             fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
                             return
                         }
-                        if let sink = connectionContext.clientSink(logLabel: "chunk") {
-                            sink.turnDidEmitChunk(turnID, chunkJSON: data as NSData)
-                        } else {
+                        let delivered = Self.deliverChunk(
+                            turnID: turnID,
+                            data: data as NSData,
+                            connectionContext: connectionContext
+                        )
+                        if !delivered {
                             fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
                         }
                     }
@@ -177,8 +180,7 @@ actor AgentServiceTurnHost {
             if Task.isCancelled {
                 let err = AgentTurnErrorDTO(turnID: turnID, message: "cancelled", code: "cancelled")
                 let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
-                connectionContext.clientSink(logLabel: "finish")?
-                    .turnDidFinish(turnID, errorJSON: data as NSData)
+                Self.deliverFinish(turnID: turnID, errorJSON: data as NSData, connectionContext: connectionContext)
             } else if chunkCount == 0 {
                 // Surface empty pipeline as an error so the UI does not hang on a blank bubble.
                 let err = AgentTurnErrorDTO(
@@ -187,11 +189,9 @@ actor AgentServiceTurnHost {
                     code: "empty_stream"
                 )
                 let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
-                connectionContext.clientSink(logLabel: "finish")?
-                    .turnDidFinish(turnID, errorJSON: data as NSData)
+                Self.deliverFinish(turnID: turnID, errorJSON: data as NSData, connectionContext: connectionContext)
             } else {
-                connectionContext.clientSink(logLabel: "finish")?
-                    .turnDidFinish(turnID, errorJSON: Data() as NSData)
+                Self.deliverFinish(turnID: turnID, errorJSON: Data() as NSData, connectionContext: connectionContext)
             }
             await AgentServiceStore.shared.log(
                 level: chunkCount == 0 ? .error : .info,
@@ -207,12 +207,59 @@ actor AgentServiceTurnHost {
             )
             let err = AgentTurnErrorDTO(turnID: turnID, message: message, code: "stream_error")
             let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
-            if let sink = connectionContext.clientSink(logLabel: "finish-error") {
-                sink.turnDidFinish(turnID, errorJSON: data as NSData)
-            } else {
+            let delivered = Self.deliverFinish(
+                turnID: turnID,
+                errorJSON: data as NSData,
+                connectionContext: connectionContext
+            )
+            if !delivered {
                 fputs("[AgentService] drop finish-error (nil sink) turn=\(turnID)\n", stderr)
             }
         }
         tasks[turnID] = nil
+    }
+
+    /// Deliver to the initiating connection sink. Also to primary UI only when the initiator is
+    /// *not* the UI (job peer wakes). Never double-send to the same UI connection.
+    @discardableResult
+    private static func deliverChunk(
+        turnID: String,
+        data: NSData,
+        connectionContext: AgentServiceConnectionContext
+    ) -> Bool {
+        var delivered = false
+        if let sink = connectionContext.clientSink(logLabel: "chunk") {
+            sink.turnDidEmitChunk(turnID, chunkJSON: data)
+            delivered = true
+        }
+        let initiatorIsUI = AgentServicePrimaryUISink.shared.isPrimaryConnection(
+            connectionContext.attachedConnection()
+        )
+        if !initiatorIsUI, let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "chunk-ui") {
+            ui.turnDidEmitChunk(turnID, chunkJSON: data)
+            delivered = true
+        }
+        return delivered
+    }
+
+    @discardableResult
+    private static func deliverFinish(
+        turnID: String,
+        errorJSON: NSData,
+        connectionContext: AgentServiceConnectionContext
+    ) -> Bool {
+        var delivered = false
+        if let sink = connectionContext.clientSink(logLabel: "finish") {
+            sink.turnDidFinish(turnID, errorJSON: errorJSON)
+            delivered = true
+        }
+        let initiatorIsUI = AgentServicePrimaryUISink.shared.isPrimaryConnection(
+            connectionContext.attachedConnection()
+        )
+        if !initiatorIsUI, let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "finish-ui") {
+            ui.turnDidFinish(turnID, errorJSON: errorJSON)
+            delivered = true
+        }
+        return delivered
     }
 }

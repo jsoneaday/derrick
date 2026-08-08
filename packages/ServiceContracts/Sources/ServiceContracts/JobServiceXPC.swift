@@ -5,6 +5,23 @@ import CryptoKit
 @objc public protocol JobServiceXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// `authJSON` is signed `peerHandoff` / `fetchJobPeer`. Endpoint travels via NSXPCCoder only.
+    /// Used so AgentService (sibling XPC) can call JobService without `serviceName:` launch.
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void)
+    /// MCP peer endpoint + signed `installMCPPeerToJob` auth. Reply signed ack.
+    /// JobService cannot `serviceName:`-launch MCPService (sibling XPC).
+    func setMCPServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    )
+    /// Agent peer endpoint + signed `installAgentPeer` auth. Reply signed ack.
+    /// JobService cannot `serviceName:`-launch AgentService (sibling XPC).
+    func setAgentServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    )
     /// Signed `createJob`. Reply `CreateJobResult`.
     func createJob(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed cancel. Reply `ServiceAckDTO` signed.
@@ -35,6 +52,29 @@ public struct JobServiceBootstrapResult: Codable, Sendable, Hashable {
 }
 
 public enum JobServiceXPCCodec {
+    public static func encodeSignedPeerHandoffAuth(
+        _ auth: PeerHandoffAuthDTO,
+        from: DerrickServiceID,
+        to: DerrickServiceID,
+        key: SymmetricKey? = nil
+    ) throws -> Data {
+        try MCPServiceXPCCodec.encodeSignedPeerHandoffAuth(auth, from: from, to: to, key: key)
+    }
+
+    public static func decodeSignedPeerHandoffAuth(
+        _ data: Data,
+        expectedTo: DerrickServiceID,
+        expectedKind: PeerHandoffAuthDTO.Kind,
+        key: SymmetricKey? = nil
+    ) throws -> PeerHandoffAuthDTO {
+        try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
+            data,
+            expectedTo: expectedTo,
+            expectedKind: expectedKind,
+            key: key
+        )
+    }
+
     public static func encodeHealth(_ report: ServiceHealthReport) throws -> Data {
         try JSONEncoder.service.encode(report)
     }

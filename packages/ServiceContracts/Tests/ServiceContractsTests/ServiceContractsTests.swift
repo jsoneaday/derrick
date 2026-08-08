@@ -213,6 +213,67 @@ import Testing
         #expect(decoded.source == .webhook)
     }
 
+    @Test func jobOrderBuilderOneShotAndAbsoluteTime() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let input = JobCreateOrderInput(
+            runAfterSeconds: 3,
+            toolName: "python_script_exec",
+            toolArgumentsJSON: #"{"script":"print(1)","mode":"readonly"}"#,
+            wakeAfter: true,
+            wakePrompt: "Announce the number from the tool result."
+        )
+        let req = try JobOrderBuilder.createJobRequest(
+            from: input,
+            principal: .agent(sessionID: "s1", agentID: "ui"),
+            sessionID: "s1",
+            agentID: "ui",
+            now: now
+        )
+        #expect(req.steps.count == 1)
+        #expect(req.steps[0].kind == .runToolThenWake)
+        #expect(req.runAt == now.addingTimeInterval(3))
+        #expect(req.source == .agent)
+
+        let at3pm = JobOrderBuilder.parseRunAtString("15:00", now: now)!
+        let cal = Calendar.current
+        #expect(cal.component(.hour, from: at3pm) == 15)
+
+        #expect(throws: JobOrderBuilderError.toolNotAllowed("shell_exec")) {
+            _ = try JobOrderBuilder.createJobRequest(
+                from: JobCreateOrderInput(
+                    toolName: "shell_exec",
+                    toolArgumentsJSON: #"{"x":1}"#,
+                    wakeAfter: false
+                ),
+                principal: .system,
+                sessionID: nil,
+                agentID: nil,
+                now: now
+            )
+        }
+    }
+
+    @Test func jobOrderBuilderScheduleInterval() throws {
+        let input = JobScheduleOrderInput(
+            name: "hourly",
+            recurrenceKind: .interval,
+            intervalSeconds: 3600,
+            runAfterSeconds: 0,
+            toolName: "python_script_exec",
+            toolArgumentsJSON: #"{"script":"print(1)","mode":"readonly"}"#,
+            wakeAfter: false
+        )
+        let req = try JobOrderBuilder.createScheduleRequest(
+            from: input,
+            principal: .system,
+            sessionID: nil,
+            agentID: nil
+        )
+        #expect(req.recurrence.kind == .interval)
+        #expect(req.recurrence.intervalSeconds == 3600)
+        #expect(req.steps[0].kind == .runTool)
+    }
+
     @Test func jobFailureReasonLastAttemptMessage() {
         let msg = JobFailureReason.interruptedDeviceUnavailable.lastAttemptMessage()
         #expect(msg.hasPrefix("Last attempt failed due to:"))

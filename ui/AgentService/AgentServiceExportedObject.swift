@@ -13,6 +13,13 @@ final class AgentServiceConnectionContext: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Underlying XPC connection (weak); used to avoid double-delivery to the same UI sink.
+    func attachedConnection() -> NSXPCConnection? {
+        lock.lock()
+        defer { lock.unlock() }
+        return connection
+    }
+
     /// Fresh reverse proxy with error logging (do not cache across process lifetime blindly).
     func clientSink(logLabel: String) -> AgentServiceClientSinkXPC? {
         lock.lock()
@@ -125,6 +132,24 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         }
     }
 
+    func peerListenerEndpoint(authJSON: NSData, withReply reply: @escaping @Sendable (NSXPCListenerEndpoint) -> Void) {
+        do {
+            _ = try AgentServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                authJSON as Data,
+                expectedTo: .agent,
+                expectedKind: .fetchAgentPeer
+            )
+            let endpoint = AgentServicePeerEndpoint.shared.endpointForHandoff()
+            fputs("[AgentService] peerListenerEndpoint handoff\n", stderr)
+            reply(endpoint)
+        } catch {
+            fputs("[AgentService] peerListenerEndpoint auth failed: \(error.localizedDescription)\n", stderr)
+            let fallback = NSXPCListener.anonymous()
+            fallback.resume()
+            reply(fallback.endpoint)
+        }
+    }
+
     func setMCPServicePeerEndpoint(
         _ endpoint: NSXPCListenerEndpoint,
         authJSON: NSData,
@@ -156,6 +181,47 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
                     code: "mcp_peer_mesh_failed"
                 )
                 fputs("[AgentService] MCPService peer mesh failed: \(message)\n", stderr)
+                let ack = (try? AgentServiceXPCCodec.encodeSignedAck(
+                    .error(message),
+                    from: .agent,
+                    to: .ui
+                )) ?? Data()
+                reply(ack as NSData)
+            }
+        }
+    }
+
+    func setJobServicePeerEndpoint(
+        _ endpoint: NSXPCListenerEndpoint,
+        authJSON: NSData,
+        withReply reply: @escaping @Sendable (NSData) -> Void
+    ) {
+        // System invariant: handoff is not complete until Agent can RPC JobService.
+        Task {
+            do {
+                _ = try AgentServiceXPCCodec.decodeSignedPeerHandoffAuth(
+                    authJSON as Data,
+                    expectedTo: .agent,
+                    expectedKind: .installJobPeer
+                )
+                JobServiceClient.shared.installPeerEndpoint(endpoint)
+                try await JobServiceClient.shared.verifyPeerMesh()
+                await AgentServiceStore.shared.log(
+                    level: .info,
+                    message: "JobService peer mesh verified (Agent→Job health ok)",
+                    code: "job_peer_mesh_ok"
+                )
+                fputs("[AgentService] JobService peer mesh verified\n", stderr)
+                let ack = try AgentServiceXPCCodec.encodeSignedAck(.ok, from: .agent, to: .ui)
+                reply(ack as NSData)
+            } catch {
+                let message = error.localizedDescription
+                await AgentServiceStore.shared.log(
+                    level: .error,
+                    message: "JobService peer mesh failed: \(message)",
+                    code: "job_peer_mesh_failed"
+                )
+                fputs("[AgentService] JobService peer mesh failed: \(message)\n", stderr)
                 let ack = (try? AgentServiceXPCCodec.encodeSignedAck(
                     .error(message),
                     from: .agent,
