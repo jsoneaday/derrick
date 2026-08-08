@@ -23,8 +23,12 @@ public enum ServiceMessageType: String, Codable, Sendable, Hashable {
     case cancelTurn
     case approvalRequest
     case approvalDecision
+    case jobPreflightRequest
+    case jobPreflightDecision
     case networkAccessRequest
     case networkAccessDecision
+    case policyDecisionRequest
+    case policyDecisionReply
     // MCP
     case runTool
     case searchTools

@@ -213,56 +213,78 @@ actor AgentServiceTurnHost {
         let counter = ChunkCounter()
         let responseBox = ResponseAccumulator()
         let suppressChatStream = delivery == .jobResultModal
-        let approvalPresenter = XPCRemoteApprovalPresenter(turnID: turnID) {
-            // Job wakes: prefer UI primary sink for any HITL; else silent.
-            connectionContext.clientSink(logLabel: "approval")
-                ?? AgentServicePrimaryUISink.shared.clientSink(logLabel: "approval-ui")
-        }
+        let isJobWake = delivery == .jobResultModal
+        let approvalPresenter = AgentServiceApprovalPresenter(
+            turnID: turnID,
+            sessionID: jobSessionID,
+            isJobWake: isJobWake,
+            resolveRepository: {
+                try await AgentServiceStore.shared.sharedRepository()
+            }
+        )
         let networkPrompt: @Sendable (String, String) async -> PolicyUserInteraction.PolicyUserDecision = { host, toolName in
-            await XPCRemoteNetworkAccess.prompt(
+            await AgentServiceHITLRouter.requestNetworkAccess(
                 host: host,
                 toolName: toolName,
-                resolveSink: {
-                    connectionContext.clientSink(logLabel: "network")
-                        ?? AgentServicePrimaryUISink.shared.clientSink(logLabel: "network-ui")
+                turnID: turnID,
+                sessionID: jobSessionID,
+                isJobWake: isJobWake,
+                resolveRepository: {
+                    try await AgentServiceStore.shared.sharedRepository()
                 }
             )
         }
         // Process-wide slots: MCP tool tasks do not inherit TaskLocal from the turn task.
         // Job wakes still install here; concurrent user turns remain a known gap (queued later).
-        TurnProcessContext.installProcessTurnContext(apiKey: apiKey, networkAccessPrompt: networkPrompt)
+        let jobPreflight: TurnProcessContext.JobSchedulingPreflight = { toolName, toolArgumentsJSON in
+            try await AgentServiceJobPreflight.approveBeforeSchedulingIfNeeded(
+                toolName: toolName,
+                toolArgumentsJSON: toolArgumentsJSON
+            )
+        }
+        let policyDecision: TurnProcessContext.PolicyDecisionPrompt = { event in
+            await AgentServiceHITLRouter.requestPolicyDecisionViaUISink(event)
+        }
+        TurnProcessContext.installProcessTurnContext(
+            apiKey: apiKey,
+            networkAccessPrompt: networkPrompt,
+            jobSchedulingPreflight: isJobWake ? nil : jobPreflight,
+            policyDecisionPrompt: policyDecision
+        )
         defer { TurnProcessContext.clearProcessTurnContext() }
         do {
             try await TurnProcessContext.$conversationAPIKey.withValue(apiKey) {
                 try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
-                    try await conversation.runTurn(
-                        prompt: prompt,
-                        apiKey: apiKey,
-                        model: model,
-                        approvalPresenter: approvalPresenter
-                    ) { chunk in
-                        let n = counter.increment()
-                        if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
-                            responseBox.append(text)
-                        }
-                        guard !suppressChatStream else { return }
-                        let dto = AgentTurnChunkDTO(
-                            turnID: turnID,
-                            status: chunk.status.rawValue,
-                            chunk: chunk.chunk,
-                            toolName: chunk.toolName
-                        )
-                        guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
-                            fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
-                            return
-                        }
-                        let delivered = Self.deliverChunk(
-                            turnID: turnID,
-                            data: data as NSData,
-                            connectionContext: connectionContext
-                        )
-                        if !delivered {
-                            fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
+                    try await TurnProcessContext.$policyDecisionPrompt.withValue(policyDecision) {
+                        try await conversation.runTurn(
+                            prompt: prompt,
+                            apiKey: apiKey,
+                            model: model,
+                            approvalPresenter: approvalPresenter
+                        ) { chunk in
+                            let n = counter.increment()
+                            if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
+                                responseBox.append(text)
+                            }
+                            guard !suppressChatStream else { return }
+                            let dto = AgentTurnChunkDTO(
+                                turnID: turnID,
+                                status: chunk.status.rawValue,
+                                chunk: chunk.chunk,
+                                toolName: chunk.toolName
+                            )
+                            guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
+                                fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
+                                return
+                            }
+                            let delivered = Self.deliverChunk(
+                                turnID: turnID,
+                                data: data as NSData,
+                                connectionContext: connectionContext
+                            )
+                            if !delivered {
+                                fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
+                            }
                         }
                     }
                 }
@@ -363,17 +385,10 @@ actor AgentServiceTurnHost {
             }
         }
         guard let data = try? JSONEncoder.service.encode(result) else { return }
-        if let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result") {
-            ui.presentJobResult(data as NSData)
-            fputs("[AgentService] presentJobResult delivered to UI job=\(result.jobID)\n", stderr)
-        } else {
-            // UI quit: do not call UserNotifications from this XPC process (bundleProxy is nil).
-            // JobKeepAlive polls job_results and posts notifications; UI loads unread on launch.
-            fputs(
-                "[AgentService] no UI sink — result persisted id=\(result.id) (KeepAlive/UI will surface)\n",
-                stderr
-            )
-        }
+        _ = data
+        DerrickNotificationWake.wakeUIIfNeeded()
+        DerrickNotificationSignal.postPoll()
+        fputs("[AgentService] job result persisted id=\(result.id) — notification wake requested\n", stderr)
         await AgentServiceStore.shared.log(
             level: .info,
             message: "job result ready job=\(result.jobID) chars=\(responseText.count) uiSink=\(AgentServicePrimaryUISink.shared.clientSink(logLabel: "probe") != nil)",

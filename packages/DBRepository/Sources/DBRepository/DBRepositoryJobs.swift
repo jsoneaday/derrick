@@ -555,6 +555,7 @@ public extension DBRepository {
         public let responseText: String
         public let createdAt: Date
         public var readAt: Date?
+        public var notifyPosted: Bool
 
         public init(
             id: String,
@@ -563,7 +564,8 @@ public extension DBRepository {
             parentSessionID: String?,
             responseText: String,
             createdAt: Date,
-            readAt: Date? = nil
+            readAt: Date? = nil,
+            notifyPosted: Bool = false
         ) {
             self.id = id
             self.jobID = jobID
@@ -572,6 +574,7 @@ public extension DBRepository {
             self.responseText = responseText
             self.createdAt = createdAt
             self.readAt = readAt
+            self.notifyPosted = notifyPosted
         }
     }
 
@@ -579,7 +582,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             try Self.execute("""
             INSERT INTO job_results (
-                id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+                id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at, notify_posted
             ) VALUES (
                 \(quoted(row.id)),
                 \(quoted(row.jobID)),
@@ -587,7 +590,8 @@ public extension DBRepository {
                 \(sqlValue(row.parentSessionID)),
                 \(quoted(row.responseText)),
                 \(quoted(Self.iso8601Formatter().string(from: row.createdAt))),
-                \(sqlValue(row.readAt.map { Self.iso8601Formatter().string(from: $0) }))
+                \(sqlValue(row.readAt.map { Self.iso8601Formatter().string(from: $0) })),
+                \(row.notifyPosted ? 1 : 0)
             );
             """, on: handle)
         }
@@ -602,12 +606,55 @@ public extension DBRepository {
         }
     }
 
+    public func markJobResultNotified(id: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE job_results SET notify_posted = 1 WHERE id = \(quoted(id));
+            """, on: handle)
+        }
+    }
+
+    /// Atomically marks `notify_posted` when still unposted.
+    public func claimJobResultNotificationPost(id: String) throws -> Bool {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE job_results SET notify_posted = 1 WHERE id = \(quoted(id)) AND notify_posted = 0;
+            """, on: handle)
+            return sqlite3_changes(handle) > 0
+        }
+    }
+
+    /// Reverts `claimJobResultNotificationPost` so a failed post can be retried.
+    public func resetJobResultNotificationClaim(id: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE job_results SET notify_posted = 0 WHERE id = \(quoted(id));
+            """, on: handle)
+        }
+    }
+
+    public func fetchJobResultsNeedingNotify(limit: Int = 20) throws -> [JobResultRow] {
+        let cap = max(1, min(limit, 100))
+        return try withDatabaseHandle { handle in
+            try Self.fetchJobResults(
+                sql: """
+                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at, notify_posted
+                FROM job_results
+                WHERE notify_posted = 0
+                ORDER BY created_at ASC
+                LIMIT \(cap);
+                """,
+                on: handle
+            )
+        }
+    }
+
     public func fetchUnreadJobResults(limit: Int = 20) throws -> [JobResultRow] {
         let cap = max(1, min(limit, 100))
         return try withDatabaseHandle { handle in
             try Self.fetchJobResults(
                 sql: """
-                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at, notify_posted
                 FROM job_results
                 WHERE read_at IS NULL
                 ORDER BY created_at DESC
@@ -622,7 +669,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let rows = try Self.fetchJobResults(
                 sql: """
-                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at, notify_posted
                 FROM job_results
                 WHERE id = \(quoted(id))
                 LIMIT 1;
@@ -631,6 +678,11 @@ public extension DBRepository {
             )
             return rows.first
         }
+    }
+
+    /// Scheduled fire time for a job run (`jobs.run_at`), if any.
+    public func fetchJobRunAt(jobID: String) throws -> Date? {
+        try fetchJob(id: jobID)?.0.runAt
     }
 
     private static func fetchJobResults(sql: String, on handle: OpaquePointer) throws -> [JobResultRow] {
@@ -649,7 +701,8 @@ public extension DBRepository {
                     parentSessionID: columnOptionalText(statement, 3),
                     responseText: columnText(statement, 4),
                     createdAt: iso8601Formatter().date(from: columnText(statement, 5)) ?? .now,
-                    readAt: columnOptionalText(statement, 6).flatMap { iso8601Formatter().date(from: $0) }
+                    readAt: columnOptionalText(statement, 6).flatMap { iso8601Formatter().date(from: $0) },
+                    notifyPosted: sqlite3_column_int(statement, 7) != 0
                 )
             )
         }

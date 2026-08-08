@@ -53,6 +53,7 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
         connection.invalidationHandler = { [weak connection] in
             if let connection {
                 AgentServiceLogRelay.shared.detach(connection: connection)
+                AgentServicePrimaryUISink.shared.detach(connection: connection)
             }
         }
     }

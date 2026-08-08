@@ -189,17 +189,39 @@ final class EgressAllowlistService: ObservableObject {
         return nil
     }
 
+    /// Hosts referenced in `script` that still need user approval before a job is scheduled.
+    func uncoveredNetworkHosts(script: String, allowNetwork: Bool) -> [String] {
+        guard allowNetwork else { return [] }
+        return EgressHostExtractor.extractHosts(from: script).filter { host in
+            !localPolicy.isHardBlockedHostname(host) && !localPolicy.isHostCoveredByAllowlist(host)
+        }
+    }
+
     private func promptForHost(_ host: String, toolName: String) async -> PolicyUserDecision {
-        // AgentService-hosted turns: reverse XPC to UI (process-wide / TaskLocal; no AppEventBus in XPC).
         if let remote = TurnProcessContext.effectiveNetworkAccessPrompt {
-            debugLog("Egress prompt via reverse XPC host=\(host)")
+            debugLog("Egress prompt via AgentService path host=\(host)")
             return await remote(host, toolName)
         }
-        let event = PolicyUserEventFactory.egressAccessRequest(
+        if !isAgentServiceProcess {
+            debugLog("Egress prompt via UI modal host=\(host)")
+            let event = PolicyUserEventFactory.egressAccessRequest(
+                host: host,
+                toolName: toolName
+            )
+            return await AppEventBus.shared.initDecision(event)
+        }
+        guard let repository else {
+            return .denied(actor: "system-no-repository")
+        }
+        debugLog("Egress prompt via notification path host=\(host)")
+        return await HITLOfflineNetworkService.awaitDecision(
             host: host,
-            toolName: toolName
+            toolName: toolName,
+            turnID: "egress-agent",
+            isJobContext: false,
+            repository: repository,
+            timeoutNanoseconds: 300_000_000_000
         )
-        return await AppEventBus.shared.initDecision(event)
     }
 
     /// Apply a user egress decision in **this** process (UI): memory + helper allowlist.
@@ -239,6 +261,7 @@ final class EgressAllowlistService: ObservableObject {
             return EgressHostAccessReply(decision: .deny, actor: "system")
         }
         // AgentService may have persisted "always" to the shared DB; reload before prompting.
+        // Preserve session grants across reload (setAllowedDomainSuffixes does not clear them).
         if let repository {
             do {
                 try await reload()

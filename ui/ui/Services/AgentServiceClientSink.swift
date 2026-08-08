@@ -14,6 +14,10 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         public var onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)?
         /// Present network/egress allow UI.
         public var onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)?
+        /// Consolidated job scheduling approval before `jobs_create`.
+        public var onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
+        /// Usage limits / content sensitivity / generic PolicyUserEvent decisions.
+        public var onPolicyDecision: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)?
 
         public init(
             onLog: (@Sendable (String) -> Void)? = nil,
@@ -22,7 +26,9 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             onBackgroundChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)? = nil,
             onBackgroundFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)? = nil,
             onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)? = nil,
-            onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)? = nil
+            onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)? = nil,
+            onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)? = nil,
+            onPolicyDecision: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)? = nil
         ) {
             self.onLog = onLog
             self.onChunk = onChunk
@@ -31,6 +37,8 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             self.onBackgroundFinish = onBackgroundFinish
             self.onApproval = onApproval
             self.onNetworkAccess = onNetworkAccess
+            self.onJobPreflight = onJobPreflight
+            self.onPolicyDecision = onPolicyDecision
         }
     }
 
@@ -90,6 +98,22 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
     ) {
         lock.lock()
         handlers.onNetworkAccess = onNetworkAccess
+        lock.unlock()
+    }
+
+    public func setJobPreflightHandler(
+        _ onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
+    ) {
+        lock.lock()
+        handlers.onJobPreflight = onJobPreflight
+        lock.unlock()
+    }
+
+    public func setPolicyDecisionHandler(
+        _ onPolicyDecision: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)?
+    ) {
+        lock.lock()
+        handlers.onPolicyDecision = onPolicyDecision
         lock.unlock()
     }
 
@@ -196,17 +220,39 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         }
     }
 
-    public func presentJobResult(_ resultJSON: NSData) {
-        guard let result = try? JSONDecoder.service.decode(JobResultDTO.self, from: resultJSON as Data) else {
-            Task { @MainActor in
-                debugLog("AgentService sink: failed to decode JobResultDTO")
+    public func requestJobPreflight(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        lock.lock()
+        let onJobPreflight = handlers.onJobPreflight
+        lock.unlock()
+
+        Task {
+            let decisionDTO: JobPreflightDecisionDTO
+            do {
+                let request = try AgentServiceXPCCodec.decodeSignedJobPreflightRequest(data)
+                if let onJobPreflight {
+                    decisionDTO = await onJobPreflight(request)
+                } else {
+                    decisionDTO = JobPreflightDecisionDTO(
+                        requestID: request.requestID,
+                        approved: false,
+                        actor: "system-no-ui-handler"
+                    )
+                }
+            } catch {
+                decisionDTO = JobPreflightDecisionDTO(
+                    requestID: "",
+                    approved: false,
+                    actor: "system-decode-failed"
+                )
             }
-            return
+            let payload = (try? AgentServiceXPCCodec.encodeSignedJobPreflightDecision(decisionDTO)) ?? Data()
+            reply(payload as NSData)
         }
-        Task { @MainActor in
-            debugLog("Job result received job=\(result.jobID) chars=\(result.responseText.count)")
-            JobResultPresenter.shared.enqueue(result)
-        }
+    }
+
+    public func presentJobResult(_ resultJSON: NSData) {
+        // Job results are persisted in AgentService and delivered via DerrickNotificationService.
     }
 
     public func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
@@ -243,6 +289,43 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             }
             let payload = (try? AgentServiceXPCCodec.encodeSignedNetworkAccessDecision(decisionDTO))
                 ?? Data()
+            reply(payload as NSData)
+        }
+    }
+
+    public func requestPolicyDecision(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        lock.lock()
+        let onPolicyDecision = handlers.onPolicyDecision
+        lock.unlock()
+
+        Task {
+            let decisionDTO: AgentPolicyDecisionDTO
+            do {
+                let request = try AgentServiceXPCCodec.decodeSignedPolicyDecisionRequest(data)
+                if let onPolicyDecision {
+                    decisionDTO = await onPolicyDecision(request)
+                } else {
+                    await MainActor.run {
+                        debugLog("AgentService sink: policy decision requested but no UI handler kind=\(request.kind)")
+                    }
+                    decisionDTO = AgentPolicyDecisionDTO(
+                        requestID: request.requestID,
+                        decision: "denied",
+                        actor: "system-no-ui-handler"
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    debugLog("AgentService sink: policy decision decode failed: \(error.localizedDescription)")
+                }
+                decisionDTO = AgentPolicyDecisionDTO(
+                    requestID: "",
+                    decision: "denied",
+                    actor: "system-decode-failed"
+                )
+            }
+            let payload = (try? AgentServiceXPCCodec.encodeSignedPolicyDecisionReply(decisionDTO)) ?? Data()
             reply(payload as NSData)
         }
     }

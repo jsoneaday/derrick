@@ -427,6 +427,9 @@ final class ConversationModel {
         description: String?
     ) async throws -> String {
         debugLog("[jobs_create] begin tool=\(toolName) run_after=\(runAfterSeconds.map(String.init) ?? "nil")")
+        if let preflight = TurnProcessContext.effectiveJobSchedulingPreflight {
+            try await preflight(toolName, toolArgumentsJSON)
+        }
         let runAt = runAtString.flatMap { JobOrderBuilder.parseRunAtString($0) }
         let input = JobCreateOrderInput(
             runAfterSeconds: runAfterSeconds,
@@ -474,6 +477,9 @@ final class ConversationModel {
         wakePrompt: String?
     ) async throws -> String {
         debugLog("[jobs_schedule_create] begin name=\(name) recurrence=\(recurrence)")
+        if let preflight = TurnProcessContext.effectiveJobSchedulingPreflight {
+            try await preflight(toolName, toolArgumentsJSON)
+        }
         let kind: JobRecurrenceKind
         switch recurrence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "interval": kind = .interval

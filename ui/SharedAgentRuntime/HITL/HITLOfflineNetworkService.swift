@@ -1,0 +1,105 @@
+import DBRepository
+import Foundation
+import PolicyUserInteraction
+import ServiceContracts
+
+/// Network allow/deny via SQLite + user notifications (same path as tool HITL).
+public enum HITLOfflineNetworkService {
+    private static let pollIntervalNanoseconds: UInt64 = 1_000_000_000
+
+    public static func awaitDecision(
+        host: String,
+        toolName: String,
+        turnID: String,
+        isJobContext: Bool,
+        repository: DBRepository,
+        timeoutNanoseconds: UInt64
+    ) async -> PolicyUserDecision {
+        let networkTool = networkToolName(host: host)
+        let approvalID: String
+        if let existing = try? await repository.fetchOpenPendingNetworkApproval(host: host, isJobContext: isJobContext) {
+            approvalID = existing.id
+            fputs("[HITL] network reusing pending id=\(approvalID) host=\(host) turn=\(turnID) job=\(isJobContext)\n", stderr)
+        } else {
+            let request = ApprovalConfirmationRequest(
+                sessionID: "network-\(host)",
+                toolName: networkTool,
+                argumentsJSON: #"{"host":"\#(host)","toolName":"\#(toolName)"}"#,
+                requiredFields: []
+            )
+            approvalID = request.id
+            let row = PendingHITLApprovalRow(
+                id: approvalID,
+                turnID: turnID,
+                sessionID: request.sessionID,
+                toolName: request.toolName,
+                argumentsJSON: request.argumentsJSON,
+                requiredFieldsJSON: "[]",
+                isJobContext: isJobContext
+            )
+            do {
+                try await repository.insertPendingHITLApproval(row)
+                fputs("[HITL] network queued id=\(approvalID) host=\(host) turn=\(turnID)\n", stderr)
+            } catch {
+                fputs("[HITL] network persist failed: \(error.localizedDescription)\n", stderr)
+                return .denied(actor: "system-persist-failed")
+            }
+        }
+
+        DerrickNotificationWake.wakeUIIfNeeded()
+        DerrickNotificationSignal.postPoll()
+
+        let deadline = Date().addingTimeInterval(Double(timeoutNanoseconds) / 1_000_000_000)
+        while Date() < deadline {
+            if Task.isCancelled {
+                try? await repository.resolveHITLApproval(
+                    id: approvalID,
+                    status: .cancelled,
+                    editedArgumentsJSON: nil,
+                    actor: "system-cancelled"
+                )
+                return .denied(actor: "system-cancelled")
+            }
+            if let decision = try? await repository.fetchPendingHITLApproval(id: approvalID),
+               decision.status != .pending {
+                return mapDecision(row: decision)
+            }
+            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        }
+
+        try? await repository.resolveHITLApproval(
+            id: approvalID,
+            status: .timeout,
+            editedArgumentsJSON: nil,
+            actor: "system-timeout"
+        )
+        return .timedOut
+    }
+
+    public static func networkToolName(host: String) -> String {
+        "network:\(host)"
+    }
+
+    public static func isNetworkToolName(_ toolName: String) -> Bool {
+        toolName.hasPrefix("network:")
+    }
+
+    public static func host(fromNetworkToolName toolName: String) -> String? {
+        guard toolName.hasPrefix("network:") else { return nil }
+        let host = String(toolName.dropFirst("network:".count))
+        return host.isEmpty ? nil : host
+    }
+
+    private static func mapDecision(row: PendingHITLApprovalRow) -> PolicyUserDecision {
+        switch row.status {
+        case .approved:
+            return .approvedOnce(actor: row.actor)
+        case .cancelled:
+            return .denied(actor: row.actor)
+        case .timeout:
+            return .timedOut
+        case .pending:
+            return .denied(actor: "system-pending")
+        }
+    }
+}

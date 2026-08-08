@@ -110,7 +110,7 @@ extension ConversationPipeline {
                             case .denied(let reason):
                                 if !publishedChunkDenial {
                                     publishedChunkDenial = true
-                                    await AppEventBus.shared.publish(
+                                    await PolicyDecisionRouting.publishNotice(
                                         PolicyUserEventFactory.contentGovernanceDenied(
                                             reason: reason,
                                             payloadPreview: String(chunk.prefix(400)),
@@ -322,7 +322,7 @@ extension ConversationPipeline {
                         let interceptedCompletion: String?
                         switch completionIntercept {
                         case .denied(let reason):
-                            await AppEventBus.shared.publish(
+                            await PolicyDecisionRouting.publishNotice(
                                 PolicyUserEventFactory.contentGovernanceDenied(
                                     reason: reason,
                                     payloadPreview: String(fullCompletion.prefix(800)),

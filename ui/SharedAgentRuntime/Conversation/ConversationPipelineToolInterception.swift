@@ -243,7 +243,7 @@ extension ConversationPipeline {
             } else {
                 preview = event.argumentsJSON
             }
-            await AppEventBus.shared.publish(
+            await PolicyDecisionRouting.publishNotice(
                 PolicyUserEventFactory.toolGovernanceDenied(
                     toolName: name,
                     reason: reason,
@@ -316,7 +316,7 @@ extension ConversationPipeline {
         }
 
         if let event {
-            await AppEventBus.shared.publish(event)
+            await PolicyDecisionRouting.publishNotice(event)
         }
     }
 

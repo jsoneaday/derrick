@@ -29,6 +29,18 @@ public final class AgentServiceClient: @unchecked Sendable {
         sink.setNetworkAccessHandler(handler)
     }
 
+    public func setJobPreflightHandler(
+        _ handler: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
+    ) {
+        sink.setJobPreflightHandler(handler)
+    }
+
+    public func setPolicyDecisionHandler(
+        _ handler: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)?
+    ) {
+        sink.setPolicyDecisionHandler(handler)
+    }
+
     /// Job wakeAgent turns stream here (not the active user `streamTurn`).
     public func setBackgroundTurnHandlers(
         onChunk: (@Sendable (String, AgentTurnChunkDTO) -> Void)?,

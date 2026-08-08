@@ -264,7 +264,7 @@ final class UsageLimitsService: ObservableObject {
             proposedSessionLimit: next,
             detail: usageSnapshotDetail(dimension: dimension)
         )
-        let decision = await AppEventBus.shared.initDecision(event)
+        let decision = await PolicyDecisionRouting.requestDecision(event)
         switch decision {
         case .approved, .approvedOnce, .approvedPermanently:
             applySession(next)
@@ -281,7 +281,7 @@ final class UsageLimitsService: ObservableObject {
             dimensionTitle: dimension.title,
             currentLimit: currentEffective
         )
-        await AppEventBus.shared.publish(event)
+        await PolicyDecisionRouting.publishNotice(event)
     }
 
     private func usageSnapshotDetail(dimension: UsageLimitDimension) -> String {

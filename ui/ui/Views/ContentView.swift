@@ -258,7 +258,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "create a job that runs in 7 seconds that generates a random number. Once that number is generated show it to me in chat"
+    @State private var prompt = "create a job that runs in 7 seconds that tells me what's on apple.com"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -274,8 +274,8 @@ struct ContentView: View {
     @State private var promptFocusToken = 0
     @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
-    @StateObject private var approvalPresentationModel = ApprovalPresentationModel()
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
+    @ObservedObject private var jobPreflightPresenter = JobPreflightApprovalPresenter.shared
     @ObservedObject private var jobResultPresenter = JobResultPresenter.shared
 
     private var canSendPrompt: Bool {
@@ -314,7 +314,7 @@ struct ContentView: View {
             Text(dockerRequiredMessage)
         }
         .modalPopup(
-            isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented && !jobResultPresenter.isPresented,
+            isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented,
             minWidth: 380,
             minHeight: 0,
             maxWidth: 460,
@@ -349,44 +349,51 @@ struct ContentView: View {
             }
         )
         .modalPopup(
-            isPresented: jobResultPresenter.isPresented && !bootstrapStatus.isModalPresented,
-            minWidth: 400,
+            isPresented: jobPreflightPresenter.isPresented && !bootstrapStatus.isModalPresented,
+            minWidth: 420,
             minHeight: 0,
             maxWidth: 520,
             maxHeight: 420,
-            onBackdropDismiss: { jobResultPresenter.dismiss() },
-            onEscape: { jobResultPresenter.dismiss() },
+            onBackdropDismiss: { jobPreflightPresenter.deny() },
+            onEscape: { jobPreflightPresenter.deny() },
             header: {
-                Text("Scheduled job finished")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
+                EmptyView()
             },
             body: {
-                if let result = jobResultPresenter.activeResult {
-                    ScrollView {
-                        Text(result.responseText)
-                            .font(.body)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                if let request = jobPreflightPresenter.activeRequest {
+                    JobPreflightModalView(
+                        request: request,
+                        onApprove: { jobPreflightPresenter.approve(grantAlways: false) },
+                        onApproveAlways: { jobPreflightPresenter.approve(grantAlways: true) },
+                        onDeny: { jobPreflightPresenter.deny() }
+                    )
                 }
             },
             footer: {
-                HStack {
-                    Spacer()
-                    Button("OK") {
-                        jobResultPresenter.dismiss()
-                    }
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-                    .keyboardShortcut(.cancelAction)
+                EmptyView()
+            }
+        )
+        .modalPopup(
+            isPresented: jobResultPresenter.isPresented
+                && !bootstrapStatus.isModalPresented
+                && !jobPreflightPresenter.isPresented
+                && !policyEventPresenter.isPresented,
+            minWidth: 420,
+            minHeight: 0,
+            maxWidth: 520,
+            maxHeight: 440,
+            onBackdropDismiss: { jobResultPresenter.dismiss() },
+            onEscape: { jobResultPresenter.dismiss() },
+            header: {
+                JobResultModalHeader(shortID: jobResultPresenter.activeResult.map { Self.shortResultID($0.id) })
+            },
+            body: {
+                if let result = jobResultPresenter.activeResult {
+                    JobResultModalBody(result: result)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+            },
+            footer: {
+                JobResultModalFooter(onDismiss: { jobResultPresenter.dismiss() })
             }
         )
         .modalPopup(
@@ -496,101 +503,24 @@ struct ContentView: View {
                 return
             }
 
-            // Job wakes no longer inject into chat; results arrive via presentJobResult → JobResultPresenter.
+            // Job wakes persist to DB; results arrive via DerrickNotificationService.
+            HITLLiveApprovalHandlers.wireAgentServiceClient()
 
-            // AgentService tool confirms + egress allows route through reverse XPC → UI modals.
-            let approvalModel = approvalPresentationModel
-            AgentServiceClient.shared.setApprovalHandler { requestDTO in
-                let request = ApprovalConfirmationRequest(
-                    id: requestDTO.approvalID,
-                    sessionID: requestDTO.sessionID,
-                    toolName: requestDTO.toolName,
-                    argumentsJSON: requestDTO.argumentsJSON,
-                    requiredFields: requestDTO.requiredFields
-                )
-                let decision = await approvalModel.confirm(request)
-                switch decision {
-                case .approved(let edited, let actor):
-                    return AgentApprovalDecisionDTO(
-                        approvalID: requestDTO.approvalID,
-                        approved: true,
-                        editedArgumentsJSON: edited,
-                        actor: actor ?? ""
-                    )
-                case .cancelled(let actor):
-                    return AgentApprovalDecisionDTO(
-                        approvalID: requestDTO.approvalID,
-                        approved: false,
-                        editedArgumentsJSON: requestDTO.argumentsJSON,
-                        actor: actor ?? ""
-                    )
-                }
-            }
-            AgentServiceClient.shared.setNetworkAccessHandler { requestDTO in
-                let event = PolicyUserEventFactory.egressAccessRequest(
-                    host: requestDTO.host,
-                    toolName: requestDTO.toolName
-                )
-                await MainActor.run {
-                    debugLog("[policy-ui] AgentService network access host=\(requestDTO.host)")
-                }
-                let decision = await AppEventBus.shared.initDecision(event)
-                // Apply on the UI process + Docker helper *before* replying so mid-flight
-                // CONNECT does not show a second modal after preflight "Always"/"Once".
-                await EgressAllowlistService.shared.applyUserNetworkDecision(
-                    host: requestDTO.host,
-                    decision: decision
-                )
-                let actor: String
-                let decisionCode: String
-                switch decision {
-                case .approved(let a), .approvedOnce(let a):
-                    decisionCode = "once"
-                    actor = a ?? ""
-                case .approvedPermanently(let a):
-                    decisionCode = "always"
-                    actor = a ?? ""
-                case .denied(let a):
-                    decisionCode = "deny"
-                    actor = a ?? ""
-                case .timedOut:
-                    decisionCode = "timeout"
-                    actor = "system-timeout"
-                case .dismissed:
-                    decisionCode = "dismissed"
-                    actor = "ui-user"
-                }
-                return AgentNetworkAccessDecisionDTO(
-                    requestID: requestDTO.requestID,
-                    decision: decisionCode,
-                    actor: actor
-                )
-            }
             if isDebugEnabled {
-                await MainActor.run {
-                    debugLogStore.log("Loading session store")
-                }
+                debugLogStore.log("Loading session store")
             }
 
             let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
             let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
 
             do {
-                // UI client bootstrap only: shared DB + settings. No local ConversationModel
-                // (turns are hosted entirely in AgentService).
-                await MainActor.run {
-                    bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
-                }
+                bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
                 let repo = try await ConversationModel.makeMemoryStore(
                     applicationName: "ui",
                     databaseDirectoryURL: databaseDirectoryURL
                 )
                 repository = repo
-                await MainActor.run {
-                    JobResultPresenter.shared.configure(repository: repo)
-                    // Defer unread modals until after bootstrap — presenting during prewarm
-                    // contended with the init modal and could stall the Docker smoke path.
-                }
+                DerrickNotificationService.shared.configure(repository: repo)
                 let settings = LLMModelSettings(repository: repo)
                 await settings.loadSettings()
                 helperModelSettings = settings
@@ -598,11 +528,7 @@ struct ContentView: View {
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
-                // Parallel: Docker prewarm (required before prompts) + Agent + MCP + Job services.
-                // Modal stays up until Docker finishes; sessionReady only then.
-                await MainActor.run {
-                    bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and services…")
-                }
+                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and services…")
                 _ = XPCDockerRunner.shared
                 await EgressAllowlistService.shared.pushToHelper()
 
@@ -613,8 +539,12 @@ struct ContentView: View {
                 async let mcpHealthTask = MCPServiceClient.shared.ensureUpAndHealth()
                 async let jobHealthTask = JobServiceClient.shared.ensureUpAndHealth()
 
-                // Docker must succeed before prompting is allowed.
                 try await dockerReady
+
+                bootstrapStatus.update(
+                    phase: .connectingHelper,
+                    message: "Starting Agent, MCP, and Job services…"
+                )
 
                 let health = try await agentHealth
                 debugLog(
@@ -631,87 +561,66 @@ struct ContentView: View {
                     "JobService ensure-up ok status=\(jobHealth.status.rawValue) pid=\(jobHealth.pid) detail=\(jobHealth.detail ?? "")"
                 )
 
-                // Login agent: keep JobService up for the user session (schedules while UI quit).
-                // SMAppService must run on the main actor; status .notFound still requires register().
+                bootstrapStatus.update(phase: .connectingHelper, message: "Connecting service mesh…")
+
                 do {
-                    let result = try await MainActor.run {
-                        let paths = JobServiceLoginAgent.preflightPaths()
-                        debugLog(
-                            "JobKeepAlive preflight plistExists=\(FileManager.default.fileExists(atPath: paths.plist.path)) exeExists=\(FileManager.default.fileExists(atPath: paths.executable.path)) sm=\(JobServiceLoginAgent.smStatusDescription) bundle=\(Bundle.main.bundlePath)"
-                        )
-                        return try JobServiceLoginAgent.ensureRegistered()
-                    }
+                    let paths = JobServiceLoginAgent.preflightPaths()
+                    debugLog(
+                        "JobKeepAlive preflight plistExists=\(FileManager.default.fileExists(atPath: paths.plist.path)) exeExists=\(FileManager.default.fileExists(atPath: paths.executable.path)) sm=\(JobServiceLoginAgent.smStatusDescription) bundle=\(Bundle.main.bundlePath)"
+                    )
+                    let result = try JobServiceLoginAgent.ensureRegistered()
                     debugLog(
                         "JobKeepAlive registered method=\(result.method.rawValue) enabled=\(result.isRunningOrEnabled) status=\(result.statusDescription) — \(result.detail)"
                     )
                 } catch {
                     debugLog("JobKeepAlive register failed: \(error.localizedDescription)")
-                    // Do not fail whole bootstrap — jobs still work while UI is up.
                 }
 
-                // Required: peer endpoint only travels via NSXPCCoder (UI → Agent).
                 let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
                 try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
                 debugLog("MCPService peer endpoint handed to AgentService")
 
-                // Required: JobService peer so Agent can place jobs_* orders (sibling XPC cannot serviceName-launch JobService).
                 let jobPeer = try await JobServiceClient.shared.fetchPeerListenerEndpoint()
                 try await AgentServiceClient.shared.setJobServicePeerEndpoint(jobPeer)
                 debugLog("JobService peer endpoint handed to AgentService")
 
-                // Required: JobService → MCPService (runTool) and JobService → AgentService (wakeAgent).
-                // Same sibling-XPC rule: Job cannot serviceName-launch MCP/Agent.
                 try await JobServiceClient.shared.setMCPServicePeerEndpoint(peer)
                 debugLog("MCPService peer endpoint handed to JobService")
                 let agentPeer = try await AgentServiceClient.shared.fetchPeerListenerEndpoint()
                 try await JobServiceClient.shared.setAgentServicePeerEndpoint(agentPeer)
                 debugLog("AgentService peer endpoint handed to JobService")
 
-                // Required: Docker helper peer for MCP docker exec (not direct CLI).
                 let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
                 try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
                 debugLog("Docker helper peer endpoint handed to MCPService")
 
                 sessionReady = true
-                await MainActor.run {
-                    bootstrapStatus.markReady()
-                    JobResultPresenter.shared.loadUnreadFromDatabase()
-                }
-                // Mesh verify used to wipe helper allowlist; restore after peer handoff.
+                bootstrapStatus.markReady()
+                await DerrickNotificationService.shared.activateSession(repository: repo)
                 await EgressAllowlistService.shared.pushToHelper()
                 if isDebugEnabled {
-                    await MainActor.run {
-                        debugLogStore.log(
-                            "UI client ready (Docker + Agent + MCP + JobService + peer mesh)"
-                        )
-                    }
+                    debugLogStore.log(
+                        "UI client ready (Docker + Agent + MCP + JobService + peer mesh)"
+                    )
                 }
             } catch is CancellationError {
-                await MainActor.run {
-                    // Do not wipe a concurrent task that already reached ready.
-                    if !sessionReady {
-                        bootstrapStatus.noteBootstrapCancelled()
-                    }
-                    debugLog("Client bootstrap cancelled")
+                if !sessionReady {
+                    bootstrapStatus.noteBootstrapCancelled()
                 }
+                debugLog("Client bootstrap cancelled")
                 return
             } catch {
-                // Racing re-entrant task must not clear a successful session.
                 if sessionReady || bootstrapStatus.phase == .ready {
-                    await MainActor.run {
-                        debugLog("Client bootstrap late error ignored (already ready): \(error)")
-                    }
+                    debugLog("Client bootstrap late error ignored (already ready): \(error)")
                 } else {
                     sessionReady = false
                     errorMessage = error.localizedDescription
-                    await MainActor.run {
-                        debugLog("Client bootstrap failed: \(error)")
-                        bootstrapStatus.markFailed(
-                            title: "Startup Failed",
-                            message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
-                            technicalDetail: String(describing: error)
-                        )
-                    }
+                    debugLog("Client bootstrap failed: \(error)")
+                    bootstrapStatus.markFailed(
+                        title: "Startup Failed",
+                        message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
+                        technicalDetail: String(describing: error)
+                    )
                 }
             }
 
@@ -1071,6 +980,10 @@ struct ContentView: View {
         case .approvalRequired, .networkAccessRequest, .usageLimitRequest:
             presenter.deny()
         }
+    }
+
+    private static func shortResultID(_ id: String) -> String {
+        String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {

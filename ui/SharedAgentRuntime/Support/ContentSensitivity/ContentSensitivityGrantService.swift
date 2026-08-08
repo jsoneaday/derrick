@@ -148,7 +148,7 @@ final class ContentSensitivityGrantService: ObservableObject {
             payloadPreview: String(content.prefix(800)),
             correlationId: sessionID
         )
-        let decision = await AppEventBus.shared.initDecision(event)
+        let decision = await PolicyDecisionRouting.requestDecision(event)
         switch decision {
         case .approved(let actor), .approvedOnce(let actor):
             debugLog("Content sensitivity allow once for \(pending.joined(separator: ",")) by \(actor ?? "user")")
@@ -160,7 +160,7 @@ final class ContentSensitivityGrantService: ObservableObject {
                 try await grantPermanent(categories: pending, actor: actor)
             } catch {
                 debugLog("Failed permanent content grants: \(error.localizedDescription)")
-                await AppEventBus.shared.publish(
+                await PolicyDecisionRouting.publishNotice(
                     PolicyUserEventFactory.contentGovernanceDenied(
                         reason: "Failed to save always-allow for sensitive content: \(error.localizedDescription)",
                         payloadPreview: String(content.prefix(800)),
@@ -172,7 +172,7 @@ final class ContentSensitivityGrantService: ObservableObject {
             return content
         case .denied(let actor):
             debugLog("Content sensitivity deny by \(actor ?? "user")")
-            await AppEventBus.shared.publish(
+            await PolicyDecisionRouting.publishNotice(
                 PolicyUserEventFactory.contentGovernanceDenied(
                     reason: "User denied assistant content that may include sensitive data (\(labels.joined(separator: ", "))).",
                     payloadPreview: String(content.prefix(800)),
@@ -181,7 +181,7 @@ final class ContentSensitivityGrantService: ObservableObject {
             )
             return nil
         case .dismissed, .timedOut:
-            await AppEventBus.shared.publish(
+            await PolicyDecisionRouting.publishNotice(
                 PolicyUserEventFactory.contentGovernanceDenied(
                     reason: "Sensitive content was not approved.",
                     payloadPreview: String(content.prefix(800)),
