@@ -243,18 +243,69 @@ public enum PolicyUserEventFactory {
         toolName: String = "python_script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
-        let suffix = permanentSuffixLabel(for: host)
+        egressAccessRequest(hosts: [host], toolName: toolName, correlationId: correlationId)
+    }
+
+    /// One decision for one or many hosts (mid-flight / preflight batching).
+    public static func egressAccessRequest(
+        hosts: [String],
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        let unique = normalizedUniqueHosts(hosts)
+        if unique.isEmpty {
+            return PolicyUserEvent(
+                priority: .userDecision,
+                correlationId: correlationId,
+                kind: .networkAccessRequest,
+                source: .egressProxy,
+                title: "Network access",
+                summary: "Allow this script to reach an unknown host?",
+                detail: "Deny cancels the entire script run.",
+                toolName: toolName,
+                rememberKey: nil
+            )
+        }
+        if unique.count == 1, let host = unique.first {
+            let suffix = permanentSuffixLabel(for: host)
+            return PolicyUserEvent(
+                priority: .userDecision,
+                correlationId: correlationId,
+                kind: .networkAccessRequest,
+                source: .egressProxy,
+                title: "Network access",
+                summary: "Allow this script to reach “\(host)”?",
+                detail: "Deny cancels the entire script run. Always saves “\(suffix)” for future runs.",
+                toolName: toolName,
+                rememberKey: "egress.suffix:\(host)"
+            )
+        }
+        let suffixes = unique.map { permanentSuffixLabel(for: $0) }
+        let uniqueSuffixes = Array(Set(suffixes)).sorted()
+        let list = unique.map { "• \($0)" }.joined(separator: "\n")
         return PolicyUserEvent(
             priority: .userDecision,
             correlationId: correlationId,
             kind: .networkAccessRequest,
             source: .egressProxy,
             title: "Network access",
-            summary: "Allow this script to reach “\(host)”?",
-            detail: "Deny cancels the entire script run. Always saves “\(suffix)” for future runs.",
+            summary: "Allow this script to reach these \(unique.count) hosts?",
+            detail: "Deny cancels the entire script run. Always saves these suffixes for future runs: \(uniqueSuffixes.joined(separator: ", ")).",
             toolName: toolName,
-            rememberKey: "egress.suffix:\(host.lowercased())"
+            payloadPreview: list,
+            rememberKey: "egress.suffix.batch:\(uniqueSuffixes.joined(separator: ","))"
         )
+    }
+
+    private static func normalizedUniqueHosts(_ hosts: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for raw in hosts {
+            let host = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !host.isEmpty, seen.insert(host).inserted else { continue }
+            ordered.append(host)
+        }
+        return ordered.sorted()
     }
 
     public static func llmProviderFailure(

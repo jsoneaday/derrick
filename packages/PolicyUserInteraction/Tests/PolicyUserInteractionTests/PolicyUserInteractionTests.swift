@@ -67,6 +67,17 @@ import AppEvents
         #expect(event.detail?.contains("reactjs.org") == true)
     }
 
+    @Test func factoryBuildsBatchedEgressAccessRequest() {
+        let event = PolicyUserEventFactory.egressAccessRequest(
+            hosts: ["m.media-amazon.com", "images-na.ssl-images-amazon.com", "c.amazon-adsystem.com"]
+        )
+        #expect(event.kind == .networkAccessRequest)
+        #expect(event.summary.contains("3 hosts"))
+        #expect(event.payloadPreview?.contains("m.media-amazon.com") == true)
+        #expect(event.payloadPreview?.contains("amazon-adsystem.com") == true)
+        #expect(event.detail?.localizedCaseInsensitiveContains("suffixes") == true)
+    }
+
     @Test func approvalRequiredIsDecisionRequesting() async {
         let bus = AppEventBus()
         let event = PolicyUserEventFactory.approvalRequired(

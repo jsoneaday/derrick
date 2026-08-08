@@ -20,6 +20,13 @@ final class EgressAllowlistService: ObservableObject {
     private let password = "ui"
     private let localPolicy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
 
+    /// Concurrent CONNECT prompts coalesce into one modal (fixed window from first waiter).
+    private var midFlightPending: [String: [CheckedContinuation<PolicyUserDecision, Never>]] = [:]
+    private var midFlightFlushTask: Task<Void, Never>?
+    private var midFlightPresenting = false
+    private var midFlightToolName = "python_script_exec"
+    private static let midFlightCoalesceNanoseconds: UInt64 = 500_000_000
+
     private init() {}
 
     func configure(repository: DBRepository) async {
@@ -121,7 +128,7 @@ final class EgressAllowlistService: ObservableObject {
 
         var sessionGrants: [String] = []
         var modalMS = 0
-        var promptedHosts = 0
+        var needsPrompt: [String] = []
 
         for host in hosts {
             if localPolicy.isHardBlockedHostname(host) {
@@ -136,45 +143,50 @@ final class EgressAllowlistService: ObservableObject {
             if localPolicy.isHostCoveredByAllowlist(host) {
                 continue
             }
+            needsPrompt.append(host)
+        }
 
-            promptedHosts += 1
+        if !needsPrompt.isEmpty {
             let modalStarted = Date()
-            let decision = await promptForHost(host, toolName: toolName)
+            let decision = await promptForHosts(needsPrompt, toolName: toolName)
             modalMS += PipelineTiming.elapsedMS(from: modalStarted)
             switch decision {
             case .approved(let actor), .approvedOnce(let actor):
-                debugLog("Egress allow once for \(host) by \(actor ?? "user")")
-                sessionGrants.append(host)
-                localPolicy.grantSessionHosts([host])
+                debugLog("Egress allow once for \(needsPrompt.count) host(s) by \(actor ?? "user")")
+                sessionGrants.append(contentsOf: needsPrompt)
+                localPolicy.grantSessionHosts(needsPrompt)
             case .approvedPermanently(let actor):
-                debugLog("Egress allow always for \(host) by \(actor ?? "user")")
-                let suffix = EgressHostExtractor.permanentSuffix(for: host)
-                do {
-                    try await addSuffix(suffix, source: "user")
-                    // Session grant for exact host (mid-flight / www. vs apex) even if helper push fails.
-                    sessionGrants.append(host)
-                    localPolicy.grantSessionHosts([host])
-                } catch {
-                    debugLog("Failed to persist egress suffix \(suffix): \(error.localizedDescription)")
-                    PipelineTiming.log(
-                        "egress_preflight persist_failed host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
-                    )
-                    return Self.blockedResultJSON(
-                        findings: ["Failed to save permanent allow for \(host): \(error.localizedDescription)"],
-                        stage: "egress"
-                    )
+                debugLog("Egress allow always for \(needsPrompt.count) host(s) by \(actor ?? "user")")
+                for host in needsPrompt {
+                    let suffix = EgressHostExtractor.permanentSuffix(for: host)
+                    do {
+                        try await addSuffix(suffix, source: "user")
+                        sessionGrants.append(host)
+                        localPolicy.grantSessionHosts([host])
+                    } catch {
+                        debugLog("Failed to persist egress suffix \(suffix): \(error.localizedDescription)")
+                        PipelineTiming.log(
+                            "egress_preflight persist_failed host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+                        )
+                        return Self.blockedResultJSON(
+                            findings: ["Failed to save permanent allow for \(host): \(error.localizedDescription)"],
+                            stage: "egress"
+                        )
+                    }
                 }
             case .denied(let actor):
-                debugLog("Egress deny for \(host) by \(actor ?? "user") — aborting entire script run")
-                let message = "User denied network access to “\(host)”. The script was not run."
+                debugLog("Egress deny for \(needsPrompt.count) host(s) by \(actor ?? "user") — aborting entire script run")
+                let listed = needsPrompt.joined(separator: ", ")
+                let message = "User denied network access to “\(listed)”. The script was not run."
                 PipelineTiming.log(
-                    "egress_preflight user_denied host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS) prompted_hosts=\(promptedHosts)"
+                    "egress_preflight user_denied hosts=\(needsPrompt.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS) prompted_hosts=\(needsPrompt.count)"
                 )
                 return Self.blockedResultJSON(findings: [message], stage: "egress")
             case .dismissed, .timedOut:
-                let message = "Network access to “\(host)” was not approved. The script was not run."
+                let listed = needsPrompt.joined(separator: ", ")
+                let message = "Network access to “\(listed)” was not approved. The script was not run."
                 PipelineTiming.log(
-                    "egress_preflight dismissed_or_timeout host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+                    "egress_preflight dismissed_or_timeout hosts=\(needsPrompt.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
                 )
                 return Self.blockedResultJSON(findings: [message], stage: "egress")
             }
@@ -184,7 +196,7 @@ final class EgressAllowlistService: ObservableObject {
             await grantSessionHostsToHelper(sessionGrants)
         }
         PipelineTiming.log(
-            "egress_preflight ok hosts=\(hosts.count) prompted=\(promptedHosts) session_grants=\(sessionGrants.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
+            "egress_preflight ok hosts=\(hosts.count) prompted=\(needsPrompt.count) session_grants=\(sessionGrants.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
         )
         return nil
     }
@@ -198,30 +210,111 @@ final class EgressAllowlistService: ObservableObject {
     }
 
     private func promptForHost(_ host: String, toolName: String) async -> PolicyUserDecision {
-        if let remote = TurnProcessContext.effectiveNetworkAccessPrompt {
-            debugLog("Egress prompt via AgentService path host=\(host)")
-            return await remote(host, toolName)
+        await promptForHosts([host], toolName: toolName)
+    }
+
+    /// Single modal for one or many hosts. Remote/HITL paths stay per-host when count > 1.
+    private func promptForHosts(_ hosts: [String], toolName: String) async -> PolicyUserDecision {
+        let unique = Self.uniqueHosts(hosts)
+        guard !unique.isEmpty else {
+            return .denied(actor: "system")
         }
+
+        if let remote = TurnProcessContext.effectiveNetworkAccessPrompt {
+            var last: PolicyUserDecision = .denied(actor: "system")
+            for host in unique {
+                debugLog("Egress prompt via AgentService path host=\(host)")
+                last = await remote(host, toolName)
+                switch last {
+                case .denied, .dismissed, .timedOut:
+                    return last
+                case .approved, .approvedOnce, .approvedPermanently:
+                    continue
+                }
+            }
+            return last
+        }
+
         if !isAgentServiceProcess {
-            debugLog("Egress prompt via UI modal host=\(host)")
+            debugLog("Egress prompt via UI modal hosts=\(unique.count)")
             let event = PolicyUserEventFactory.egressAccessRequest(
-                host: host,
+                hosts: unique,
                 toolName: toolName
             )
             return await AppEventBus.shared.initDecision(event)
         }
+
         guard let repository else {
             return .denied(actor: "system-no-repository")
         }
-        debugLog("Egress prompt via notification path host=\(host)")
-        return await HITLOfflineNetworkService.awaitDecision(
-            host: host,
-            toolName: toolName,
-            turnID: "egress-agent",
-            isJobContext: false,
-            repository: repository,
-            timeoutNanoseconds: 300_000_000_000
-        )
+        var last: PolicyUserDecision = .denied(actor: "system")
+        for host in unique {
+            debugLog("Egress prompt via notification path host=\(host)")
+            last = await HITLOfflineNetworkService.awaitDecision(
+                host: host,
+                toolName: toolName,
+                turnID: "egress-agent",
+                isJobContext: false,
+                repository: repository,
+                timeoutNanoseconds: 300_000_000_000
+            )
+            switch last {
+            case .denied, .dismissed, .timedOut:
+                return last
+            case .approved, .approvedOnce, .approvedPermanently:
+                continue
+            }
+        }
+        return last
+    }
+
+    private static func uniqueHosts(_ hosts: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for raw in hosts {
+            let host = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !host.isEmpty, seen.insert(host).inserted else { continue }
+            ordered.append(host)
+        }
+        return ordered
+    }
+
+    // MARK: - Mid-flight batching
+
+    private func enqueueMidFlightHostPrompt(_ host: String, toolName: String) async -> PolicyUserDecision {
+        midFlightToolName = toolName
+        return await withCheckedContinuation { (continuation: CheckedContinuation<PolicyUserDecision, Never>) in
+            midFlightPending[host, default: []].append(continuation)
+            scheduleMidFlightFlushIfNeeded()
+        }
+    }
+
+    private func scheduleMidFlightFlushIfNeeded() {
+        guard midFlightFlushTask == nil, !midFlightPresenting else { return }
+        midFlightFlushTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.midFlightCoalesceNanoseconds)
+            self.midFlightFlushTask = nil
+            await self.flushMidFlightHostPrompts()
+        }
+    }
+
+    private func flushMidFlightHostPrompts() async {
+        guard !midFlightPending.isEmpty else { return }
+        midFlightPresenting = true
+        let snapshot = midFlightPending
+        midFlightPending = [:]
+        let hosts = Array(snapshot.keys).sorted()
+        debugLog("Egress mid-flight batch prompt hosts=\(hosts.count)")
+        let decision = await promptForHosts(hosts, toolName: midFlightToolName)
+        for (_, waiters) in snapshot {
+            for waiter in waiters {
+                waiter.resume(returning: decision)
+            }
+        }
+        midFlightPresenting = false
+        if !midFlightPending.isEmpty {
+            scheduleMidFlightFlushIfNeeded()
+        }
     }
 
     /// Apply a user egress decision in **this** process (UI): memory + helper allowlist.
@@ -288,7 +381,7 @@ final class EgressAllowlistService: ObservableObject {
         }
 
         let modalStarted = Date()
-        let decision = await promptForHost(normalized, toolName: toolName)
+        let decision = await enqueueMidFlightHostPrompt(normalized, toolName: toolName)
         let modalMS = PipelineTiming.elapsedMS(from: modalStarted)
         switch decision {
         case .approved(let actor), .approvedOnce(let actor):
