@@ -64,6 +64,21 @@ import Testing
     }
 
     @MainActor
+    @Test func runClientBootstrapInvokesBodyWhenAlreadyReady() async {
+        let status = AppBootstrapStatus.shared
+        if status.phase != .ready {
+            status.beginLoadingSession()
+            status.markReady()
+        }
+        var bodyInvoked = false
+        await status.runClientBootstrap {
+            bodyInvoked = true
+        }
+        #expect(bodyInvoked)
+        #expect(status.phase == .ready)
+    }
+
+    @MainActor
     @Test func cancelClearsInProgressModal() {
         let status = AppBootstrapStatus.shared
         // Ensure we can start: if ready, failed path is blocked — use a fresh begin only if idle/failed.

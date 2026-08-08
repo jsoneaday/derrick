@@ -33,8 +33,14 @@ final class AppBootstrapStatus: ObservableObject {
 
     /// Run client bootstrap once; concurrent callers await the same flight.
     /// After cancel, a later caller may start a new flight (modal was cleared).
+    ///
+    /// When bootstrap already finished, `body` still runs so a recreated `ContentView`
+    /// can sync local `@State` (`sessionReady`, `helperModelSettings`, etc.).
     func runClientBootstrap(_ body: @escaping @MainActor () async -> Void) async {
-        if phase == .ready { return }
+        if phase == .ready {
+            await body()
+            return
+        }
 
         if let existing = inFlightBootstrap {
             await existing.value

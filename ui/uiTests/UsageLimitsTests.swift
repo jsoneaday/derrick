@@ -41,4 +41,21 @@ import Testing
         #expect(c.dayKey != "2000-01-01")
         #expect(c.dayTokens == 0)
     }
+
+    @Test func usageLimitMetadataFiltersPresetsAboveCurrent() {
+        let meta = UsageLimitRaiseMetadata(
+            dimension: UsageLimitDimension.dailyTokens.rawValue,
+            currentLimit: 200_000,
+            sessionProposedLimit: 500_000,
+            presets: UsageLimits.dailyTokenPresets,
+            absoluteMax: UsageLimits.absoluteMax.dailyTokenBudget
+        )
+        #expect(meta.selectablePresets == [500_000, 1_000_000, 2_000_000])
+    }
+
+    @Test func usageLimitActorParsing() {
+        #expect(UsageLimitRaiseOutcome.parseLimit(from: "ui-permanent:500000") == 500_000)
+        #expect(UsageLimitRaiseOutcome.isPermanent(actor: "ui-permanent:500000"))
+        #expect(!UsageLimitRaiseOutcome.isPermanent(actor: "ui-session:500000"))
+    }
 }

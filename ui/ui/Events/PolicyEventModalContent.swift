@@ -145,13 +145,7 @@ struct PolicyEventModalFooter: View {
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             case .usageLimitRequest:
-                Button("Stop", action: onDeny)
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                Button("Raise for this session", action: onApproveOnce)
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-                    .lineLimit(1)
+                EmptyView()
             }
         }
         .lineLimit(1)

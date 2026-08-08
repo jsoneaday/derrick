@@ -71,6 +71,14 @@ final class PolicyEventPresenter: ObservableObject {
     }
 
     private func enqueue(_ event: PolicyUserEvent) {
+        // Usage limits use a dedicated picker modal (presets + custom permanent value).
+        if event.kind == .usageLimitRequest {
+            Task { @MainActor in
+                let outcome = await UsageLimitRaisePresenter.shared.present(event: event)
+                await bus.completeDecision(id: event.id, decision: outcome.policyDecision)
+            }
+            return
+        }
         // Already decided or already waiting in queue / active — never present twice.
         if finishedIDs.contains(event.id) {
             debugLog("[policy-ui] drop finished event id=\(event.id) kind=\(event.kind.rawValue)")

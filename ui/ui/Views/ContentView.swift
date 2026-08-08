@@ -277,6 +277,7 @@ struct ContentView: View {
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var jobPreflightPresenter = JobPreflightApprovalPresenter.shared
     @ObservedObject private var jobResultPresenter = JobResultPresenter.shared
+    @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
 
     private var canSendPrompt: Bool {
         sessionReady
@@ -372,6 +373,21 @@ struct ContentView: View {
             footer: {
                 EmptyView()
             }
+        )
+        .modalPopup(
+            isPresented: usageLimitRaisePresenter.isPresented
+                && !bootstrapStatus.isModalPresented,
+            minWidth: 440,
+            minHeight: 0,
+            maxWidth: 520,
+            maxHeight: 480,
+            onBackdropDismiss: { usageLimitRaisePresenter.stop() },
+            onEscape: { usageLimitRaisePresenter.stop() },
+            header: { EmptyView() },
+            body: {
+                UsageLimitRaiseModalView(presenter: usageLimitRaisePresenter)
+            },
+            footer: { EmptyView() }
         )
         .modalPopup(
             isPresented: jobResultPresenter.isPresented
@@ -475,7 +491,7 @@ struct ContentView: View {
         .task {
             // Single-flight: SwiftUI may re-enter `.task` (sidebar appear / identity churn).
             // A second beginLoadingSession after ready left an undismissable modal and dead UI.
-            await MainActor.run { policyEventPresenter.start() }
+            policyEventPresenter.start()
             await bootstrapStatus.runClientBootstrap {
                 await self.performClientBootstrap()
             }
@@ -498,7 +514,7 @@ struct ContentView: View {
     private func performClientBootstrap() async {
             guard bootstrapStatus.beginLoadingSession() || bootstrapStatus.isInitializing else {
                 if bootstrapStatus.phase == .ready {
-                    sessionReady = true
+                    await syncClientSessionAfterBootstrap()
                 }
                 return
             }
@@ -510,20 +526,9 @@ struct ContentView: View {
                 debugLogStore.log("Loading session store")
             }
 
-            let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
-            let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
-
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
-                let repo = try await ConversationModel.makeMemoryStore(
-                    applicationName: "ui",
-                    databaseDirectoryURL: databaseDirectoryURL
-                )
-                repository = repo
-                DerrickNotificationService.shared.configure(repository: repo)
-                let settings = LLMModelSettings(repository: repo)
-                await settings.loadSettings()
-                helperModelSettings = settings
+                let repo = try await ensureSessionStoreLoaded()
                 await EgressAllowlistService.shared.configure(repository: repo)
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
@@ -627,6 +632,46 @@ struct ContentView: View {
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
+    }
+
+    /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
+    @MainActor
+    private func ensureSessionStoreLoaded() async throws -> DBRepository {
+        if let repository, let helperModelSettings {
+            return repository
+        }
+
+        let fallbackDirectoryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ui", isDirectory: true)
+        let databaseDirectoryURL = (try? AppDatabaseDirectory.resolve(applicationName: "ui")) ?? fallbackDirectoryURL
+        let repo = try await ConversationModel.makeMemoryStore(
+            applicationName: "ui",
+            databaseDirectoryURL: databaseDirectoryURL
+        )
+        repository = repo
+        DerrickNotificationService.shared.configure(repository: repo)
+        let settings = LLMModelSettings(repository: repo)
+        await settings.loadSettings()
+        helperModelSettings = settings
+        return repo
+    }
+
+    /// Re-attaches local UI state after global bootstrap already reached `.ready`.
+    @MainActor
+    private func syncClientSessionAfterBootstrap() async {
+        guard !sessionReady || helperModelSettings == nil || repository == nil else { return }
+
+        do {
+            let repo = try await ensureSessionStoreLoaded()
+            sessionReady = true
+            await DerrickNotificationService.shared.activateSession(repository: repo)
+            if isDebugEnabled {
+                debugLogStore.log("UI client session synced after bootstrap ready")
+            }
+        } catch {
+            sessionReady = false
+            errorMessage = error.localizedDescription
+            debugLog("Client session sync failed: \(error)")
+        }
     }
 
     var mainPanel: some View {

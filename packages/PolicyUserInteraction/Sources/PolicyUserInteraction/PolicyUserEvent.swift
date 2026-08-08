@@ -343,6 +343,8 @@ public enum PolicyUserEventFactory {
         currentLimit: Int,
         proposedSessionLimit: Int,
         detail: String? = nil,
+        payloadPreview: String? = nil,
+        dimensionKey: String? = nil,
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         PolicyUserEvent(
@@ -351,10 +353,11 @@ public enum PolicyUserEventFactory {
             kind: .usageLimitRequest,
             source: .usageLimits,
             title: "Usage limit reached",
-            summary: "\(dimensionTitle) limit (\(currentLimit)) was reached. Raise to \(proposedSessionLimit) for this session only?",
+            summary: "\(dimensionTitle) limit (\(currentLimit)) was reached.",
             detail: (detail.map { $0 + "\n\n" } ?? "")
-                + "Stop ends this action. Raise applies until you quit the app. Permanent limits are in Settings → Usage limits (capped).",
-            rememberKey: "usage.limit:\(dimensionTitle)"
+                + "Raise for this session, or pick a permanent cap below (saved in Settings → Usage limits).",
+            payloadPreview: payloadPreview,
+            rememberKey: dimensionKey.map { "usage.limit:\($0)" }
         )
     }
 

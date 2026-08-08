@@ -262,18 +262,78 @@ final class UsageLimitsService: ObservableObject {
             dimensionTitle: dimension.title,
             currentLimit: currentEffective,
             proposedSessionLimit: next,
-            detail: usageSnapshotDetail(dimension: dimension)
+            detail: usageSnapshotDetail(dimension: dimension),
+            payloadPreview: UsageLimitRaiseMetadata.encode(
+                dimension: dimension,
+                currentLimit: currentEffective,
+                sessionProposedLimit: next,
+                presets: presets,
+                absoluteMax: absoluteMax
+            ),
+            dimensionKey: dimension.rawValue
         )
-        let decision = await PolicyDecisionRouting.requestDecision(event)
-        switch decision {
-        case .approved, .approvedOnce, .approvedPermanently:
-            applySession(next)
-            debugLog("Usage limit session raise \(dimension.rawValue): \(currentEffective) → \(next)")
-            return true
-        case .denied, .dismissed, .timedOut:
+        let outcome = await requestUsageLimitRaise(for: event)
+        switch outcome {
+        case .stop:
             debugLog("Usage limit stop \(dimension.rawValue) at \(currentEffective)")
             return false
+        case .session(let limit):
+            applySession(limit)
+            debugLog("Usage limit session raise \(dimension.rawValue): \(currentEffective) → \(limit)")
+            return true
+        case .permanent(let limit):
+            await applyPermanentRaise(dimension: dimension, newLimit: limit)
+            debugLog("Usage limit permanent raise \(dimension.rawValue): \(currentEffective) → \(limit)")
+            return true
         }
+    }
+
+    private func requestUsageLimitRaise(for event: PolicyUserEvent) async -> UsageLimitRaiseOutcome {
+        let decision = await PolicyDecisionRouting.requestDecision(event)
+        if UsageLimitRaiseOutcome.isPermanent(actor: decision.actorString) {
+            if let limit = UsageLimitRaiseOutcome.parseLimit(from: decision.actorString) {
+                return .permanent(limit)
+            }
+        }
+        switch decision {
+        case .approvedOnce(let actor), .approved(let actor):
+            if let limit = UsageLimitRaiseOutcome.parseLimit(from: actor) {
+                return .session(limit)
+            }
+            if let proposed = event.metadataSessionProposed {
+                return .session(proposed)
+            }
+            return .stop
+        case .approvedPermanently(let actor):
+            if let limit = UsageLimitRaiseOutcome.parseLimit(from: actor) {
+                return .permanent(limit)
+            }
+            return .stop
+        case .denied, .dismissed, .timedOut:
+            return .stop
+        }
+    }
+
+    private func applyPermanentRaise(dimension: UsageLimitDimension, newLimit: Int) async {
+        var limits = permanentLimits
+        switch dimension {
+        case .toolRounds:
+            limits.maxToolRoundsPerMessage = newLimit
+            sessionToolRounds = nil
+        case .pythonScripts:
+            limits.maxPythonScriptRunsPerMessage = newLimit
+            sessionPythonRuns = nil
+        case .reviewerCalls:
+            limits.maxReviewerCallsPerMessage = newLimit
+            sessionReviewerCalls = nil
+        case .dailyTokens:
+            limits.dailyTokenBudget = newLimit
+            sessionDailyTokens = nil
+        case .weeklyTokens:
+            limits.weeklyTokenBudget = newLimit
+            sessionWeeklyTokens = nil
+        }
+        await savePermanentLimits(limits.clamped())
     }
 
     private func presentHardStop(dimension: UsageLimitDimension, currentEffective: Int) async {
@@ -309,5 +369,22 @@ final class UsageLimitsService: ObservableObject {
         } catch {
             debugLog("Failed to save usage counters: \(error.localizedDescription)")
         }
+    }
+}
+
+private extension PolicyUserDecision {
+    var actorString: String? {
+        switch self {
+        case .approved(let actor), .approvedOnce(let actor), .approvedPermanently(let actor), .denied(let actor):
+            return actor
+        case .dismissed, .timedOut:
+            return nil
+        }
+    }
+}
+
+private extension PolicyUserEvent {
+    var metadataSessionProposed: Int? {
+        UsageLimitRaiseMetadata.decode(from: self)?.sessionProposedLimit
     }
 }

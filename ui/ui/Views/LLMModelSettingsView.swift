@@ -268,7 +268,7 @@ struct LLMModelSettingsView: View {
             Text("Usage limits")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Caps apply per user message (tool / python / reviewer) and over daily / weekly windows (provider token counts when available). When a limit is hit you can raise it for this session only. Values here are permanent and cannot exceed built-in maximums.")
+            Text("Caps apply per user message (tool / python / reviewer) and over daily / weekly windows (provider token counts when available). When a limit is hit you can raise it for this session or save a permanent cap from the modal (presets or custom). Values here are permanent and cannot exceed built-in maximums.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

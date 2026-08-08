@@ -25,6 +25,11 @@ enum HITLLiveApprovalHandlers {
         _ request: AgentPolicyDecisionRequestDTO
     ) async -> AgentPolicyDecisionDTO {
         let kind = PolicyEventKind(rawValue: request.kind) ?? .usageLimitRequest
+        if kind == .usageLimitRequest {
+            let event = policyEvent(from: request, kind: kind)
+            let outcome = await UsageLimitRaisePresenter.shared.present(event: event)
+            return agentPolicyDecision(requestID: request.requestID, outcome: outcome)
+        }
         let source = PolicyEventSource(rawValue: request.source) ?? .usageLimits
         let eventID = UUID(uuidString: request.requestID) ?? UUID()
         let event = PolicyUserEvent(
@@ -40,6 +45,45 @@ enum HITLLiveApprovalHandlers {
             rememberKey: request.rememberKey
         )
         let decision = await AppEventBus.shared.initDecision(event)
+        return agentPolicyDecision(requestID: request.requestID, decision: decision)
+    }
+
+    private static func policyEvent(
+        from request: AgentPolicyDecisionRequestDTO,
+        kind: PolicyEventKind
+    ) -> PolicyUserEvent {
+        PolicyUserEvent(
+            id: UUID(uuidString: request.requestID) ?? UUID(),
+            correlationId: request.correlationId,
+            kind: kind,
+            source: PolicyEventSource(rawValue: request.source) ?? .usageLimits,
+            title: request.title,
+            summary: request.summary,
+            detail: request.detail,
+            toolName: request.toolName,
+            payloadPreview: request.payloadPreview,
+            rememberKey: request.rememberKey
+        )
+    }
+
+    private static func agentPolicyDecision(
+        requestID: String,
+        outcome: UsageLimitRaiseOutcome
+    ) -> AgentPolicyDecisionDTO {
+        switch outcome {
+        case .stop:
+            return AgentPolicyDecisionDTO(requestID: requestID, decision: "denied", actor: "ui-stop")
+        case .session(let limit):
+            return AgentPolicyDecisionDTO(requestID: requestID, decision: "approvedOnce", actor: "ui-session:\(limit)")
+        case .permanent(let limit):
+            return AgentPolicyDecisionDTO(requestID: requestID, decision: "approvedPermanently", actor: "ui-permanent:\(limit)")
+        }
+    }
+
+    private static func agentPolicyDecision(
+        requestID: String,
+        decision: PolicyUserDecision
+    ) -> AgentPolicyDecisionDTO {
         let decisionString: String
         let actor: String?
         switch decision {
@@ -63,7 +107,7 @@ enum HITLLiveApprovalHandlers {
             actor = nil
         }
         return AgentPolicyDecisionDTO(
-            requestID: request.requestID,
+            requestID: requestID,
             decision: decisionString,
             actor: actor
         )
