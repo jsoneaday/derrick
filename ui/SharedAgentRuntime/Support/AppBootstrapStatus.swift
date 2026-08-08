@@ -36,31 +36,30 @@ final class AppBootstrapStatus: ObservableObject {
     ///
     /// When bootstrap already finished, `body` still runs so a recreated `ContentView`
     /// can sync local `@State` (`sessionReady`, `helperModelSettings`, etc.).
+    /// Callers that only **joined** an in-flight flight must also run `body` once ready.
     func runClientBootstrap(_ body: @escaping @MainActor () async -> Void) async {
         if phase == .ready {
             await body()
             return
         }
 
+        var ranBodyInFlight = false
+
         if let existing = inFlightBootstrap {
             await existing.value
-            if phase == .ready || phase == .failed { return }
-            // Prior flight cancelled without ready — fall through to start a new one.
+        } else {
+            ranBodyInFlight = true
+            let task = Task { @MainActor in
+                await body()
+            }
+            inFlightBootstrap = task
+            await task.value
+            inFlightBootstrap = nil
         }
 
-        if phase == .ready { return }
-        // Another waiter may have started a flight while we awaited above.
-        if let existing = inFlightBootstrap {
-            await existing.value
-            return
-        }
-
-        let task = Task { @MainActor in
+        if phase == .ready, !ranBodyInFlight {
             await body()
         }
-        inFlightBootstrap = task
-        await task.value
-        inFlightBootstrap = nil
     }
 
     var isInitializing: Bool {

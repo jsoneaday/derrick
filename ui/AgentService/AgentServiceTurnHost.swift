@@ -104,18 +104,21 @@ actor AgentServiceTurnHost {
     }
 
     private func ensureRuntimeReady() async throws {
-        if repository != nil, helperModelSettings != nil { return }
-        let repo = try await AgentServiceStore.shared.sharedRepository()
-        repository = repo
-        let settings = await MainActor.run {
-            LLMModelSettings(repository: repo)
+        if repository == nil {
+            let repo = try await AgentServiceStore.shared.sharedRepository()
+            repository = repo
+            let settings = await MainActor.run {
+                LLMModelSettings(repository: repo)
+            }
+            helperModelSettings = settings
+            await EgressAllowlistService.shared.configure(repository: repo)
+            await ContentSensitivityGrantService.shared.configure(repository: repo)
+            await UsageLimitsService.shared.configure(repository: repo)
+            await EgressAllowlistService.shared.pushToHelper()
         }
-        await settings.loadSettings()
-        helperModelSettings = settings
-        await EgressAllowlistService.shared.configure(repository: repo)
-        await ContentSensitivityGrantService.shared.configure(repository: repo)
-        await UsageLimitsService.shared.configure(repository: repo)
-        await EgressAllowlistService.shared.pushToHelper()
+        if let settings = helperModelSettings {
+            await settings.loadSettings()
+        }
     }
 
     func startTurn(

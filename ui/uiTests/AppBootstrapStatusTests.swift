@@ -79,6 +79,33 @@ import Testing
     }
 
     @MainActor
+    @Test func runClientBootstrapInvokesBodyForJoinerAfterReady() async {
+        let status = AppBootstrapStatus.shared
+        status.beginLoadingSession()
+        let gate = AsyncGate()
+
+        let flight = Task { @MainActor in
+            await status.runClientBootstrap {
+                await gate.wait()
+                status.markReady()
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        var joinerInvoked = false
+        await status.runClientBootstrap {
+            joinerInvoked = true
+        }
+
+        await gate.open()
+        await flight.value
+
+        #expect(joinerInvoked)
+        #expect(status.phase == .ready)
+    }
+
+    @MainActor
     @Test func cancelClearsInProgressModal() {
         let status = AppBootstrapStatus.shared
         // Ensure we can start: if ready, failed path is blocked — use a fresh begin only if idle/failed.
@@ -96,5 +123,27 @@ import Testing
         status.noteBootstrapCancelled()
         #expect(!status.isModalPresented)
         #expect(status.phase == .idle)
+    }
+}
+
+/// Test helper: single open/close gate for bootstrap join tests.
+private actor AsyncGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters = []
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 }

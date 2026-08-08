@@ -19,6 +19,7 @@ final class ConversationModel {
     let toolClient: any ConversationToolClient
     let ragInstructions: String
     let mcpToolInstructions: String
+    private let helperModelSettings: LLMModelSettings
     let responseSchema: AgentSchema = AgentSchema(
         type: .object,
         properties: [
@@ -69,7 +70,8 @@ final class ConversationModel {
         agentsOrchestrationHost: MCPLocalBridge,
         toolClient: any ConversationToolClient,
         ragInstructions: String,
-        mcpToolInstructions: String
+        mcpToolInstructions: String,
+        helperModelSettings: LLMModelSettings
     ) {
         self.sessionKey = sessionKey
         self.orchestrator = orchestrator
@@ -79,6 +81,7 @@ final class ConversationModel {
         self.toolClient = toolClient
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
+        self.helperModelSettings = helperModelSettings
     }
 
     static func makeDefault(
@@ -141,7 +144,8 @@ final class ConversationModel {
             agentsOrchestrationHost: agentsHost,
             toolClient: toolClient,
             ragInstructions: ragInstructions,
-            mcpToolInstructions: mcpToolInstructions
+            mcpToolInstructions: mcpToolInstructions,
+            helperModelSettings: helperModelSettings
         )
     }
 
@@ -195,6 +199,8 @@ final class ConversationModel {
         let responseSchema = self.responseSchema
         let interceptor = makeContentPolicyInterceptor()
         let orchestrator = self.orchestrator
+        let workerModel = helperModelSettings.workerAgentModel
+        let workerApiKey = resolveAPIKey(for: workerModel, turnFallback: apiKey) ?? apiKey
 
         let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
             let childKey = MemorySessionKey(agentRef: child.ref)
@@ -202,8 +208,8 @@ final class ConversationModel {
             let rag = [ragInstructions, overlay].joined(separator: "\n\n")
             let stream = await Self.makePolicyStream(
                 prompt: envelope.body,
-                apiKey: apiKey,
-                model: model,
+                apiKey: workerApiKey,
+                model: workerModel,
                 sessionKey: childKey,
                 memoryCoordinator: memoryCoordinator,
                 policyStore: policyStore,
@@ -323,6 +329,21 @@ final class ConversationModel {
         }
         let policy = StoreBackedCompletionContentPolicy(store: policyStore, applicationName: "ui")
         return DefaultPolicyInterceptor(policy: policy)
+    }
+
+    /// API key for a helper/worker model: keychain/env for its provider, else the active turn key.
+    private func resolveAPIKey(for model: LLMModelChoice, turnFallback: String) -> String? {
+        if let key = AppSecretResolver().resolve(
+            account: model.provider.secretAccount,
+            environmentKeys: model.provider.apiKeyEnvironmentKeys
+        ), !key.isEmpty {
+            return key
+        }
+        if let turnKey = TurnProcessContext.effectiveAPIKey, !turnKey.isEmpty {
+            return turnKey
+        }
+        let trimmed = turnFallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// In-process host for orchestration tools (`agents_*`, `jobs_*`). Not used for MCP effectors.

@@ -110,7 +110,7 @@ struct LLMModelSettingsView: View {
             Text("Helper models")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Choose the models Derrick uses for memory summarization and Python script review.")
+            Text("Choose the models Derrick uses for memory summarization, Python script review, and secondary agents spawned during a chat.")
                 .foregroundStyle(.secondary)
 
             Form {
@@ -126,6 +126,16 @@ struct LLMModelSettingsView: View {
                         selection: $helperModelSettings.pythonScriptReviewerModel,
                         accessibilityLabel: "Python script reviewer model"
                     )
+                }
+
+                Section("Secondary agent model") {
+                    helperModelPicker(
+                        selection: $helperModelSettings.workerAgentModel,
+                        accessibilityLabel: "Secondary agent model"
+                    )
+                    Text("Used when the main agent or you spawn worker agents (agents_spawn). The main chat keeps the model selected in the chat input.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

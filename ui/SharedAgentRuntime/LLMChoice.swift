@@ -66,7 +66,7 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         .openai(.gpt56Sol)
     ]
 
-    /// Default for summarizer, Python reviewer, and conversation UI preselection.
+    /// Default for summarizer, Python reviewer, secondary agents, and conversation UI preselection.
     static let defaultHelperModel: LLMModelChoice = .openai(.gpt56Luna)
 
     var id: String {

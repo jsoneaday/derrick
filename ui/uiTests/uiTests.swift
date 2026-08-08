@@ -141,6 +141,7 @@ import DBRepository
         let settings = LLMModelSettings(repository: repo)
         settings.summarizerModel = .openai(.gpt54)
         settings.pythonScriptReviewerModel = .gemini(.gemini31FlashLite)
+        settings.workerAgentModel = .openai(.gpt56Terra)
 
         // Wait for asynchronous saving tasks to complete before reloading
         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -149,6 +150,7 @@ import DBRepository
         await reloaded.loadSettings()
         #expect(reloaded.summarizerModel == .openai(.gpt54))
         #expect(reloaded.pythonScriptReviewerModel == .gemini(.gemini31FlashLite))
+        #expect(reloaded.workerAgentModel == .openai(.gpt56Terra))
     }
 
     @MainActor @Test func helperModelSettingsDefaultsAreCorrect() async {
@@ -158,6 +160,7 @@ import DBRepository
         await settings.loadSettings()
         #expect(settings.summarizerModel == .defaultHelperModel)
         #expect(settings.pythonScriptReviewerModel == .defaultHelperModel)
+        #expect(settings.workerAgentModel == .defaultHelperModel)
     }
 
     @Test func helperModelChoicesExposeEverySupportedModel() {

@@ -18,6 +18,12 @@ final class LLMModelSettings: ObservableObject {
         }
     }
 
+    @Published var workerAgentModel: LLMModelChoice = .defaultHelperModel {
+        didSet {
+            Task { await save(workerAgentModel, forKey: "workerAgentModel") }
+        }
+    }
+
     private let repository: DBRepository
     private let username: String
     private let password: String
@@ -34,6 +40,9 @@ final class LLMModelSettings: ObservableObject {
         }
         if let model = await Self.load(repository: repository, key: "pythonScriptReviewerModel", username: username, password: password) {
             pythonScriptReviewerModel = model
+        }
+        if let model = await Self.load(repository: repository, key: "workerAgentModel", username: username, password: password) {
+            workerAgentModel = model
         }
     }
 
