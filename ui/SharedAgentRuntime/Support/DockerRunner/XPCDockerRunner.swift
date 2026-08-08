@@ -86,6 +86,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     public static let shared = XPCDockerRunner()
 
     private static let serviceName = "derrick.ui.DockerRunnerHelper"
+    /// First-launch baseline build pulls Chromium; keep this above `baselineImageBuildTimeoutSeconds`.
+    private static let prewarmWaitCeilingSeconds: UInt64 = 1_200
     private let connection: NSXPCConnection
     private let appLogSink: XPCAppLogSink
 
@@ -140,23 +142,6 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 }
                 waiters.append(cont)
                 lock.unlock()
-            }
-        }
-
-        /// Unblock waiters without treating prewarm as a hard failure (used by wait ceiling).
-        func forceCompleteIfStillWaiting() {
-            lock.lock()
-            if completed {
-                lock.unlock()
-                return
-            }
-            completed = true
-            failure = nil
-            let pending = waiters
-            waiters = []
-            lock.unlock()
-            for waiter in pending {
-                waiter.resume()
             }
         }
     }
@@ -220,20 +205,30 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     }
 
     /// Wait until docker volumes/image/warm containers are ready (or throw if prewarm failed).
-    /// Hard-capped so a stuck helper can never freeze the init modal forever.
+    /// Ceiling is long enough for a cold Chromium bake; timeout fails instead of fake-ready.
     public func waitUntilPrewarmed() async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await self.prewarmState.wait()
             }
             group.addTask {
-                // Max time for entire prewarm (volumes + image + containers + optional smoke).
-                try await Task.sleep(nanoseconds: 90_000_000_000)
-                debugLog("Docker prewarm wait hit 90s ceiling — forcing complete so UI can proceed.")
-                self.prewarmState.forceCompleteIfStillWaiting()
+                try await Task.sleep(nanoseconds: Self.prewarmWaitCeilingSeconds * 1_000_000_000)
+                let message =
+                    "Docker environment setup timed out after \(Self.prewarmWaitCeilingSeconds)s while preparing the Python runtime. Keep Docker Desktop running and retry — first install downloads Chromium and can take several minutes."
+                debugLog("Docker prewarm wait hit \(Self.prewarmWaitCeilingSeconds)s ceiling — failing wait (not forcing ready).")
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 504,
+                    userInfo: [NSLocalizedDescriptionKey: message]
+                )
             }
-            try await group.next()
-            group.cancelAll()
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                group.cancelAll()
+                throw error
+            }
         }
     }
 
@@ -407,10 +402,14 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             timeoutSeconds: 15
         )
         if parentInspect.exitCode != 0 {
+            await reportBootstrap(
+                phase: .preparingImage,
+                message: "Downloading base Python image…"
+            )
             debugLog("Pre-warming: Pulling parent image '\(DockerScriptPreparer.parentImage)'...")
             let pull = try await runXPCCommand(
                 dockerArguments: DockerScriptPreparer.dockerPullArguments(DockerScriptPreparer.parentImage),
-                timeoutSeconds: 300
+                timeoutSeconds: DockerScriptPreparer.parentImagePullTimeoutSeconds
             )
             if pull.exitCode != 0 {
                 let stderr = String(decoding: pull.stderr, as: UTF8.self)
@@ -418,19 +417,42 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             }
         }
 
+        await reportBootstrap(
+            phase: .preparingImage,
+            message: "Building Python runtime (includes Chromium). First install can take several minutes…"
+        )
         debugLog("Pre-warming: Building baseline image '\(DockerScriptPreparer.defaultImage)'...")
         guard let dockerfileData = DockerScriptPreparer.baselineDockerfile.data(using: .utf8) else {
             throw NSError(domain: "XPCDockerRunner", code: 12, userInfo: [NSLocalizedDescriptionKey: "Failed to encode Dockerfile."])
         }
+
+        let heartbeat = Task {
+            var elapsedSeconds = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { return }
+                elapsedSeconds += 30
+                let minutes = elapsedSeconds / 60
+                let seconds = elapsedSeconds % 60
+                let elapsedLabel = minutes > 0 ? "\(minutes)m \(seconds)s" : "\(seconds)s"
+                await self.reportBootstrap(
+                    phase: .preparingImage,
+                    message: "Still building Python runtime… (\(elapsedLabel) elapsed). Chromium download is large on first install."
+                )
+            }
+        }
+        defer { heartbeat.cancel() }
+
         let build = try await runXPCCommand(
             dockerArguments: DockerScriptPreparer.dockerBuildBaselineArguments(),
             stdinData: dockerfileData,
-            timeoutSeconds: 300
+            timeoutSeconds: DockerScriptPreparer.baselineImageBuildTimeoutSeconds
         )
         if build.exitCode != 0 {
             let stderr = String(decoding: build.stderr, as: UTF8.self)
             throw NSError(domain: "XPCDockerRunner", code: 13, userInfo: [NSLocalizedDescriptionKey: "Failed to build baseline image: \(stderr)"])
         }
+        await reportBootstrap(phase: .preparingImage, message: "Python runtime image ready.")
         debugLog("Pre-warming: Baseline image built successfully.")
     }
 

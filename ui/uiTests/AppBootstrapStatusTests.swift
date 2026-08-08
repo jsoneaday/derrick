@@ -32,7 +32,7 @@ import Testing
         let error = NSError(
             domain: "XPCDockerRunner",
             code: 14,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container derrick-runner-net-px2: invalid reference format"]
+            userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container derrick-runner-net-px4: invalid reference format"]
         )
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Container"))

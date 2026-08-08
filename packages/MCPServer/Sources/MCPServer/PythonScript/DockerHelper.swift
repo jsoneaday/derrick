@@ -18,7 +18,7 @@ public enum DockerScriptPreparer {
     public static let parentImage = "ghcr.io/astral-sh/uv:debian"
 
     /// Bump when baseline package set or Dockerfile changes so prewarm rebuilds.
-    public static let baselineImageVersion = "4"
+    public static let baselineImageVersion = "6"
 
     /// Local image with baseline packages baked in (`docker build` on prewarm if missing).
     public static var defaultImage: String {
@@ -31,22 +31,57 @@ public enum DockerScriptPreparer {
         "\(baselineVenvPath)/bin/python"
     }
 
+    /// Playwright browser binaries path (baked at image build; not under the read-only root only).
+    public static let playwrightBrowsersPath = "/opt/pw-browsers"
+
+    /// Crawlee default `./storage` is on the read-only root — force writable tmpfs.
+    public static let crawleeStorageDir = "/tmp/crawlee-storage"
+
     /// Net-container hold process: installs OUTPUT iptables policy then sleeps.
     public static let forcedEgressHoldPath = "/usr/local/bin/derrick-net-hold"
 
     public static let pipCacheVolume = "derrick-pip-cache"
     public static let packagesVolume = "derrick-python-packages"
-    /// Bump when create-args change (e.g. forced egress) so warm containers recreate.
-    public static let warmContainerGeneration = "px2"
+    /// Bump when create-args change (e.g. forced egress / limits / crawlee storage) so warm containers recreate.
+    public static let warmContainerGeneration = "px4"
     public static var warmContainerNetwork: String { "derrick-runner-net-\(warmContainerGeneration)" }
     public static var warmContainerNoNetwork: String { "derrick-runner-nonet-\(warmContainerGeneration)" }
 
+    /// Pip install specs baked into the image (extras syntax allowed).
+    public static let baselinePipSpecs: [String] = [
+        "requests",
+        "chardet",
+        "lxml",
+        "crawlee[playwright,beautifulsoup]"
+    ]
+
+    /// Package names treated as already available (no `/packages` install).
+    /// `beautifulsoup4` / `playwright` arrive via the crawlee extras; listed so agents need not reinstall.
     public static let baselinePackages: Set<String> = [
         "requests",
-        "beautifulsoup4",
         "chardet",
-        "lxml"
+        "lxml",
+        "beautifulsoup4",
+        "crawlee",
+        "crawlee[playwright]",
+        "crawlee[beautifulsoup]",
+        "crawlee[playwright,beautifulsoup]",
+        "crawlee[all]",
+        "playwright"
     ]
+
+    /// Warm-container resource limits sized for Chromium via Playwright/Crawlee.
+    public static let warmContainerMemory = "2g"
+    public static let warmContainerCPUs = "2.0"
+    public static let warmContainerPIDsLimit = "256"
+    public static let warmContainerShmSize = "1g"
+    public static let warmContainerNofile = "4096:4096"
+    public static let warmContainerTmpfsSize = "512m"
+
+    /// Cold `docker pull` of the uv/debian parent on a wiped Docker store.
+    public static let parentImagePullTimeoutSeconds = 600
+    /// Cold baseline build installs crawlee + Playwright Chromium (often several minutes).
+    public static let baselineImageBuildTimeoutSeconds = 900
 
     /// Hold script for networked containers (written into the image via base64).
     /// No leading indentation — shebang must be at column 0.
@@ -81,21 +116,29 @@ exec /bin/sleep infinity
 """#
 
     public static var baselineDockerfile: String {
-        let packages = baselinePackages.sorted().joined(separator: " ")
+        let packages = baselinePipSpecs
+            .map { spec in
+                let escaped = spec.replacingOccurrences(of: "'", with: "'\\''")
+                return "'\(escaped)'"
+            }
+            .joined(separator: " ")
         let holdB64 = Data(forcedEgressHoldScript.utf8).base64EncodedString()
         // Debian/uv images mark system Python as externally managed (PEP 668).
         // Net hold script forces OUTPUT via host proxy only (item 4).
+        // Playwright Chromium + OS deps are baked once at image build (first prewarm).
         return """
         FROM \(parentImage)
         RUN apt-get update \\
          && apt-get install -y --no-install-recommends iptables iproute2 ca-certificates \\
-         && rm -rf /var/lib/apt/lists/* \\
          && uv venv \(baselineVenvPath) \\
          && uv pip install --python \(baselinePythonPath) --no-cache \(packages) \\
+         && PLAYWRIGHT_BROWSERS_PATH=\(playwrightBrowsersPath) \(baselineVenvPath)/bin/playwright install --with-deps chromium \\
+         && rm -rf /var/lib/apt/lists/* \\
          && echo \(holdB64) | base64 -d > \(forcedEgressHoldPath) \\
          && chmod 755 \(forcedEgressHoldPath)
         ENV VIRTUAL_ENV=\(baselineVenvPath)
         ENV PATH="\(baselineVenvPath)/bin:$$PATH"
+        ENV PLAYWRIGHT_BROWSERS_PATH=\(playwrightBrowsersPath)
         ENV DERRICK_PROXY_PORT=18080
         """
     }
@@ -112,9 +155,18 @@ exec /bin/sleep infinity
         return output
     }
 
+    /// True when the package is already in the baseline image (including crawlee extras).
+    public static func isBaselinePackageName(_ name: String) -> Bool {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if baselinePackages.contains(normalized) { return true }
+        if normalized.hasPrefix("crawlee[") && normalized.hasSuffix("]") { return true }
+        return false
+    }
+
     /// Packages that are not baked into the baseline image (installed into the packages volume).
     public static func extraPackages(from requested: [String]) -> [String] {
-        normalizePackages(requested).filter { !baselinePackages.contains($0) }
+        normalizePackages(requested).filter { !isBaselinePackageName($0) }
     }
 
     public static func warmContainerName(allowNetwork: Bool) -> String {
@@ -217,6 +269,8 @@ exec /bin/sleep infinity
             "beautifulsoup4": "bs4",
             "chardet": "chardet",
             "lxml": "lxml",
+            "crawlee": "crawlee",
+            "playwright": "playwright",
         }
         for package_name, module_name in baseline_imports.items():
             try:
@@ -303,19 +357,27 @@ exec /bin/sleep infinity
                 "--name", name,
                 "--init",
                 "--read-only",
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-                "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
-                "--tmpfs", "/run:rw,nosuid,size=16m",
-                "--pids-limit", "64",
-                "--cpus", "1.0",
-                "--memory", "512m",
+                "--tmpfs", "/tmp:rw,nosuid,size=\(warmContainerTmpfsSize)",
+                "--tmpfs", "/var/tmp:rw,nosuid,size=128m",
+                "--tmpfs", "/run:rw,nosuid,size=32m",
+                "--shm-size", warmContainerShmSize,
+                "--pids-limit", warmContainerPIDsLimit,
+                "--cpus", warmContainerCPUs,
+                "--memory", warmContainerMemory,
                 "--security-opt", "no-new-privileges",
                 "--cap-drop", "ALL",
                 "--cap-add", "NET_ADMIN",
-                "--ulimit", "nofile=128:128",
+                "--ulimit", "nofile=\(warmContainerNofile)",
                 "-v", "\(pipCacheVolume):/root/.cache",
                 "-v", "\(packagesVolume):/packages",
                 "-e", "DERRICK_PROXY_PORT=18080",
+                "-e", "PLAYWRIGHT_BROWSERS_PATH=\(playwrightBrowsersPath)",
+                "-e", "CRAWLEE_STORAGE_DIR=\(crawleeStorageDir)",
+                "-e", "CRAWLEE_PURGE_ON_START=1",
+                "-e", "CRAWLEE_DISABLE_BROWSER_SANDBOX=1",
+                "-e", "HOME=/tmp/home",
+                "-e", "XDG_CACHE_HOME=/tmp/cache",
+                "-e", "TMPDIR=/tmp",
                 "--add-host", "host.docker.internal:host-gateway",
                 "--entrypoint", forcedEgressHoldPath
             ]
@@ -334,16 +396,24 @@ exec /bin/sleep infinity
             "--name", name,
             "--init",
             "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-            "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
-            "--pids-limit", "64",
-            "--cpus", "1.0",
-            "--memory", "512m",
+            "--tmpfs", "/tmp:rw,nosuid,size=\(warmContainerTmpfsSize)",
+            "--tmpfs", "/var/tmp:rw,nosuid,size=128m",
+            "--shm-size", warmContainerShmSize,
+            "--pids-limit", warmContainerPIDsLimit,
+            "--cpus", warmContainerCPUs,
+            "--memory", warmContainerMemory,
             "--security-opt", "no-new-privileges",
             "--cap-drop", "ALL",
-            "--ulimit", "nofile=128:128",
+            "--ulimit", "nofile=\(warmContainerNofile)",
             "-v", "\(pipCacheVolume):/root/.cache",
             "-v", "\(packagesVolume):/packages",
+            "-e", "PLAYWRIGHT_BROWSERS_PATH=\(playwrightBrowsersPath)",
+            "-e", "CRAWLEE_STORAGE_DIR=\(crawleeStorageDir)",
+            "-e", "CRAWLEE_PURGE_ON_START=1",
+            "-e", "CRAWLEE_DISABLE_BROWSER_SANDBOX=1",
+            "-e", "HOME=/tmp/home",
+            "-e", "XDG_CACHE_HOME=/tmp/cache",
+            "-e", "TMPDIR=/tmp",
             "--entrypoint", offlineHoldBinary,
             defaultImage,
             offlineHoldArg

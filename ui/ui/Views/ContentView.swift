@@ -244,6 +244,17 @@ private struct WindowConfigurator: NSViewRepresentable {
     }
 }
 
+private enum MeshBootstrapError: Error, LocalizedError {
+    case step(String, underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .step(let name, let underlying):
+            return "\(name) failed: \(underlying.localizedDescription)"
+        }
+    }
+}
+
 struct ContentView: View {
     private let secretResolver = AppSecretResolver()
     private let debugConfiguration = AppDebugConfiguration()
@@ -461,7 +472,11 @@ struct ContentView: View {
                     }
 
                     if bootstrapStatus.isInitializing {
-                        Text("This may take a minute the first time while Docker images and containers are prepared.")
+                        Text(
+                            bootstrapStatus.phase == .preparingImage
+                                ? "First install builds a Python image with Chromium. This often takes several minutes; keep Docker Desktop running."
+                                : "This may take a minute the first time while Docker images and containers are prepared."
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -581,23 +596,44 @@ struct ContentView: View {
                     debugLog("JobKeepAlive register failed: \(error.localizedDescription)")
                 }
 
-                let peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
-                try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
-                debugLog("MCPService peer endpoint handed to AgentService")
+                let peer: NSXPCListenerEndpoint
+                do {
+                    peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
+                    try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
+                    debugLog("MCPService peer endpoint handed to AgentService")
+                } catch {
+                    throw MeshBootstrapError.step("AgentService←MCP peer handoff", underlying: error)
+                }
 
-                let jobPeer = try await JobServiceClient.shared.fetchPeerListenerEndpoint()
-                try await AgentServiceClient.shared.setJobServicePeerEndpoint(jobPeer)
-                debugLog("JobService peer endpoint handed to AgentService")
+                do {
+                    let jobPeer = try await JobServiceClient.shared.fetchPeerListenerEndpoint()
+                    try await AgentServiceClient.shared.setJobServicePeerEndpoint(jobPeer)
+                    debugLog("JobService peer endpoint handed to AgentService")
+                } catch {
+                    throw MeshBootstrapError.step("AgentService←Job peer handoff", underlying: error)
+                }
 
-                try await JobServiceClient.shared.setMCPServicePeerEndpoint(peer)
-                debugLog("MCPService peer endpoint handed to JobService")
-                let agentPeer = try await AgentServiceClient.shared.fetchPeerListenerEndpoint()
-                try await JobServiceClient.shared.setAgentServicePeerEndpoint(agentPeer)
-                debugLog("AgentService peer endpoint handed to JobService")
+                do {
+                    try await JobServiceClient.shared.setMCPServicePeerEndpoint(peer)
+                    debugLog("MCPService peer endpoint handed to JobService")
+                } catch {
+                    throw MeshBootstrapError.step("JobService←MCP peer handoff", underlying: error)
+                }
+                do {
+                    let agentPeer = try await AgentServiceClient.shared.fetchPeerListenerEndpoint()
+                    try await JobServiceClient.shared.setAgentServicePeerEndpoint(agentPeer)
+                    debugLog("AgentService peer endpoint handed to JobService")
+                } catch {
+                    throw MeshBootstrapError.step("JobService←Agent peer handoff", underlying: error)
+                }
 
-                let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
-                try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
-                debugLog("Docker helper peer endpoint handed to MCPService")
+                do {
+                    let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
+                    try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
+                    debugLog("Docker helper peer endpoint handed to MCPService")
+                } catch {
+                    throw MeshBootstrapError.step("MCPService←Docker helper peer handoff", underlying: error)
+                }
 
                 sessionReady = true
                 bootstrapStatus.markReady()

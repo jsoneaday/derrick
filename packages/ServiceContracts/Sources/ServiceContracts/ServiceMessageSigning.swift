@@ -3,11 +3,12 @@ import CryptoKit
 
 /// v1 HMAC-SHA256 over a stable canonical string (plan: app-group shared key).
 public enum ServiceMessageSigning: Sendable {
-    /// Stable, order-independent canonical form (not full JSON encode of the struct).
+    /// Stable canonical form. Intentionally omits `createdAt` — JSON date round-trips
+    /// (ISO-8601) are not bit-stable and previously caused intermittent `invalidSignature`
+    /// across UI ↔ XPC processes. Replay uniqueness comes from `id` + payload.
     public static func canonicalBytes(for message: ServiceMessage) -> Data {
         let payloadB64 = message.payloadJSON.base64EncodedString()
         let corr = message.correlationId ?? ""
-        let created = ISO8601DateFormatter().string(from: message.createdAt)
         let principal: String
         switch message.principal {
         case .ui: principal = "ui"
@@ -18,7 +19,6 @@ public enum ServiceMessageSigning: Sendable {
         }
         let line = [
             message.id.uuidString,
-            created,
             message.from.rawValue,
             message.to.rawValue,
             message.type.rawValue,

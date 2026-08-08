@@ -131,11 +131,17 @@ import MCPClient
         #expect(tools.map(\.name).contains("python_script_exec"))
     }
 
-    @Test func baselinePackagesIncludeLxml() {
+    @Test func baselinePackagesIncludeCrawleeAndPlaywright() {
         #expect(DockerScriptPreparer.baselinePackages.contains("requests"))
         #expect(DockerScriptPreparer.baselinePackages.contains("beautifulsoup4"))
         #expect(DockerScriptPreparer.baselinePackages.contains("chardet"))
         #expect(DockerScriptPreparer.baselinePackages.contains("lxml"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("crawlee"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("crawlee[playwright,beautifulsoup]"))
+        #expect(DockerScriptPreparer.baselinePackages.contains("playwright"))
+        #expect(DockerScriptPreparer.baselinePipSpecs.contains("crawlee[playwright,beautifulsoup]"))
+        #expect(!DockerScriptPreparer.baselinePipSpecs.contains("beautifulsoup4"))
+        #expect(!DockerScriptPreparer.baselinePipSpecs.contains("crawlee[playwright]"))
     }
 
     @Test func executionScriptVerifiesBaselinePackagesBeforeRunningUserCode() {
@@ -149,6 +155,8 @@ import MCPClient
         #expect(script.contains("verified baseline package"))
         #expect(script.contains("baseline package verification failed"))
         #expect(script.contains("lxml"))
+        #expect(script.contains("crawlee"))
+        #expect(script.contains("playwright"))
         #expect(script.contains("sys.path.insert(0, \"/packages\")"))
         #expect(!script.contains("installing packages: requests"))
         #expect(script.contains("_wipe_ephemeral_dir(\"/tmp\")"))
@@ -191,8 +199,10 @@ import MCPClient
     }
 
     @Test func extraPackagesExcludesBaseline() {
-        let extras = DockerScriptPreparer.extraPackages(from: ["requests", "pandas", "lxml", "numpy"])
-        #expect(extras == ["pandas", "numpy"] || extras == ["numpy", "pandas"])
+        let extras = DockerScriptPreparer.extraPackages(from: [
+            "requests", "pandas", "lxml", "numpy", "crawlee", "crawlee[playwright]",
+            "crawlee[playwright,beautifulsoup]", "beautifulsoup4", "playwright"
+        ])
         #expect(Set(extras) == Set(["pandas", "numpy"]))
     }
 
@@ -256,6 +266,16 @@ import MCPClient
         #expect(online.contains("NET_ADMIN"))
         #expect(online.contains { $0.contains("HTTPS_PROXY=") })
         #expect(online.contains(DockerScriptPreparer.warmContainerNetwork))
+        #expect(online.contains("--shm-size"))
+        #expect(online.contains(DockerScriptPreparer.warmContainerShmSize))
+        #expect(online.contains("--memory"))
+        #expect(online.contains(DockerScriptPreparer.warmContainerMemory))
+        #expect(online.contains("--cpus"))
+        #expect(online.contains(DockerScriptPreparer.warmContainerCPUs))
+        #expect(online.contains("--pids-limit"))
+        #expect(online.contains(DockerScriptPreparer.warmContainerPIDsLimit))
+        #expect(online.contains { $0.contains("PLAYWRIGHT_BROWSERS_PATH=") })
+        #expect(online.contains { $0.hasPrefix("CRAWLEE_STORAGE_DIR=") && $0.contains(DockerScriptPreparer.crawleeStorageDir) })
         // Image must be last so Docker does not treat an -e value as the image ref.
         #expect(online.last == DockerScriptPreparer.defaultImage)
         if let imageIndex = online.lastIndex(of: DockerScriptPreparer.defaultImage) {
@@ -283,6 +303,9 @@ import MCPClient
         #expect(dockerfile.contains(DockerScriptPreparer.baselineVenvPath))
         #expect(dockerfile.contains("requests"))
         #expect(dockerfile.contains("lxml"))
+        #expect(dockerfile.contains("crawlee[playwright,beautifulsoup]"))
+        #expect(dockerfile.contains("playwright install --with-deps chromium"))
+        #expect(dockerfile.contains("PLAYWRIGHT_BROWSERS_PATH=\(DockerScriptPreparer.playwrightBrowsersPath)"))
     }
 
     @Test func dockerExecUsesBaselineVenvPython() {

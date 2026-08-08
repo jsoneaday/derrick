@@ -504,7 +504,8 @@ public enum PythonScriptExecutionVerifier {
 
     private static func networkRequiredViolations(in script: String) -> [String] {
         let patterns: [(String, String)] = [
-            (#"(?m)\b(requests\.|httpx\.|urllib\.|socket\.)"#, "Network access in script requires allow_network=true.")
+            (#"(?m)\b(requests\.|httpx\.|urllib\.|socket\.)"#, "Network access in script requires allow_network=true."),
+            (#"(?m)\b(crawlee|playwright|BeautifulSoupCrawler|PlaywrightCrawler|ParselCrawler)\b"#, "Network access in script requires allow_network=true.")
         ]
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil

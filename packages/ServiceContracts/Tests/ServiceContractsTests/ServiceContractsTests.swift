@@ -150,6 +150,29 @@ import Testing
         #expect(ServiceMessageSigning.verify(msg, key: key) == false)
     }
 
+    @Test func messageSigningSurvivesJSONDateRoundTrip() throws {
+        let key = ServiceMessageSigning.developmentKey(seed: "helloworld")
+        var msg = ServiceMessage(
+            from: .ui,
+            to: .agent,
+            type: .peerHandoff,
+            principal: .system,
+            correlationId: "installMCPPeer",
+            payloadJSON: Data(#"{"kind":"installMCPPeer"}"#.utf8)
+        )
+        ServiceMessageSigning.sign(&msg, key: key)
+        let data = try JSONEncoder.service.encode(msg)
+        let decoded = try JSONDecoder.service.decode(ServiceMessage.self, from: data)
+        #expect(ServiceMessageSigning.verify(decoded, key: key))
+        let dto = try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
+            data,
+            expectedTo: .agent,
+            expectedKind: .installMCPPeer,
+            key: key
+        )
+        #expect(dto.kind == .installMCPPeer)
+    }
+
     @Test func signedToolCallEnvelopeRoundTrip() throws {
         let key = ServiceMessageSigning.developmentKey(seed: "test-messages-secret")
         let request = MCPToolCallRequest(

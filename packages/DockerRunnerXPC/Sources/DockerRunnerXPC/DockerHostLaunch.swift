@@ -16,7 +16,8 @@ public enum DockerHostLaunch: Sendable {
         "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     public static let minTimeoutSeconds = 1
-    public static let maxTimeoutSeconds = 600
+    /// Allows cold baseline builds that install Playwright Chromium (often >10 minutes).
+    public static let maxTimeoutSeconds = 1_200
     /// Max stdin payload (execution scripts / Dockerfiles).
     public static let maxStdinBytes = 5 * 1024 * 1024
 

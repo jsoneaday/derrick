@@ -65,9 +65,8 @@ final class JobServiceExportedObject: NSObject, JobServiceXPC {
             reply(endpoint)
         } catch {
             fputs("[JobService] peerListenerEndpoint auth failed: \(error.localizedDescription)\n", stderr)
-            let fallback = NSXPCListener.anonymous()
-            fallback.resume()
-            reply(fallback.endpoint)
+            let endpoint = JobServicePeerEndpoint.shared.endpointForHandoff()
+            reply(endpoint)
         }
     }
 

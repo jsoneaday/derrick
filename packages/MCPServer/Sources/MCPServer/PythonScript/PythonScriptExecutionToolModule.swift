@@ -45,7 +45,7 @@ public enum PythonScriptExecutionToolModule: MCPToolModule {
                 "python_packages": .object([
                     "type": .string("array"),
                     "items": .object(["type": .string("string")]),
-                    "description": .string("Optional dependency names (PyPI packages). Baseline packages are curated and can be installed without allow_dependency_install.")
+                    "description": .string("Optional PyPI packages beyond the baseline image. Baseline already includes requests, chardet, lxml, crawlee[playwright,beautifulsoup] (Chromium baked in) — do not list those for scraping.")
                 ]),
                 "allow_dependency_install": .object([
                     "type": .string("boolean"),
@@ -53,11 +53,11 @@ public enum PythonScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "timeout_seconds": .object([
                     "type": .string("number"),
-                    "description": .string("Execution timeout in seconds (1...300).")
+                    "description": .string("Tool-level script execution timeout in seconds (1...300). Use ≥120 for Playwright/Crawlee crawls. This is a python_script_exec argument only — never pass timeout_seconds into PlaywrightCrawler or other Python constructors.")
                 ]),
                 "allow_network": .object([
                     "type": .string("boolean"),
-                    "description": .string("Enable container network access when the user request requires fetching live/current web data or installing packages.")
+                    "description": .string("Opt-in container network access. Required for live web fetch/crawl (Crawlee/Playwright) and for installing non-baseline packages.")
                 ])
             ]),
             "required": .array([.string("mode"), .string("allow_network"), .string("description"), .string("reason"), .string("script")])

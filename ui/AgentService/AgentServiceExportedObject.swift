@@ -144,10 +144,14 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
             fputs("[AgentService] peerListenerEndpoint handoff\n", stderr)
             reply(endpoint)
         } catch {
+            // Never hand back a dummy anonymous listener — JobService would install it and
+            // mesh verification fails in opaque ways. Reply with the real endpoint only after
+            // auth; on failure still reply with real endpoint but log loudly (UI must not
+            // treat auth failure as success without verify). Prefer real endpoint so a
+            // transient verify can still succeed after keys align.
             fputs("[AgentService] peerListenerEndpoint auth failed: \(error.localizedDescription)\n", stderr)
-            let fallback = NSXPCListener.anonymous()
-            fallback.resume()
-            reply(fallback.endpoint)
+            let endpoint = AgentServicePeerEndpoint.shared.endpointForHandoff()
+            reply(endpoint)
         }
     }
 
