@@ -972,6 +972,19 @@ struct ContentView: View {
                 copyToPasteboard(message)
             }
             .buttonStyle(.bordered)
+
+            Button {
+                errorMessage = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
+            .help("Dismiss")
         }
         .padding(12)
         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
