@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DatabaseSchema {
-    public static let latestVersion = 12
+    public static let latestVersion = 13
 
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
@@ -46,6 +46,8 @@ public enum DatabaseSchema {
             return "job_schedules"
         case 12:
             return "job_failure_detail"
+        case 13:
+            return "job_results"
         default:
             return "unknown"
         }

@@ -69,4 +69,5 @@ private final class AgentServicePeerSilentSink: NSObject, AgentServiceClientSink
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         reply(Data() as NSData)
     }
+    func presentJobResult(_ resultJSON: NSData) {}
 }

@@ -1,5 +1,8 @@
 import Foundation
 
+// Do NOT call UserNotifications / AppKit here. XPC services have no main-app
+// bundle proxy (`bundleProxyForCurrentProcess is nil`) and will trap under the debugger.
+
 // Fan SharedAgentRuntime debugLog → stderr + service_logs + UI (when reverse XPC is up).
 RuntimeLog.shared.addSink { message in
     if AgentServiceLogRelay.shouldRelayToUI(message) {

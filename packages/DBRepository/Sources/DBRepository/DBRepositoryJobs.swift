@@ -545,6 +545,117 @@ public extension DBRepository {
         return rows
     }
 
+    // MARK: - Job results (wake completion for modal / notification)
+
+    public struct JobResultRow: Sendable, Hashable {
+        public let id: String
+        public let jobID: String
+        public let jobSessionID: String
+        public let parentSessionID: String?
+        public let responseText: String
+        public let createdAt: Date
+        public var readAt: Date?
+
+        public init(
+            id: String,
+            jobID: String,
+            jobSessionID: String,
+            parentSessionID: String?,
+            responseText: String,
+            createdAt: Date,
+            readAt: Date? = nil
+        ) {
+            self.id = id
+            self.jobID = jobID
+            self.jobSessionID = jobSessionID
+            self.parentSessionID = parentSessionID
+            self.responseText = responseText
+            self.createdAt = createdAt
+            self.readAt = readAt
+        }
+    }
+
+    public func insertJobResult(_ row: JobResultRow) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            INSERT INTO job_results (
+                id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+            ) VALUES (
+                \(quoted(row.id)),
+                \(quoted(row.jobID)),
+                \(quoted(row.jobSessionID)),
+                \(sqlValue(row.parentSessionID)),
+                \(quoted(row.responseText)),
+                \(quoted(Self.iso8601Formatter().string(from: row.createdAt))),
+                \(sqlValue(row.readAt.map { Self.iso8601Formatter().string(from: $0) }))
+            );
+            """, on: handle)
+        }
+    }
+
+    public func markJobResultRead(id: String, at date: Date = .now) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE job_results SET read_at = \(quoted(Self.iso8601Formatter().string(from: date)))
+            WHERE id = \(quoted(id));
+            """, on: handle)
+        }
+    }
+
+    public func fetchUnreadJobResults(limit: Int = 20) throws -> [JobResultRow] {
+        let cap = max(1, min(limit, 100))
+        return try withDatabaseHandle { handle in
+            try Self.fetchJobResults(
+                sql: """
+                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+                FROM job_results
+                WHERE read_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT \(cap);
+                """,
+                on: handle
+            )
+        }
+    }
+
+    public func fetchJobResult(id: String) throws -> JobResultRow? {
+        try withDatabaseHandle { handle in
+            let rows = try Self.fetchJobResults(
+                sql: """
+                SELECT id, job_id, job_session_id, parent_session_id, response_text, created_at, read_at
+                FROM job_results
+                WHERE id = \(quoted(id))
+                LIMIT 1;
+                """,
+                on: handle
+            )
+            return rows.first
+        }
+    }
+
+    private static func fetchJobResults(sql: String, on handle: OpaquePointer) throws -> [JobResultRow] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw DBRepositoryError.sqliteOperationFailed(String(cString: sqlite3_errmsg(handle)))
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [JobResultRow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            rows.append(
+                JobResultRow(
+                    id: columnText(statement, 0),
+                    jobID: columnText(statement, 1),
+                    jobSessionID: columnText(statement, 2),
+                    parentSessionID: columnOptionalText(statement, 3),
+                    responseText: columnText(statement, 4),
+                    createdAt: iso8601Formatter().date(from: columnText(statement, 5)) ?? .now,
+                    readAt: columnOptionalText(statement, 6).flatMap { iso8601Formatter().date(from: $0) }
+                )
+            )
+        }
+        return rows
+    }
+
     private static func fetchSteps(sql: String, on handle: OpaquePointer) throws -> [JobStepRow] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {

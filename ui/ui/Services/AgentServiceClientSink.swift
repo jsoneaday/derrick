@@ -196,6 +196,19 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         }
     }
 
+    public func presentJobResult(_ resultJSON: NSData) {
+        guard let result = try? JSONDecoder.service.decode(JobResultDTO.self, from: resultJSON as Data) else {
+            Task { @MainActor in
+                debugLog("AgentService sink: failed to decode JobResultDTO")
+            }
+            return
+        }
+        Task { @MainActor in
+            debugLog("Job result received job=\(result.jobID) chars=\(result.responseText.count)")
+            JobResultPresenter.shared.enqueue(result)
+        }
+    }
+
     public func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let data = requestJSON as Data
         lock.lock()

@@ -1,9 +1,13 @@
 import Foundation
 import DockerRunnerXPC
 import ServiceContracts
+import UserNotifications
+import SQLite3
+import AppKit
 
 /// Login / keep-alive helper: holds an XPC connection to JobService so the scheduler
 /// stays up for the user session. Does not run job steps itself.
+/// Also polls `job_results` and posts user notifications when the UI is not running.
 ///
 /// Usage:
 ///   JobKeepAlive                 — run keep-alive loop (default; used by launchd)
@@ -26,6 +30,7 @@ if installOnly || installAndRun {
 }
 
 fputs("[JobKeepAlive] starting pid=\(ProcessInfo.processInfo.processIdentifier)\n", stderr)
+JobResultNotifier.shared.start()
 KeepAliveRunner().runForever()
 
 // MARK: - Install user LaunchAgent (absolute path; reliable vs flaky SM-only jobs)
@@ -264,5 +269,211 @@ enum KeepAliveError: Error, LocalizedError {
         case .unavailable: return "JobService unavailable"
         case .bootstrapFailed(let m): return "JobService bootstrap failed: \(m)"
         }
+    }
+}
+
+// MARK: - Job result notifications (UI may be quit)
+
+/// Polls shared SQLite `job_results` and posts UN notifications for unread rows.
+/// Click opens the main `ui.app` which loads unread results into the modal.
+final class JobResultNotifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    static let shared = JobResultNotifier()
+
+    private let defaultsKey = "notifiedJobResultIDs"
+    private var timer: DispatchSourceTimer?
+    private let lock = NSLock()
+
+    func start() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            fputs(
+                "[JobKeepAlive] notification auth granted=\(granted) err=\(error?.localizedDescription ?? "nil")\n",
+                stderr
+            )
+        }
+        let open = UNNotificationAction(identifier: "OPEN", title: "Open", options: [.foreground])
+        let category = UNNotificationCategory(
+            identifier: "JOB_RESULT",
+            actions: [open],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
+
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        t.schedule(deadline: .now() + 5, repeating: 10)
+        t.setEventHandler { [weak self] in
+            self?.pollOnce()
+        }
+        t.resume()
+        timer = t
+        fputs("[JobKeepAlive] job result notifier started\n", stderr)
+    }
+
+    private func pollOnce() {
+        // Skip if main UI is already frontmost (it handles modal itself).
+        if isMainUIRunning() {
+            return
+        }
+        let rows = loadUnreadJobResults()
+        guard !rows.isEmpty else { return }
+        lock.lock()
+        var notified = Set(UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [])
+        lock.unlock()
+        for row in rows {
+            if notified.contains(row.id) { continue }
+            postNotification(row)
+            notified.insert(row.id)
+        }
+        lock.lock()
+        // Cap remembered ids
+        let trimmed = Array(notified.suffix(200))
+        UserDefaults.standard.set(trimmed, forKey: defaultsKey)
+        lock.unlock()
+    }
+
+    private func isMainUIRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == "derrick.ui"
+        }
+    }
+
+    private struct ResultRow {
+        let id: String
+        let jobID: String
+        let body: String
+    }
+
+    private func loadUnreadJobResults() -> [ResultRow] {
+        guard let dbPath = sharedDatabasePath() else {
+            fputs("[JobKeepAlive] job_results DB not found\n", stderr)
+            return []
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            fputs("[JobKeepAlive] sqlite open failed: \(dbPath)\n", stderr)
+            return []
+        }
+        defer { sqlite3_close(db) }
+        // Table may not exist on older DBs
+        let sql = """
+        SELECT id, job_id, response_text FROM job_results
+        WHERE read_at IS NULL
+        ORDER BY created_at DESC LIMIT 10;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            fputs("[JobKeepAlive] job_results prepare failed (migration?)\n", stderr)
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        var out: [ResultRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let c0 = sqlite3_column_text(stmt, 0),
+                  let c1 = sqlite3_column_text(stmt, 1),
+                  let c2 = sqlite3_column_text(stmt, 2) else { continue }
+            out.append(
+                ResultRow(
+                    id: String(cString: c0),
+                    jobID: String(cString: c1),
+                    body: String(cString: c2)
+                )
+            )
+        }
+        if !out.isEmpty {
+            fputs("[JobKeepAlive] unread job_results count=\(out.count)\n", stderr)
+        }
+        return out
+    }
+
+    private func sharedDatabasePath() -> String? {
+        let groupID = "VUSK4B2YKQ.derrick.shared"
+        let rel = "Library/Group Containers/\(groupID)/Library/Application Support/ui/derrick.sqlite3"
+        // 1) Real user home (LaunchAgent / non-sandbox KeepAlive)
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            let path = URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+                .appendingPathComponent(rel).path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        // 2) App group container API (works when group is entitled)
+        if let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
+            let path = base
+                .appendingPathComponent("Library/Application Support/ui/derrick.sqlite3")
+                .path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        // 3) HOME env if not containerized
+        if let home = ProcessInfo.processInfo.environment["HOME"], !home.contains("/Containers/") {
+            let path = URL(fileURLWithPath: home, isDirectory: true)
+                .appendingPathComponent(rel).path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
+
+    private func postNotification(_ row: ResultRow) {
+        let content = UNMutableNotificationContent()
+        content.title = "Scheduled job finished"
+        let preview = row.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        content.body = preview.count > 180 ? String(preview.prefix(177)) + "…" : preview
+        content.sound = .default
+        content.categoryIdentifier = "JOB_RESULT"
+        content.userInfo = ["jobResultID": row.id, "jobID": row.jobID]
+
+        let request = UNNotificationRequest(
+            identifier: "job-result-\(row.id)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                fputs("[JobKeepAlive] notify failed: \(error.localizedDescription)\n", stderr)
+            } else {
+                fputs("[JobKeepAlive] notified jobResult=\(row.id)\n", stderr)
+            }
+        }
+    }
+
+    private func openMainApp() {
+        // Prefer the host app next to this helper: …/ui.app/Contents/MacOS/JobKeepAlive
+        let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        // …/ui.app/Contents/MacOS/JobKeepAlive → …/ui.app
+        let appURL = exe
+            .deletingLastPathComponent() // MacOS
+            .deletingLastPathComponent() // Contents
+            .deletingLastPathComponent() // ui.app
+        if appURL.pathExtension == "app" {
+            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error {
+                    fputs("[JobKeepAlive] open app failed: \(error.localizedDescription)\n", stderr)
+                }
+            }
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "derrick.ui") {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        openMainApp()
+        completionHandler()
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
     }
 }

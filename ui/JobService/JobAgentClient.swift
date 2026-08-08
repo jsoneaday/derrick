@@ -2,22 +2,18 @@ import Foundation
 import DockerRunnerXPC
 import ServiceContracts
 
-/// JobService → AgentService: signed startTurn with a no-op reverse sink (no UI).
-///
-/// Must use a **peer** `NSXPCListenerEndpoint` from UI handoff — sibling XPC services
-/// cannot launch each other via `serviceName:`.
+/// JobService → AgentService: signed startTurn with a no-op reverse sink (no UI chat stream).
+/// Job wakes use `delivery: .jobResultModal` and an isolated `job-` session.
 final class JobAgentClient: @unchecked Sendable {
     static let shared = JobAgentClient()
 
-    /// Default helper model JSON for job wakes when payload omits modelJSON.
-    /// Matches `LLMModelChoice.openai(.gpt56Luna)` synthesized Codable shape used in tests.
     static let defaultModelJSON = Data(#"{"openai":{"_0":"gpt-5.6-luna"}}"#.utf8)
 
     private let lock = NSLock()
     private var connection: NSXPCConnection?
     private var peerEndpoint: NSXPCListenerEndpoint?
     private let sink = JobAgentSink()
-    private let callTimeoutNanoseconds: UInt64 = 30_000_000_000
+    private let callTimeoutNanoseconds: UInt64 = 120_000_000_000
 
     private init() {}
 
@@ -56,7 +52,7 @@ final class JobAgentClient: @unchecked Sendable {
         fputs("[JobAgentClient] peer mesh verified status=\(report.status.rawValue)\n", stderr)
     }
 
-    /// Fire-and-forget agent turn: wait for accept, not for full completion.
+    /// Start a job-isolated turn. AgentService collects completion and presents a job-result modal/notification.
     func wakeAgent(payload: JobWakeAgentPayload) async throws -> AgentTurnAccepted {
         let modelJSON = payload.modelJSON ?? Self.defaultModelJSON
         let apiKey = payload.apiKey ?? ""
@@ -64,7 +60,10 @@ final class JobAgentClient: @unchecked Sendable {
             sessionID: payload.sessionID,
             prompt: payload.prompt,
             apiKey: apiKey,
-            modelJSON: modelJSON
+            modelJSON: modelJSON,
+            delivery: .jobResultModal,
+            jobID: payload.jobID,
+            parentSessionID: payload.parentSessionID
         )
         nonisolated(unsafe) let proxy = try remoteProxy()
         nonisolated(unsafe) let payloadData = try AgentServiceXPCCodec.encodeSignedTurnRequest(request) as NSData
@@ -106,10 +105,8 @@ final class JobAgentClient: @unchecked Sendable {
                 ofReply: false
             )
             conn.remoteObjectInterface = remote
-            // Agent expects reverse sink (UI). Provide a silent sink for job-sourced turns.
             conn.exportedInterface = NSXPCInterface(with: AgentServiceClientSinkXPC.self)
             conn.exportedObject = sink
-            // Anonymous peer: no code-sign requirement.
             conn.interruptionHandler = { [weak self] in self?.invalidate() }
             conn.invalidationHandler = { [weak self] in self?.invalidate() }
             conn.resume()
@@ -151,31 +148,31 @@ final class JobAgentClient: @unchecked Sendable {
     }
 }
 
+/// Silent sink: job turns must not paint chat; AgentService presents job results to UI primary sink.
 private final class JobAgentSink: NSObject, AgentServiceClientSinkXPC, @unchecked Sendable {
     func appendServiceLogLine(_ line: String) {
         fputs("[JobAgentSink] \(line)\n", stderr)
     }
 
-    func turnDidEmitChunk(_ turnID: String, chunkJSON: NSData) {
-        // Job-sourced wakes stream into a silent sink; UI is not attached.
-    }
+    func turnDidEmitChunk(_ turnID: String, chunkJSON: NSData) {}
 
     func turnDidFinish(_ turnID: String, errorJSON: NSData) {
         if errorJSON.length > 0 {
-            fputs("[JobAgentSink] turn \(turnID) finished with error payload (\(errorJSON.length) bytes)\n", stderr)
+            fputs("[JobAgentSink] turn \(turnID) finished with error payload\n", stderr)
         } else {
             fputs("[JobAgentSink] turn \(turnID) finished ok\n", stderr)
         }
     }
 
     func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        // Auto-deny: no human in the loop for job-sourced turns.
-        let empty = Data()
-        reply(empty as NSData)
+        reply(Data() as NSData)
     }
 
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        let empty = Data()
-        reply(empty as NSData)
+        reply(Data() as NSData)
+    }
+
+    func presentJobResult(_ resultJSON: NSData) {
+        // JobService is not the UI; ignore.
     }
 }

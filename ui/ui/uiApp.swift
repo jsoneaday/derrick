@@ -6,10 +6,12 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 @main
 struct uiApp: App {
     @StateObject private var logStore = LogStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         RuntimeLog.shared.addSink { message in
@@ -25,5 +27,13 @@ struct uiApp: App {
                 .environmentObject(logStore)
                 .preferredColorScheme(.light)
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = JobResultNotificationDelegate.shared
+        JobResultNotificationPoster.requestAuthorizationIfNeeded()
+        _ = JobResultPresenter.shared
     }
 }

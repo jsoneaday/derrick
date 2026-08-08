@@ -40,6 +40,8 @@ import CryptoKit
     func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed `networkAccessRequest` → reply signed `networkAccessDecision`.
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Encoded `JobResultDTO` JSON — scheduled job finished; UI shows modal or notification.
+    func presentJobResult(_ resultJSON: NSData)
 }
 
 /// Result of AgentService bootstrap.

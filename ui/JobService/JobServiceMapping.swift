@@ -70,16 +70,59 @@ enum JobServiceMapping {
             errorMessage: nil
         )
         let steps = request.steps.enumerated().map { index, spec in
-            JobStepRow(
+            let payloadJSON = (try? Self.injectJobID(into: spec.payloadJSON, kind: spec.kind, jobID: jobID))
+                ?? spec.payloadJSON
+            return JobStepRow(
                 id: UUID().uuidString,
                 jobID: jobID,
                 index: index,
                 kind: spec.kind.rawValue,
                 status: JobStepStatus.pending.rawValue,
-                payloadJSON: spec.payloadJSON
+                payloadJSON: payloadJSON
             )
         }
         return (job, steps)
+    }
+
+    /// Stamp durable job id onto wake payloads after the job row id is assigned.
+    private static func injectJobID(into payloadJSON: String, kind: JobStepKind, jobID: String) throws -> String {
+        switch kind {
+        case .wakeAgent:
+            var wake = try JSONDecoder.service.decode(JobWakeAgentPayload.self, from: Data(payloadJSON.utf8))
+            wake = JobWakeAgentPayload(
+                prompt: wake.prompt,
+                sessionID: wake.sessionID,
+                agentID: wake.agentID,
+                modelJSON: wake.modelJSON,
+                apiKey: wake.apiKey,
+                jobID: jobID,
+                parentSessionID: wake.parentSessionID
+            )
+            let data = try JSONEncoder.service.encode(wake)
+            return String(data: data, encoding: .utf8) ?? payloadJSON
+        case .runToolThenWake:
+            var combined = try JSONDecoder.service.decode(
+                JobRunToolThenWakePayload.self,
+                from: Data(payloadJSON.utf8)
+            )
+            let wake = combined.wake
+            combined = JobRunToolThenWakePayload(
+                tool: combined.tool,
+                wake: JobWakeAgentPayload(
+                    prompt: wake.prompt,
+                    sessionID: wake.sessionID,
+                    agentID: wake.agentID,
+                    modelJSON: wake.modelJSON,
+                    apiKey: wake.apiKey,
+                    jobID: jobID,
+                    parentSessionID: wake.parentSessionID
+                )
+            )
+            let data = try JSONEncoder.service.encode(combined)
+            return String(data: data, encoding: .utf8) ?? payloadJSON
+        default:
+            return payloadJSON
+        }
     }
 
     static func scheduleRecord(from row: JobScheduleRow) throws -> JobScheduleRecord {

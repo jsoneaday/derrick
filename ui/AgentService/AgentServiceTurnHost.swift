@@ -4,6 +4,30 @@ import LLMAgentClient
 import PolicyUserInteraction
 import ServiceContracts
 
+private enum AgentServiceError: Error, LocalizedError {
+    case notReady
+    var errorDescription: String? {
+        switch self {
+        case .notReady: return "AgentService runtime not ready."
+        }
+    }
+}
+
+private final class ResponseAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var parts: [String] = []
+    func append(_ s: String) {
+        lock.lock()
+        parts.append(s)
+        lock.unlock()
+    }
+    var joined: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return parts.joined()
+    }
+}
+
 private final class ChunkCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
@@ -23,7 +47,10 @@ private final class ChunkCounter: @unchecked Sendable {
 actor AgentServiceTurnHost {
     static let shared = AgentServiceTurnHost()
 
+    /// Live chat conversation (single primary UI session).
     private var conversation: ConversationModel?
+    /// Isolated job wake conversations keyed by job session id (`job-…`).
+    private var jobConversations: [String: ConversationModel] = [:]
     private var repository: DBRepository?
     private var helperModelSettings: LLMModelSettings?
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -33,17 +60,10 @@ actor AgentServiceTurnHost {
         if let conversation {
             return conversation
         }
-        let repo = try await AgentServiceStore.shared.sharedRepository()
-        repository = repo
-        let settings = await MainActor.run {
-            LLMModelSettings(repository: repo)
+        try await ensureRuntimeReady()
+        guard let repo = repository, let settings = helperModelSettings else {
+            throw AgentServiceError.notReady
         }
-        await settings.loadSettings()
-        helperModelSettings = settings
-        await EgressAllowlistService.shared.configure(repository: repo)
-        await ContentSensitivityGrantService.shared.configure(repository: repo)
-        await UsageLimitsService.shared.configure(repository: repo)
-        await EgressAllowlistService.shared.pushToHelper()
 
         let model = try await ConversationModel.makeDefault(
             repository: repo,
@@ -59,18 +79,70 @@ actor AgentServiceTurnHost {
         return model
     }
 
+    /// Job-isolated session memory (never the live chat session).
+    private func ensureJobConversation(jobSessionID: String) async throws -> ConversationModel {
+        if let existing = jobConversations[jobSessionID] {
+            return existing
+        }
+        try await ensureRuntimeReady()
+        guard let repo = repository, let settings = helperModelSettings else {
+            throw AgentServiceError.notReady
+        }
+        let model = try await ConversationModel.makeDefault(
+            repository: repo,
+            helperModelSettings: settings,
+            sessionID: jobSessionID,
+            agentIDOverride: JobSessionID.agentID
+        )
+        jobConversations[jobSessionID] = model
+        await AgentServiceStore.shared.log(
+            level: .info,
+            message: "Job conversation ready session=\(jobSessionID)",
+            code: "job_session_ready"
+        )
+        return model
+    }
+
+    private func ensureRuntimeReady() async throws {
+        if repository != nil, helperModelSettings != nil { return }
+        let repo = try await AgentServiceStore.shared.sharedRepository()
+        repository = repo
+        let settings = await MainActor.run {
+            LLMModelSettings(repository: repo)
+        }
+        await settings.loadSettings()
+        helperModelSettings = settings
+        await EgressAllowlistService.shared.configure(repository: repo)
+        await ContentSensitivityGrantService.shared.configure(repository: repo)
+        await UsageLimitsService.shared.configure(repository: repo)
+        await EgressAllowlistService.shared.pushToHelper()
+    }
+
     func startTurn(
         request: AgentTurnRequest,
         connectionContext: AgentServiceConnectionContext
     ) async -> AgentTurnAccepted {
         do {
-            let model = try await ensureConversation(applicationName: request.applicationName)
+            let isJobWake = request.delivery == .jobResultModal
+                || JobSessionID.isJobSession(request.sessionID)
+            let model: ConversationModel
+            let sid: String
+            if isJobWake {
+                let jobSession = request.sessionID ?? JobSessionID.make()
+                model = try await ensureJobConversation(jobSessionID: jobSession)
+                sid = jobSession
+            } else {
+                model = try await ensureConversation(applicationName: request.applicationName)
+                sid = sessionID ?? model.sessionKey.sessionID
+            }
             let llmModel = try JSONDecoder().decode(LLMModelChoice.self, from: request.modelJSON)
             let turnID = request.turnID
-            let sid = sessionID ?? model.sessionKey.sessionID
             let prompt = request.prompt
             let apiKey = request.apiKey
             let apiKeyEmpty = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let delivery = isJobWake ? AgentTurnDelivery.jobResultModal : request.delivery
+            let jobID = request.jobID
+            let parentSessionID = request.parentSessionID
 
             tasks[turnID]?.cancel()
             tasks[turnID] = Task {
@@ -80,13 +152,17 @@ actor AgentServiceTurnHost {
                     prompt: prompt,
                     apiKey: apiKey,
                     model: llmModel,
-                    connectionContext: connectionContext
+                    connectionContext: connectionContext,
+                    delivery: delivery,
+                    jobID: jobID,
+                    jobSessionID: sid,
+                    parentSessionID: parentSessionID
                 )
             }
 
             await AgentServiceStore.shared.log(
                 level: .info,
-                message: "startTurn accepted id=\(turnID) model=\(llmModel.id) apiKeyEmpty=\(apiKeyEmpty)",
+                message: "startTurn accepted id=\(turnID) model=\(llmModel.id) apiKeyEmpty=\(apiKeyEmpty) delivery=\(delivery.rawValue) session=\(sid)",
                 code: "start_turn_accepted"
             )
 
@@ -123,25 +199,37 @@ actor AgentServiceTurnHost {
         prompt: String,
         apiKey: String,
         model: LLMModelChoice,
-        connectionContext: AgentServiceConnectionContext
+        connectionContext: AgentServiceConnectionContext,
+        delivery: AgentTurnDelivery,
+        jobID: String?,
+        jobSessionID: String,
+        parentSessionID: String?
     ) async {
         await AgentServiceStore.shared.log(
             level: .info,
-            message: "turn started id=\(turnID) chars=\(prompt.count)",
+            message: "turn started id=\(turnID) chars=\(prompt.count) delivery=\(delivery.rawValue)",
             code: "turn_start"
         )
         let counter = ChunkCounter()
+        let responseBox = ResponseAccumulator()
+        let suppressChatStream = delivery == .jobResultModal
         let approvalPresenter = XPCRemoteApprovalPresenter(turnID: turnID) {
+            // Job wakes: prefer UI primary sink for any HITL; else silent.
             connectionContext.clientSink(logLabel: "approval")
+                ?? AgentServicePrimaryUISink.shared.clientSink(logLabel: "approval-ui")
         }
         let networkPrompt: @Sendable (String, String) async -> PolicyUserInteraction.PolicyUserDecision = { host, toolName in
             await XPCRemoteNetworkAccess.prompt(
                 host: host,
                 toolName: toolName,
-                resolveSink: { connectionContext.clientSink(logLabel: "network") }
+                resolveSink: {
+                    connectionContext.clientSink(logLabel: "network")
+                        ?? AgentServicePrimaryUISink.shared.clientSink(logLabel: "network-ui")
+                }
             )
         }
         // Process-wide slots: MCP tool tasks do not inherit TaskLocal from the turn task.
+        // Job wakes still install here; concurrent user turns remain a known gap (queued later).
         TurnProcessContext.installProcessTurnContext(apiKey: apiKey, networkAccessPrompt: networkPrompt)
         defer { TurnProcessContext.clearProcessTurnContext() }
         do {
@@ -154,6 +242,10 @@ actor AgentServiceTurnHost {
                         approvalPresenter: approvalPresenter
                     ) { chunk in
                         let n = counter.increment()
+                        if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
+                            responseBox.append(text)
+                        }
+                        guard !suppressChatStream else { return }
                         let dto = AgentTurnChunkDTO(
                             turnID: turnID,
                             status: chunk.status.rawValue,
@@ -177,12 +269,33 @@ actor AgentServiceTurnHost {
             }
 
             let chunkCount = counter.value
-            if Task.isCancelled {
+            if delivery == .jobResultModal {
+                let text = responseBox.joined.trimmingCharacters(in: .whitespacesAndNewlines)
+                if Task.isCancelled {
+                    await AgentServiceStore.shared.log(
+                        level: .warning,
+                        message: "job wake cancelled turn=\(turnID)",
+                        code: "job_wake_cancelled"
+                    )
+                } else if text.isEmpty {
+                    await AgentServiceStore.shared.log(
+                        level: .error,
+                        message: "job wake empty response turn=\(turnID)",
+                        code: "job_wake_empty"
+                    )
+                } else {
+                    await self.finishJobResult(
+                        responseText: text,
+                        jobID: jobID,
+                        jobSessionID: jobSessionID,
+                        parentSessionID: parentSessionID
+                    )
+                }
+            } else if Task.isCancelled {
                 let err = AgentTurnErrorDTO(turnID: turnID, message: "cancelled", code: "cancelled")
                 let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
                 Self.deliverFinish(turnID: turnID, errorJSON: data as NSData, connectionContext: connectionContext)
             } else if chunkCount == 0 {
-                // Surface empty pipeline as an error so the UI does not hang on a blank bubble.
                 let err = AgentTurnErrorDTO(
                     turnID: turnID,
                     message: "AgentService turn completed with no response chunks (empty model stream or pipeline early exit).",
@@ -195,7 +308,7 @@ actor AgentServiceTurnHost {
             }
             await AgentServiceStore.shared.log(
                 level: chunkCount == 0 ? .error : .info,
-                message: "turn finished id=\(turnID) cancelled=\(Task.isCancelled) chunks=\(chunkCount)",
+                message: "turn finished id=\(turnID) cancelled=\(Task.isCancelled) chunks=\(chunkCount) delivery=\(delivery.rawValue)",
                 code: "turn_finish"
             )
         } catch {
@@ -205,18 +318,67 @@ actor AgentServiceTurnHost {
                 message: "turn failed id=\(turnID): \(message)",
                 code: "turn_failed"
             )
-            let err = AgentTurnErrorDTO(turnID: turnID, message: message, code: "stream_error")
-            let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
-            let delivered = Self.deliverFinish(
-                turnID: turnID,
-                errorJSON: data as NSData,
-                connectionContext: connectionContext
-            )
-            if !delivered {
-                fputs("[AgentService] drop finish-error (nil sink) turn=\(turnID)\n", stderr)
+            if delivery != .jobResultModal {
+                let err = AgentTurnErrorDTO(turnID: turnID, message: message, code: "stream_error")
+                let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
+                let delivered = Self.deliverFinish(
+                    turnID: turnID,
+                    errorJSON: data as NSData,
+                    connectionContext: connectionContext
+                )
+                if !delivered {
+                    fputs("[AgentService] drop finish-error (nil sink) turn=\(turnID)\n", stderr)
+                }
             }
         }
         tasks[turnID] = nil
+    }
+
+    private func finishJobResult(
+        responseText: String,
+        jobID: String?,
+        jobSessionID: String,
+        parentSessionID: String?
+    ) async {
+        let result = JobResultDTO(
+            jobID: jobID ?? "unknown",
+            jobSessionID: jobSessionID,
+            parentSessionID: parentSessionID,
+            responseText: responseText
+        )
+        if let repo = repository {
+            do {
+                try await repo.insertJobResult(
+                    DBRepository.JobResultRow(
+                        id: result.id,
+                        jobID: result.jobID,
+                        jobSessionID: result.jobSessionID,
+                        parentSessionID: result.parentSessionID,
+                        responseText: result.responseText,
+                        createdAt: result.createdAt
+                    )
+                )
+            } catch {
+                fputs("[AgentService] persist job result failed: \(error.localizedDescription)\n", stderr)
+            }
+        }
+        guard let data = try? JSONEncoder.service.encode(result) else { return }
+        if let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result") {
+            ui.presentJobResult(data as NSData)
+            fputs("[AgentService] presentJobResult delivered to UI job=\(result.jobID)\n", stderr)
+        } else {
+            // UI quit: do not call UserNotifications from this XPC process (bundleProxy is nil).
+            // JobKeepAlive polls job_results and posts notifications; UI loads unread on launch.
+            fputs(
+                "[AgentService] no UI sink — result persisted id=\(result.id) (KeepAlive/UI will surface)\n",
+                stderr
+            )
+        }
+        await AgentServiceStore.shared.log(
+            level: .info,
+            message: "job result ready job=\(result.jobID) chars=\(responseText.count) uiSink=\(AgentServicePrimaryUISink.shared.clientSink(logLabel: "probe") != nil)",
+            code: "job_result_ready"
+        )
     }
 
     /// Deliver to the initiating connection sink. Also to primary UI only when the initiator is

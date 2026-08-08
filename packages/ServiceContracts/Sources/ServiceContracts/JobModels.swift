@@ -79,24 +79,80 @@ public struct JobRunToolBatchPayload: Codable, Sendable, Hashable {
 /// Payload for `wakeAgent`.
 public struct JobWakeAgentPayload: Codable, Sendable, Hashable {
     public let prompt: String
+    /// Job-isolated memory session (prefix `job-`). Never the live chat session.
     public let sessionID: String?
     public let agentID: String?
     /// Encoded LLM model choice JSON (same as AgentTurnRequest.modelJSON).
     public let modelJSON: Data?
     public let apiKey: String?
+    /// Durable job id (filled when the job row is created if missing).
+    public let jobID: String?
+    /// Live chat session that placed the order (audit / UI correlation only).
+    public let parentSessionID: String?
 
     public init(
         prompt: String,
         sessionID: String? = nil,
         agentID: String? = nil,
         modelJSON: Data? = nil,
-        apiKey: String? = nil
+        apiKey: String? = nil,
+        jobID: String? = nil,
+        parentSessionID: String? = nil
     ) {
         self.prompt = prompt
         self.sessionID = sessionID
         self.agentID = agentID
         self.modelJSON = modelJSON
         self.apiKey = apiKey
+        self.jobID = jobID
+        self.parentSessionID = parentSessionID
+    }
+
+    /// True when this wake must not touch the live chat session stream.
+    public var isJobIsolatedSession: Bool {
+        guard let sessionID else { return false }
+        return sessionID.hasPrefix(JobSessionID.prefix)
+    }
+}
+
+/// Helpers for job-isolated session ids (`job-<uuid>`).
+public enum JobSessionID {
+    public static let prefix = "job-"
+    public static let agentID = "job"
+
+    public static func make() -> String {
+        prefix + UUID().uuidString
+    }
+
+    public static func isJobSession(_ sessionID: String?) -> Bool {
+        guard let sessionID else { return false }
+        return sessionID.hasPrefix(prefix)
+    }
+}
+
+/// Delivered to UI when a scheduled job wake completes (modal / notification).
+public struct JobResultDTO: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let jobID: String
+    public let jobSessionID: String
+    public let parentSessionID: String?
+    public let responseText: String
+    public let createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        jobID: String,
+        jobSessionID: String,
+        parentSessionID: String? = nil,
+        responseText: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.jobID = jobID
+        self.jobSessionID = jobSessionID
+        self.parentSessionID = parentSessionID
+        self.responseText = responseText
+        self.createdAt = createdAt
     }
 }
 

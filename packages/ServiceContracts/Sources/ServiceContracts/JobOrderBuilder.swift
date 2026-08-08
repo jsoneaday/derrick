@@ -138,11 +138,15 @@ public enum JobOrderBuilder {
 
         let step: CreateJobStepSpec
         if input.wakeAfter {
+            // Branch memory: job session is isolated from the live chat session.
+            let jobSessionID = JobSessionID.make()
             let wake = JobWakeAgentPayload(
                 prompt: input.wakePrompt ?? "",
-                sessionID: sessionID,
-                agentID: agentID,
-                apiKey: helperAPIKey
+                sessionID: jobSessionID,
+                agentID: JobSessionID.agentID,
+                apiKey: helperAPIKey,
+                jobID: nil,
+                parentSessionID: sessionID
             )
             step = try .runToolThenWake(JobRunToolThenWakePayload(tool: toolPayload, wake: wake))
         } else {
@@ -211,11 +215,14 @@ public enum JobOrderBuilder {
 
         let step: CreateJobStepSpec
         if input.wakeAfter {
+            let jobSessionID = JobSessionID.make()
             let wake = JobWakeAgentPayload(
                 prompt: input.wakePrompt ?? "",
-                sessionID: sessionID,
-                agentID: agentID,
-                apiKey: helperAPIKey
+                sessionID: jobSessionID,
+                agentID: JobSessionID.agentID,
+                apiKey: helperAPIKey,
+                jobID: nil,
+                parentSessionID: sessionID
             )
             step = try .runToolThenWake(JobRunToolThenWakePayload(tool: toolPayload, wake: wake))
         } else {

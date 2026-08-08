@@ -81,11 +81,19 @@ final class ConversationModel {
         self.mcpToolInstructions = mcpToolInstructions
     }
 
-    static func makeDefault(repository: DBRepository, helperModelSettings: LLMModelSettings) async throws -> ConversationModel {
-        let sessionID = UUID().uuidString
+    static func makeDefault(
+        repository: DBRepository,
+        helperModelSettings: LLMModelSettings,
+        sessionID: String? = nil,
+        agentIDOverride: String? = nil
+    ) async throws -> ConversationModel {
+        let sessionID = sessionID ?? UUID().uuidString
         let orchestrator = SessionOrchestrator(sessionID: sessionID)
         try await orchestrator.bootstrapUserFacingAgent()
-        let sessionKey = orchestrator.memorySessionKey
+        var sessionKey = orchestrator.memorySessionKey
+        if let agentIDOverride {
+            sessionKey = MemorySessionKey(sessionID: sessionKey.sessionID, agentID: agentIDOverride)
+        }
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = try PromptResources.mcpToolInstructions()
@@ -95,7 +103,7 @@ final class ConversationModel {
             settings: helperModelSettings,
             systemPrompt: summarizerInstructions
         )
-        debugLog("Memory bootstrap started")
+        debugLog("Memory bootstrap started session=\(sessionKey.sessionID) agent=\(sessionKey.agentID)")
         debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
 
         let agentsHost = try await makeAgentsOrchestrationHost(
@@ -445,7 +453,7 @@ final class ConversationModel {
         iso.formatOptions = [.withInternetDateTime]
         let runAtStr = job.runAt.map { iso.string(from: $0) } ?? "asap"
         return """
-        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created."}
+        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. Result will open in a modal when it finishes (not in this chat thread)."}
         """
     }
 

@@ -1,5 +1,13 @@
 import Foundation
 
+/// How turn output is delivered to the client.
+public enum AgentTurnDelivery: String, Codable, Sendable, Hashable {
+    /// Stream chunks into the active chat (default).
+    case chatStream
+    /// Collect completion and surface as a job-result modal/notification (no chat injection).
+    case jobResultModal
+}
+
 /// Request to run one user-facing conversation turn in AgentService.
 public struct AgentTurnRequest: Codable, Sendable, Hashable {
     public let turnID: String
@@ -9,6 +17,9 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
     /// Encoded `LLMModelChoice` JSON (SharedAgentRuntime type).
     public let modelJSON: Data
     public let applicationName: String
+    public let delivery: AgentTurnDelivery
+    public let jobID: String?
+    public let parentSessionID: String?
 
     public init(
         turnID: String = UUID().uuidString,
@@ -16,7 +27,10 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         prompt: String,
         apiKey: String,
         modelJSON: Data,
-        applicationName: String = DerrickAppSupport.defaultApplicationName
+        applicationName: String = DerrickAppSupport.defaultApplicationName,
+        delivery: AgentTurnDelivery = .chatStream,
+        jobID: String? = nil,
+        parentSessionID: String? = nil
     ) {
         self.turnID = turnID
         self.sessionID = sessionID
@@ -24,6 +38,9 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         self.apiKey = apiKey
         self.modelJSON = modelJSON
         self.applicationName = applicationName
+        self.delivery = delivery
+        self.jobID = jobID
+        self.parentSessionID = parentSessionID
     }
 }
 

@@ -7,6 +7,32 @@ import ServiceContracts
 
 extension NSData: @unchecked @retroactive Sendable {}
 
+/// Ensures an XPC reply continuation is resumed at most once (timeout + late reply race).
+private final class XPCReplyOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<Data, Error>?
+
+    init(_ cont: CheckedContinuation<Data, Error>) {
+        self.cont = cont
+    }
+
+    func resume(returning value: Data) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
+    }
+
+    func resume(throwing error: Error) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(throwing: error)
+    }
+}
+
 private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked Sendable {
 
     func appendLog(message: String) {
@@ -116,6 +142,23 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 lock.unlock()
             }
         }
+
+        /// Unblock waiters without treating prewarm as a hard failure (used by wait ceiling).
+        func forceCompleteIfStillWaiting() {
+            lock.lock()
+            if completed {
+                lock.unlock()
+                return
+            }
+            completed = true
+            failure = nil
+            let pending = waiters
+            waiters = []
+            lock.unlock()
+            for waiter in pending {
+                waiter.resume()
+            }
+        }
     }
 
     private let prewarmState = PrewarmState()
@@ -177,8 +220,21 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     }
 
     /// Wait until docker volumes/image/warm containers are ready (or throw if prewarm failed).
+    /// Hard-capped so a stuck helper can never freeze the init modal forever.
     public func waitUntilPrewarmed() async throws {
-        try await prewarmState.wait()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await self.prewarmState.wait()
+            }
+            group.addTask {
+                // Max time for entire prewarm (volumes + image + containers + optional smoke).
+                try await Task.sleep(nanoseconds: 90_000_000_000)
+                debugLog("Docker prewarm wait hit 90s ceiling — forcing complete so UI can proceed.")
+                self.prewarmState.forceCompleteIfStillWaiting()
+            }
+            try await group.next()
+            group.cancelAll()
+        }
     }
 
     public var isPrewarmCompleted: Bool {
@@ -216,19 +272,53 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             environment: DockerScriptPreparer.processEnvironment()
         )
         let requestData = try JSONEncoder().encode(request)
-        let responseData: Data = try await withCheckedThrowingContinuation { continuation in
-            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
-                continuation.resume(throwing: error)
-            }
-            guard let service = proxy as? any DockerProcessRunnerXPC else {
-                continuation.resume(throwing: NSError(domain: "XPCDockerRunner", code: 2, userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]))
-                return
-            }
-            Task { @MainActor in
-                service.runProcess(requestData: requestData as NSData) { replyNSData in
-                    continuation.resume(returning: replyNSData as Data)
+        // Helper enforces timeoutSeconds on the process; also bound the XPC round-trip so a dead
+        // helper / lost reply cannot hang bootstrap forever (was stuck on "Verifying runtime…").
+        let clientTimeoutNs = UInt64(max(timeoutSeconds + 15, 30)) * 1_000_000_000
+        nonisolated(unsafe) let payload = requestData as NSData
+        let responseData: Data = try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                    let box = XPCReplyOnce(continuation)
+                    let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                        box.resume(throwing: error)
+                    }
+                    guard let service = proxy as? any DockerProcessRunnerXPC else {
+                        box.resume(
+                            throwing: NSError(
+                                domain: "XPCDockerRunner",
+                                code: 2,
+                                userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]
+                            )
+                        )
+                        return
+                    }
+                    // Do not hop to MainActor — bootstrap may be waiting on MainActor-isolated UI code.
+                    service.runProcess(requestData: payload) { replyNSData in
+                        box.resume(returning: replyNSData as Data)
+                    }
                 }
             }
+            group.addTask {
+                try await Task.sleep(nanoseconds: clientTimeoutNs)
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 504,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Docker helper XPC timed out after \(timeoutSeconds + 15)s (no reply)."
+                    ]
+                )
+            }
+            guard let first = try await group.next() else {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 504,
+                    userInfo: [NSLocalizedDescriptionKey: "Docker helper XPC timed out."]
+                )
+            }
+            group.cancelAll()
+            return first
         }
         let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         if let launchError = response.launchError {
@@ -468,7 +558,10 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             try await ensureWarmContainer(allowNetwork: false)
 
             await reportBootstrap(phase: .verifyingEnvironment, message: "Verifying runtime environment…")
-            try await smokeTestBaseline()
+            // Do NOT run full baseline package smoke on the critical path. A hung docker-exec
+            // over XPC previously froze the init modal. Containers already running is enough;
+            // first python_script_exec still exercises packages.
+            debugLog("Pre-warming: Skipping baseline package smoke (containers ready).")
 
             prewarmState.markCompleted()
             debugLog("Docker environment pre-warming completed successfully.")

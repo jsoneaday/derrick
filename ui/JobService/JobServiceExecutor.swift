@@ -206,9 +206,11 @@ actor JobServiceExecutor {
         wake = JobWakeAgentPayload(
             prompt: combinedPrompt,
             sessionID: wake.sessionID,
-            agentID: wake.agentID,
+            agentID: wake.agentID ?? JobSessionID.agentID,
             modelJSON: wake.modelJSON,
-            apiKey: wake.apiKey
+            apiKey: wake.apiKey,
+            jobID: wake.jobID,
+            parentSessionID: wake.parentSessionID
         )
         let wakeJSON = String(data: try JSONEncoder.service.encode(wake), encoding: .utf8) ?? "{}"
         let wakeResult = try await wakeAgentStep(payloadJSON: wakeJSON)
