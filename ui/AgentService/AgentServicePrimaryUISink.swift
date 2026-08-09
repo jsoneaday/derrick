@@ -1,3 +1,5 @@
+import AppKit
+import AppKit
 import Foundation
 import ServiceContracts
 
@@ -12,10 +14,21 @@ final class AgentServicePrimaryUISink: @unchecked Sendable {
 
     private init() {}
 
+    /// Adopt `connection` only when it exports `AgentServiceClientSinkXPC` (AgentServiceClient).
+    /// Job/MCP host clients open additional daemon Mach connections from the same UI process;
+    /// they must not replace the reverse sink used for job-result modals.
     func attach(connection: NSXPCConnection) {
         lock.lock()
+        defer { lock.unlock() }
+        if let current = self.connection, current === connection { return }
+        if let current = self.connection, current !== connection, peerIsAlive(current) {
+            fputs(
+                "[AgentService] primary UI sink attach skipped pid=\(connection.processIdentifier) (keeping pid=\(current.processIdentifier))\n",
+                stderr
+            )
+            return
+        }
         self.connection = connection
-        lock.unlock()
         fputs("[AgentService] primary UI sink attached pid=\(connection.processIdentifier)\n", stderr)
     }
 
@@ -23,6 +36,7 @@ final class AgentServicePrimaryUISink: @unchecked Sendable {
         lock.lock()
         if self.connection === connection {
             self.connection = nil
+            fputs("[AgentService] primary UI sink detached pid=\(connection.processIdentifier)\n", stderr)
         }
         lock.unlock()
     }
@@ -40,7 +54,6 @@ final class AgentServicePrimaryUISink: @unchecked Sendable {
         let conn = connection
         lock.unlock()
         guard let conn else {
-            // Quiet: job-only / pre-UI boots have no primary yet.
             return nil
         }
         let proxy = conn.remoteObjectProxyWithErrorHandler { error in
@@ -54,5 +67,11 @@ final class AgentServicePrimaryUISink: @unchecked Sendable {
             return nil
         }
         return sink
+    }
+
+    private func peerIsAlive(_ connection: NSXPCConnection) -> Bool {
+        let pid = connection.processIdentifier
+        guard pid > 0 else { return false }
+        return NSRunningApplication(processIdentifier: pid) != nil
     }
 }

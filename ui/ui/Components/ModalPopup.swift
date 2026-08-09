@@ -72,8 +72,6 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
                 }
                 .accessibilityHidden(true)
 
-            // Prefer content-sized card; only if it does not fit do we use a scrolling body.
-            // Background is on the card itself — never on a maxHeight-expanded frame (avoids empty gaps).
             ViewThatFits(in: .vertical) {
                 styledCard(scrollBody: false)
                 styledCard(scrollBody: true)
@@ -101,7 +99,6 @@ struct ModalPopup<Header: View, BodyContent: View, Footer: View>: View {
             .background(
                 RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius)
                     .fill(Color(nsColor: .windowBackgroundColor))
-                    .shadow(color: .black.opacity(0.25), radius: 24, x: 0, y: 8)
             )
             .clipShape(RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius))
             .frame(maxHeight: scrollBody ? maxHeight : nil, alignment: .top)

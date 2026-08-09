@@ -315,6 +315,30 @@ final class DerrickNotificationService {
         await presentJobResultFromNotificationTap(id: id)
     }
 
+    /// Live delivery from AgentService reverse XPC — present immediately from DTO (no DB fetch race).
+    func presentJobResultLive(_ dto: JobResultDTO) async {
+        DerrickMainWindowBridge.ensureMainWindow()
+        let row = DBRepository.JobResultRow(
+            id: dto.id,
+            jobID: dto.jobID,
+            jobSessionID: dto.jobSessionID,
+            parentSessionID: dto.parentSessionID,
+            responseText: dto.responseText,
+            createdAt: dto.createdAt
+        )
+        var scheduledAt: Date?
+        if let repository = await ensureRepository() {
+            scheduledAt = try? await repository.fetchJobRunAt(jobID: dto.jobID)
+        }
+        JobResultPresenter.shared.present(
+            row: row,
+            scheduledAt: scheduledAt,
+            ephemeralSession: false
+        )
+        await markJobResultRead(id: dto.id)
+        fputs("[HumanDecision] job result live modal id=\(dto.id)\n", stderr)
+    }
+
     private func presentJobResultFromNotificationTap(id: String) async {
         // Standalone floating panel only — do not reopen the main chat window.
         guard await ensureRepository() != nil else { return }

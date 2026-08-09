@@ -384,11 +384,25 @@ actor AgentServiceTurnHost {
                         createdAt: result.createdAt
                     )
                 )
+                let uiRunning = DerrickUIPresence.isInteractiveUIRunning()
+                let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result")
+                if uiRunning {
+                    if sink != nil {
+                        Self.presentJobResultToUIIfConnected(result)
+                    } else {
+                        fputs(
+                            "[AgentService] UI running but reverse sink missing; Darwin wake for \(result.id)\n",
+                            stderr
+                        )
+                        DerrickNotificationLaunch.postShowJobResult(result.id)
+                    }
+                }
                 await JobResultNotifier.notifyCompletion(
                     resultID: result.id,
                     jobID: result.jobID,
                     responseText: result.responseText,
-                    repository: repo
+                    repository: repo,
+                    liveUIModal: uiRunning
                 )
             } catch {
                 fputs("[AgentService] persist job result failed: \(error.localizedDescription)\n", stderr)
@@ -400,6 +414,17 @@ actor AgentServiceTurnHost {
             message: "job result ready job=\(result.jobID) chars=\(responseText.count) uiSink=\(AgentServicePrimaryUISink.shared.clientSink(logLabel: "probe") != nil)",
             code: "job_result_ready"
         )
+    }
+
+    /// Direct reverse-XPC to the connected UI — reliable when derrick.ui is already running.
+    @discardableResult
+    private static func presentJobResultToUIIfConnected(_ result: JobResultDTO) -> Bool {
+        guard let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result"),
+              let data = try? JSONEncoder.service.encode(result)
+        else { return false }
+        sink.presentJobResult(data as NSData)
+        fputs("[AgentService] job result delivered to UI sink id=\(result.id)\n", stderr)
+        return true
     }
 
     /// Deliver to the initiating connection sink. Also to primary UI only when the initiator is

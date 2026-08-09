@@ -247,7 +247,10 @@ final class DaemonUnifiedListenerDelegate: NSObject, NSXPCListenerDelegate, @unc
         } catch {
             fputs("[derrickd] peer auth soft-fail: \(error.localizedDescription)\n", stderr)
         }
-        newConnection.invalidationHandler = {
+        newConnection.invalidationHandler = { [weak newConnection] in
+            if let newConnection {
+                AgentServicePrimaryUISink.shared.detach(connection: newConnection)
+            }
             fputs("[derrickd] client connection invalidated\n", stderr)
         }
         newConnection.resume()

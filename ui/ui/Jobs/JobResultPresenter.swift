@@ -77,6 +77,10 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         scheduledAt: Date? = nil,
         ephemeralSession: Bool = false
     ) {
+        if let current = activeResult, current.id == row.id, isPresented {
+            fputs("[ui] JobResultPresenter skip duplicate id=\(row.id)\n", stderr)
+            return
+        }
         self.ephemeralSession = ephemeralSession
         if ephemeralSession {
             allowsTermination = false
@@ -262,7 +266,6 @@ private struct JobResultStandaloneCard: View {
             RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
         .padding(16)
         .preferredColorScheme(.light)
     }

@@ -67,11 +67,11 @@ public enum DaemonUILauncher: Sendable {
 
         let uiApps = NSRunningApplication
             .runningApplications(withBundleIdentifier: DerrickServiceID.ui.rawValue)
-        // Only an interactive (regular) UI can consume the Darwin wake as an in-process panel.
-        // Accessory job-worker / stale panel processes must not block a fresh panel launch.
-        let interactiveUIRunning = uiApps.contains { $0.activationPolicy == .regular }
-        if interactiveUIRunning {
-            fputs("[derrickd] present-job-result wake \(id) (interactive UI running)\n", stderr)
+        // Any live derrick.ui process should consume the Darwin wake in-process.
+        // Spawning `open -n` while the main UI is up races the pending-result file and
+        // often produces an invisible accessory panel.
+        if !uiApps.isEmpty {
+            fputs("[derrickd] present-job-result wake \(id) (UI already running)\n", stderr)
             return
         }
 

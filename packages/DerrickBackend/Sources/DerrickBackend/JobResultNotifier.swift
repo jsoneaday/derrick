@@ -1,3 +1,4 @@
+import AppKit
 import DBRepository
 import Foundation
 import ServiceContracts
@@ -5,12 +6,27 @@ import ServiceContracts
 /// Persisted job result → Daemon UserNotifications (sole poster).
 public enum JobResultNotifier: Sendable {
     /// Claim DB row and ask the Daemon to post. Safe to call from AgentService / JobService.
+    /// When `liveUIModal` is true the interactive UI is already showing the result panel — skip notification + wake.
     public static func notifyCompletion(
         resultID: String,
         jobID: String,
         responseText: String,
-        repository: DBRepository
+        repository: DBRepository,
+        liveUIModal: Bool = false
     ) async {
+        if liveUIModal {
+            fputs("[JobResultNotifier] skip notification (live UI modal) id=\(resultID)\n", stderr)
+            return
+        }
+
+        guard DerrickUIPresence.isInteractiveUIRunning() == false else {
+            fputs(
+                "[JobResultNotifier] skip notification (derrick.ui running; live modal path) id=\(resultID)\n",
+                stderr
+            )
+            return
+        }
+
         do {
             let claimed = try await repository.claimJobResultNotificationPost(id: resultID)
             guard claimed else {
@@ -59,5 +75,6 @@ public enum JobResultNotifier: Sendable {
                 stderr
             )
         }
+        // Modal is shown only when the user taps the notification (DaemonNotificationCenterDelegate).
     }
 }
