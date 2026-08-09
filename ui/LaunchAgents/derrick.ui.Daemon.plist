@@ -3,9 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>derrick.ui.JobKeepAlive</string>
+	<string>derrick.ui.Daemon</string>
 	<key>BundleProgram</key>
-	<string>Contents/MacOS/JobKeepAlive</string>
+	<string>Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive</string>
+	<key>MachServices</key>
+	<dict>
+		<key>VUSK4B2YKQ.derrick.shared.daemon</key>
+		<true/>
+	</dict>
 	<key>AssociatedBundleIdentifiers</key>
 	<array>
 		<string>derrick.ui</string>

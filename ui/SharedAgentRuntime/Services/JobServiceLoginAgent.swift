@@ -1,16 +1,23 @@
 import Foundation
 import ServiceManagement
+import ServiceContracts
 
-/// Registers the keep-alive that holds JobService up for the user session.
+/// Registers the headless Derrick Daemon LoginAgent for the user session.
 ///
-/// Strategy (reliable for Xcode/dev + production):
-/// 1. Best-effort `SMAppService` registration (Login Items / BTM).
-/// 2. **Always** run `JobKeepAlive --install-launchd` (non-sandboxed helper writes
-///    `~/Library/LaunchAgents` + `launchctl bootstrap`). This is what actually keeps
-///    the process alive when SM's submitted job is missing or stuck.
+/// Primary path: `SMAppService` (allowed from the sandboxed UI).
+/// Secondary path: spawn daemon `--install-launchd` (writes `~/Library/LaunchAgents`).
+/// Helper install often fails when the child inherits the UI sandbox — skip it when SM is already enabled.
 public enum JobServiceLoginAgent {
-    public static let plistName = "derrick.ui.JobKeepAlive.plist"
-    public static let label = "derrick.ui.JobKeepAlive"
+    /// Embedded SMAppService plist under `Contents/Library/LaunchAgents/`.
+    public static let plistName = "derrick.ui.Daemon.plist"
+    /// Pre-rename SM plist; unregister on upgrade so BTM does not keep a stale agent.
+    public static let legacyPlistName = "derrick.ui.JobKeepAlive.plist"
+    public static let label = DerrickServiceID.daemon.rawValue
+    public static let executableName = "JobKeepAlive"
+    /// Relative path inside the host app for the LSUIElement daemon bundle.
+    public static let embeddedAppRelativePath = "Contents/Library/LoginItems/JobKeepAlive.app"
+    public static let embeddedExecutableRelativePath =
+        "\(embeddedAppRelativePath)/Contents/MacOS/\(executableName)"
 
     public enum Method: String, Sendable {
         case smAppService
@@ -33,14 +40,18 @@ public enum JobServiceLoginAgent {
         public var errorDescription: String? {
             switch self {
             case .missingPlist(let p): return "LaunchAgent plist missing in app bundle: \(p)"
-            case .missingExecutable(let p): return "JobKeepAlive executable missing: \(p)"
-            case .registerFailed(let m): return "Failed to register JobKeepAlive: \(m)"
+            case .missingExecutable(let p): return "Daemon executable missing: \(p)"
+            case .registerFailed(let m): return "Failed to register Derrick daemon: \(m)"
             }
         }
     }
 
     private static var smAgent: SMAppService {
         SMAppService.agent(plistName: plistName)
+    }
+
+    private static var legacySMAgent: SMAppService {
+        SMAppService.agent(plistName: legacyPlistName)
     }
 
     public static var smStatusDescription: String {
@@ -51,12 +62,11 @@ public enum JobServiceLoginAgent {
         let root = Bundle.main.bundleURL
         let plist = root
             .appendingPathComponent("Contents/Library/LaunchAgents/\(plistName)", isDirectory: false)
-        let exe = root
-            .appendingPathComponent("Contents/MacOS/JobKeepAlive", isDirectory: false)
+        let exe = root.appendingPathComponent(embeddedExecutableRelativePath, isDirectory: false)
         return (plist, exe)
     }
 
-    /// Register / refresh keep-alive. Call from the main actor after JobService is healthy.
+    /// Register / refresh daemon. Call from the main actor after services are healthy.
     @MainActor
     @discardableResult
     public static func ensureRegistered() throws -> Result {
@@ -68,53 +78,79 @@ public enum JobServiceLoginAgent {
             throw AgentError.missingExecutable(paths.executable.path)
         }
 
+        // Drop pre-rename SM registration if present (plist renamed JobKeepAlive → Daemon).
+        if legacySMAgent.status != .notRegistered, legacySMAgent.status != .notFound {
+            try? legacySMAgent.unregister()
+            fputs("[derrickd] unregistered legacy SM agent \(legacyPlistName)\n", stderr)
+        }
+
         fputs(
-            "[JobKeepAlive] ensureRegistered bundle=\(Bundle.main.bundleURL.path) sm=\(describe(smAgent.status))\n",
+            "[derrickd] ensureRegistered bundle=\(Bundle.main.bundleURL.path) sm=\(describe(smAgent.status))\n",
             stderr
         )
 
         var smDetail = "SM skipped"
-        var smOK = false
+        var smEnabled = false
+        var smNeedsApproval = false
         do {
             if let r = try registerViaSMAppService() {
                 smDetail = r.detail
-                smOK = r.isRunningOrEnabled || r.statusDescription.contains("requiresApproval")
+                smEnabled = r.isRunningOrEnabled
+                smNeedsApproval = r.statusDescription.contains("requiresApproval")
             }
         } catch {
             smDetail = "SM failed: \(error.localizedDescription)"
-            fputs("[JobKeepAlive] \(smDetail)\n", stderr)
+            fputs("[derrickd] \(smDetail)\n", stderr)
         }
 
-        // Reliable path: non-sandboxed helper installs user LaunchAgent + kickstarts.
-        var installDetail = "helper install not run"
-        do {
-            try runHelperInstall(executable: paths.executable)
-            installDetail = "helper --install-launchd ok"
-        } catch {
-            installDetail = "helper install failed: \(error.localizedDescription)"
-            fputs("[JobKeepAlive] \(installDetail)\n", stderr)
+        // User LaunchAgent only when SM is not already owning the agent.
+        var installDetail = "helper install skipped (SM enabled)"
+        if !smEnabled {
+            if isLaunchdJobLoaded() {
+                installDetail = "launchd job already loaded"
+            } else {
+                do {
+                    try runHelperInstall(executable: paths.executable)
+                    installDetail = isLaunchdJobLoaded()
+                        ? "helper --install-launchd ok"
+                        : "helper --install-launchd returned but launchd job not visible"
+                } catch {
+                    installDetail = "helper install unavailable under App Sandbox: \(error.localizedDescription)"
+                    fputs("[derrickd] \(installDetail)\n", stderr)
+                }
+            }
         }
 
-        let running = isLaunchdJobLoaded()
-        // Success if launchd has the job (even when SM-only path looked flaky).
-        if running {
+        let loaded = isLaunchdJobLoaded()
+        if loaded {
             return Result(
-                method: smOK ? .both : .userLaunchAgent,
+                method: smEnabled ? .both : .userLaunchAgent,
                 statusDescription: "launchd loaded",
                 isRunningOrEnabled: true,
-                detail: "\(smDetail); \(installDetail); launchdLoaded=true"
+                detail: "\(smDetail); \(installDetail); label=\(label); mach=\(DerrickServiceID.daemon.machServiceName)"
             )
         }
-        if smOK {
+
+        if smEnabled {
             return Result(
                 method: .smAppService,
                 statusDescription: smStatusDescription,
                 isRunningOrEnabled: true,
-                detail: "\(smDetail); \(installDetail); launchdLoaded=false (SM only)"
+                detail: "\(smDetail); mach=\(DerrickServiceID.daemon.machServiceName) (demand-start via SM)"
             )
         }
+
+        if smNeedsApproval {
+            return Result(
+                method: .smAppService,
+                statusDescription: "requiresApproval",
+                isRunningOrEnabled: false,
+                detail: "\(smDetail); \(installDetail)"
+            )
+        }
+
         throw AgentError.registerFailed(
-            "Could not load keep-alive in launchd. \(smDetail); \(installDetail)"
+            "Could not register derrickd. \(smDetail); \(installDetail). If SM is stuck, run: \(paths.executable.path) --install-launchd"
         )
     }
 
@@ -124,11 +160,24 @@ public enum JobServiceLoginAgent {
 
     public static func unregister() throws {
         try? smAgent.unregister()
-        let dest = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(plistName)")
+        try? legacySMAgent.unregister()
         let uid = getuid()
         _ = try? runLaunchctl(["bootout", "gui/\(uid)/\(label)"])
-        try? FileManager.default.removeItem(at: dest)
+        _ = try? runLaunchctl(["bootout", "gui/\(uid)/\(DerrickServiceID.jobKeepAlive.rawValue)"])
+        let home: URL = {
+            if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+                return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+            }
+            return FileManager.default.homeDirectoryForCurrentUser
+        }()
+        try? FileManager.default.removeItem(
+            at: home.appendingPathComponent("Library/LaunchAgents/\(label).plist")
+        )
+        try? FileManager.default.removeItem(
+            at: home.appendingPathComponent(
+                "Library/LaunchAgents/\(DerrickServiceID.jobKeepAlive.rawValue).plist"
+            )
+        )
     }
 
     // MARK: - SMAppService
@@ -153,13 +202,12 @@ public enum JobServiceLoginAgent {
                 detail: "Approve in System Settings → Login Items"
             )
         case .notRegistered, .notFound:
-            // Force clean re-register when BTM is stale (enabled in BTM but no launchd job).
             try? smAgent.unregister()
             do {
                 try smAgent.register()
             } catch {
                 fputs(
-                    "[JobKeepAlive] SM register error: \((error as NSError).domain) \((error as NSError).code) \(error.localizedDescription)\n",
+                    "[derrickd] SM register error: \((error as NSError).domain) \((error as NSError).code) \(error.localizedDescription)\n",
                     stderr
                 )
                 return nil
@@ -182,7 +230,7 @@ public enum JobServiceLoginAgent {
         }
     }
 
-    // MARK: - Helper install (out-of-sandbox launchctl)
+    // MARK: - Helper install
 
     private static func runHelperInstall(executable: URL) throws {
         let process = Process()
@@ -193,14 +241,25 @@ public enum JobServiceLoginAgent {
         process.standardError = err
         process.standardOutput = out
         try process.run()
-        process.waitUntilExit()
+        let deadline = Date().addingTimeInterval(25)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            throw AgentError.registerFailed("daemon --install-launchd timed out after 25s")
+        }
         let errText = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if !errText.isEmpty {
             fputs(errText, stderr)
         }
         if process.terminationStatus != 0 {
             throw AgentError.registerFailed(
-                "JobKeepAlive --install-launchd exit \(process.terminationStatus): \(errText)"
+                "daemon --install-launchd exit \(process.terminationStatus): \(errText)"
             )
         }
     }
@@ -209,8 +268,7 @@ public enum JobServiceLoginAgent {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["print", "gui/\(getuid())/\(label)"]
-        let out = Pipe()
-        process.standardOutput = out
+        process.standardOutput = Pipe()
         process.standardError = Pipe()
         do {
             try process.run()

@@ -11,12 +11,15 @@
 
 | Process | Bundle / Mach id | Owns |
 | --- | --- | --- |
-| **UI** | `derrick.ui` | Chat, settings, approvals; XPC client; ensure peers up |
-| **AgentService** | `derrick.ui.AgentService` | Agents, mailboxes, turns, memory; LLM; MCP now or Job later |
-| **JobService** | `derrick.ui.JobService` | Durable jobs, schedules, retries; **RunTool** / **WakeAgent** |
-| **MCPService** | `derrick.ui.MCPService` | Tool execution, policy principal, Docker path |
+| **UI** | `derrick.ui` | Chat, settings, approvals; XPC client of Daemon; ensure Daemon up |
+| **Daemon (`derrickd`)** | `derrick.ui.Daemon` | Headless LoginAgent: agent turns, jobs, MCP host, AppEventBus, **sole** UserNotifications poster |
+| **AgentService** | `derrick.ui.AgentService` | *(legacy XPC — folding into Daemon)* |
+| **JobService** | `derrick.ui.JobService` | *(legacy XPC — folding into Daemon)* |
+| **MCPService** | `derrick.ui.MCPService` | *(legacy XPC — folding into Daemon)* |
 | **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent |
 | **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained process runner (existing) |
+
+See [adr-headless-backend.md](adr-headless-backend.md).
 
 **Packaging (locked):** Embedded **XPC services** in the app bundle. **JobKeepAlive** login LaunchAgent (`SMAppService`, RunAtLoad + KeepAlive) holds an XPC connection to JobService for the **user session** (not system boot — no HITL/Keychain without login). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
 
@@ -93,7 +96,7 @@ UI ─────────────────────────�
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
-| **P4** | partial | JobService + schedules; **JobKeepAlive login LaunchAgent**; structured job failures (`error_code` / `Last attempt failed due to…`); late-start `status_detail` after sleep. **Jobs UI** / **HITL queue** / webhook still open. |
+| **P4** | partial | JobService + schedules; **derrickd LoginAgent** (Mach service + notify); structured job failures. Folding Agent/Job/MCP into Daemon next. **Jobs UI** / webhook still open. |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |
 

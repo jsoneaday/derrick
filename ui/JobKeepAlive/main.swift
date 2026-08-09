@@ -1,38 +1,98 @@
-import Foundation
+import AppKit
+import DerrickBackend
 import DockerRunnerXPC
+import Foundation
 import ServiceContracts
 
-/// Login / keep-alive helper: holds an XPC connection to JobService so the scheduler
-/// stays up for the user session. Does not run job steps itself.
+/// Headless Derrick backend (`derrick.ui.Daemon`) — LSUIElement app launched by launchd.
+///
+/// Must be an application bundle (not a bare tool) so UserNotifications TCC works.
 ///
 /// Usage:
-///   JobKeepAlive                 — run keep-alive loop (default; used by launchd)
-///   JobKeepAlive --install-launchd — write ~/Library/LaunchAgents plist + bootstrap, then exit
-///   JobKeepAlive --install-and-run  — install then run keep-alive
+///   JobKeepAlive                 — run forever (launchd)
+///   JobKeepAlive --install-launchd — write LaunchAgent + bootstrap, then exit
+///   JobKeepAlive --install-and-run — install then run
 
 let args = Set(CommandLine.arguments.dropFirst())
 let installOnly = args.contains("--install-launchd")
 let installAndRun = args.contains("--install-and-run")
+let testNotify = args.contains("--test-notify")
 
 if installOnly || installAndRun {
     do {
-        try LaunchAgentInstaller.install(executableURL: URL(fileURLWithPath: CommandLine.arguments[0]))
-        fputs("[JobKeepAlive] launchd install ok\n", stderr)
+        try DaemonLaunchAgentInstaller.install(executableURL: URL(fileURLWithPath: CommandLine.arguments[0]))
+        fputs("[derrickd] launchd install ok\n", stderr)
     } catch {
-        fputs("[JobKeepAlive] launchd install failed: \(error.localizedDescription)\n", stderr)
+        fputs("[derrickd] launchd install failed: \(error.localizedDescription)\n", stderr)
         if installOnly { exit(1) }
     }
     if installOnly { exit(0) }
 }
 
-fputs("[JobKeepAlive] starting pid=\(ProcessInfo.processInfo.processIdentifier)\n", stderr)
-KeepAliveRunner().runForever()
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 
-// MARK: - Install user LaunchAgent (absolute path; reliable vs flaky SM-only jobs)
+NotificationSender.postsLocally = true
+DaemonNotificationCenterDelegate.shared.install()
 
-enum LaunchAgentInstaller {
-    static let label = "derrick.ui.JobKeepAlive"
-    static let plistName = "derrick.ui.JobKeepAlive.plist"
+if testNotify {
+    fputs("[derrickd] --test-notify\n", stderr)
+    Task {
+        let resultID = CommandLine.arguments
+            .drop(while: { $0 != "--test-notify" })
+            .dropFirst()
+            .first(where: { !$0.hasPrefix("--") })
+            ?? "test"
+        let short = String(resultID.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
+        let req = UserNotificationRequest(
+            id: "derrick.job-result.\(resultID)",
+            kind: .jobResult,
+            title: "Derrick · Job finished",
+            body: "Tap to view the result panel.",
+            subtitle: "Result \(short)",
+            timeSensitive: true,
+            userInfo: [
+                UserNotificationUserInfoKey.kind.rawValue: UserNotificationKind.jobResult.rawValue,
+                UserNotificationUserInfoKey.jobResultID.rawValue: resultID
+            ]
+        )
+        do {
+            try await NotificationSender.post(req)
+            fputs("[derrickd] --test-notify ok id=\(resultID)\n", stderr)
+        } catch {
+            fputs("[derrickd] --test-notify failed: \(error.localizedDescription)\n", stderr)
+        }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        exit(0)
+    }
+    app.run()
+}
+
+fputs(
+    "[derrickd] starting pid=\(ProcessInfo.processInfo.processIdentifier) mach=\(DerrickServiceID.daemon.machServiceName)\n",
+    stderr
+)
+
+let listenerDelegate = DaemonListenerDelegate()
+let listener = NSXPCListener(machServiceName: DerrickServiceID.daemon.machServiceName)
+listener.delegate = listenerDelegate
+listener.resume()
+
+Task {
+    do {
+        _ = try await DaemonRuntime.shared.bootstrap()
+    } catch {
+        fputs("[derrickd] bootstrap failed: \(error.localizedDescription)\n", stderr)
+    }
+}
+
+app.run()
+
+// MARK: - LaunchAgent install
+
+enum DaemonLaunchAgentInstaller {
+    static let label = DerrickServiceID.daemon.rawValue
+    static let plistName = "\(label).plist"
 
     static func install(executableURL: URL) throws {
         let exe = executableURL.resolvingSymlinksInPath().path
@@ -40,8 +100,6 @@ enum LaunchAgentInstaller {
             throw InstallError.notExecutable(exe)
         }
 
-        // Prefer passwd home — `FileManager.homeDirectoryForCurrentUser` is the *container*
-        // home when launched from the sandboxed UI, and launchd will not bootstrap from there.
         let home = realUserHomeDirectory()
         let agentsDir = home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
         try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
@@ -58,64 +116,70 @@ enum LaunchAgentInstaller {
             <array>
                 <string>\(exe)</string>
             </array>
+            <key>MachServices</key>
+            <dict>
+                <key>\(DerrickServiceID.daemon.machServiceName)</key>
+                <true/>
+            </dict>
             <key>RunAtLoad</key>
             <true/>
             <key>KeepAlive</key>
             <true/>
             <key>ThrottleInterval</key>
-            <integer>10</integer>
+            <integer>2</integer>
             <key>AssociatedBundleIdentifiers</key>
             <array>
-                <string>derrick.ui</string>
+                <string>\(DerrickServiceID.ui.rawValue)</string>
             </array>
             <key>ProcessType</key>
             <string>Background</string>
+            <key>StandardOutPath</key>
+            <string>\(home.path)/Library/Logs/derrick.ui.Daemon.out.log</string>
+            <key>StandardErrorPath</key>
+            <string>\(home.path)/Library/Logs/derrick.ui.Daemon.err.log</string>
         </dict>
         </plist>
         """
         try plist.write(to: dest, atomically: true, encoding: .utf8)
-        fputs("[JobKeepAlive] wrote \(dest.path)\n", stderr)
-        // launchd refuses quarantined plists/binaries (error 155). Strip after every install.
+        fputs("[derrickd] wrote \(dest.path)\n", stderr)
         stripQuarantine(at: dest)
         stripQuarantine(at: URL(fileURLWithPath: exe))
 
         let uid = getuid()
         let domainLabel = "gui/\(uid)/\(label)"
-
-        // Idempotent load: bootout (ignore miss), bootstrap (ignore "already loaded"), then kickstart.
-        _ = runLaunchctlAllowFail(["bootout", domainLabel])
-        let boot = runLaunchctlAllowFail(["bootstrap", "gui/\(uid)", dest.path])
+        _ = runLaunchctlAllowFail(["bootout", "gui/\(uid)/\(DerrickServiceID.jobKeepAlive.rawValue)"], timeoutSeconds: 3)
+        _ = runLaunchctlAllowFail(["bootout", domainLabel], timeoutSeconds: 3)
+        let boot = runLaunchctlAllowFail(["bootstrap", "gui/\(uid)", dest.path], timeoutSeconds: 5)
         if boot.status != 0 {
-            // Error 5 / I/O often means already bootstrapped or transient; accept if print works.
             if isLoaded(domainLabel: domainLabel) {
-                fputs(
-                    "[JobKeepAlive] bootstrap returned \(boot.status) but job already loaded; continuing\n",
-                    stderr
+                fputs("[derrickd] bootstrap \(boot.status) but job loaded — continuing\n", stderr)
+            } else if boot.status == 5 {
+                throw InstallError.launchctlFailed(
+                    "launchctl bootstrap → 5 (I/O). Prefer SMAppService; or run from Terminal: \(exe) --install-launchd"
                 )
             } else {
-                throw InstallError.launchctlFailed(
-                    "launchctl bootstrap → \(boot.status) \(boot.output)"
-                )
+                throw InstallError.launchctlFailed("launchctl bootstrap → \(boot.status) \(boot.output)")
             }
         }
-        _ = runLaunchctlAllowFail(["enable", domainLabel])
-        let kick = runLaunchctlAllowFail(["kickstart", "-k", domainLabel])
-        if kick.status != 0, !isLoaded(domainLabel: domainLabel) {
-            throw InstallError.launchctlFailed(
-                "launchctl kickstart → \(kick.status) \(kick.output)"
-            )
+        _ = runLaunchctlAllowFail(["enable", domainLabel], timeoutSeconds: 3)
+        let kick = runLaunchctlAllowFail(["kickstart", "-k", domainLabel], timeoutSeconds: 12)
+        if kick.status != 0 {
+            fputs("[derrickd] kickstart status=\(kick.status) \(kick.output)\n", stderr)
         }
+        Thread.sleep(forTimeInterval: 0.4)
         if !isLoaded(domainLabel: domainLabel) {
             throw InstallError.launchctlFailed("job not loaded after install: \(domainLabel)")
         }
     }
 
     private static func isLoaded(domainLabel: String) -> Bool {
-        runLaunchctlAllowFail(["print", domainLabel]).status == 0
+        runLaunchctlAllowFail(["print", domainLabel], timeoutSeconds: 3).status == 0
     }
 
-    /// Runs launchctl; never throws (caller decides).
-    private static func runLaunchctlAllowFail(_ arguments: [String]) -> (status: Int32, output: String) {
+    private static func runLaunchctlAllowFail(
+        _ arguments: [String],
+        timeoutSeconds: TimeInterval = 15
+    ) -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = arguments
@@ -125,38 +189,54 @@ enum LaunchAgentInstaller {
         process.standardOutput = out
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return (status: -1, output: error.localizedDescription)
         }
+
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return (
+                status: -2,
+                output: "timed out after \(Int(timeoutSeconds))s: launchctl \(arguments.joined(separator: " "))"
+            )
+        }
+
         let e = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let o = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return (status: process.terminationStatus, output: (e + o).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// Remove com.apple.quarantine so launchd will bootstrap this agent (error 155 otherwise).
     private static func stripQuarantine(at url: URL) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
         process.arguments = ["-cr", url.path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
         do {
             try process.run()
             process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                fputs("[JobKeepAlive] stripped quarantine: \(url.path)\n", stderr)
+            if process.terminationStatus != 0 {
+                fputs(
+                    "[derrickd] xattr skip (status=\(process.terminationStatus)) \(url.lastPathComponent)\n",
+                    stderr
+                )
             }
         } catch {
-            fputs("[JobKeepAlive] xattr failed for \(url.path): \(error.localizedDescription)\n", stderr)
+            fputs("[derrickd] xattr unavailable: \(error.localizedDescription)\n", stderr)
         }
     }
 
-    /// Real macOS user home (e.g. /Users/name), not the app-sandbox container home.
     private static func realUserHomeDirectory() -> URL {
         if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
             return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
-        }
-        if let home = ProcessInfo.processInfo.environment["HOME"], !home.contains("/Containers/") {
-            return URL(fileURLWithPath: home, isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
     }
@@ -169,119 +249,6 @@ enum LaunchAgentInstaller {
             case .notExecutable(let p): return "Not executable: \(p)"
             case .launchctlFailed(let m): return m
             }
-        }
-    }
-}
-
-// MARK: - Keep-alive loop
-
-final class KeepAliveRunner: @unchecked Sendable {
-    private let serviceName = DerrickServiceID.job.xpcServiceName
-    private let lock = NSLock()
-    private var connection: NSXPCConnection?
-    private let intervalNanoseconds: UInt64 = 15_000_000_000 // 15s health ping
-
-    func runForever() {
-        let sem = DispatchSemaphore(value: 0)
-        Task {
-            while !Task.isCancelled {
-                do {
-                    try await ensureConnectedAndHealthy()
-                } catch {
-                    fputs("[JobKeepAlive] ensure failed: \(error.localizedDescription)\n", stderr)
-                    invalidate()
-                }
-                try? await Task.sleep(nanoseconds: intervalNanoseconds)
-            }
-            sem.signal()
-        }
-        sem.wait()
-    }
-
-    private func ensureConnectedAndHealthy() async throws {
-        nonisolated(unsafe) let proxy = try remoteProxy()
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            proxy.bootstrap { data in
-                do {
-                    let boot = try JobServiceXPCCodec.decodeBootstrap(data as Data)
-                    if boot.ok {
-                        cont.resume()
-                    } else {
-                        cont.resume(throwing: KeepAliveError.bootstrapFailed(boot.message))
-                    }
-                } catch {
-                    cont.resume(throwing: error)
-                }
-            }
-        }
-        let report: ServiceHealthReport = try await withCheckedThrowingContinuation { cont in
-            proxy.health { data in
-                do {
-                    cont.resume(returning: try JobServiceXPCCodec.decodeHealth(data as Data))
-                } catch {
-                    cont.resume(throwing: error)
-                }
-            }
-        }
-        fputs(
-            "[JobKeepAlive] JobService ok status=\(report.status.rawValue) pid=\(report.pid)\n",
-            stderr
-        )
-    }
-
-    private func remoteProxy() throws -> JobServiceXPC {
-        lock.lock()
-        defer { lock.unlock() }
-        if connection == nil {
-            let conn = NSXPCConnection(serviceName: serviceName)
-            conn.remoteObjectInterface = NSXPCInterface(with: JobServiceXPC.self)
-            do {
-                try XPCPeerAuthentication.apply(
-                    requirement: XPCPeerAuthentication.requirementString(
-                        allowedPeerIdentifiers: [DerrickServiceID.job.rawValue]
-                    ),
-                    to: conn
-                )
-            } catch {
-                fputs("[JobKeepAlive] code-sign soft-fail: \(error.localizedDescription)\n", stderr)
-            }
-            conn.interruptionHandler = { [weak self] in
-                fputs("[JobKeepAlive] connection interrupted\n", stderr)
-                self?.invalidate()
-            }
-            conn.invalidationHandler = { [weak self] in
-                fputs("[JobKeepAlive] connection invalidated\n", stderr)
-                self?.invalidate()
-            }
-            conn.resume()
-            connection = conn
-            fputs("[JobKeepAlive] connected serviceName=\(serviceName)\n", stderr)
-        }
-        guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ [weak self] error in
-            fputs("[JobKeepAlive] proxy error: \(error.localizedDescription)\n", stderr)
-            self?.invalidate()
-        }) as? JobServiceXPC else {
-            throw KeepAliveError.unavailable
-        }
-        return proxy
-    }
-
-    private func invalidate() {
-        lock.lock()
-        connection?.invalidate()
-        connection = nil
-        lock.unlock()
-    }
-}
-
-enum KeepAliveError: Error, LocalizedError {
-    case unavailable
-    case bootstrapFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .unavailable: return "JobService unavailable"
-        case .bootstrapFailed(let m): return "JobService bootstrap failed: \(m)"
         }
     }
 }

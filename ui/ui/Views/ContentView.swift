@@ -6,6 +6,7 @@ import SwiftUI
 import DBRepository
 import PolicyUserInteraction
 import ServiceContracts
+import ServiceEnsureUp
 
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
@@ -269,7 +270,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "create a job that runs in 7 seconds that tells me what's on apple.com"
+    @State private var prompt = "create a job that runs in 9 seconds that tells me what's on apple.com"
     @State private var turns: [ChatTurn] = []
     @State private var isStreaming = false
     @State private var errorMessage: String?
@@ -287,7 +288,6 @@ struct ContentView: View {
     @State private var shouldAutoScroll = true
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var jobPreflightPresenter = JobPreflightApprovalPresenter.shared
-    @ObservedObject private var jobResultPresenter = JobResultPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
 
     private var canSendPrompt: Bool {
@@ -401,29 +401,6 @@ struct ContentView: View {
             footer: { EmptyView() }
         )
         .modalPopup(
-            isPresented: jobResultPresenter.isPresented
-                && !bootstrapStatus.isModalPresented
-                && !jobPreflightPresenter.isPresented
-                && !policyEventPresenter.isPresented,
-            minWidth: 420,
-            minHeight: 0,
-            maxWidth: 520,
-            maxHeight: 440,
-            onBackdropDismiss: { jobResultPresenter.dismiss() },
-            onEscape: { jobResultPresenter.dismiss() },
-            header: {
-                JobResultModalHeader(shortID: jobResultPresenter.activeResult.map { Self.shortResultID($0.id) })
-            },
-            body: {
-                if let result = jobResultPresenter.activeResult {
-                    JobResultModalBody(result: result)
-                }
-            },
-            footer: {
-                JobResultModalFooter(onDismiss: { jobResultPresenter.dismiss() })
-            }
-        )
-        .modalPopup(
             isPresented: bootstrapStatus.isModalPresented,
             minWidth: 380,
             minHeight: 0,
@@ -506,6 +483,10 @@ struct ContentView: View {
         .task {
             // Single-flight: SwiftUI may re-enter `.task` (sidebar appear / identity churn).
             // A second beginLoadingSession after ready left an undismissable modal and dead UI.
+            guard !JobResultPanelSession.isPanelOnlyLaunch else {
+                fputs("[ui] ContentView bootstrap skipped (panel-only launch)\n", stderr)
+                return
+            }
             policyEventPresenter.start()
             await bootstrapStatus.runClientBootstrap {
                 await self.performClientBootstrap()
@@ -583,19 +564,6 @@ struct ContentView: View {
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Connecting service mesh…")
 
-                do {
-                    let paths = JobServiceLoginAgent.preflightPaths()
-                    debugLog(
-                        "JobKeepAlive preflight plistExists=\(FileManager.default.fileExists(atPath: paths.plist.path)) exeExists=\(FileManager.default.fileExists(atPath: paths.executable.path)) sm=\(JobServiceLoginAgent.smStatusDescription) bundle=\(Bundle.main.bundlePath)"
-                    )
-                    let result = try JobServiceLoginAgent.ensureRegistered()
-                    debugLog(
-                        "JobKeepAlive registered method=\(result.method.rawValue) enabled=\(result.isRunningOrEnabled) status=\(result.statusDescription) — \(result.detail)"
-                    )
-                } catch {
-                    debugLog("JobKeepAlive register failed: \(error.localizedDescription)")
-                }
-
                 let peer: NSXPCListenerEndpoint
                 do {
                     peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
@@ -644,6 +612,11 @@ struct ContentView: View {
                         "UI client ready (Docker + Agent + MCP + JobService + peer mesh)"
                     )
                 }
+
+                // derrickd install/ensure must not block first paint — launchctl kickstart can hang.
+                Task.detached(priority: .utility) {
+                    await Self.registerDaemonInBackground()
+                }
             } catch is CancellationError {
                 if !sessionReady {
                     bootstrapStatus.noteBootstrapCancelled()
@@ -668,6 +641,39 @@ struct ContentView: View {
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
+    }
+
+    /// Install/ensure derrickd off the UI critical path (`launchctl kickstart` can wedge).
+    private static func registerDaemonInBackground() async {
+        do {
+            let result = try await MainActor.run {
+                try JobServiceLoginAgent.ensureRegistered()
+            }
+            await MainActor.run {
+                debugLog(
+                    "derrickd register method=\(result.method.rawValue) enabled=\(result.isRunningOrEnabled) — \(result.detail)"
+                )
+            }
+        } catch {
+            await MainActor.run {
+                debugLog("derrickd register failed: \(error.localizedDescription)")
+            }
+            return
+        }
+        do {
+            let health = try await ServiceEnsureUp.shared.ensureDaemon(retries: 3)
+            await MainActor.run {
+                debugLog(
+                    "derrickd ensure-up ok status=\(health.status.rawValue) pid=\(health.pid)"
+                )
+            }
+        } catch {
+            await MainActor.run {
+                debugLog(
+                    "derrickd Mach service not reachable yet: \(error.localizedDescription). If SMAppService is enabled, check Login Items; else run JobKeepAlive --install-launchd from Terminal."
+                )
+            }
+        }
     }
 
     /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
@@ -1074,10 +1080,6 @@ struct ContentView: View {
         case .approvalRequired, .networkAccessRequest, .usageLimitRequest:
             presenter.deny()
         }
-    }
-
-    private static func shortResultID(_ id: String) -> String {
-        String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {

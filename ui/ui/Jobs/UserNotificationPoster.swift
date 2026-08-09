@@ -2,7 +2,8 @@ import Foundation
 import ServiceContracts
 import UserNotifications
 
-/// Posts macOS user notifications from the **main UI app only** (`derrick.ui`).
+/// Posts macOS user notifications from the **main UI app** for remaining HITL paths.
+/// Job-completion banners are posted by derrickd (`NotificationSender` / `JobResultNotifier`).
 /// Background helpers and XPC services must not call this.
 enum UserNotificationPoster {
     enum PostError: Error, LocalizedError {
@@ -153,18 +154,24 @@ final class UserNotificationCenterDelegate: NSObject, UNUserNotificationCenterDe
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let actionID = response.actionIdentifier
-        let kind = response.notification.request.content.userInfo[DerrickNotificationPayload.kindKey] as? String
-        let approvalID = response.notification.request.content.userInfo[DerrickNotificationPayload.approvalIDKey] as? String
-        let jobResultID = response.notification.request.content.userInfo[DerrickNotificationPayload.jobResultIDKey] as? String
-        // Never block the main thread waiting on MainActor work — that deadlocks.
+        let userInfo = response.notification.request.content.userInfo
+        let kind = userInfo[DerrickNotificationPayload.kindKey] as? String
+            ?? userInfo[UserNotificationUserInfoKey.kind.rawValue] as? String
+        let approvalID = userInfo[DerrickNotificationPayload.approvalIDKey] as? String
+            ?? userInfo[UserNotificationUserInfoKey.approvalID.rawValue] as? String
+        let jobResultID = userInfo[DerrickNotificationPayload.jobResultIDKey] as? String
+            ?? userInfo[UserNotificationUserInfoKey.jobResultID.rawValue] as? String
+        // Finish the system callback first; never do AppKit work on this stack.
         completionHandler()
-        Task { @MainActor in
-            await DerrickNotificationService.shared.handleResponse(
-                actionIdentifier: actionID,
-                kind: kind,
-                approvalID: approvalID,
-                jobResultID: jobResultID
-            )
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                await DerrickNotificationService.shared.handleResponse(
+                    actionIdentifier: actionID,
+                    kind: kind,
+                    approvalID: approvalID,
+                    jobResultID: jobResultID
+                )
+            }
         }
     }
 }

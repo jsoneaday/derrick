@@ -20,6 +20,8 @@ public enum XPCPeerAuthentication: Sendable {
     public static let webhookServiceIdentifier = "derrick.ui.WebhookService"
     /// Login LaunchAgent that holds JobService open for the user session.
     public static let jobKeepAliveIdentifier = "derrick.ui.JobKeepAlive"
+    /// Headless session backend (LoginAgent).
+    public static let daemonIdentifier = "derrick.ui.Daemon"
 
     public enum PeerRole: Sendable {
         /// Helper accepting connections — peer must be the main app.

@@ -2,15 +2,58 @@ import AppKit
 import Combine
 import DBRepository
 import Foundation
+import ServiceContracts
 import SwiftUI
 
-/// Presents scheduled-job completion content in a centered themed modal (notification tap).
+/// Process-wide flags for notification panel sessions (readable from AppKit delegate callbacks).
+enum JobResultPanelSession {
+    nonisolated(unsafe) static var allowsTermination = true
+    nonisolated(unsafe) static var isPanelOnlyLaunch =
+        DerrickNotificationLaunch.isJobResultPresentationLaunch()
+    nonisolated(unsafe) static var swallowMouseEventsUntil = Date.distantPast
+    nonisolated(unsafe) private static var mouseMonitor: Any?
+
+    static func installMouseSwallowMonitorIfNeeded() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { event in
+            if Date() < swallowMouseEventsUntil {
+                return nil
+            }
+            return event
+        }
+    }
+}
+
+/// Presents scheduled-job completion in a **standalone floating panel**.
+/// Not tied to the main chat window — notification taps show only this popup.
 @MainActor
-final class JobResultPresenter: ObservableObject {
+final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
     static let shared = JobResultPresenter()
+
+    /// True when the user launched the interactive main UI (not panel-only / headless).
+    static var interactiveSessionActive = false
+
+    /// Set early from argv so SwiftUI never mounts `ContentView` for panel-only taps.
+    static var panelOnlyLaunch: Bool {
+        get { JobResultPanelSession.isPanelOnlyLaunch }
+        set { JobResultPanelSession.isPanelOnlyLaunch = newValue }
+    }
+
+    static var shouldUseEphemeralSession: Bool {
+        panelOnlyLaunch
+            || !interactiveSessionActive
+            || DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            || DerrickNotificationLaunch.isPollLaunch()
+            || DerrickNotificationLaunch.isJobWorkerLaunch()
+    }
 
     @Published private(set) var activeResult: PresentedJobResult?
     @Published private(set) var isPresented = false
+
+    var allowsTermination: Bool {
+        get { JobResultPanelSession.allowsTermination }
+        set { JobResultPanelSession.allowsTermination = newValue }
+    }
 
     struct PresentedJobResult: Identifiable, Equatable {
         let id: String
@@ -20,9 +63,25 @@ final class JobResultPresenter: ObservableObject {
         let scheduledAt: Date?
     }
 
-    private init() {}
+    private var panel: NSPanel?
+    private var presentGeneration = 0
+    private var ephemeralSession = false
+    private var automaticTerminationDisabled = false
 
-    func present(row: DBRepository.JobResultRow, scheduledAt: Date? = nil) {
+    private override init() {
+        super.init()
+    }
+
+    func present(
+        row: DBRepository.JobResultRow,
+        scheduledAt: Date? = nil,
+        ephemeralSession: Bool = false
+    ) {
+        self.ephemeralSession = ephemeralSession
+        if ephemeralSession {
+            allowsTermination = false
+            disableAutomaticTerminationIfNeeded()
+        }
         activeResult = PresentedJobResult(
             id: row.id,
             jobID: row.jobID,
@@ -31,12 +90,181 @@ final class JobResultPresenter: ObservableObject {
             scheduledAt: scheduledAt
         )
         isPresented = true
-        NSApp.activate(ignoringOtherApps: true)
+        // Never build AppKit UI synchronously inside UNUserNotificationCenter callbacks —
+        // setActivationPolicy / panel ordering there can EXC_BAD_ACCESS.
+        presentGeneration += 1
+        let generation = presentGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.presentGeneration == generation else { return }
+            self.showStandalonePanel()
+        }
     }
 
     func dismiss() {
         isPresented = false
         activeResult = nil
+        let shouldQuit = ephemeralSession
+        ephemeralSession = false
+        tearDownPanel()
+        enableAutomaticTerminationIfNeeded()
+        if shouldQuit {
+            // Hard exit — NSApp.terminate can relaunch this process with the same
+            // `--derrick-show-job-result` argv via window restoration / open -n resume.
+            JobResultPanelSession.allowsTermination = true
+            DerrickJobResultPresentationWake.takePendingResultID()
+            _exit(0)
+        } else if !JobResultPanelSession.isPanelOnlyLaunch {
+            allowsTermination = true
+        }
+    }
+
+    // MARK: - Standalone panel
+
+    private func showStandalonePanel() {
+        guard let result = activeResult else { return }
+
+        let shortID = String(result.id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
+        let root = JobResultStandaloneCard(
+            result: result,
+            shortID: shortID,
+            onDismiss: { [weak self] in self?.dismiss() }
+        )
+        let hosting = NSHostingController(rootView: root)
+        hosting.view.frame = NSRect(x: 0, y: 0, width: 512, height: 440)
+
+        // Always rebuild so chrome/shadow settings stay correct across presents.
+        if panel != nil {
+            tearDownPanel()
+        }
+
+        // Subclass so borderless panel can become key — otherwise accessory apps
+        // look windowless and macOS auto-terminates them within seconds.
+        let panel = JobResultKeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 512, height: 440),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        // SwiftUI draws the card shadow; AppKit window shadow shows as a square halo.
+        panel.hasShadow = false
+        panel.isMovableByWindowBackground = true
+        panel.contentViewController = hosting
+        panel.delegate = self
+        panel.setContentSize(NSSize(width: 512, height: 440))
+        self.panel = panel
+
+        position(panel)
+        // Swallow residual mouse-up from the notification click that launched us.
+        panel.ignoresMouseEvents = true
+        JobResultPanelSession.swallowMouseEventsUntil = Date().addingTimeInterval(1.0)
+        JobResultPanelSession.installMouseSwallowMonitorIfNeeded()
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak panel] in
+            panel?.ignoresMouseEvents = false
+        }
+    }
+
+    private func disableAutomaticTerminationIfNeeded() {
+        guard !automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.disableAutomaticTermination("derrick.job-result-panel")
+        ProcessInfo.processInfo.disableSuddenTermination()
+        automaticTerminationDisabled = true
+    }
+
+    private func enableAutomaticTerminationIfNeeded() {
+        guard automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.enableSuddenTermination()
+        ProcessInfo.processInfo.enableAutomaticTermination("derrick.job-result-panel")
+        automaticTerminationDisabled = false
+    }
+
+    private func position(_ panel: NSPanel) {
+        panel.layoutIfNeeded()
+        var frame = panel.frame
+        if frame.width < 100 || frame.height < 100 {
+            frame.size = NSSize(width: 512, height: 440)
+        }
+        if let screen = NSScreen.main {
+            let visible = screen.visibleFrame
+            frame.origin.x = visible.midX - frame.width / 2
+            frame.origin.y = visible.midY - frame.height / 2
+            panel.setFrame(frame, display: true)
+        } else {
+            panel.center()
+        }
+    }
+
+    private func tearDownPanel() {
+        if let panel {
+            panel.orderOut(nil)
+            panel.delegate = nil
+            panel.contentViewController = nil
+            self.panel = nil
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow, closing === panel else { return }
+        fputs("[ui] JobResultPresenter.windowWillClose ephemeral=\(ephemeralSession)\n", stderr)
+        isPresented = false
+        activeResult = nil
+        panel?.delegate = nil
+        panel?.contentViewController = nil
+        panel = nil
+        let shouldQuit = ephemeralSession
+        ephemeralSession = false
+        enableAutomaticTerminationIfNeeded()
+        if shouldQuit {
+            JobResultPanelSession.allowsTermination = true
+            DerrickJobResultPresentationWake.takePendingResultID()
+            _exit(0)
+        } else if !JobResultPanelSession.isPanelOnlyLaunch {
+            allowsTermination = true
+        }
+    }
+}
+
+/// Borderless `NSPanel` defaults to `canBecomeKey == false`, which makes accessory
+/// panel-only launches look windowless and get auto-terminated by the system.
+private final class JobResultKeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+// MARK: - Standalone card (not hosted inside ContentView)
+
+private struct JobResultStandaloneCard: View {
+    let result: JobResultPresenter.PresentedJobResult
+    let shortID: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            JobResultModalHeader(shortID: shortID)
+            JobResultModalBody(result: result)
+            JobResultModalFooter(onDismiss: onDismiss)
+        }
+        .frame(width: 480)
+        .background(
+            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
+        .padding(16)
+        .preferredColorScheme(.light)
     }
 }
 
@@ -94,17 +322,29 @@ struct JobResultModalBody: View {
 
 struct JobResultModalFooter: View {
     let onDismiss: () -> Void
+    @State private var acceptClicks = false
 
     var body: some View {
         HStack {
             Spacer(minLength: 0)
-            Button("OK", action: onDismiss)
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .keyboardShortcut(.cancelAction)
+            Button("OK") {
+                guard acceptClicks else { return }
+                onDismiss()
+            }
+            .buttonStyle(ModalPrimaryButtonStyle())
+            .opacity(acceptClicks ? 1 : 0.55)
+            .allowsHitTesting(acceptClicks)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .padding(.top, 4)
+        .onAppear {
+            // Click-through guard: notification mouse-up must not dismiss the panel.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                DispatchQueue.main.async {
+                    acceptClicks = true
+                }
+            }
+        }
     }
 }

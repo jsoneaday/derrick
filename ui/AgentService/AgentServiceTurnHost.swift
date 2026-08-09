@@ -1,5 +1,6 @@
 import Foundation
 import DBRepository
+import DerrickBackend
 import LLMAgentClient
 import PolicyUserInteraction
 import ServiceContracts
@@ -383,15 +384,17 @@ actor AgentServiceTurnHost {
                         createdAt: result.createdAt
                     )
                 )
+                await JobResultNotifier.notifyCompletion(
+                    resultID: result.id,
+                    jobID: result.jobID,
+                    responseText: result.responseText,
+                    repository: repo
+                )
             } catch {
                 fputs("[AgentService] persist job result failed: \(error.localizedDescription)\n", stderr)
             }
         }
-        guard let data = try? JSONEncoder.service.encode(result) else { return }
-        _ = data
-        DerrickNotificationWake.wakeUIIfNeeded()
-        DerrickNotificationSignal.postPoll()
-        fputs("[AgentService] job result persisted id=\(result.id) — notification wake requested\n", stderr)
+        fputs("[AgentService] job result persisted id=\(result.id) — daemon notify requested\n", stderr)
         await AgentServiceStore.shared.log(
             level: .info,
             message: "job result ready job=\(result.jobID) chars=\(responseText.count) uiSink=\(AgentServicePrimaryUISink.shared.clientSink(logLabel: "probe") != nil)",

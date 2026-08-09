@@ -633,6 +633,11 @@ public extension DBRepository {
         }
     }
 
+    public func hasPendingUserNotifications() throws -> Bool {
+        try !fetchJobResultsNeedingNotify(limit: 1).isEmpty
+            || !fetchPendingHITLApprovalsNeedingNotify(limit: 1).isEmpty
+    }
+
     public func fetchJobResultsNeedingNotify(limit: Int = 20) throws -> [JobResultRow] {
         let cap = max(1, min(limit, 100))
         return try withDatabaseHandle { handle in
@@ -683,6 +688,28 @@ public extension DBRepository {
     /// Scheduled fire time for a job run (`jobs.run_at`), if any.
     public func fetchJobRunAt(jobID: String) throws -> Date? {
         try fetchJob(id: jobID)?.0.runAt
+    }
+
+    /// True when work is waiting or in flight (daemon uses this to wake a headless UI worker).
+    public func hasDueOrRunningJobs(now: Date = .now) throws -> Bool {
+        let nowStr = Self.iso8601Formatter().string(from: now)
+        return try withDatabaseHandle { handle in
+            let sql = """
+            SELECT COUNT(*) FROM jobs
+            WHERE status = 'running'
+               OR (
+                    status IN ('pending', 'scheduled')
+                AND (run_at IS NULL OR run_at <= \(quoted(nowStr)))
+               );
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw DBRepositoryError.sqliteOperationFailed(String(cString: sqlite3_errmsg(handle)))
+            }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+            return sqlite3_column_int(statement, 0) > 0
+        }
     }
 
     private static func fetchJobResults(sql: String, on handle: OpaquePointer) throws -> [JobResultRow] {

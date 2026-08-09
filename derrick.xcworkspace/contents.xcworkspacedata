@@ -14,6 +14,9 @@
       location = "group:packages/DBRepository">
    </FileRef>
    <FileRef
+      location = "group:packages/DerrickBackend">
+   </FileRef>
+   <FileRef
       location = "group:packages/DockerRunnerXPC">
    </FileRef>
    <FileRef

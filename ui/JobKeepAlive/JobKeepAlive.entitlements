@@ -5,7 +5,7 @@
 	<!--
 	  Do NOT enable app-sandbox on this LaunchAgent.
 	  Bare sandboxed executables launched by launchd crash with Trace/BPT trap (no app container).
-	  Host UI is sandboxed; JobKeepAlive is a keep-alive XPC client only (code-sign peer auth).
+	  Host UI is sandboxed; DerrickDaemon is the unsandboxed session backend.
 	-->
 	<key>com.apple.security.network.client</key>
 	<true/>

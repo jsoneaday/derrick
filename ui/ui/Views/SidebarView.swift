@@ -5,18 +5,19 @@ private let sideMenuRecentsFontSize = CGFloat(12)
 
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
 
-    private let topActions = [
-        SidebarRow(icon: "plus.circle.fill", title: "New chat", isProminent: true),
-        SidebarRow(icon: "message.fill", title: "Chats"),
-        SidebarRow(icon: "folder.fill", title: "Projects"),
-        SidebarRow(icon: "square.grid.2x2.fill", title: "Artifacts"),
-        SidebarRow(icon: "chevron.left.forwardslash.chevron.right", title: "Code", isDisabled: true),
-        SidebarRow(icon: "briefcase.fill", title: "Customize")
+    private static let topActions: [SidebarRow] = [
+        SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat", isProminent: true),
+        SidebarRow(id: "chats", icon: "message.fill", title: "Chats"),
+        SidebarRow(id: "projects", icon: "folder.fill", title: "Projects"),
+        SidebarRow(id: "artifacts", icon: "square.grid.2x2.fill", title: "Artifacts"),
+        SidebarRow(id: "code", icon: "chevron.left.forwardslash.chevron.right", title: "Code", isDisabled: true),
+        SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
     ]
 
-    private let recents = [
+    private static let recents = [
         "React Native desktop adoption",
         "RDS compute charges when idle",
         "Unsupported media type error",
@@ -26,7 +27,7 @@ struct SidebarView: View {
         "Rust SDKs for major LLM vendors"
     ]
 
-    private let starred = [
+    private static let starred = [
         "Subscribing to GitHub repos in S..."
     ]
 
@@ -52,7 +53,7 @@ struct SidebarView: View {
             .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(topActions) { row in
+                ForEach(Self.topActions) { row in
                     SidebarActionRow(row: row)
                 }
             }
@@ -64,7 +65,7 @@ struct SidebarView: View {
                     .padding(.top, 4)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(starred, id: \.self) { item in
+                    ForEach(Self.starred, id: \.self) { item in
                         Text(item)
                             .font(.system(size: sideMenuRecentsFontSize))
                             .lineLimit(1)
@@ -88,7 +89,7 @@ struct SidebarView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(recents, id: \.self) { recent in
+                        ForEach(Self.recents, id: \.self) { recent in
                             Text(recent)
                                 .font(.system(size: sideMenuRecentsFontSize))
                                 .lineLimit(1)
@@ -146,14 +147,15 @@ struct SidebarView: View {
     SidebarView(helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)))
 }
 
-struct SidebarRow: Identifiable, Hashable {
-    let id = UUID()
+struct SidebarRow: Identifiable, Hashable, Sendable {
+    let id: String
     let icon: String
     let title: String
     let isProminent: Bool
     let isDisabled: Bool
 
-    init(icon: String, title: String, isProminent: Bool = false, isDisabled: Bool = false) {
+    init(id: String, icon: String, title: String, isProminent: Bool = false, isDisabled: Bool = false) {
+        self.id = id
         self.icon = icon
         self.title = title
         self.isProminent = isProminent

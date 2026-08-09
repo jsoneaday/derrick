@@ -17,12 +17,12 @@ enum DerrickNotificationPayload {
     static let categoryHITL = "derrick.hitl-approval"
 }
 
-/// Single macOS notification path for scheduled-job HITL and job completion.
+/// Single macOS notification **tap** path for scheduled-job HITL and job completion.
 ///
 /// Delivery rules:
 /// - Live chat HITL (UI connected): modal via `HITLLiveApprovalHandlers` — no notification.
-/// - Scheduled job HITL: notification always (even when UI is open); tap → Allow/Deny alert.
-/// - Job completion: notification always (chat is not interrupted).
+/// - Scheduled job HITL: UI still posts (migration); tap → Allow/Deny alert.
+/// - Job completion: **posted by derrickd** via `JobResultNotifier`; UI only handles taps.
 /// - Info/errors during UI session: modal only (`PolicyEventPresenter`), never notifications.
 @MainActor
 final class DerrickNotificationService {
@@ -31,6 +31,7 @@ final class DerrickNotificationService {
     private var repository: DBRepository?
     private var pollTask: Task<Void, Never>?
     private var darwinObserver: UnsafeMutableRawPointer?
+    private var presentJobResultObserver: DerrickDarwinNotifyObserver?
     private var postingIDs: Set<String> = []
     private let pollIntervalNanoseconds: UInt64 = 2_000_000_000
     private let launchEpoch = Date()
@@ -48,6 +49,7 @@ final class DerrickNotificationService {
         UserNotificationPoster.configureDelegateIfNeeded()
         registerCategories()
         registerDarwinObserver()
+        registerPresentJobResultObserver()
     }
 
     func activateSession(repository: DBRepository) async {
@@ -75,6 +77,7 @@ final class DerrickNotificationService {
         pollTask?.cancel()
         pollTask = nil
         unregisterDarwinObserver()
+        unregisterPresentJobResultObserver()
         if let activationObserver {
             NotificationCenter.default.removeObserver(activationObserver)
             self.activationObserver = nil
@@ -102,7 +105,7 @@ final class DerrickNotificationService {
         }
 
         switch kind {
-        case DerrickNotificationPayload.kindHITL:
+        case DerrickNotificationPayload.kindHITL, UserNotificationKind.hitlApproval.rawValue:
             guard let approvalID else { return }
             switch actionIdentifier {
             case UNNotificationDefaultActionIdentifier:
@@ -112,7 +115,7 @@ final class DerrickNotificationService {
             default:
                 fputs("[HumanDecision] unhandled action=\(actionIdentifier)\n", stderr)
             }
-        case DerrickNotificationPayload.kindJobResult:
+        case DerrickNotificationPayload.kindJobResult, UserNotificationKind.jobResult.rawValue:
             guard let jobResultID else { return }
             switch actionIdentifier {
             case UNNotificationDefaultActionIdentifier:
@@ -148,7 +151,10 @@ final class DerrickNotificationService {
                 databaseDirectoryURL: directory
             )
             repository = repo
-            await EgressAllowlistService.shared.configure(repository: repo)
+            // Do not push egress → Docker during panel-only presentation launches.
+            if !JobResultPanelSession.isPanelOnlyLaunch {
+                await EgressAllowlistService.shared.configure(repository: repo)
+            }
             return repo
         } catch {
             fputs("[HumanDecision] ensureRepository failed: \(error.localizedDescription)\n", stderr)
@@ -161,7 +167,7 @@ final class DerrickNotificationService {
         guard await ensureRepository() != nil else { return }
         guard let repository else { return }
         await postPendingHITL(repository: repository)
-        await postPendingJobResults(repository: repository)
+        // Job-completion banners are posted by derrickd via `JobResultNotifier` / NotificationSender.
     }
 
     private func postPendingHITL(repository: DBRepository) async {
@@ -219,49 +225,8 @@ final class DerrickNotificationService {
         }
     }
 
-    private func postPendingJobResults(repository: DBRepository) async {
-        let rows = (try? await repository.fetchJobResultsNeedingNotify()) ?? []
-        for row in rows {
-            // Stable + unique per result so macOS never replaces/collapses prior banners.
-            let key = "derrick.job-result.\(row.id)"
-            if postingIDs.contains(key) { continue }
-            guard (try? await repository.claimJobResultNotificationPost(id: row.id)) == true else { continue }
-            postingIDs.insert(key)
-
-            let shortID = Self.shortID(row.id)
-            let scheduled = (try? await repository.fetchJobRunAt(jobID: row.jobID))
-                .map { "Scheduled for \($0.formatted(date: .abbreviated, time: .shortened)). " } ?? ""
-            let body = scheduled + truncated(row.responseText, limit: 220)
-            let result = await UserNotificationPoster.post(
-                identifier: key,
-                title: "Derrick · Job finished",
-                body: body,
-                subtitle: "Result \(shortID)",
-                userInfo: [
-                    DerrickNotificationPayload.kindKey: DerrickNotificationPayload.kindJobResult,
-                    DerrickNotificationPayload.jobResultIDKey: row.id
-                ],
-                threadIdentifier: key,
-                timeSensitive: true
-            )
-            postingIDs.remove(key)
-            switch result {
-            case .success:
-                requestAttentionIfNeeded()
-                fputs("[HumanDecision] job result posted id=\(row.id) notify=\(key)\n", stderr)
-            case .failure(let error):
-                try? await repository.resetJobResultNotificationClaim(id: row.id)
-                fputs("[HumanDecision] job result post failed id=\(row.id): \(error.localizedDescription)\n", stderr)
-            }
-        }
-    }
-
-    private static func shortID(_ id: String) -> String {
-        String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
-    }
-
     private func resolveHITLFromNotificationTap(approvalID: String) async {
-        NSApp.activate(ignoringOtherApps: true)
+        DerrickMainWindowBridge.ensureMainWindow()
         guard let row = try? await repository?.fetchPendingHITLApproval(id: approvalID),
               row.status == .pending else {
             fputs("[HumanDecision] tap: no pending row id=\(approvalID)\n", stderr)
@@ -335,8 +300,24 @@ final class DerrickNotificationService {
         fputs("[HumanDecision] \(approved ? "approved" : "denied") id=\(approvalID) turn=\(row.turnID) actor=\(actor)\n", stderr)
     }
 
+    func presentJobResultWhenReady(id: String) async {
+        for _ in 0..<40 {
+            if sessionReady {
+                await presentJobResultFromNotificationTap(id: id)
+                return
+            }
+            if await ensureRepository() != nil {
+                await presentJobResultFromNotificationTap(id: id)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        await presentJobResultFromNotificationTap(id: id)
+    }
+
     private func presentJobResultFromNotificationTap(id: String) async {
-        NSApp.activate(ignoringOtherApps: true)
+        // Standalone floating panel only — do not reopen the main chat window.
+        guard await ensureRepository() != nil else { return }
         guard let repository else { return }
         guard let row = try? await repository.fetchJobResult(id: id) else {
             fputs("[HumanDecision] job result tap: missing row id=\(id)\n", stderr)
@@ -344,10 +325,23 @@ final class DerrickNotificationService {
             return
         }
         let scheduledAt = try? await repository.fetchJobRunAt(jobID: row.jobID)
-        // Small delay so Notification Center finishes dismissing before our modal paints.
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        JobResultPresenter.shared.present(row: row, scheduledAt: scheduledAt)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        hideMainWindowsForPanelOnlyIfNeeded()
+        JobResultPresenter.shared.present(
+            row: row,
+            scheduledAt: scheduledAt,
+            ephemeralSession: JobResultPresenter.shouldUseEphemeralSession
+        )
         await markJobResultRead(id: id)
+    }
+
+    /// Panel-only / cold notification launches must not leave an empty main window behind the card.
+    private func hideMainWindowsForPanelOnlyIfNeeded() {
+        guard JobResultPresenter.shouldUseEphemeralSession else { return }
+        NSApp.setActivationPolicy(.accessory)
+        for window in NSApp.windows where !(window is NSPanel) {
+            window.orderOut(nil)
+        }
     }
 
     private func markJobResultRead(id: String) async {
@@ -398,6 +392,32 @@ final class DerrickNotificationService {
 
     private func isUIApplicationProcessRunning() -> Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: DerrickServiceID.ui.rawValue).isEmpty
+    }
+
+    private func registerPresentJobResultObserver() {
+        guard presentJobResultObserver == nil else { return }
+        let observer = DerrickDarwinNotifyObserver(
+            darwinName: DerrickJobResultPresentationWake.darwinName
+        ) {
+            Task { @MainActor in
+                if let id = DerrickJobResultPresentationWake.takePendingResultID() {
+                    await DerrickNotificationService.shared.presentJobResultWhenReady(id: id)
+                }
+            }
+        }
+        presentJobResultObserver = observer
+        observer.start()
+        // Catch a wake that arrived before we registered.
+        if let id = DerrickJobResultPresentationWake.takePendingResultID() {
+            Task { @MainActor in
+                await self.presentJobResultWhenReady(id: id)
+            }
+        }
+    }
+
+    private func unregisterPresentJobResultObserver() {
+        presentJobResultObserver?.stop()
+        presentJobResultObserver = nil
     }
 
     private func registerDarwinObserver() {

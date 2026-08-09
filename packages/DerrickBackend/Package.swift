@@ -1,0 +1,41 @@
+// swift-tools-version: 6.2
+
+import PackageDescription
+
+let package = Package(
+    name: "DerrickBackend",
+    platforms: [
+        .macOS(.v15)
+    ],
+    products: [
+        .library(name: "DerrickBackend", targets: ["DerrickBackend"])
+    ],
+    dependencies: [
+        .package(path: "../ServiceContracts"),
+        .package(path: "../DBRepository"),
+        .package(path: "../DockerRunnerXPC")
+    ],
+    targets: [
+        .target(
+            name: "DerrickBackend",
+            dependencies: [
+                "ServiceContracts",
+                "DBRepository",
+                "DockerRunnerXPC"
+            ],
+            path: "Sources/DerrickBackend",
+            swiftSettings: [
+                .enableUpcomingFeature("ApproachableConcurrency")
+            ]
+        ),
+        .testTarget(
+            name: "DerrickBackendTests",
+            dependencies: ["DerrickBackend"],
+            path: "Tests/DerrickBackendTests",
+            swiftSettings: [
+                .enableUpcomingFeature("ApproachableConcurrency")
+            ]
+        )
+    ],
+    swiftLanguageModes: [.v6]
+)

@@ -56,6 +56,22 @@ public actor ServiceEnsureUp {
         throw lastError ?? ServiceEnsureUpError.unavailable("JobService")
     }
 
+    /// Headless backend LoginAgent (`derrick.ui.Daemon`). Prefer this over per-XPC ensure-up as migration completes.
+    @discardableResult
+    public func ensureDaemon(retries: Int = 3) async throws -> ServiceHealthReport {
+        var lastError: Error?
+        for attempt in 0..<max(1, retries) {
+            do {
+                return try await connectDaemon()
+            } catch {
+                lastError = error
+                fputs("[ServiceEnsureUp] Daemon attempt \(attempt + 1): \(error.localizedDescription)\n", stderr)
+                try? await Task.sleep(nanoseconds: UInt64(100_000_000 * (attempt + 1)))
+            }
+        }
+        throw lastError ?? ServiceEnsureUpError.unavailable("DerrickDaemon")
+    }
+
     // MARK: - Connections
 
     private func connectAgent() async throws -> ServiceHealthReport {
@@ -120,6 +136,53 @@ public actor ServiceEnsureUp {
                 proxy.health { data in
                     do {
                         cont.resume(returning: try MCPServiceXPCCodec.decodeHealth(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
+    private func connectDaemon() async throws -> ServiceHealthReport {
+        let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+        conn.remoteObjectInterface = NSXPCInterface(with: DerrickDaemonXPC.self)
+        do {
+            try XPCPeerAuthentication.apply(
+                requirement: XPCPeerAuthentication.requirementString(
+                    allowedPeerIdentifiers: [DerrickServiceID.daemon.rawValue]
+                ),
+                to: conn
+            )
+        } catch {
+            fputs("[ServiceEnsureUp] code-sign soft-fail Daemon: \(error.localizedDescription)\n", stderr)
+        }
+        conn.resume()
+        defer { conn.invalidate() }
+        nonisolated(unsafe) let proxy = try castProxy(conn, as: DerrickDaemonXPC.self, label: "DerrickDaemon")
+
+        try await withTimeout {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.bootstrap { data in
+                    do {
+                        let boot = try DerrickDaemonXPCCodec.decodeBootstrap(data as Data)
+                        if boot.ok { cont.resume() }
+                        else {
+                            cont.resume(
+                                throwing: ServiceEnsureUpError.bootstrapFailed("DerrickDaemon", boot.message)
+                            )
+                        }
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        return try await withTimeout {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.health { data in
+                    do {
+                        cont.resume(returning: try DerrickDaemonXPCCodec.decodeHealth(data as Data))
                     } catch {
                         cont.resume(throwing: error)
                     }

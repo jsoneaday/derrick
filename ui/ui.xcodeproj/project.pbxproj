@@ -28,6 +28,7 @@
 		DEAS10202A00000000AS001 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10212A00000000AS001 /* PartialJSON */; };
 		DEAS10222A00000000AS001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10232A00000000AS001 /* Lib */; };
 		DEAS10242A00000000AS001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10252A00000000AS001 /* EgressProxy */; };
+		DEAS10262A00000000AS001 /* DerrickBackend in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10272A00000000AS001 /* DerrickBackend */; };
 		DECF6281300ED94C00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6280300ED94C00E1757D /* Plugin */; };
 		DECF6284300ED9AC00E1757D /* Plugin in Frameworks */ = {isa = PBXBuildFile; productRef = DECF6283300ED9AC00E1757D /* Plugin */; };
 		DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0022A0000000042F230 /* DockerRunnerXPC */; };
@@ -43,10 +44,12 @@
 		DEJB10112A00000000JB001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10212A00000000JB001 /* DBRepository */; };
 		DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10222A00000000JB001 /* DockerRunnerXPC */; };
 		DEJB10132A00000000JB001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10232A00000000JB001 /* ServiceEnsureUp */; };
-		DEKA100B2A00000000KA001 /* JobKeepAlive in Embed JobKeepAlive */ = {isa = PBXBuildFile; fileRef = DEKA10012A00000000KA001 /* JobKeepAlive */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		DEKA100C2A00000000KA001 /* derrick.ui.JobKeepAlive.plist in Embed LaunchAgents */ = {isa = PBXBuildFile; fileRef = DEKA10022A00000000KA001 /* derrick.ui.JobKeepAlive.plist */; };
+		DEKA100B2A00000000KA001 /* JobKeepAlive.app in Embed JobKeepAlive */ = {isa = PBXBuildFile; fileRef = DEKA10012A00000000KA001 /* JobKeepAlive.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		DEKA100C2A00000000KA001 /* derrick.ui.Daemon.plist in Embed LaunchAgents */ = {isa = PBXBuildFile; fileRef = DEKA10022A00000000KA001 /* derrick.ui.Daemon.plist */; };
 		DEKA10102A00000000KA001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10202A00000000KA001 /* ServiceContracts */; };
 		DEKA10112A00000000KA001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10212A00000000KA001 /* DockerRunnerXPC */; };
+		DEKA10222A00000000KA002 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10232A00000000KA002 /* DBRepository */; };
+		DEKA10242A00000000KA003 /* DerrickBackend in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10252A00000000KA003 /* DerrickBackend */; };
 		DEMC100B2A00000000MC001 /* MCPService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEMC10012A00000000MC001 /* MCPService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* ServiceContracts */; };
 		DEMC10112A00000000MC001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10212A00000000MC001 /* DBRepository */; };
@@ -59,6 +62,7 @@
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
 		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
 		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
+		DEUISE0012A00000000SE001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEUISE0022A00000000SE001 /* ServiceEnsureUp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,10 +132,10 @@
 		};
 		DEKA10122A00000000KA001 /* Embed JobKeepAlive */ = {
 			isa = PBXCopyFilesBuildPhase;
-			dstPath = "";
-			dstSubfolder = Executables;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/LoginItems";
+			dstSubfolder = Product;
 			files = (
-				DEKA100B2A00000000KA001 /* JobKeepAlive in Embed JobKeepAlive */,
+				DEKA100B2A00000000KA001 /* JobKeepAlive.app in Embed JobKeepAlive */,
 			);
 			name = "Embed JobKeepAlive";
 		};
@@ -140,7 +144,7 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents";
 			dstSubfolder = Product;
 			files = (
-				DEKA100C2A00000000KA001 /* derrick.ui.JobKeepAlive.plist in Embed LaunchAgents */,
+				DEKA100C2A00000000KA001 /* derrick.ui.Daemon.plist in Embed LaunchAgents */,
 			);
 			name = "Embed LaunchAgents";
 		};
@@ -153,8 +157,8 @@
 		DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = DockerRunnerHelper.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEAS10012A00000000AS001 /* AgentService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = AgentService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEJB10012A00000000JB001 /* JobService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = JobService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
-		DEKA10012A00000000KA001 /* JobKeepAlive */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = JobKeepAlive; sourceTree = BUILT_PRODUCTS_DIR; };
-		DEKA10022A00000000KA001 /* derrick.ui.JobKeepAlive.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = derrick.ui.JobKeepAlive.plist; sourceTree = "<group>"; };
+		DEKA10012A00000000KA001 /* JobKeepAlive.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JobKeepAlive.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DEKA10022A00000000KA001 /* derrick.ui.Daemon.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = derrick.ui.Daemon.plist; sourceTree = "<group>"; };
 		DEMC10012A00000000MC001 /* MCPService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = MCPService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -269,6 +273,7 @@
 				DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */,
 				DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */,
 				DESC00012A00000000SC001 /* ServiceContracts in Frameworks */,
+				DEUISE0012A00000000SE001 /* ServiceEnsureUp in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -305,6 +310,7 @@
 				DEAS10202A00000000AS001 /* PartialJSON in Frameworks */,
 				DEAS10222A00000000AS001 /* Lib in Frameworks */,
 				DEAS10242A00000000AS001 /* EgressProxy in Frameworks */,
+				DEAS10262A00000000AS001 /* DerrickBackend in Frameworks */,
 			);
 		};
 		DEJB10042A00000000JB001 /* Frameworks */ = {
@@ -321,6 +327,8 @@
 			files = (
 				DEKA10102A00000000KA001 /* ServiceContracts in Frameworks */,
 				DEKA10112A00000000KA001 /* DockerRunnerXPC in Frameworks */,
+				DEKA10222A00000000KA002 /* DBRepository in Frameworks */,
+				DEKA10242A00000000KA003 /* DerrickBackend in Frameworks */,
 			);
 		};
 		DEMC10042A00000000MC001 /* Frameworks */ = {
@@ -364,7 +372,7 @@
 				DEAS10012A00000000AS001 /* AgentService.xpc */,
 				DEMC10012A00000000MC001 /* MCPService.xpc */,
 				DEJB10012A00000000JB001 /* JobService.xpc */,
-				DEKA10012A00000000KA001 /* JobKeepAlive */,
+				DEKA10012A00000000KA001 /* JobKeepAlive.app */,
 				DE1B9F132FEB74260042F227 /* uiTests.xctest */,
 				DE1B9F1D2FEB74260042F227 /* uiUITests.xctest */,
 			);
@@ -374,7 +382,7 @@
 		DEKA10302A00000000KA001 /* LaunchAgents */ = {
 			isa = PBXGroup;
 			children = (
-				DEKA10022A00000000KA001 /* derrick.ui.JobKeepAlive.plist */,
+				DEKA10022A00000000KA001 /* derrick.ui.Daemon.plist */,
 			);
 			path = LaunchAgents;
 			sourceTree = "<group>";
@@ -424,6 +432,7 @@
 				DEE6B0053010000000E6B001 /* EgressProxy */,
 				DEAR00022A00000000AR001 /* AgentRuntime */,
 				DESC00022A00000000SC001 /* ServiceContracts */,
+				DEUISE0022A00000000SE001 /* ServiceEnsureUp */,
 			);
 			productName = ui;
 			productReference = DE1B9F062FEB74250042F227 /* ui.app */;
@@ -523,6 +532,7 @@
 				DEAS10212A00000000AS001 /* PartialJSON */,
 				DEAS10232A00000000AS001 /* Lib */,
 				DEAS10252A00000000AS001 /* EgressProxy */,
+				DEAS10272A00000000AS001 /* DerrickBackend */,
 			);
 			productName = AgentService;
 			productReference = DEAS10012A00000000AS001 /* AgentService.xpc */;
@@ -568,10 +578,12 @@
 			packageProductDependencies = (
 				DEKA10202A00000000KA001 /* ServiceContracts */,
 				DEKA10212A00000000KA001 /* DockerRunnerXPC */,
+				DEKA10232A00000000KA002 /* DBRepository */,
+				DEKA10252A00000000KA003 /* DerrickBackend */,
 			);
 			productName = JobKeepAlive;
-			productReference = DEKA10012A00000000KA001 /* JobKeepAlive */;
-			productType = "com.apple.product-type.tool";
+			productReference = DEKA10012A00000000KA001 /* JobKeepAlive.app */;
+			productType = "com.apple.product-type.application";
 		};
 		DEMC10062A00000000MC001 /* MCPService */ = {
 			isa = PBXNativeTarget;
@@ -650,6 +662,7 @@
 				DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */,
 				DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */,
 				DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */,
+				DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -1207,16 +1220,22 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = JobKeepAlive/JobKeepAlive.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VUSK4B2YKQ;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JobKeepAlive/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				OTHER_CODE_SIGN_FLAGS = "--identifier=derrick.ui.JobKeepAlive";
-				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.JobKeepAlive;
+				OTHER_CODE_SIGN_FLAGS = "--identifier=derrick.ui.Daemon";
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.Daemon;
 				PRODUCT_NAME = JobKeepAlive;
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1229,16 +1248,22 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = JobKeepAlive/JobKeepAlive.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VUSK4B2YKQ;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JobKeepAlive/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				OTHER_CODE_SIGN_FLAGS = "--identifier=derrick.ui.JobKeepAlive";
-				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.JobKeepAlive;
+				OTHER_CODE_SIGN_FLAGS = "--identifier=derrick.ui.Daemon";
+				PRODUCT_BUNDLE_IDENTIFIER = derrick.ui.Daemon;
 				PRODUCT_NAME = JobKeepAlive;
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1400,6 +1425,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/MCPToolCatalog;
 		};
+		DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/DerrickBackend;
+		};
 		DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/EgressProxy;
@@ -1511,6 +1540,11 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = EgressProxy;
 		};
+		DEAS10272A00000000AS001 /* DerrickBackend */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */;
+			productName = DerrickBackend;
+		};
 		DECF6280300ED94C00E1757D /* Plugin */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */;
@@ -1581,6 +1615,15 @@
 			package = DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */;
 			productName = DockerRunnerXPC;
 		};
+		DEKA10232A00000000KA002 /* DBRepository */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DBRepository;
+		};
+		DEKA10252A00000000KA003 /* DerrickBackend */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */;
+			productName = DerrickBackend;
+		};
 		DEMC10202A00000000MC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ServiceContracts;
@@ -1625,6 +1668,11 @@
 		DESC00042A00000000SC001 /* ServiceContracts */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ServiceContracts;
+		};
+		DEUISE0022A00000000SE001 /* ServiceEnsureUp */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */;
+			productName = ServiceEnsureUp;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
