@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceContracts
 
 /// App-load initialization progress and failures for the bootstrap modal.
 @MainActor
@@ -115,6 +116,7 @@ final class AppBootstrapStatus: ObservableObject {
         failureTitle = nil
         failureMessage = nil
         isModalPresented = false
+        DerrickUISessionPresence.markInteractiveSessionActive()
         debugLog("[bootstrap] phase=ready")
     }
 

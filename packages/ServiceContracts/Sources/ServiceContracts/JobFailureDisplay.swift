@@ -30,6 +30,9 @@ public enum JobFailureDisplay: Sendable {
         if let raw, !raw.isEmpty, !isLowValueDetail(raw) {
             return raw
         }
+        guard failureCode != nil else {
+            return nil
+        }
         return fallbackMessage(for: failureCode)
     }
 

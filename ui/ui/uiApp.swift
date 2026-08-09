@@ -10,10 +10,10 @@ struct uiApp: App {
     /// Captured at process start so Scene content cannot race AppDelegate.
     private let isPanelOnlyOrHeadlessLaunch =
         DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
 
     init() {
-        if DerrickNotificationLaunch.isJobResultPresentationLaunch() {
+        if DerrickNotificationLaunch.hasJobResultPresentationIntent() {
             JobResultPanelSession.isPanelOnlyLaunch = true
             JobResultPanelSession.allowsTermination = false
         }
@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Panel-only launches must not restore the main chat window from a prior session.
         !JobResultPanelSession.isPanelOnlyLaunch
             && !DerrickNotificationLaunch.isPollLaunch()
+            && !DerrickNotificationLaunch.hasJobResultPresentationIntent()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -89,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
         {
             return false
         }
@@ -100,14 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserNotificationPoster.configureDelegateIfNeeded()
         if DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
         {
             NSApp.setActivationPolicy(.accessory)
-            if DerrickNotificationLaunch.isJobResultPresentationLaunch() {
+            if DerrickNotificationLaunch.hasJobResultPresentationIntent() {
                 JobResultPanelSession.isPanelOnlyLaunch = true
                 JobResultPanelSession.allowsTermination = false
                 ProcessInfo.processInfo.disableAutomaticTermination("derrick.job-result-panel-launch")
                 ProcessInfo.processInfo.disableSuddenTermination()
+                dismissRestoredMainWindows()
             }
         }
     }
@@ -126,15 +128,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let resultID = DerrickNotificationLaunch.jobResultIDToPresent()
             ?? DerrickJobResultPresentationWake.takePendingResultID()
         {
-            let panelOnly = DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            let panelOnly = DerrickNotificationLaunch.hasJobResultPresentationIntent()
                 || JobResultPanelSession.isPanelOnlyLaunch
             JobResultPresenter.interactiveSessionActive = !panelOnly
             if panelOnly {
                 JobResultPanelSession.isPanelOnlyLaunch = true
                 JobResultPanelSession.allowsTermination = false
+                dismissRestoredMainWindows()
                 Task { @MainActor in
                     for window in NSApp.windows where !(window is NSPanel) {
-                        window.orderOut(nil)
+                        window.orderOut(NSApp)
                     }
                     DerrickNotificationService.shared.prepare()
                     await DerrickNotificationService.shared.presentJobResultWhenReady(id: resultID)
@@ -155,8 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         guard !DerrickNotificationLaunch.isPollLaunch(),
-              !DerrickNotificationLaunch.isJobResultPresentationLaunch()
+              !DerrickNotificationLaunch.hasJobResultPresentationIntent()
         else { return }
+        DerrickUISessionPresence.clearInteractiveSession()
         DerrickNotificationService.shared.stop()
         let sem = DispatchSemaphore(value: 0)
         Task { @MainActor in
@@ -164,5 +168,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 5)
+    }
+
+    /// State restoration can resurrect `derrick.main` even when this launch is panel-only.
+    private func dismissRestoredMainWindows() {
+        for window in NSApp.windows {
+            let id = window.identifier?.rawValue ?? ""
+            if id == DerrickMainWindowID.main || window.title == "Derrick" {
+                window.isRestorable = false
+                window.orderOut(NSApp)
+                window.close()
+            }
+        }
     }
 }

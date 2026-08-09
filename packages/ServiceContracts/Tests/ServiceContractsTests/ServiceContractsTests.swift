@@ -335,6 +335,16 @@ import Testing
         #expect(detail == "ModuleNotFoundError: No module named 'requests'")
     }
 
+    @Test func jobFailureDisplaySkipsFooterForSuccessfulJob() {
+        let text = JobFailureDisplay.composePresentation(
+            responseText: "Apple.com is currently highlighting the latest iPhone lineup.",
+            failureDetail: nil,
+            failureCode: nil
+        )
+        #expect(!text.contains("What went wrong"))
+        #expect(text == "Apple.com is currently highlighting the latest iPhone lineup.")
+    }
+
     @Test func jobFailureDisplaySkipsRedundantFooterWhenSummaryExplainsFailure() {
         let text = JobFailureDisplay.composePresentation(
             responseText: "The scheduled Python script failed during execution.",
@@ -353,6 +363,23 @@ import Testing
         )
         #expect(text.contains("What went wrong"))
         #expect(text.contains("Permission denied"))
+    }
+
+    @Test func derrickNotificationLaunchDetectsPendingPresentationIntent() {
+        let id = "FE1AB9C3-C51F-4A8D-AB94-0C01E9357D19"
+        DerrickJobResultPresentationWake.post(resultID: id)
+        defer { _ = DerrickJobResultPresentationWake.takePendingResultID() }
+        #expect(DerrickNotificationLaunch.hasJobResultPresentationIntent([]))
+        #expect(!DerrickNotificationLaunch.isJobResultPresentationLaunch([]))
+    }
+
+    @Test func derrickUISessionPresenceTracksLivePID() {
+        DerrickUISessionPresence.clearInteractiveSession()
+        defer { DerrickUISessionPresence.clearInteractiveSession() }
+        #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
+        DerrickUISessionPresence.markInteractiveSessionActive()
+        #expect(DerrickUISessionPresence.isInteractiveSessionActive(excludingPID: -1))
+        #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
     }
 
     @Test func derrickDaemonHygieneDetectsOrphanPath() {

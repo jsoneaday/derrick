@@ -9,7 +9,7 @@ import SwiftUI
 enum JobResultPanelSession {
     nonisolated(unsafe) static var allowsTermination = true
     nonisolated(unsafe) static var isPanelOnlyLaunch =
-        DerrickNotificationLaunch.isJobResultPresentationLaunch()
+        DerrickNotificationLaunch.hasJobResultPresentationIntent()
     nonisolated(unsafe) static var swallowMouseEventsUntil = Date.distantPast
     nonisolated(unsafe) private static var mouseMonitor: Any?
 
@@ -42,7 +42,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
     static var shouldUseEphemeralSession: Bool {
         panelOnlyLaunch
             || !interactiveSessionActive
-            || DerrickNotificationLaunch.isJobResultPresentationLaunch()
+            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
             || DerrickNotificationLaunch.isPollLaunch()
     }
 
@@ -65,7 +65,8 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         let failureCode: String?
 
         var displayText: String {
-            JobFailureDisplay.composePresentation(
+            guard failed else { return responseText }
+            return JobFailureDisplay.composePresentation(
                 responseText: responseText,
                 failureDetail: failureDetail,
                 failureCode: failureCode

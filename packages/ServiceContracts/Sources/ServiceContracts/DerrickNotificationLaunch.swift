@@ -18,9 +18,15 @@ public enum DerrickNotificationLaunch: Sendable {
         return id.isEmpty ? nil : id
     }
 
-    /// Panel-only session from notification tap argv.
+    /// Panel-only session from notification tap argv or pending app-group wake file.
     public static func isJobResultPresentationLaunch(_ arguments: [String] = CommandLine.arguments) -> Bool {
         jobResultIDToPresent(arguments) != nil
+    }
+
+    /// Launch should present a job result without mounting the main chat shell.
+    /// Uses argv and the pending wake file (argv is often dropped by Launch Services).
+    public static func hasJobResultPresentationIntent(_ arguments: [String] = CommandLine.arguments) -> Bool {
+        isJobResultPresentationLaunch(arguments) || DerrickJobResultPresentationWake.peekPendingResultID() != nil
     }
 
     public static func postShowJobResult(_ id: String) {

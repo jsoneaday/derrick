@@ -304,7 +304,8 @@ final class DerrickNotificationService {
 
     private func presentJobResultFromNotificationTap(id: String) async {
         // Single presentation path for notification tap (Darwin wake or panel-only argv).
-        if JobResultPresenter.interactiveSessionActive {
+        if JobResultPresenter.interactiveSessionActive,
+           !JobResultPanelSession.isPanelOnlyLaunch {
             DerrickMainWindowBridge.ensureMainWindow()
         }
         guard await ensureRepository() != nil else { return }

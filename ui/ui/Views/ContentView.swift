@@ -483,7 +483,8 @@ struct ContentView: View {
         .task {
             // Single-flight: SwiftUI may re-enter `.task` (sidebar appear / identity churn).
             // A second beginLoadingSession after ready left an undismissable modal and dead UI.
-            guard !JobResultPanelSession.isPanelOnlyLaunch else {
+            guard !JobResultPanelSession.isPanelOnlyLaunch,
+                  !DerrickNotificationLaunch.hasJobResultPresentationIntent() else {
                 fputs("[ui] ContentView bootstrap skipped (panel-only launch)\n", stderr)
                 return
             }
