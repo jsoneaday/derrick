@@ -13,28 +13,25 @@
 | --- | --- | --- |
 | **UI** | `derrick.ui` | Chat, settings, approvals; XPC client of Daemon; ensure Daemon up |
 | **Daemon (`derrickd`)** | `derrick.ui.Daemon` | Headless LoginAgent: agent turns, jobs, MCP host, AppEventBus, **sole** UserNotifications poster |
-| **AgentService** | `derrick.ui.AgentService` | *(legacy XPC — folding into Daemon)* |
-| **JobService** | `derrick.ui.JobService` | *(legacy XPC — folding into Daemon)* |
-| **MCPService** | `derrick.ui.MCPService` | *(legacy XPC — folding into Daemon)* |
-| **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent |
+| **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent (future) |
 | **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained process runner (existing) |
 
 See [adr-headless-backend.md](adr-headless-backend.md).
 
-**Packaging (locked):** Embedded **XPC services** in the app bundle. **JobKeepAlive** login LaunchAgent (`SMAppService`, RunAtLoad + KeepAlive) holds an XPC connection to JobService for the **user session** (not system boot — no HITL/Keychain without login). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
+**Packaging (locked):** UI embeds **DockerRunnerHelper** XPC + **JobKeepAlive** LoginItem (`derrickd`). Agent/Job/MCP run **in-process** inside derrickd. UI talks only to the daemon Mach service (`VUSK4B2YKQ.derrick.shared.daemon`). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
 
 ## Call rules
 
 ```
-AgentService ──execute now──► MCPService
-AgentService ──jobs_* tools──► JobService (create job / schedule; local orchestration)
-JobService ──at fire──► MCPService (RunTool)
-JobService ──at fire──► AgentService (WakeAgent)
-WebhookService ─────────────► JobService | AgentService | MCPService (bound intents only)
-UI ─────────────────────────► Agent | Job | Webhook | health/start
+UI ──Mach XPC──► derrickd (Agent + Jobs + MCP modules)
+derrickd Agent ──in-process──► MCP
+derrickd Agent ──in-process──► Jobs (create / schedule)
+derrickd Jobs ──at fire──► MCP (RunTool) / Agent (WakeAgent)
+derrickd ──XPC──► DockerRunnerHelper
+WebhookService (future) ──► derrickd
 ```
 
-- JobService / WebhookService never run LLM turns.
+- Job / Webhook never run LLM turns outside the Agent module.
 - Every MCP call carries a **principal** for policy.
 
 ### Job model
@@ -42,7 +39,7 @@ UI ─────────────────────────�
 - **Step kinds:** `runTool` | `runToolBatch` | `wakeAgent` | `runToolThenWake`.
 - Notify-after-tool = `runToolThenWake` or graph `runTool` → `wakeAgent` (not a silent side-effect).
 - Heartbeat / decision alerts = **schedules** that fire `wakeAgent` (or notify) steps, not a vague “event” step type.
-- **ServiceEnsureUp** shared library: ensure Agent / MCP / Job are up (health+bootstrap). Job/Webhook/UI reuse it.
+- **ServiceEnsureUp** shared library: primary `ensureDaemon()` (Agent/MCP/Job ensure-up aliases to daemon).
 
 ### Job fire types (step kinds)
 1. **runTool** — frozen tool+args; 0 LLM at fire.
@@ -96,7 +93,7 @@ UI ─────────────────────────�
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
-| **P4** | partial | JobService + schedules; **derrickd LoginAgent** (Mach service + notify); structured job failures. Folding Agent/Job/MCP into Daemon next. **Jobs UI** / webhook still open. |
+| **P4** | done | Job + Agent + MCP folded into **derrickd** (in-process); UI → daemon Mach only; peer mesh + job-worker/watchdog removed. Jobs UI / webhook still open. |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |
 

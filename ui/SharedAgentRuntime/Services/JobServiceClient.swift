@@ -31,6 +31,10 @@ public final class JobServiceClient: @unchecked Sendable {
 
     /// AgentService: after install, prove health works over the peer link.
     public func verifyPeerMesh() async throws {
+        if DerrickProcessRole.isDaemon {
+            fputs("[JobServiceClient] in-process Job ready (daemon)\n", stderr)
+            return
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
@@ -131,15 +135,18 @@ public final class JobServiceClient: @unchecked Sendable {
     }
 
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
+        if DerrickProcessRole.isDaemon {
+            return ServiceHealthReport(service: .job, status: .ok, detail: "in-process (daemon)")
+        }
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {
                 nonisolated(unsafe) let proxy = try remoteProxy()
-                let boot: JobServiceBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
+                let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
                     try await withCheckedThrowingContinuation { cont in
                         proxy.bootstrap { data in
                             do {
-                                cont.resume(returning: try JobServiceXPCCodec.decodeBootstrap(data as Data))
+                                cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
                             } catch {
                                 cont.resume(throwing: error)
                             }
@@ -148,7 +155,7 @@ public final class JobServiceClient: @unchecked Sendable {
                 }
                 await MainActor.run {
                     debugLog(
-                        "JobService bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") msg=\(boot.message)"
+                        "Daemon/Job bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") modules=\(boot.modules) msg=\(boot.message)"
                     )
                 }
                 guard boot.ok else {
@@ -407,6 +414,9 @@ public final class JobServiceClient: @unchecked Sendable {
     }
 
     private func remoteProxy() throws -> JobServiceXPC {
+        if DerrickProcessRole.isDaemon, let local = InProcessServiceBridges.jobLocalProxy as? JobServiceXPC {
+            return local
+        }
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
@@ -415,7 +425,7 @@ public final class JobServiceClient: @unchecked Sendable {
         guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ [weak self] error in
             fputs("[JobServiceClient] proxy error: \(error.localizedDescription)\n", stderr)
             self?.invalidate()
-        }) as? JobServiceXPC else {
+        }) as? DerrickDaemonServiceXPC else {
             throw JobServiceClientError.unavailable
         }
         return proxy
@@ -426,7 +436,7 @@ public final class JobServiceClient: @unchecked Sendable {
     }
 
     private func makeConnection() throws -> NSXPCConnection {
-        // Prefer peer endpoint when installed (AgentService mesh).
+        // Prefer peer endpoint when installed (legacy AgentService mesh).
         if let endpoint = peerEndpoint {
             let conn = NSXPCConnection(listenerEndpoint: endpoint)
             // Anonymous peer: no client code-sign requirement (same as MCPServiceClient).
@@ -443,26 +453,25 @@ public final class JobServiceClient: @unchecked Sendable {
             throw JobServiceClientError.peerEndpointMissing
         }
 
-        // UI host + JobKeepAlive LaunchAgent: Application XPC serviceName.
-        let conn = NSXPCConnection(serviceName: serviceName)
-        let remote = NSXPCInterface(with: JobServiceXPC.self)
+        // UI host → derrickd Mach service.
+        let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+        let remote = NSXPCInterface(with: DerrickDaemonServiceXPC.self)
         let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
-        // peerListenerEndpoint reply carries NSXPCListenerEndpoint
         remote.setClasses(
             endpointClasses,
-            for: #selector(JobServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
+            for: #selector(DerrickDaemonServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: true
         )
         remote.setClasses(
             endpointClasses,
-            for: #selector(JobServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
+            for: #selector(DerrickDaemonServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )
         remote.setClasses(
             endpointClasses,
-            for: #selector(JobServiceXPC.setAgentServicePeerEndpoint(_:authJSON:withReply:)),
+            for: #selector(DerrickDaemonServiceXPC.setAgentServicePeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )
@@ -470,7 +479,7 @@ public final class JobServiceClient: @unchecked Sendable {
         do {
             try XPCPeerAuthentication.apply(
                 requirement: XPCPeerAuthentication.requirementString(
-                    allowedPeerIdentifiers: [DerrickServiceID.job.rawValue]
+                    allowedPeerIdentifiers: [DerrickServiceID.daemon.rawValue]
                 ),
                 to: conn
             )
@@ -480,7 +489,10 @@ public final class JobServiceClient: @unchecked Sendable {
         conn.interruptionHandler = { [weak self] in self?.invalidate() }
         conn.invalidationHandler = { [weak self] in self?.invalidate() }
         conn.resume()
-        fputs("[JobServiceClient] connected serviceName=\(serviceName)\n", stderr)
+        fputs(
+            "[JobServiceClient] host connected daemon mach=\(DerrickServiceID.daemon.machServiceName)\n",
+            stderr
+        )
         return conn
     }
 

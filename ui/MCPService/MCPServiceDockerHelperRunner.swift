@@ -1,8 +1,22 @@
 import Foundation
 import DockerRunnerXPC
 import MCPServer
+import ServiceContracts
 
 extension NSData: @unchecked @retroactive Sendable {}
+
+/// Reverse XPC sink for daemon → embedded DockerRunnerHelper (logs + headless egress replies).
+private final class MCPDockerHelperLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked Sendable {
+    func appendLog(message: String) {
+        fputs("[DockerHelper] \(message)\n", stderr)
+    }
+
+    func requestEgressHostAccess(host: String, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        fputs("[MCPService] mid-flight egress denied (headless) host=\(host)\n", stderr)
+        let data = (try? EgressHostAccessReply(decision: .deny).encodeJSON()) ?? Data("{}".utf8)
+        reply(data as NSData)
+    }
+}
 
 /// PythonScriptRunner in MCPService that runs docker **only** via DockerRunnerHelper peer XPC.
 /// UI prewarms volumes/image/warm containers; this path only docker-execs into them.
@@ -13,12 +27,18 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
     private let lock = NSLock()
     private var peerEndpoint: NSXPCListenerEndpoint?
     private var connection: NSXPCConnection?
+    private let logSink = MCPDockerHelperLogSink()
     private let callTimeoutNanoseconds: UInt64 = 120_000_000_000
 
     private init() {}
 
     /// Install helper peer endpoint from UI handoff. Invalidates any prior connection.
+    /// Ignored in derrickd — the daemon uses its embedded DockerRunnerHelper so jobs survive UI quit.
     func installPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) {
+        if DerrickProcessRole.isDaemon {
+            fputs("[MCPService] Docker helper peer handoff ignored (daemon uses embedded helper)\n", stderr)
+            return
+        }
         lock.lock()
         peerEndpoint = endpoint
         connection?.invalidate()
@@ -177,14 +197,36 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
             environment: DockerScriptPreparer.processEnvironment()
         )
         let requestData = try JSONEncoder().encode(request)
-        let responseData: Data = try await withProxy { proxy in
-            try await withCheckedThrowingContinuation { cont in
-                proxy.runProcess(requestData: requestData as NSData) { reply in
-                    cont.resume(returning: reply as Data)
+        // Bound by caller timeout (+slack), not the 120s withProxy default — failed helper
+        // probes must not hang derrickd bootstrap / job ticks.
+        let timeoutNs = UInt64(max(1, timeoutSeconds) + 5) * 1_000_000_000
+        let responseData: Data = try await invokeHelper(
+            timeoutNanoseconds: timeoutNs,
+            requestData: requestData as NSData
+        )
+        return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
+    }
+
+    /// XPC `runProcess` with single-resume + timeout so helper death cannot leak a continuation.
+    private func invokeHelper(timeoutNanoseconds: UInt64, requestData: NSData) async throws -> Data {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+            let box = OnceResumeBox(cont)
+            do {
+                let proxy = try self.remoteProxy(onError: { error in
+                    box.resume(throwing: error)
+                })
+                proxy.runProcess(requestData: requestData) { reply in
+                    box.resume(returning: reply as Data)
                 }
+                Task {
+                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    self.invalidateConnection()
+                    box.resume(throwing: MCPServiceDockerHelperError.timeout)
+                }
+            } catch {
+                box.resume(throwing: error)
             }
         }
-        return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
     }
 
     // MARK: - Connection
@@ -192,44 +234,95 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
     private func withProxy<T: Sendable>(
         _ body: @escaping @Sendable (any DockerProcessRunnerXPC) async throws -> T
     ) async throws -> T {
-        nonisolated(unsafe) let proxy = try remoteProxy()
-        return try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await body(proxy) }
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                let proxy = try self.remoteProxy(onError: { _ in })
+                return try await body(proxy)
+            }
             group.addTask {
                 try await Task.sleep(nanoseconds: self.callTimeoutNanoseconds)
+                self.invalidateConnection()
                 throw MCPServiceDockerHelperError.timeout
             }
-            guard let first = try await group.next() else {
-                throw MCPServiceDockerHelperError.timeout
+            do {
+                guard let first = try await group.next() else {
+                    throw MCPServiceDockerHelperError.timeout
+                }
+                group.cancelAll()
+                return first
+            } catch {
+                group.cancelAll()
+                self.invalidateConnection()
+                throw error
             }
-            group.cancelAll()
-            return first
         }
     }
 
-    private func remoteProxy() throws -> any DockerProcessRunnerXPC {
+    /// Pushes permanent egress suffixes into the embedded helper (daemon headless path).
+    func pushEgressAllowedDomainSuffixes(_ suffixes: [String]) async {
+        guard let data = try? JSONEncoder().encode(suffixes) else { return }
+        do {
+            let ok: Bool = try await withProxy { proxy in
+                try await withCheckedThrowingContinuation { cont in
+                    proxy.setEgressAllowedDomainSuffixes(suffixesJSON: data as NSData) { success in
+                        cont.resume(returning: success)
+                    }
+                }
+            }
+            fputs("[MCPService] egress allowlist push ok=\(ok) count=\(suffixes.count)\n", stderr)
+        } catch {
+            fputs("[MCPService] egress allowlist push failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    private func remoteProxy(
+        onError: (@Sendable (Error) -> Void)? = nil
+    ) throws -> any DockerProcessRunnerXPC {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
-            guard let endpoint = peerEndpoint else {
+            if DerrickProcessRole.isDaemon {
+                let conn = NSXPCConnection(serviceName: "derrick.ui.DockerRunnerHelper")
+                do {
+                    try XPCPeerAuthentication.apply(
+                        requirement: XPCPeerAuthentication.requirementString(
+                            allowedPeerIdentifiers: [XPCPeerAuthentication.dockerHelperIdentifier]
+                        ),
+                        to: conn
+                    )
+                } catch {
+                    fputs("[MCPService] Docker helper auth soft-fail: \(error.localizedDescription)\n", stderr)
+                }
+                configureConnection(conn)
+                conn.resume()
+                connection = conn
+                fputs("[MCPService] Docker helper serviceName connected (daemon)\n", stderr)
+            } else if let endpoint = peerEndpoint {
+                let conn = NSXPCConnection(listenerEndpoint: endpoint)
+                configureConnection(conn)
+                conn.resume()
+                connection = conn
+                fputs("[MCPService] Docker helper peer connected\n", stderr)
+            } else {
                 throw MCPServiceDockerHelperError.peerEndpointMissing
             }
-            let conn = NSXPCConnection(listenerEndpoint: endpoint)
-            // Anonymous peer: no client code-sign requirement (same as Agent→MCP mesh).
-            conn.remoteObjectInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
-            conn.interruptionHandler = { [weak self] in self?.invalidateConnection() }
-            conn.invalidationHandler = { [weak self] in self?.invalidateConnection() }
-            conn.resume()
-            connection = conn
-            fputs("[MCPService] Docker helper peer connected\n", stderr)
         }
         guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ [weak self] error in
             fputs("[MCPService] Docker helper proxy error: \(error.localizedDescription)\n", stderr)
             self?.invalidateConnection()
+            onError?(error)
         }) as? any DockerProcessRunnerXPC else {
             throw MCPServiceDockerHelperError.unavailable
         }
         return proxy
+    }
+
+    private func configureConnection(_ conn: NSXPCConnection) {
+        conn.remoteObjectInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
+        conn.exportedInterface = NSXPCInterface(with: DockerHelperLogSinkXPC.self)
+        conn.exportedObject = logSink
+        conn.interruptionHandler = { [weak self] in self?.invalidateConnection() }
+        conn.invalidationHandler = { [weak self] in self?.invalidateConnection() }
     }
 
     private func invalidateConnection() {
@@ -237,6 +330,32 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         connection?.invalidate()
         connection = nil
         lock.unlock()
+    }
+}
+
+/// Ensures a checked continuation is resumed at most once (XPC reply vs error vs timeout).
+private final class OnceResumeBox<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+
+    init(_ continuation: CheckedContinuation<T, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(returning value: T) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        cont?.resume(returning: value)
+    }
+
+    func resume(throwing error: Error) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        cont?.resume(throwing: error)
     }
 }
 

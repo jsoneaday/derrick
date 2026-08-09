@@ -22,12 +22,21 @@ public actor DaemonRuntime {
 
     public init() {}
 
+    /// Optional hook set by JobKeepAlive to start MCP/Agent/Jobs in-process.
+    nonisolated(unsafe) public static var onBootstrapModules: (@Sendable () async -> Void)?
+
     public func bootstrap() async throws -> DerrickDaemonBootstrapResult {
         if !started {
             try await openDatabase()
             await NotificationPostingService.shared.prepare()
-            await DaemonJobWatchdog.shared.start()
+            // Job/Agent/MCP now run in-process — no UI job-worker wake.
+            await DaemonJobWatchdog.shared.stop()
             started = true
+            // Start modules in the background so Mach XPC bootstrap replies immediately.
+            // Awaiting MCP↔Docker verify here hung UI ensureDaemon (leaked XPC continuations).
+            if let onBootstrapModules = Self.onBootstrapModules {
+                Task { await onBootstrapModules() }
+            }
             fputs("[derrickd] runtime bootstrap ok modules=\(readyModules.map(\.rawValue).sorted())\n", stderr)
         }
         let path = try await repository?.databaseURL.path

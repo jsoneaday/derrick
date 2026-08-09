@@ -529,78 +529,43 @@ struct ContentView: View {
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
-                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and services…")
+                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and Derrick daemon…")
                 _ = XPCDockerRunner.shared
                 await EgressAllowlistService.shared.pushToHelper()
+
+                // Prefer a live daemon before long Docker prewarm so ensure-up isn't racing a wedged old process.
+                Task.detached(priority: .utility) {
+                    await Self.registerDaemonInBackground()
+                }
 
                 async let dockerReady: Void = {
                     try await XPCDockerRunner.shared.waitUntilPrewarmed()
                 }()
-                async let agentHealth = AgentServiceClient.shared.ensureUpAndHealth()
-                async let mcpHealthTask = MCPServiceClient.shared.ensureUpAndHealth()
-                async let jobHealthTask = JobServiceClient.shared.ensureUpAndHealth()
 
                 try await dockerReady
 
                 bootstrapStatus.update(
                     phase: .connectingHelper,
-                    message: "Starting Agent, MCP, and Job services…"
+                    message: "Connecting to Derrick daemon…"
                 )
 
-                let health = try await agentHealth
+                let health = try await ServiceEnsureUp.shared.ensureDaemon()
                 debugLog(
-                    "AgentService ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
+                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
                 )
 
-                let mcpHealth = try await mcpHealthTask
-                debugLog(
-                    "MCPService ensure-up ok status=\(mcpHealth.status.rawValue) pid=\(mcpHealth.pid) detail=\(mcpHealth.detail ?? "")"
-                )
+                // Warm UI clients against the same Mach service (reverse sink for Agent).
+                _ = try await AgentServiceClient.shared.ensureUpAndHealth()
+                _ = try await MCPServiceClient.shared.ensureUpAndHealth()
+                _ = try await JobServiceClient.shared.ensureUpAndHealth()
 
-                let jobHealth = try await jobHealthTask
-                debugLog(
-                    "JobService ensure-up ok status=\(jobHealth.status.rawValue) pid=\(jobHealth.pid) detail=\(jobHealth.detail ?? "")"
-                )
-
-                bootstrapStatus.update(phase: .connectingHelper, message: "Connecting service mesh…")
-
-                let peer: NSXPCListenerEndpoint
-                do {
-                    peer = try await MCPServiceClient.shared.fetchPeerListenerEndpoint()
-                    try await AgentServiceClient.shared.setMCPServicePeerEndpoint(peer)
-                    debugLog("MCPService peer endpoint handed to AgentService")
-                } catch {
-                    throw MeshBootstrapError.step("AgentService←MCP peer handoff", underlying: error)
-                }
-
-                do {
-                    let jobPeer = try await JobServiceClient.shared.fetchPeerListenerEndpoint()
-                    try await AgentServiceClient.shared.setJobServicePeerEndpoint(jobPeer)
-                    debugLog("JobService peer endpoint handed to AgentService")
-                } catch {
-                    throw MeshBootstrapError.step("AgentService←Job peer handoff", underlying: error)
-                }
-
-                do {
-                    try await JobServiceClient.shared.setMCPServicePeerEndpoint(peer)
-                    debugLog("MCPService peer endpoint handed to JobService")
-                } catch {
-                    throw MeshBootstrapError.step("JobService←MCP peer handoff", underlying: error)
-                }
-                do {
-                    let agentPeer = try await AgentServiceClient.shared.fetchPeerListenerEndpoint()
-                    try await JobServiceClient.shared.setAgentServicePeerEndpoint(agentPeer)
-                    debugLog("AgentService peer endpoint handed to JobService")
-                } catch {
-                    throw MeshBootstrapError.step("JobService←Agent peer handoff", underlying: error)
-                }
-
+                // Hand Docker helper peer to daemon MCP so tools can run without UI.
                 do {
                     let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
                     try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
-                    debugLog("Docker helper peer endpoint handed to MCPService")
+                    debugLog("Docker helper peer endpoint handed to daemon MCP")
                 } catch {
-                    throw MeshBootstrapError.step("MCPService←Docker helper peer handoff", underlying: error)
+                    throw MeshBootstrapError.step("Daemon MCP←Docker helper peer handoff", underlying: error)
                 }
 
                 sessionReady = true
@@ -609,13 +574,8 @@ struct ContentView: View {
                 await EgressAllowlistService.shared.pushToHelper()
                 if isDebugEnabled {
                     debugLogStore.log(
-                        "UI client ready (Docker + Agent + MCP + JobService + peer mesh)"
+                        "UI client ready (Docker + derrickd Agent/Job/MCP)"
                     )
-                }
-
-                // derrickd install/ensure must not block first paint — launchctl kickstart can hang.
-                Task.detached(priority: .utility) {
-                    await Self.registerDaemonInBackground()
                 }
             } catch is CancellationError {
                 if !sessionReady {

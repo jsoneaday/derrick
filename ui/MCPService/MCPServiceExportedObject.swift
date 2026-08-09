@@ -95,21 +95,28 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         authJSON: NSData,
         withReply reply: @escaping @Sendable (NSData) -> Void
     ) {
+        nonisolated(unsafe) let endpoint = endpoint
+        nonisolated(unsafe) let authData = authJSON as Data
+        let skipMeshVerify = DerrickProcessRole.isDaemon
         Task {
             do {
                 _ = try MCPServiceXPCCodec.decodeSignedPeerHandoffAuth(
-                    authJSON as Data,
+                    authData,
                     expectedTo: .mcp,
                     expectedKind: .installDockerHelperPeer
                 )
                 MCPServiceDockerHelperRunner.shared.installPeerEndpoint(endpoint)
-                try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
+                if !skipMeshVerify {
+                    try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
+                }
                 await MCPServiceStore.shared.log(
                     level: .info,
-                    message: "Docker helper peer mesh verified (MCP→helper)",
+                    message: skipMeshVerify
+                        ? "Docker helper peer installed (daemon; verify deferred)"
+                        : "Docker helper peer mesh verified (MCP→helper)",
                     code: "docker_helper_peer_ok"
                 )
-                fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
+                fputs("[MCPService] Docker helper peer endpoint installed\n", stderr)
                 let ack = try MCPServiceXPCCodec.encodeSignedAck(.ok, from: .mcp, to: .ui)
                 reply(ack as NSData)
             } catch {
@@ -120,12 +127,11 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
                     code: "docker_helper_peer_failed"
                 )
                 fputs("[MCPService] Docker helper peer mesh failed: \(message)\n", stderr)
-                let ack = (try? MCPServiceXPCCodec.encodeSignedAck(
-                    .error(message),
-                    from: .mcp,
-                    to: .ui
-                )) ?? Data()
-                reply(ack as NSData)
+                let ackData =
+                    (try? MCPServiceXPCCodec.encodeSignedAck(.error(message), from: .mcp, to: .ui))
+                    ?? (try? DerrickDaemonXPCCodec.encodeAck(.error(message)))
+                    ?? Data(#"{"ok":false,"message":"handoff failed"}"#.utf8)
+                reply(ackData as NSData)
             }
         }
     }

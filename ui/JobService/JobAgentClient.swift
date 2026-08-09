@@ -4,6 +4,7 @@ import ServiceContracts
 
 /// JobService → AgentService: signed startTurn with a no-op reverse sink (no UI chat stream).
 /// Job wakes use `delivery: .jobResultModal` and an isolated `job-` session.
+/// Inside derrickd, calls Agent in-process (no peer XPC).
 final class JobAgentClient: @unchecked Sendable {
     static let shared = JobAgentClient()
 
@@ -13,11 +14,13 @@ final class JobAgentClient: @unchecked Sendable {
     private var connection: NSXPCConnection?
     private var peerEndpoint: NSXPCListenerEndpoint?
     private let sink = JobAgentSink()
+    private let inProcessAgent = AgentServiceExportedObject()
     private let callTimeoutNanoseconds: UInt64 = 120_000_000_000
 
     private init() {}
 
     var hasPeerEndpoint: Bool {
+        if DerrickProcessRole.isDaemon { return true }
         lock.lock()
         defer { lock.unlock() }
         return peerEndpoint != nil
@@ -34,6 +37,10 @@ final class JobAgentClient: @unchecked Sendable {
     }
 
     func verifyPeerMesh() async throws {
+        if DerrickProcessRole.isDaemon {
+            fputs("[JobAgentClient] in-process Agent ready (daemon)\n", stderr)
+            return
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         let report: ServiceHealthReport = try await invoke(timeout: 15_000_000_000) {
             try await withCheckedThrowingContinuation { cont in
@@ -65,8 +72,22 @@ final class JobAgentClient: @unchecked Sendable {
             jobID: payload.jobID,
             parentSessionID: payload.parentSessionID
         )
-        nonisolated(unsafe) let proxy = try remoteProxy()
         nonisolated(unsafe) let payloadData = try AgentServiceXPCCodec.encodeSignedTurnRequest(request) as NSData
+        if DerrickProcessRole.isDaemon {
+            nonisolated(unsafe) let agent = inProcessAgent
+            return try await invoke(timeout: callTimeoutNanoseconds) {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AgentTurnAccepted, Error>) in
+                    agent.startTurn(requestJSON: payloadData) { data in
+                        do {
+                            cont.resume(returning: try AgentServiceXPCCodec.decodeTurnAccepted(data as Data))
+                        } catch {
+                            cont.resume(throwing: error)
+                        }
+                    }
+                }
+            }
+        }
+        nonisolated(unsafe) let proxy = try remoteProxy()
         return try await invoke(timeout: callTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AgentTurnAccepted, Error>) in
                 proxy.startTurn(requestJSON: payloadData) { data in

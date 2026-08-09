@@ -13,47 +13,17 @@ public actor ServiceEnsureUp {
 
     @discardableResult
     public func ensureAgent(retries: Int = 3) async throws -> ServiceHealthReport {
-        var lastError: Error?
-        for attempt in 0..<max(1, retries) {
-            do {
-                return try await connectAgent()
-            } catch {
-                lastError = error
-                fputs("[ServiceEnsureUp] AgentService attempt \(attempt + 1): \(error.localizedDescription)\n", stderr)
-                try? await Task.sleep(nanoseconds: UInt64(100_000_000 * (attempt + 1)))
-            }
-        }
-        throw lastError ?? ServiceEnsureUpError.unavailable("AgentService")
+        try await ensureDaemon(retries: retries)
     }
 
     @discardableResult
     public func ensureMCP(retries: Int = 3) async throws -> ServiceHealthReport {
-        var lastError: Error?
-        for attempt in 0..<max(1, retries) {
-            do {
-                return try await connectMCP()
-            } catch {
-                lastError = error
-                fputs("[ServiceEnsureUp] MCPService attempt \(attempt + 1): \(error.localizedDescription)\n", stderr)
-                try? await Task.sleep(nanoseconds: UInt64(100_000_000 * (attempt + 1)))
-            }
-        }
-        throw lastError ?? ServiceEnsureUpError.unavailable("MCPService")
+        try await ensureDaemon(retries: retries)
     }
 
     @discardableResult
     public func ensureJob(retries: Int = 3) async throws -> ServiceHealthReport {
-        var lastError: Error?
-        for attempt in 0..<max(1, retries) {
-            do {
-                return try await connectJob()
-            } catch {
-                lastError = error
-                fputs("[ServiceEnsureUp] JobService attempt \(attempt + 1): \(error.localizedDescription)\n", stderr)
-                try? await Task.sleep(nanoseconds: UInt64(100_000_000 * (attempt + 1)))
-            }
-        }
-        throw lastError ?? ServiceEnsureUpError.unavailable("JobService")
+        try await ensureDaemon(retries: retries)
     }
 
     /// Headless backend LoginAgent (`derrick.ui.Daemon`). Prefer this over per-XPC ensure-up as migration completes.

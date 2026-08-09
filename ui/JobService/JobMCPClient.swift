@@ -4,8 +4,7 @@ import ServiceContracts
 
 /// JobService → MCPService callTool client (signed envelopes).
 ///
-/// Must use a **peer** `NSXPCListenerEndpoint` from UI handoff — sibling XPC services
-/// cannot launch each other via `serviceName:`.
+/// Historically used a **peer** endpoint from UI handoff. Inside derrickd, calls MCP in-process.
 final class JobMCPClient: @unchecked Sendable {
     static let shared = JobMCPClient()
 
@@ -17,6 +16,7 @@ final class JobMCPClient: @unchecked Sendable {
     private init() {}
 
     var hasPeerEndpoint: Bool {
+        if DerrickProcessRole.isDaemon { return true }
         lock.lock()
         defer { lock.unlock() }
         return peerEndpoint != nil
@@ -33,6 +33,11 @@ final class JobMCPClient: @unchecked Sendable {
     }
 
     func verifyPeerMesh() async throws {
+        if DerrickProcessRole.isDaemon {
+            _ = try await MCPServiceToolHost.shared.ensureReady()
+            fputs("[JobMCPClient] in-process MCP ready (daemon)\n", stderr)
+            return
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         let report: ServiceHealthReport = try await invoke(timeout: 15_000_000_000) {
             try await withCheckedThrowingContinuation { cont in
@@ -52,6 +57,9 @@ final class JobMCPClient: @unchecked Sendable {
     }
 
     func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
+        if DerrickProcessRole.isDaemon {
+            return try await MCPServiceToolHost.shared.callTool(request: request)
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         nonisolated(unsafe) let payload = try MCPServiceXPCCodec.encodeSignedToolCallRequest(
             request,

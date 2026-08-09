@@ -28,15 +28,15 @@ Only the Daemon process posts `UNUserNotificationCenter` notifications. Other co
 
 ## Migration
 
-1. Stand up Daemon (health, bootstrap, notify, event bus) — **this ADR**
-2. Fold Job scheduler/executor into Daemon
-3. Fold Agent turns into Daemon
-4. Fold MCP tool host into Daemon
-5. Remove AgentService / JobService / MCPService `.xpc` targets and peer mesh
-6. UI ensure-up → single `ensureDaemon()`
+1. Stand up Daemon (health, bootstrap, notify, event bus) — **done**
+2. Fold Job scheduler/executor into Daemon — **done**
+3. Fold Agent turns into Daemon — **done**
+4. Fold MCP tool host into Daemon — **done**
+5. Remove AgentService / JobService / MCPService `.xpc` products from the UI embed (sources compile into derrickd); peer mesh removed from UI bootstrap — **done**
+6. UI ensure-up → primary `ensureDaemon()` — **done**
 7. Job completion → `JobResultNotifier` → Daemon `UNUserNotificationCenter` (done); retire UI poll/wake for job results
 8. Fold HITL notify posting into Daemon
-9. Until Job/Agent live in-daemon: derrickd job watchdog wakes `--derrick-job-worker` when UI is quit and jobs are due
+9. ~~derrickd job watchdog / `--derrick-job-worker`~~ — **removed** (jobs run in-process)
 
 ## Non-goals
 

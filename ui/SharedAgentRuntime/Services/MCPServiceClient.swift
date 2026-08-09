@@ -31,6 +31,15 @@ public final class MCPServiceClient: @unchecked Sendable {
 
     /// AgentService: after install, prove searchTools works over the peer link.
     public func verifyPeerMesh() async throws {
+        if DerrickProcessRole.isDaemon, let ensure = InProcessServiceBridges.mcpEnsureReady {
+            try await ensure()
+            let result = try await searchTools(principal: .system, query: "")
+            guard result.ok else {
+                throw MCPServiceClientError.meshUnverified(result.message.isEmpty ? "searchTools not ok" : result.message)
+            }
+            fputs("[MCPServiceClient] in-process MCP verified tools=\(result.tools.count)\n", stderr)
+            return
+        }
         let result = try await searchTools(principal: .system, query: "")
         guard result.ok else {
             throw MCPServiceClientError.meshUnverified(result.message.isEmpty ? "searchTools not ok" : result.message)
@@ -39,15 +48,21 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
+        if DerrickProcessRole.isDaemon {
+            if let ensure = InProcessServiceBridges.mcpEnsureReady {
+                try await ensure()
+            }
+            return ServiceHealthReport(service: .mcp, status: .ok, detail: "in-process (daemon)")
+        }
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {
                 nonisolated(unsafe) let proxy = try remoteProxy()
-                let boot: MCPServiceBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
-                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<MCPServiceBootstrapResult, Error>) in
+                let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
+                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
                         proxy.bootstrap { data in
                             do {
-                                cont.resume(returning: try MCPServiceXPCCodec.decodeBootstrap(data as Data))
+                                cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
                             } catch {
                                 cont.resume(throwing: error)
                             }
@@ -55,7 +70,9 @@ public final class MCPServiceClient: @unchecked Sendable {
                     }
                 }
                 await MainActor.run {
-                    debugLog("MCPService bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") msg=\(boot.message)")
+                    debugLog(
+                        "Daemon/MCP bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") modules=\(boot.modules) msg=\(boot.message)"
+                    )
                 }
                 guard boot.ok else {
                     throw MCPServiceClientError.bootstrapFailed(boot.message)
@@ -117,7 +134,7 @@ public final class MCPServiceClient: @unchecked Sendable {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 proxy.setDockerHelperPeerEndpoint(endpoint, authJSON: auth) { data in
                     do {
-                        let ack = try MCPServiceXPCCodec.decodeSignedAck(data as Data, expectedTo: .ui)
+                        let ack = try Self.decodeDockerHelperHandoffAck(data as Data)
                         if ack.ok {
                             cont.resume()
                         } else {
@@ -139,6 +156,9 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     public func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
+        if DerrickProcessRole.isDaemon, let call = InProcessServiceBridges.mcpCallTool {
+            return try await call(request)
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         // Signed ServiceMessage envelope (HMAC) — Agent → MCP runTool.
         let payload = try MCPServiceXPCCodec.encodeSignedToolCallRequest(request) as NSData
@@ -156,6 +176,9 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     public func searchTools(principal: ServicePrincipal, query: String = "") async throws -> MCPToolSearchResultDTO {
+        if DerrickProcessRole.isDaemon, let search = InProcessServiceBridges.mcpSearchTools {
+            return try await search(principal, query)
+        }
         nonisolated(unsafe) let proxy = try remoteProxy()
         let request = MCPToolSearchRequest(principal: principal, query: query)
         let payload = try MCPServiceXPCCodec.encodeSignedToolSearchRequest(request) as NSData
@@ -181,7 +204,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ [weak self] error in
             fputs("[MCPServiceClient] proxy error: \(error.localizedDescription)\n", stderr)
             self?.invalidate()
-        }) as? MCPServiceXPC else {
+        }) as? DerrickDaemonServiceXPC else {
             throw MCPServiceClientError.unavailable
         }
         return proxy
@@ -193,11 +216,11 @@ public final class MCPServiceClient: @unchecked Sendable {
 
     private func makeConnection() throws -> NSXPCConnection {
         if isHostApp {
-            let conn = NSXPCConnection(serviceName: serviceName)
-            // Host→Application XPC: require MCPService identity.
-            configure(conn, codeSignPeerAsMCPService: true)
+            // UI → derrickd Mach service (Agent/Job/MCP hosted in-process).
+            let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+            configure(conn, codeSignPeerAsDaemon: true)
             conn.resume()
-            fputs("[MCPServiceClient] host connected serviceName=\(serviceName)\n", stderr)
+            fputs("[MCPServiceClient] host connected daemon mach=\(DerrickServiceID.daemon.machServiceName)\n", stderr)
             return conn
         }
 
@@ -207,27 +230,27 @@ public final class MCPServiceClient: @unchecked Sendable {
         let conn = NSXPCConnection(listenerEndpoint: endpoint)
         // Anonymous peer listener: do not set client code-sign requirement.
         // Team/identifier checks on anonymous endpoints reject valid sibling links.
-        configure(conn, codeSignPeerAsMCPService: false)
+        configure(conn, codeSignPeerAsDaemon: false)
         conn.resume()
         fputs("[MCPServiceClient] peer connected via listener endpoint\n", stderr)
         return conn
     }
 
-    private func configure(_ conn: NSXPCConnection, codeSignPeerAsMCPService: Bool) {
-        let remote = NSXPCInterface(with: MCPServiceXPC.self)
+    private func configure(_ conn: NSXPCConnection, codeSignPeerAsDaemon: Bool) {
+        let remote = NSXPCInterface(with: DerrickDaemonServiceXPC.self)
         // Allow NSXPCListenerEndpoint argument on setDockerHelperPeerEndpoint:
         remote.setClasses(
             NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>,
-            for: #selector(MCPServiceXPC.setDockerHelperPeerEndpoint(_:authJSON:withReply:)),
+            for: #selector(DerrickDaemonServiceXPC.setDockerHelperPeerEndpoint(_:authJSON:withReply:)),
             argumentIndex: 0,
             ofReply: false
         )
         conn.remoteObjectInterface = remote
-        if codeSignPeerAsMCPService {
+        if codeSignPeerAsDaemon {
             do {
                 try XPCPeerAuthentication.apply(
                     requirement: XPCPeerAuthentication.requirementString(
-                        allowedPeerIdentifiers: [DerrickServiceID.mcp.rawValue]
+                        allowedPeerIdentifiers: [DerrickServiceID.daemon.rawValue]
                     ),
                     to: conn
                 )
@@ -244,6 +267,17 @@ public final class MCPServiceClient: @unchecked Sendable {
         connection?.invalidate()
         connection = nil
         lock.unlock()
+    }
+
+    /// Signed ack from legacy MCPService XPC, or unsigned `ServiceAckDTO` from derrickd fallback.
+    private static func decodeDockerHelperHandoffAck(_ data: Data) throws -> ServiceAckDTO {
+        if data.isEmpty {
+            throw MCPServiceClientError.meshUnverified("empty handoff reply")
+        }
+        if let signed = try? MCPServiceXPCCodec.decodeSignedAck(data, expectedTo: .ui) {
+            return signed
+        }
+        return try DerrickDaemonXPCCodec.decodeAck(data)
     }
 
     private func invoke<T: Sendable>(

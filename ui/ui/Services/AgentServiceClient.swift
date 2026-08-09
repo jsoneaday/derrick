@@ -68,10 +68,10 @@ public final class AgentServiceClient: @unchecked Sendable {
         for attempt in 0..<max(1, retries) {
             do {
                 let proxy = try remoteProxy()
-                let boot = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AgentServiceBootstrapResult, Error>) in
+                let boot = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
                     proxy.bootstrap { data in
                         do {
-                            cont.resume(returning: try AgentServiceXPCCodec.decodeBootstrap(data as Data))
+                            cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
                         } catch {
                             cont.resume(throwing: error)
                         }
@@ -79,7 +79,7 @@ public final class AgentServiceClient: @unchecked Sendable {
                 }
                 await MainActor.run {
                     debugLog(
-                        "AgentService bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") msg=\(boot.message)"
+                        "Daemon/Agent bootstrap: ok=\(boot.ok) path=\(boot.databasePath ?? "?") modules=\(boot.modules) msg=\(boot.message)"
                     )
                 }
                 guard boot.ok else {
@@ -297,25 +297,25 @@ public final class AgentServiceClient: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
-            let conn = NSXPCConnection(serviceName: serviceName)
-            let remote = NSXPCInterface(with: AgentServiceXPC.self)
+            let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+            let remote = NSXPCInterface(with: DerrickDaemonServiceXPC.self)
             // Allow NSXPCListenerEndpoint on peer install / fetch selectors:
             let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
             remote.setClasses(
                 endpointClasses,
-                for: #selector(AgentServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
+                for: #selector(DerrickDaemonServiceXPC.peerListenerEndpoint(authJSON:withReply:)),
                 argumentIndex: 0,
                 ofReply: true
             )
             remote.setClasses(
                 endpointClasses,
-                for: #selector(AgentServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
+                for: #selector(DerrickDaemonServiceXPC.setMCPServicePeerEndpoint(_:authJSON:withReply:)),
                 argumentIndex: 0,
                 ofReply: false
             )
             remote.setClasses(
                 endpointClasses,
-                for: #selector(AgentServiceXPC.setJobServicePeerEndpoint(_:authJSON:withReply:)),
+                for: #selector(DerrickDaemonServiceXPC.setJobServicePeerEndpoint(_:authJSON:withReply:)),
                 argumentIndex: 0,
                 ofReply: false
             )
@@ -325,7 +325,7 @@ public final class AgentServiceClient: @unchecked Sendable {
             do {
                 try XPCPeerAuthentication.apply(
                     requirement: XPCPeerAuthentication.requirementString(
-                        allowedPeerIdentifiers: [DerrickServiceID.agent.rawValue]
+                        allowedPeerIdentifiers: [DerrickServiceID.daemon.rawValue]
                     ),
                     to: conn
                 )
@@ -341,14 +341,14 @@ public final class AgentServiceClient: @unchecked Sendable {
             conn.resume()
             connection = conn
             Task { @MainActor in
-                debugLog("AgentService NSXPCConnection resumed for \(self.serviceName)")
+                debugLog("AgentService NSXPCConnection resumed for daemon mach=\(DerrickServiceID.daemon.machServiceName)")
             }
         }
         guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ error in
             Task { @MainActor in
                 debugLog("AgentService proxy error: \(error.localizedDescription)")
             }
-        }) as? AgentServiceXPC else {
+        }) as? DerrickDaemonServiceXPC else {
             throw AgentServiceClientError.unavailable
         }
         return proxy

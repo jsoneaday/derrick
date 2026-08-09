@@ -1,14 +1,15 @@
 import Foundation
 
-/// XPC surface for the headless Derrick daemon (`derrick.ui.Daemon`).
-///
-/// UI and other external clients talk only to this process. Agent / jobs / MCP run in-process inside the daemon.
+/// Control surface for the headless Derrick daemon (`derrick.ui.Daemon`).
 @objc public protocol DerrickDaemonXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void)
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Encoded `UserNotificationRequest`. Reply encoded `ServiceAckDTO`.
     func postUserNotification(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
+
+/// Full daemon surface: control + in-process Agent / Job / MCP methods on one Mach connection.
+@objc public protocol DerrickDaemonServiceXPC: DerrickDaemonXPC, AgentServiceXPC, JobServiceXPC, MCPServiceXPC {}
 
 public struct DerrickDaemonBootstrapResult: Codable, Sendable, Hashable {
     public let ok: Bool

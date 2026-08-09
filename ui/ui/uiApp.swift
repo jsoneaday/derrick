@@ -102,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserNotificationPoster.configureDelegateIfNeeded()
         if DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobWorkerLaunch()
             || DerrickNotificationLaunch.isJobResultPresentationLaunch()
         {
             NSApp.setActivationPolicy(.accessory)
@@ -116,12 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if DerrickNotificationLaunch.isJobWorkerLaunch() {
-            Task { @MainActor in
-                await DerrickHeadlessJobWorker.runUntilIdleThenTerminate()
-            }
-            return
-        }
         if DerrickNotificationLaunch.isPollLaunch() {
             Task { @MainActor in
                 await DerrickNotificationService.shared.pollOnceAndFinish()

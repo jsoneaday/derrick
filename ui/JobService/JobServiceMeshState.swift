@@ -1,7 +1,7 @@
 import Foundation
 
-/// Tracks whether JobService has peer endpoints for MCP + Agent (required for execute/wake).
-/// Scheduler refuses to claim jobs until both are installed (UI bootstrap).
+/// Tracks whether Job can reach Agent + MCP (peer mesh historically; in-process inside derrickd).
+/// Scheduler refuses to claim jobs until ready.
 final class JobServiceMeshState: @unchecked Sendable {
     static let shared = JobServiceMeshState()
 
@@ -15,6 +15,15 @@ final class JobServiceMeshState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return mcpPeerReady && agentPeerReady
+    }
+
+    /// derrickd: Agent/MCP are in-process — no peer handoff required.
+    func markInProcessReady() {
+        lock.lock()
+        mcpPeerReady = true
+        agentPeerReady = true
+        lock.unlock()
+        fputs("[JobService] in-process Agent+MCP ready (daemon)\n", stderr)
     }
 
     func markMCPPeerReady() {

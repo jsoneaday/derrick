@@ -15,7 +15,8 @@ final class DockerRunnerHelperDelegate: NSObject, NSXPCListenerDelegate {
                 XPCPeerAuthentication.mainAppIdentifier,
                 XPCPeerAuthentication.agentServiceIdentifier,
                 XPCPeerAuthentication.jobServiceIdentifier,
-                XPCPeerAuthentication.mcpServiceIdentifier
+                XPCPeerAuthentication.mcpServiceIdentifier,
+                XPCPeerAuthentication.daemonIdentifier
             ]
         )
         do {

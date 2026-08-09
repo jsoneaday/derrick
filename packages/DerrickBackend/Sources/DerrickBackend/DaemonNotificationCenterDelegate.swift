@@ -103,21 +103,9 @@ public enum DaemonUILauncher: Sendable {
         }
     }
 
-    /// Launch accessory UI that bootstraps Job/Agent mesh, drains due jobs, then quits.
+    /// Deprecated: jobs run in-process inside derrickd. Kept as a no-op for ABI stability.
     public static func wakeJobWorker() async {
-        guard let uiURL = locateUIApp() else {
-            fputs("[derrickd] cannot locate derrick.ui for job worker\n", stderr)
-            return
-        }
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = false
-        config.arguments = [DerrickNotificationLaunch.jobWorkerArgument]
-        do {
-            _ = try await NSWorkspace.shared.openApplication(at: uiURL, configuration: config)
-            fputs("[derrickd] launched headless job worker\n", stderr)
-        } catch {
-            fputs("[derrickd] job worker launch failed: \(error.localizedDescription)\n", stderr)
-        }
+        fputs("[derrickd] wakeJobWorker ignored — jobs run in-process\n", stderr)
     }
 
     private static func locateUIApp() -> URL? {

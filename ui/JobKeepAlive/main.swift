@@ -13,6 +13,11 @@ import ServiceContracts
 ///   JobKeepAlive --install-launchd — write LaunchAgent + bootstrap, then exit
 ///   JobKeepAlive --install-and-run — install then run
 
+DerrickProcessRole.isDaemon = true
+DaemonRuntime.onBootstrapModules = {
+    await DaemonModuleBootstrap.startAllModules()
+}
+
 let args = Set(CommandLine.arguments.dropFirst())
 let installOnly = args.contains("--install-launchd")
 let installAndRun = args.contains("--install-and-run")
@@ -73,7 +78,7 @@ fputs(
     stderr
 )
 
-let listenerDelegate = DaemonListenerDelegate()
+let listenerDelegate = DaemonUnifiedListenerDelegate()
 let listener = NSXPCListener(machServiceName: DerrickServiceID.daemon.machServiceName)
 listener.delegate = listenerDelegate
 listener.resume()
