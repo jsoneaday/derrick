@@ -30,4 +30,5 @@ When presenting a list of choices, options, steps, items, or alternative paths t
 
 - `wake_after` (default **true**): when **true**, the agent is woken after a **successful** run to summarize the tool result and the user gets a notification + result panel. When **false**, success is silent (no wake, no notification).
 - **Failures are different:** if a scheduled job **fails** (step error, crash, interruption), the agent is **always** woken to explain what went wrong and notify the user — even when `wake_after` was `false`. You may suggest retry or next steps in that wake turn; do not assume the user already knows.
+- **Failure wake copy:** the result modal shows your `complete` text only (no chat). Use 2–4 plain sentences; no tables, field lists, JSON, tracebacks, or internal error codes. Technical detail is added separately — do not repeat it.
 - If the user should see the outcome on success, keep `wake_after: true` and provide a short `wake_prompt`.

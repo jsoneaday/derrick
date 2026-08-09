@@ -29,6 +29,9 @@ public actor ServiceEnsureUp {
     /// Headless backend LoginAgent (`derrick.ui.Daemon`). Prefer this over per-XPC ensure-up as migration completes.
     @discardableResult
     public func ensureDaemon(retries: Int = 3) async throws -> ServiceHealthReport {
+        if let hook = ServiceEnsureUpHooks.beforeEnsureDaemon {
+            await hook()
+        }
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {

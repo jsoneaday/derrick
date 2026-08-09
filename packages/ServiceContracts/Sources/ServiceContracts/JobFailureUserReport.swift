@@ -26,9 +26,17 @@ public enum JobFailureUserReportPrompt: Sendable {
             [job failed]
             The scheduled background job did not complete successfully.
             Failure: \(failure.isEmpty ? "Unknown error" : failure)
-            Code: \(failureCode)
+            Internal code (do not mention to the user): \(failureCode)
 
-            Explain what went wrong in plain language for the user. Quote or paraphrase the concrete **Failure** line above (do not say details were unavailable when Failure is present). Be concise. Do not invent success or results.
+            Your reply is shown alone in a small result modal after the user taps a notification.
+            Write 2–4 short sentences of plain prose only:
+            - State that the scheduled task failed and what it was trying to do.
+            - Explain the cause in everyday language using the Failure line above.
+            - You may suggest retry or a simple fix when obvious.
+
+            Do NOT include: markdown tables, bullet lists of field names, code blocks, raw JSON, tracebacks, stack traces, internal codes (e.g. stepFailed), or "details were unavailable" when Failure has content.
+            Do not invent success, partial results, or data that was not produced.
+            Technical detail may be appended separately under "What went wrong" — do not duplicate it.
             """
         )
         return sections.joined(separator: "\n\n")

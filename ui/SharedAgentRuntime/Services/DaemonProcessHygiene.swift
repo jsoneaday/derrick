@@ -22,35 +22,36 @@ public enum DaemonProcessHygiene {
         }
 
         let expectedMtime = modificationDate(expectedExe)
+        let hostPath = hostAppBundle.path
+        let expectedPath = expectedExe.path
+
         let processes = listJobKeepAliveProcesses()
-        guard !processes.isEmpty else {
+        if processes.isEmpty {
             fputs(
-                "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedExe.path))\n",
+                "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedPath))\n",
                 stderr
             )
+            await restartDaemonIfNeeded(evictedAny: false, hostPath: hostPath, expectedPath: expectedPath, expectedMtime: expectedMtime)
             return
         }
 
         fputs(
-            "[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es) expected=\(expectedExe.path)\n",
+            "[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es) expected=\(expectedPath)\n",
             stderr
         )
 
-        var evictedExpectedDaemon = false
+        var evictedAny = false
         for process in processes {
             guard let reason = DerrickDaemonHygiene.evictionReason(
                 executablePath: process.executablePath,
                 processStartDate: process.startDate,
-                hostAppBundlePath: hostAppBundle.path,
-                expectedExecutablePath: expectedExe.path,
+                hostAppBundlePath: hostPath,
+                expectedExecutablePath: expectedPath,
                 expectedExecutableModificationDate: expectedMtime
             ) else {
                 continue
             }
-            if DerrickDaemonHygiene.canonicalPath(process.executablePath)
-                == DerrickDaemonHygiene.canonicalPath(expectedExe.path) {
-                evictedExpectedDaemon = true
-            }
+            evictedAny = true
             terminate(
                 pid: process.pid,
                 reason: reason,
@@ -58,10 +59,48 @@ public enum DaemonProcessHygiene {
             )
         }
 
-        if evictedExpectedDaemon {
-            try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
-            JobServiceLoginAgent.kickstartRegisteredDaemon()
+        let hasHealthy = listJobKeepAliveProcesses().contains { process in
+            DerrickDaemonHygiene.isHealthyExpectedDaemon(
+                executablePath: process.executablePath,
+                processStartDate: process.startDate,
+                hostAppBundlePath: hostPath,
+                expectedExecutablePath: expectedPath,
+                expectedExecutableModificationDate: expectedMtime
+            )
         }
+
+        await restartDaemonIfNeeded(
+            evictedAny: evictedAny,
+            hasHealthyExpectedDaemon: hasHealthy,
+            hostPath: hostPath,
+            expectedPath: expectedPath,
+            expectedMtime: expectedMtime
+        )
+    }
+
+    private static func restartDaemonIfNeeded(
+        evictedAny: Bool,
+        hasHealthyExpectedDaemon: Bool = false,
+        hostPath: String = "",
+        expectedPath: String = "",
+        expectedMtime: Date? = nil
+    ) async {
+        guard DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+            evictedAny: evictedAny,
+            hasHealthyExpectedDaemon: hasHealthyExpectedDaemon
+        ) else {
+            fputs("[DaemonHygiene] expected daemon healthy — skip register/kickstart\n", stderr)
+            return
+        }
+        fputs(
+            "[DaemonHygiene] register+kickstart evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)\n",
+            stderr
+        )
+        await MainActor.run {
+            try? JobServiceLoginAgent.ensureRegistered()
+        }
+        try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
+        JobServiceLoginAgent.kickstartRegisteredDaemon()
     }
 
     // MARK: - Process scan

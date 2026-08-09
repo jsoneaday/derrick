@@ -178,8 +178,8 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.contentViewController = hosting
         panel.delegate = self
-        let fit = hosting.sizeThatFits(in: NSSize(width: 512, height: 2_000))
-        let height = min(max(fit.height, 160), 480)
+        let fit = hosting.sizeThatFits(in: NSSize(width: 512, height: CGFloat.greatestFiniteMagnitude))
+        let height = min(max(ceil(fit.height), 120), 480)
         panel.setContentSize(NSSize(width: 512, height: height))
         self.panel = panel
 
@@ -276,6 +276,7 @@ private struct JobResultStandaloneCard: View {
             JobResultModalFooter(onDismiss: onDismiss)
         }
         .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -354,7 +355,7 @@ struct JobResultModalBody: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
     }
 
     private var responseMarkdown: some View {
@@ -382,8 +383,8 @@ struct JobResultModalFooter: View {
             .allowsHitTesting(acceptClicks)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 16)
-        .padding(.top, 4)
+        .padding(.bottom, 12)
+        .padding(.top, 0)
         .onAppear {
             // Click-through guard: notification mouse-up must not dismiss the panel.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {

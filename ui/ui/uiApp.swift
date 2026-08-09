@@ -1,5 +1,6 @@
 import AppKit
 import ServiceContracts
+import ServiceEnsureUp
 import SwiftUI
 
 @main
@@ -100,6 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserNotificationPoster.configureDelegateIfNeeded()
+        ServiceEnsureUpHooks.beforeEnsureDaemon = {
+            await DaemonBootstrapCoordinator.prepareForHostApp(force: false)
+        }
         if DerrickNotificationLaunch.isPollLaunch()
             || DerrickNotificationLaunch.hasJobResultPresentationIntent()
         {
@@ -154,7 +158,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         JobResultPresenter.interactiveSessionActive = true
         DerrickNotificationService.shared.prepare()
+        if !DerrickNotificationLaunch.hasJobResultPresentationIntent() {
+            activationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                Task { await DaemonBootstrapCoordinator.prepareForHostApp(force: false) }
+            }
+            Task { await DaemonBootstrapCoordinator.prepareForHostApp(force: true) }
+        }
     }
+
+    private var activationObserver: NSObjectProtocol?
 
     func applicationWillTerminate(_ notification: Notification) {
         guard !DerrickNotificationLaunch.isPollLaunch(),

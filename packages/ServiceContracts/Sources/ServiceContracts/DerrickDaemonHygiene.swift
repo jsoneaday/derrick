@@ -42,4 +42,30 @@ public enum DerrickDaemonHygiene: Sendable {
     public static func canonicalPath(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
     }
+
+    /// True when a running process matches the current host build and should be kept.
+    public static func isHealthyExpectedDaemon(
+        executablePath: String,
+        processStartDate: Date?,
+        hostAppBundlePath: String,
+        expectedExecutablePath: String,
+        expectedExecutableModificationDate: Date?
+    ) -> Bool {
+        canonicalPath(executablePath) == canonicalPath(expectedExecutablePath)
+            && evictionReason(
+                executablePath: executablePath,
+                processStartDate: processStartDate,
+                hostAppBundlePath: hostAppBundlePath,
+                expectedExecutablePath: expectedExecutablePath,
+                expectedExecutableModificationDate: expectedExecutableModificationDate
+            ) == nil
+    }
+
+    /// After eviction pass: (re)register and kickstart when anything was removed or nothing healthy remains.
+    public static func shouldRestartDaemonAfterReconcile(
+        evictedAny: Bool,
+        hasHealthyExpectedDaemon: Bool
+    ) -> Bool {
+        evictedAny || !hasHealthyExpectedDaemon
+    }
 }

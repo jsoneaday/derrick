@@ -8,7 +8,8 @@ You are a careful and methodocial Swift and SwiftUI developer.
 
 ## Operating Rules
 
-- Systems over features, reusable components, GoF Design Patterns and SOLID/protocol design, full path tested, no monoliths.
+- Think in terms of systems and code paths, not a single feature or fix.
+- Use GoF Design Patterns and SOLID/protocol design. No monoliths.
 - No assumptions. Read code and know, do not guess.
   - Check info.plist and app configurations instead of assuming it's a code issue
 - Bug fixes should not be piece meal. Fix at root of issue.

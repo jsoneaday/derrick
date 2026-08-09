@@ -382,6 +382,27 @@ import Testing
         #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
     }
 
+    @Test func derrickDaemonHygieneRestartAfterOrphanEviction() {
+        #expect(
+            DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+                evictedAny: true,
+                hasHealthyExpectedDaemon: false
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+                evictedAny: false,
+                hasHealthyExpectedDaemon: true
+            )
+        )
+        #expect(
+            DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+                evictedAny: false,
+                hasHealthyExpectedDaemon: false
+            )
+        )
+    }
+
     @Test func derrickDaemonHygieneDetectsOrphanPath() {
         let host = "/Users/me/DerivedData/.../Debug/ui.app"
         let orphan = "/Users/me/DerivedData/.../Debug/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
@@ -442,6 +463,8 @@ import Testing
         #expect(prompt.contains("[job failed]"))
         #expect(prompt.contains("stepFailed"))
         #expect(prompt.contains("timeout"))
+        #expect(prompt.contains("plain prose"))
+        #expect(prompt.contains("Do NOT include"))
     }
 
     @Test func jobFailureUserReportPromptSilentOnSuccess() {

@@ -530,27 +530,19 @@ struct ContentView: View {
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
 
+                bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
+                await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
+
                 bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and Derrick daemon…")
                 _ = XPCDockerRunner.shared
                 await EgressAllowlistService.shared.pushToHelper()
 
-                // Prefer a live daemon before long Docker prewarm so ensure-up isn't racing a wedged old process.
-                Task.detached(priority: .utility) {
-                    await Self.registerDaemonInBackground()
-                }
-
-                async let dockerReady: Void = {
-                    try await XPCDockerRunner.shared.waitUntilPrewarmed()
-                }()
-
-                try await dockerReady
+                try await XPCDockerRunner.shared.waitUntilPrewarmed()
 
                 bootstrapStatus.update(
                     phase: .connectingHelper,
                     message: "Connecting to Derrick daemon…"
                 )
-
-                await DaemonProcessHygiene.reconcile()
 
                 let health = try await ServiceEnsureUp.shared.ensureDaemon()
                 debugLog(
@@ -604,40 +596,6 @@ struct ContentView: View {
             if resolveAPIKey() == nil {
                 isPresentingAPIKeyPrompt = true
             }
-    }
-
-    /// Install/ensure derrickd off the UI critical path (`launchctl kickstart` can wedge).
-    private static func registerDaemonInBackground() async {
-        await DaemonProcessHygiene.reconcile()
-        do {
-            let result = try await MainActor.run {
-                try JobServiceLoginAgent.ensureRegistered()
-            }
-            await MainActor.run {
-                debugLog(
-                    "derrickd register method=\(result.method.rawValue) enabled=\(result.isRunningOrEnabled) — \(result.detail)"
-                )
-            }
-        } catch {
-            await MainActor.run {
-                debugLog("derrickd register failed: \(error.localizedDescription)")
-            }
-            return
-        }
-        do {
-            let health = try await ServiceEnsureUp.shared.ensureDaemon(retries: 3)
-            await MainActor.run {
-                debugLog(
-                    "derrickd ensure-up ok status=\(health.status.rawValue) pid=\(health.pid)"
-                )
-            }
-        } catch {
-            await MainActor.run {
-                debugLog(
-                    "derrickd Mach service not reachable yet: \(error.localizedDescription). If SMAppService is enabled, check Login Items; else run JobKeepAlive --install-launchd from Terminal."
-                )
-            }
-        }
     }
 
     /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
