@@ -15,22 +15,28 @@ public func parseToolArgumentsObject(_ json: String) throws -> [String: Value] {
         return [:]
     }
 
-    if let dict = tryParseJSONObject(trimmed) {
-        return dict.mapValues { jsonToToolValue($0) }
+    for candidate in trailingBraceCandidates(trimmed) {
+        if let dict = tryParseJSONObject(candidate) {
+            return dict.mapValues { jsonToToolValue($0) }
+        }
     }
 
     // After outer AgentResponse decode, string values often contain raw newlines / bare quotes.
     let repaired = reescapeJSONDocumentAfterOuterDecode(trimmed)
-    if let dict = tryParseJSONObject(repaired) {
-        return dict.mapValues { jsonToToolValue($0) }
+    for candidate in trailingBraceCandidates(repaired) {
+        if let dict = tryParseJSONObject(candidate) {
+            return dict.mapValues { jsonToToolValue($0) }
+        }
     }
 
     // Model output often truncates mid-string (nested jobs_create + script is large when
     // double-encoded). Close open strings/containers then re-escape again.
     let closed = closeIncompleteJSONDocument(repaired)
     let closedRescued = reescapeJSONDocumentAfterOuterDecode(closed)
-    if let dict = tryParseJSONObject(closedRescued) ?? tryParseJSONObject(closed) {
-        return dict.mapValues { jsonToToolValue($0) }
+    for candidate in trailingBraceCandidates(closedRescued) + trailingBraceCandidates(closed) {
+        if let dict = tryParseJSONObject(candidate) {
+            return dict.mapValues { jsonToToolValue($0) }
+        }
     }
 
     throw NSError(
@@ -274,6 +280,20 @@ public func closeIncompleteJSONDocument(_ input: String) -> String {
 }
 
 // MARK: - Private
+
+/// PartialJSON / nested `tool_call.arguments` decode can glue an extra outer `}` onto the payload.
+private func trailingBraceCandidates(_ json: String) -> [String] {
+    var candidates: [String] = []
+    var current = json
+    candidates.append(current)
+    var extraBraces = 0
+    while extraBraces < 3, current.hasSuffix("}"), current.count > 2 {
+        current.removeLast()
+        extraBraces += 1
+        candidates.append(current)
+    }
+    return candidates
+}
 
 private enum ContainerKind {
     case object

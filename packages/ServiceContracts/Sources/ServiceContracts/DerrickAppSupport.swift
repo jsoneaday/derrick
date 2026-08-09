@@ -96,4 +96,32 @@ public enum DerrickAppSupport {
             stderr
         )
     }
+
+    /// Path fragment for the embedded Login Item daemon (`…/ui.app/Contents/Library/LoginItems/JobKeepAlive.app`).
+    public static let loginItemDaemonPathMarker = "/Contents/Library/LoginItems/JobKeepAlive.app"
+
+    /// True when this process is the launchd/SMAppService daemon nested under `ui.app`.
+    public static func isEmbeddedLoginItemDaemon(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
+        bundleURL.standardizedFileURL.path.contains(loginItemDaemonPathMarker)
+    }
+
+    /// Resolve the host `derrick.ui` app bundle from an embedded or sibling JobKeepAlive layout.
+    public static func hostUIApplicationURL(bundleURL: URL = Bundle.main.bundleURL) -> URL? {
+        var dir = bundleURL.standardizedFileURL
+        for _ in 0..<12 {
+            if dir.pathExtension == "app",
+               Bundle(url: dir)?.bundleIdentifier == hostAppBundleIdentifier {
+                return dir
+            }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { break }
+            dir = parent
+        }
+        // Xcode Debug layout: `Products/Debug/JobKeepAlive.app` beside `Products/Debug/ui.app`.
+        let sibling = bundleURL.deletingLastPathComponent().appendingPathComponent("ui.app", isDirectory: true)
+        if Bundle(url: sibling)?.bundleIdentifier == hostAppBundleIdentifier {
+            return sibling
+        }
+        return nil
+    }
 }

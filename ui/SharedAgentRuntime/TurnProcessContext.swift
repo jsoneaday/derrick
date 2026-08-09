@@ -10,6 +10,7 @@ public enum TurnProcessContext {
     public typealias NetworkPrompt = @Sendable (_ host: String, _ toolName: String) async -> PolicyUserDecision
     public typealias JobSchedulingPreflight = @Sendable (_ toolName: String, _ toolArgumentsJSON: String) async throws -> Void
     public typealias PolicyDecisionPrompt = @Sendable (_ event: PolicyUserEvent) async -> PolicyUserDecision
+    public typealias PolicyNoticePublisher = @Sendable (_ event: PolicyUserEvent) async -> Void
 
     /// Conversation API key from the UI turn request (AgentService has no app keychain).
     @TaskLocal public static var conversationAPIKey: String?
@@ -22,17 +23,22 @@ public enum TurnProcessContext {
     /// Optional reverse-XPC for usage limits / content sensitivity (PolicyUserEvent → decision).
     @TaskLocal public static var policyDecisionPrompt: PolicyDecisionPrompt?
 
+    /// Fire-and-forget policy notices (failure / informational modals) when UI is connected.
+    @TaskLocal public static var policyNoticePublisher: PolicyNoticePublisher?
+
     public static func installProcessTurnContext(
         apiKey: String?,
         networkAccessPrompt: NetworkPrompt?,
         jobSchedulingPreflight: JobSchedulingPreflight? = nil,
-        policyDecisionPrompt: PolicyDecisionPrompt? = nil
+        policyDecisionPrompt: PolicyDecisionPrompt? = nil,
+        policyNoticePublisher: PolicyNoticePublisher? = nil
     ) {
         ProcessTurnSlots.shared.install(
             apiKey: apiKey,
             networkAccessPrompt: networkAccessPrompt,
             jobSchedulingPreflight: jobSchedulingPreflight,
-            policyDecisionPrompt: policyDecisionPrompt
+            policyDecisionPrompt: policyDecisionPrompt,
+            policyNoticePublisher: policyNoticePublisher
         )
     }
 
@@ -67,6 +73,13 @@ public enum TurnProcessContext {
         }
         return ProcessTurnSlots.shared.policyDecisionPrompt
     }
+
+    public static var effectivePolicyNoticePublisher: PolicyNoticePublisher? {
+        if let publisher = policyNoticePublisher {
+            return publisher
+        }
+        return ProcessTurnSlots.shared.policyNoticePublisher
+    }
 }
 
 /// Thread-safe process-wide turn slots (MCP tool tasks do not inherit TaskLocal).
@@ -78,6 +91,7 @@ private final class ProcessTurnSlots: @unchecked Sendable {
     private var storedNetworkPrompt: TurnProcessContext.NetworkPrompt?
     private var storedJobSchedulingPreflight: TurnProcessContext.JobSchedulingPreflight?
     private var storedPolicyDecisionPrompt: TurnProcessContext.PolicyDecisionPrompt?
+    private var storedPolicyNoticePublisher: TurnProcessContext.PolicyNoticePublisher?
 
     private init() {}
 
@@ -85,13 +99,15 @@ private final class ProcessTurnSlots: @unchecked Sendable {
         apiKey: String?,
         networkAccessPrompt: TurnProcessContext.NetworkPrompt?,
         jobSchedulingPreflight: TurnProcessContext.JobSchedulingPreflight?,
-        policyDecisionPrompt: TurnProcessContext.PolicyDecisionPrompt?
+        policyDecisionPrompt: TurnProcessContext.PolicyDecisionPrompt?,
+        policyNoticePublisher: TurnProcessContext.PolicyNoticePublisher?
     ) {
         lock.lock()
         storedAPIKey = apiKey
         storedNetworkPrompt = networkAccessPrompt
         storedJobSchedulingPreflight = jobSchedulingPreflight
         storedPolicyDecisionPrompt = policyDecisionPrompt
+        storedPolicyNoticePublisher = policyNoticePublisher
         lock.unlock()
     }
 
@@ -101,6 +117,7 @@ private final class ProcessTurnSlots: @unchecked Sendable {
         storedNetworkPrompt = nil
         storedJobSchedulingPreflight = nil
         storedPolicyDecisionPrompt = nil
+        storedPolicyNoticePublisher = nil
         lock.unlock()
     }
 
@@ -127,5 +144,11 @@ private final class ProcessTurnSlots: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storedPolicyDecisionPrompt
+    }
+
+    var policyNoticePublisher: TurnProcessContext.PolicyNoticePublisher? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedPolicyNoticePublisher
     }
 }

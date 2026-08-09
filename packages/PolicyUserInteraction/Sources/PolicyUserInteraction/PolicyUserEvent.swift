@@ -334,6 +334,22 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func jobSchedulingFailed(
+        toolName: String,
+        reason: String,
+        detail: String? = nil,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .toolGovernance,
+            title: "Could not schedule job",
+            summary: reason,
+            detail: detail,
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
     public static func toolGovernanceDenied(
         toolName: String,
         reason: String,

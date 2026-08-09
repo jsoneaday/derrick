@@ -1,32 +1,18 @@
-import AppKit
 import DBRepository
 import Foundation
 import ServiceContracts
 
 /// Persisted job result → Daemon UserNotifications (sole poster).
+///
+/// Modal presentation is **only** via notification tap (`DaemonNotificationCenterDelegate` → `DaemonUILauncher`).
 public enum JobResultNotifier: Sendable {
     /// Claim DB row and ask the Daemon to post. Safe to call from AgentService / JobService.
-    /// When `liveUIModal` is true the interactive UI is already showing the result panel — skip notification + wake.
     public static func notifyCompletion(
         resultID: String,
         jobID: String,
         responseText: String,
-        repository: DBRepository,
-        liveUIModal: Bool = false
+        repository: DBRepository
     ) async {
-        if liveUIModal {
-            fputs("[JobResultNotifier] skip notification (live UI modal) id=\(resultID)\n", stderr)
-            return
-        }
-
-        guard DerrickUIPresence.isInteractiveUIRunning() == false else {
-            fputs(
-                "[JobResultNotifier] skip notification (derrick.ui running; live modal path) id=\(resultID)\n",
-                stderr
-            )
-            return
-        }
-
         do {
             let claimed = try await repository.claimJobResultNotificationPost(id: resultID)
             guard claimed else {
@@ -39,6 +25,8 @@ public enum JobResultNotifier: Sendable {
         }
 
         let shortID = String(resultID.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
+        let jobFailed = (try? await repository.fetchJobStatus(id: jobID)) == JobStatus.failed.rawValue
+        let title = jobFailed ? "Derrick · Job failed" : "Derrick · Job finished"
         var scheduled = ""
         if let runAt = try? await repository.fetchJobRunAt(jobID: jobID) {
             scheduled = "Scheduled for \(runAt.formatted(date: .abbreviated, time: .shortened)). "
@@ -50,12 +38,11 @@ public enum JobResultNotifier: Sendable {
             : trimmed
         let body = scheduled + truncated
 
-        // Keep UI tap routing keys stable (`DerrickNotificationPayload` / UserNotificationPoster).
         let request = UserNotificationRequest(
             id: "derrick.job-result.\(resultID)",
             kind: .jobResult,
-            title: "Derrick · Job finished",
-            body: body.isEmpty ? "Job finished." : body,
+            title: title,
+            body: body.isEmpty ? (jobFailed ? "Job failed." : "Job finished.") : body,
             subtitle: "Result \(shortID)",
             threadIdentifier: "derrick.job-result.\(resultID)",
             timeSensitive: true,
@@ -75,6 +62,5 @@ public enum JobResultNotifier: Sendable {
                 stderr
             )
         }
-        // Modal is shown only when the user taps the notification (DaemonNotificationCenterDelegate).
     }
 }

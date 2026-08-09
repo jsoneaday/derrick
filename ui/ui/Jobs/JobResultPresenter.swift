@@ -44,7 +44,6 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
             || !interactiveSessionActive
             || DerrickNotificationLaunch.isJobResultPresentationLaunch()
             || DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobWorkerLaunch()
     }
 
     @Published private(set) var activeResult: PresentedJobResult?
@@ -59,8 +58,19 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         let id: String
         let jobID: String
         let responseText: String
+        let failureDetail: String?
         let createdAt: Date
         let scheduledAt: Date?
+        let failed: Bool
+        let failureCode: String?
+
+        var displayText: String {
+            JobFailureDisplay.composePresentation(
+                responseText: responseText,
+                failureDetail: failureDetail,
+                failureCode: failureCode
+            )
+        }
     }
 
     private var panel: NSPanel?
@@ -75,7 +85,10 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
     func present(
         row: DBRepository.JobResultRow,
         scheduledAt: Date? = nil,
-        ephemeralSession: Bool = false
+        ephemeralSession: Bool = false,
+        failed: Bool = false,
+        failureDetail: String? = nil,
+        failureCode: String? = nil
     ) {
         if let current = activeResult, current.id == row.id, isPresented {
             fputs("[ui] JobResultPresenter skip duplicate id=\(row.id)\n", stderr)
@@ -90,8 +103,11 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
             id: row.id,
             jobID: row.jobID,
             responseText: row.responseText,
+            failureDetail: failureDetail,
             createdAt: row.createdAt,
-            scheduledAt: scheduledAt
+            scheduledAt: scheduledAt,
+            failed: failed,
+            failureCode: failureCode
         )
         isPresented = true
         // Never build AppKit UI synchronously inside UNUserNotificationCenter callbacks —
@@ -134,7 +150,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
             onDismiss: { [weak self] in self?.dismiss() }
         )
         let hosting = NSHostingController(rootView: root)
-        hosting.view.frame = NSRect(x: 0, y: 0, width: 512, height: 440)
+        hosting.sizingOptions = [.intrinsicContentSize]
 
         // Always rebuild so chrome/shadow settings stay correct across presents.
         if panel != nil {
@@ -144,7 +160,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         // Subclass so borderless panel can become key — otherwise accessory apps
         // look windowless and macOS auto-terminates them within seconds.
         let panel = JobResultKeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 512, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 512, height: 220),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -161,7 +177,9 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.contentViewController = hosting
         panel.delegate = self
-        panel.setContentSize(NSSize(width: 512, height: 440))
+        let fit = hosting.sizeThatFits(in: NSSize(width: 512, height: 2_000))
+        let height = min(max(fit.height, 160), 480)
+        panel.setContentSize(NSSize(width: 512, height: height))
         self.panel = panel
 
         position(panel)
@@ -194,7 +212,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panel.layoutIfNeeded()
         var frame = panel.frame
         if frame.width < 100 || frame.height < 100 {
-            frame.size = NSSize(width: 512, height: 440)
+            frame.size = NSSize(width: 512, height: 220)
         }
         if let screen = NSScreen.main {
             let visible = screen.visibleFrame
@@ -252,7 +270,7 @@ private struct JobResultStandaloneCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            JobResultModalHeader(shortID: shortID)
+            JobResultModalHeader(shortID: shortID, failed: result.failed)
             JobResultModalBody(result: result)
             JobResultModalFooter(onDismiss: onDismiss)
         }
@@ -273,15 +291,20 @@ private struct JobResultStandaloneCard: View {
 
 struct JobResultModalHeader: View {
     var shortID: String?
+    var failed: Bool = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle")
+            Image(systemName: failed ? "exclamationmark.circle" : "checkmark.circle")
                 .font(ModalChrome.symbolFont)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Color(red: 0.176, green: 0.286, blue: 0.576))
+                .foregroundStyle(
+                    failed
+                        ? Color(red: 0.72, green: 0.22, blue: 0.18)
+                        : Color(red: 0.176, green: 0.286, blue: 0.576)
+                )
             VStack(alignment: .leading, spacing: 2) {
-                Text("Derrick · Job finished")
+                Text(failed ? "Derrick · Job failed" : "Derrick · Job finished")
                     .font(.headline)
                     .lineLimit(1)
                 if let shortID, !shortID.isEmpty {
@@ -301,25 +324,44 @@ struct JobResultModalHeader: View {
 struct JobResultModalBody: View {
     let result: JobResultPresenter.PresentedJobResult
 
+    private var displayText: String {
+        result.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var needsScroll: Bool {
+        displayText.count > 420 || displayText.components(separatedBy: "\n").count > 10
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             if let scheduledAt = result.scheduledAt {
                 Text("Scheduled for \(scheduledAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            ScrollView {
-                MarkdownResponseView(
-                    text: result.responseText.trimmingCharacters(in: .whitespacesAndNewlines),
-                    allowsCSVExport: false
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if needsScroll {
+                    ScrollView {
+                        responseMarkdown
+                    }
+                    .frame(maxHeight: 240)
+                } else {
+                    responseMarkdown
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .frame(maxHeight: 280)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 4)
+        .padding(.bottom, 8)
+    }
+
+    private var responseMarkdown: some View {
+        MarkdownResponseView(
+            text: displayText,
+            allowsCSVExport: false
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -249,18 +249,23 @@ actor AgentServiceTurnHost {
         let policyDecision: TurnProcessContext.PolicyDecisionPrompt = { event in
             await AgentServiceHITLRouter.requestPolicyDecisionViaUISink(event)
         }
+        let policyNotice: TurnProcessContext.PolicyNoticePublisher = { event in
+            _ = await AgentServiceHITLRouter.requestPolicyDecisionViaUISink(event)
+        }
         TurnProcessContext.installProcessTurnContext(
             apiKey: apiKey,
             networkAccessPrompt: networkPrompt,
             jobSchedulingPreflight: isJobWake ? nil : jobPreflight,
-            policyDecisionPrompt: policyDecision
+            policyDecisionPrompt: policyDecision,
+            policyNoticePublisher: policyNotice
         )
         defer { TurnProcessContext.clearProcessTurnContext() }
         do {
             try await TurnProcessContext.$conversationAPIKey.withValue(apiKey) {
                 try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
                     try await TurnProcessContext.$policyDecisionPrompt.withValue(policyDecision) {
-                        try await conversation.runTurn(
+                        try await TurnProcessContext.$policyNoticePublisher.withValue(policyNotice) {
+                            try await conversation.runTurn(
                             prompt: prompt,
                             apiKey: apiKey,
                             model: model,
@@ -290,6 +295,7 @@ actor AgentServiceTurnHost {
                                 fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
                             }
                         }
+                        }
                     }
                 }
             }
@@ -304,11 +310,24 @@ actor AgentServiceTurnHost {
                         code: "job_wake_cancelled"
                     )
                 } else if text.isEmpty {
-                    await AgentServiceStore.shared.log(
-                        level: .error,
-                        message: "job wake empty response turn=\(turnID)",
-                        code: "job_wake_empty"
+                    let failureFallback = await Self.jobFailureFallbackText(
+                        repository: repository,
+                        jobID: jobID
                     )
+                    if let failureFallback {
+                        await self.finishJobResult(
+                            responseText: failureFallback,
+                            jobID: jobID,
+                            jobSessionID: jobSessionID,
+                            parentSessionID: parentSessionID
+                        )
+                    } else {
+                        await AgentServiceStore.shared.log(
+                            level: .error,
+                            message: "job wake empty response turn=\(turnID)",
+                            code: "job_wake_empty"
+                        )
+                    }
                 } else {
                     await self.finishJobResult(
                         responseText: text,
@@ -360,17 +379,39 @@ actor AgentServiceTurnHost {
         tasks[turnID] = nil
     }
 
+    private static func jobFailureFallbackText(repository: DBRepository?, jobID: String?) async -> String? {
+        guard let repository, let jobID else { return nil }
+        guard (try? await repository.fetchJobStatus(id: jobID)) == JobStatus.failed.rawValue else {
+            return nil
+        }
+        guard let message = try? await repository.fetchJobFailureMessage(id: jobID) else { return nil }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private func finishJobResult(
         responseText: String,
         jobID: String?,
         jobSessionID: String,
         parentSessionID: String?
     ) async {
+        var text = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let jobID, let repo = repository,
+           (try? await repo.fetchJobStatus(id: jobID)) == JobStatus.failed.rawValue,
+           let message = try? await repo.fetchJobFailureMessage(id: jobID),
+           let detail = JobFailureDisplay.technicalDetail(from: message) {
+            let failureCode = try? await repo.fetchJobErrorCode(id: jobID)
+            text = JobFailureDisplay.composePresentation(
+                responseText: text,
+                failureDetail: detail,
+                failureCode: failureCode
+            )
+        }
         let result = JobResultDTO(
             jobID: jobID ?? "unknown",
             jobSessionID: jobSessionID,
             parentSessionID: parentSessionID,
-            responseText: responseText
+            responseText: text
         )
         if let repo = repository {
             do {
@@ -384,25 +425,11 @@ actor AgentServiceTurnHost {
                         createdAt: result.createdAt
                     )
                 )
-                let uiRunning = DerrickUIPresence.isInteractiveUIRunning()
-                let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result")
-                if uiRunning {
-                    if sink != nil {
-                        Self.presentJobResultToUIIfConnected(result)
-                    } else {
-                        fputs(
-                            "[AgentService] UI running but reverse sink missing; Darwin wake for \(result.id)\n",
-                            stderr
-                        )
-                        DerrickNotificationLaunch.postShowJobResult(result.id)
-                    }
-                }
                 await JobResultNotifier.notifyCompletion(
                     resultID: result.id,
                     jobID: result.jobID,
                     responseText: result.responseText,
-                    repository: repo,
-                    liveUIModal: uiRunning
+                    repository: repo
                 )
             } catch {
                 fputs("[AgentService] persist job result failed: \(error.localizedDescription)\n", stderr)
@@ -411,20 +438,9 @@ actor AgentServiceTurnHost {
         fputs("[AgentService] job result persisted id=\(result.id) — daemon notify requested\n", stderr)
         await AgentServiceStore.shared.log(
             level: .info,
-            message: "job result ready job=\(result.jobID) chars=\(responseText.count) uiSink=\(AgentServicePrimaryUISink.shared.clientSink(logLabel: "probe") != nil)",
+            message: "job result ready job=\(result.jobID) chars=\(text.count)",
             code: "job_result_ready"
         )
-    }
-
-    /// Direct reverse-XPC to the connected UI — reliable when derrick.ui is already running.
-    @discardableResult
-    private static func presentJobResultToUIIfConnected(_ result: JobResultDTO) -> Bool {
-        guard let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "job-result"),
-              let data = try? JSONEncoder.service.encode(result)
-        else { return false }
-        sink.presentJobResult(data as NSData)
-        fputs("[AgentService] job result delivered to UI sink id=\(result.id)\n", stderr)
-        return true
     }
 
     /// Deliver to the initiating connection sink. Also to primary UI only when the initiator is

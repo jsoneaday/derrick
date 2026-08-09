@@ -203,6 +203,11 @@ extension ConversationPipeline {
                         toolName: interceptedEvent.toolName,
                         resultText: result.text
                     )
+                    await Self.publishJobSchedulingFailureIfNeeded(
+                        toolName: interceptedEvent.toolName,
+                        resultText: result.text,
+                        sessionID: sessionID
+                    )
                     return result
                 }
             )
@@ -318,6 +323,28 @@ extension ConversationPipeline {
         if let event {
             await PolicyDecisionRouting.publishNotice(event)
         }
+    }
+
+    private static func publishJobSchedulingFailureIfNeeded(
+        toolName: String,
+        resultText: String,
+        sessionID: String
+    ) async {
+        guard toolName == "jobs_create" || toolName == "jobs_schedule_create" else { return }
+        let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if trimmed.contains("\"ok\":true") || trimmed.contains("\"ok\": true") {
+            return
+        }
+        let detail = trimmed.count > 800 ? String(trimmed.prefix(800)) + "…" : trimmed
+        await PolicyDecisionRouting.publishNotice(
+            PolicyUserEventFactory.jobSchedulingFailed(
+                toolName: toolName,
+                reason: "The job could not be scheduled.",
+                detail: detail,
+                correlationId: sessionID
+            )
+        )
     }
 
     func batchCallToolsWithPolicyInterception(

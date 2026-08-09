@@ -159,8 +159,6 @@ final class UserNotificationCenterDelegate: NSObject, UNUserNotificationCenterDe
             ?? userInfo[UserNotificationUserInfoKey.kind.rawValue] as? String
         let approvalID = userInfo[DerrickNotificationPayload.approvalIDKey] as? String
             ?? userInfo[UserNotificationUserInfoKey.approvalID.rawValue] as? String
-        let jobResultID = userInfo[DerrickNotificationPayload.jobResultIDKey] as? String
-            ?? userInfo[UserNotificationUserInfoKey.jobResultID.rawValue] as? String
         // Finish the system callback first; never do AppKit work on this stack.
         completionHandler()
         DispatchQueue.main.async {
@@ -168,8 +166,7 @@ final class UserNotificationCenterDelegate: NSObject, UNUserNotificationCenterDe
                 await DerrickNotificationService.shared.handleResponse(
                     actionIdentifier: actionID,
                     kind: kind,
-                    approvalID: approvalID,
-                    jobResultID: jobResultID
+                    approvalID: approvalID
                 )
             }
         }

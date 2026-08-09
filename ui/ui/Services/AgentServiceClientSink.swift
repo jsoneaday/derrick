@@ -251,18 +251,6 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         }
     }
 
-    public func presentJobResult(_ resultJSON: NSData) {
-        let data = resultJSON as Data
-        Task { @MainActor in
-            guard let dto = try? JSONDecoder.service.decode(JobResultDTO.self, from: data) else {
-                fputs("[AgentService sink] presentJobResult decode failed\n", stderr)
-                return
-            }
-            fputs("[AgentService sink] presentJobResult id=\(dto.id)\n", stderr)
-            await DerrickNotificationService.shared.presentJobResultLive(dto)
-        }
-    }
-
     public func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let data = requestJSON as Data
         lock.lock()

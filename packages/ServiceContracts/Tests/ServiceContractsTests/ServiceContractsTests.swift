@@ -311,6 +311,146 @@ import Testing
         #expect(late.contains("asleep") || late.contains("not running"))
     }
 
+    @Test func jobFailureDisplayExtractsTechnicalDetail() {
+        let detail = JobFailureDisplay.technicalDetail(
+            from: "Last attempt failed due to: a job step failed — something went wrong"
+        )
+        #expect(detail == "something went wrong")
+    }
+
+    @Test func jobFailureDisplayReplacesGenericDetail() {
+        let detail = JobFailureDisplay.userFacingDetail(
+            from: "something went wrong",
+            failureCode: JobFailureReason.stepFailed.rawValue
+        )
+        #expect(detail?.contains("No specific error details") == true)
+        #expect(detail?.contains("something went wrong") == false)
+    }
+
+    @Test func jobFailureDisplayPreservesSubstantiveDetail() {
+        let detail = JobFailureDisplay.userFacingDetail(
+            from: "ModuleNotFoundError: No module named 'requests'",
+            failureCode: JobFailureReason.stepFailed.rawValue
+        )
+        #expect(detail == "ModuleNotFoundError: No module named 'requests'")
+    }
+
+    @Test func jobFailureDisplaySkipsRedundantFooterWhenSummaryExplainsFailure() {
+        let text = JobFailureDisplay.composePresentation(
+            responseText: "The scheduled Python script failed during execution.",
+            failureDetail: "something went wrong",
+            failureCode: JobFailureReason.stepFailed.rawValue
+        )
+        #expect(!text.contains("What went wrong"))
+        #expect(!text.contains("something went wrong"))
+    }
+
+    @Test func jobFailureDisplayAppendsSubstantiveFooter() {
+        let text = JobFailureDisplay.composePresentation(
+            responseText: "The job failed with no details.",
+            failureDetail: "exit code 1: Permission denied",
+            failureCode: JobFailureReason.stepFailed.rawValue
+        )
+        #expect(text.contains("What went wrong"))
+        #expect(text.contains("Permission denied"))
+    }
+
+    @Test func derrickDaemonHygieneDetectsOrphanPath() {
+        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let orphan = "/Users/me/DerivedData/.../Debug/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let reason = DerrickDaemonHygiene.evictionReason(
+            executablePath: orphan,
+            processStartDate: Date(),
+            hostAppBundlePath: host,
+            expectedExecutablePath: "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive",
+            expectedExecutableModificationDate: Date()
+        )
+        #expect(reason == .orphanPath)
+    }
+
+    @Test func derrickDaemonHygieneDetectsStaleBuild() {
+        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let started = Date(timeIntervalSince1970: 1_000)
+        let rebuilt = Date(timeIntervalSince1970: 2_000)
+        let reason = DerrickDaemonHygiene.evictionReason(
+            executablePath: embedded,
+            processStartDate: started,
+            hostAppBundlePath: host,
+            expectedExecutablePath: embedded,
+            expectedExecutableModificationDate: rebuilt
+        )
+        #expect(reason == .staleBuild)
+    }
+
+    @Test func derrickDaemonHygieneKeepsFreshEmbeddedDaemon() {
+        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let started = Date(timeIntervalSince1970: 2_000)
+        let built = Date(timeIntervalSince1970: 1_000)
+        let reason = DerrickDaemonHygiene.evictionReason(
+            executablePath: embedded,
+            processStartDate: started,
+            hostAppBundlePath: host,
+            expectedExecutablePath: embedded,
+            expectedExecutableModificationDate: built
+        )
+        #expect(reason == nil)
+    }
+
+    @Test func normalizePythonScriptArgumentsCoercesInvalidMode() {
+        let normalized = JobOrderBuilder.normalizePythonScriptArgumentsJSON(
+            #"{"mode":"run","script":"print(1)"}"#
+        )
+        #expect(normalized.contains(#""mode":"readonly"#))
+    }
+
+    @Test func jobFailureUserReportPromptIncludesFailureContext() {
+        let prompt = JobFailureUserReportPrompt.failureWakePrompt(
+            originalWakePrompt: "Summarize the crawl result.",
+            failureMessage: "Last attempt failed due to: a job step failed — timeout",
+            failureCode: "stepFailed"
+        )
+        #expect(prompt.contains("Summarize the crawl result."))
+        #expect(prompt.contains("[job failed]"))
+        #expect(prompt.contains("stepFailed"))
+        #expect(prompt.contains("timeout"))
+    }
+
+    @Test func jobFailureUserReportPromptSilentOnSuccess() {
+        let prompt = JobFailureUserReportPrompt.failureWakePrompt(
+            originalWakePrompt: "",
+            failureMessage: "Last attempt failed due to: a job step failed",
+            failureCode: "stepFailed",
+            silentOnSuccess: true
+        )
+        #expect(prompt.contains("wake_after=false"))
+        #expect(prompt.contains("[job failed]"))
+    }
+
+    @Test func resolveFailureWakePayloadFromRunToolOnlyJob() throws {
+        let toolJSON = try JSONEncoder.service.encode(
+            JobRunToolPayload(
+                toolName: "python_script_exec",
+                argumentsJSON: #"{"mode":"readonly","script":"print(1)"}"#,
+                helperAPIKey: "test-key",
+                helperReviewerModelJSON: #"{"openai":{"_0":"gpt-5.6-luna"}}"#
+            )
+        )
+        let principal = try JSONEncoder.service.encode(ServicePrincipal.agent(sessionID: "chat-1", agentID: "main"))
+        let resolved = JobWakeContext.resolveFailureWakePayload(
+            steps: [(.runTool, String(data: toolJSON, encoding: .utf8)!)],
+            failedStepPayloadJSON: String(data: toolJSON, encoding: .utf8),
+            failedStepKind: .runTool,
+            jobID: "job-1",
+            principalJSON: String(data: principal, encoding: .utf8)!
+        )
+        #expect(resolved?.silentOnSuccess == true)
+        #expect(resolved?.wake.apiKey == "test-key")
+        #expect(resolved?.wake.parentSessionID == "chat-1")
+        #expect(resolved?.wake.jobID == "job-1")
+    }
+
     @Test func scheduleTimingAndSignedCRUD() throws {
         let fired = Date(timeIntervalSince1970: 1_700_000_000)
         #expect(JobScheduleTiming.nextFireDate(after: fired, recurrence: .once) == nil)

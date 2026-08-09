@@ -10,7 +10,6 @@ struct uiApp: App {
     /// Captured at process start so Scene content cannot race AppDelegate.
     private let isPanelOnlyOrHeadlessLaunch =
         DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.isJobWorkerLaunch()
             || DerrickNotificationLaunch.isJobResultPresentationLaunch()
 
     init() {
@@ -74,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Panel-only launches must not restore the main chat window from a prior session.
         !JobResultPanelSession.isPanelOnlyLaunch
             && !DerrickNotificationLaunch.isPollLaunch()
-            && !DerrickNotificationLaunch.isJobWorkerLaunch()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -90,8 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if DerrickNotificationLaunch.isJobWorkerLaunch()
-            || DerrickNotificationLaunch.isPollLaunch()
+        if DerrickNotificationLaunch.isPollLaunch()
             || DerrickNotificationLaunch.isJobResultPresentationLaunch()
         {
             return false
@@ -158,7 +155,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         guard !DerrickNotificationLaunch.isPollLaunch(),
-              !DerrickNotificationLaunch.isJobWorkerLaunch(),
               !DerrickNotificationLaunch.isJobResultPresentationLaunch()
         else { return }
         DerrickNotificationService.shared.stop()

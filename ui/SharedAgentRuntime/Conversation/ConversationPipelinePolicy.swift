@@ -440,6 +440,7 @@ extension ConversationPipeline {
                             let parseStarted = Date()
                             let parsedTool = Self.parseToolPayload(agentResponse)
                             let parseToolMS = PipelineTiming.elapsedMS(from: parseStarted)
+                            let schedulingToolNames = Self.jobSchedulingToolNames(in: agentResponse)
                             if parsedTool == nil {
                                 await MainActor.run {
                                     let name = agentResponse?.toolCall?.toolName ?? agentResponse?.toolBatch?.tools?.first?.toolName ?? "(unknown)"
@@ -450,14 +451,39 @@ extension ConversationPipeline {
                                         "Tool payload parse failed for status=\(agentResponse?.status.rawValue ?? "?") name=\(name) argsLen=\(rawArgs.count) head=\(head) tail=\(tail)"
                                     )
                                 }
+                                for toolName in schedulingToolNames {
+                                    await PolicyDecisionRouting.publishNotice(
+                                        PolicyUserEventFactory.jobSchedulingFailed(
+                                            toolName: toolName,
+                                            reason: "The job could not be scheduled because the tool request was invalid.",
+                                            detail: "Tool arguments could not be parsed. No job was created.",
+                                            correlationId: sessionID
+                                        )
+                                    )
+                                }
                             }
                             let toolStarted = Date()
-                            let toolExecution = try await executeToolRequest(
-                                parsedTool,
-                                sessionID: sessionID,
-                                userPrompt: prompt,
-                                approvalPresenter: approvalPresenter
-                            )
+                            let toolExecution: (summary: String, records: [ToolCallRecord])
+                            do {
+                                toolExecution = try await executeToolRequest(
+                                    parsedTool,
+                                    sessionID: sessionID,
+                                    userPrompt: prompt,
+                                    approvalPresenter: approvalPresenter
+                                )
+                            } catch {
+                                for toolName in schedulingToolNames {
+                                    await PolicyDecisionRouting.publishNotice(
+                                        PolicyUserEventFactory.jobSchedulingFailed(
+                                            toolName: toolName,
+                                            reason: "The job could not be scheduled.",
+                                            detail: error.localizedDescription,
+                                            correlationId: sessionID
+                                        )
+                                    )
+                                }
+                                throw error
+                            }
                             let toolWallMS = PipelineTiming.elapsedMS(from: toolStarted)
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
                             let slimFollowUpBody = ToolFollowUpFormatter.slimToolResults(records: toolExecution.records)
@@ -617,7 +643,10 @@ extension ConversationPipeline {
     ) async throws -> (summary: String, records: [ToolCallRecord]) {
         guard let request else {
             return (
-                "No tool request detected (model emitted tool_call/tool_batch but payload could not be parsed). Retry with a simpler tool arguments JSON.",
+                """
+                Tool call payload could not be parsed, so nothing ran. Do not tell the user a job was scheduled or completed. \
+                Ask them to retry, or schedule again with a simpler one-line script.
+                """,
                 []
             )
         }
@@ -687,6 +716,26 @@ extension ConversationPipeline {
             toolName: toolName,
             arguments: arguments
         )
+    }
+
+    private static func isJobSchedulingTool(_ name: String) -> Bool {
+        name == "jobs_create" || name == "jobs_schedule_create"
+    }
+
+    private static func jobSchedulingToolNames(in response: AgentResponse?) -> [String] {
+        guard let response else { return [] }
+        if response.status == .toolCall {
+            let name = response.toolCall?.toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return isJobSchedulingTool(name) ? [name] : []
+        }
+        if response.status == .toolBatch {
+            let names = (response.toolBatch?.tools ?? []).compactMap { tool -> String? in
+                let name = tool.toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return isJobSchedulingTool(name) ? name : nil
+            }
+            return names
+        }
+        return []
     }
 
     private static func parseToolPayload(_ agentResponse: AgentResponse?) -> ParsedToolRequest? {

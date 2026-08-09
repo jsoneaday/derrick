@@ -315,7 +315,15 @@ public enum JobOrderBuilder {
         guard var dict = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else {
             return json
         }
-        if dict["mode"] == nil { dict["mode"] = "readonly" }
+        let modeRaw = (dict["mode"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        switch modeRaw {
+        case "readonly", "write":
+            dict["mode"] = modeRaw
+        default:
+            dict["mode"] = "readonly"
+        }
         if dict["allow_network"] == nil { dict["allow_network"] = false }
         if dict["description"] == nil { dict["description"] = "Scheduled job script" }
         if dict["reason"] == nil { dict["reason"] = "Background job" }

@@ -3,7 +3,7 @@ import DockerRunnerXPC
 import ServiceContracts
 
 /// JobService → AgentService: signed startTurn with a no-op reverse sink (no UI chat stream).
-/// Job wakes use `delivery: .jobResultModal` and an isolated `job-` session.
+/// Job wakes use `delivery: .jobResultModal` (no chat stream) and an isolated `job-` session.
 /// Inside derrickd, calls Agent in-process (no peer XPC).
 final class JobAgentClient: @unchecked Sendable {
     static let shared = JobAgentClient()
@@ -59,7 +59,7 @@ final class JobAgentClient: @unchecked Sendable {
         fputs("[JobAgentClient] peer mesh verified status=\(report.status.rawValue)\n", stderr)
     }
 
-    /// Start a job-isolated turn. AgentService collects completion and presents a job-result modal/notification.
+    /// Start a job-isolated turn. AgentService persists completion and requests a daemon notification.
     func wakeAgent(payload: JobWakeAgentPayload) async throws -> AgentTurnAccepted {
         let modelJSON = payload.modelJSON ?? Self.defaultModelJSON
         let apiKey = payload.apiKey ?? ""
@@ -169,7 +169,7 @@ final class JobAgentClient: @unchecked Sendable {
     }
 }
 
-/// Silent sink: job turns must not paint chat; AgentService presents job results to UI primary sink.
+/// Silent sink: job turns must not paint chat; completion is notified by derrickd.
 private final class JobAgentSink: NSObject, AgentServiceClientSinkXPC, @unchecked Sendable {
     func appendServiceLogLine(_ line: String) {
         fputs("[JobAgentSink] \(line)\n", stderr)
@@ -199,9 +199,5 @@ private final class JobAgentSink: NSObject, AgentServiceClientSinkXPC, @unchecke
 
     func requestPolicyDecision(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         reply(Data() as NSData)
-    }
-
-    func presentJobResult(_ resultJSON: NSData) {
-        // JobService is not the UI; ignore.
     }
 }

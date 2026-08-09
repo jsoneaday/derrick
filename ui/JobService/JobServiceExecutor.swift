@@ -30,7 +30,9 @@ actor JobServiceExecutor {
             guard let kind = JobStepKind(rawValue: step.kind) else {
                 await failJob(
                     repo: repo,
-                    jobID: job.id,
+                    job: job,
+                    steps: ordered,
+                    failedStep: step,
                     reason: .invalidRecord,
                     detail: "unknown step kind \(step.kind)"
                 )
@@ -79,7 +81,14 @@ actor JobServiceExecutor {
                 step.errorMessage = userMessage
                 step.finishedAt = Date()
                 try? await repo.updateStep(step)
-                await failJob(repo: repo, jobID: job.id, reason: reason, detail: error.localizedDescription)
+                await failJob(
+                    repo: repo,
+                    job: job,
+                    steps: ordered,
+                    failedStep: step,
+                    reason: reason,
+                    detail: error.localizedDescription
+                )
                 return
             }
         }
@@ -94,21 +103,31 @@ actor JobServiceExecutor {
 
     private func failJob(
         repo: DBRepository,
-        jobID: String,
+        job: JobRow,
+        steps: [JobStepRow],
+        failedStep: JobStepRow?,
         reason: JobFailureReason,
         detail: String? = nil
     ) async {
         let message = reason.lastAttemptMessage(detail: detail)
         try? await repo.updateJobStatus(
-            id: jobID,
+            id: job.id,
             status: JobStatus.failed.rawValue,
             errorMessage: message,
             errorCode: reason.rawValue
         )
         await JobServiceStore.shared.log(
             level: .error,
-            message: "job failed id=\(jobID) code=\(reason.rawValue): \(message)",
+            message: "job failed id=\(job.id) code=\(reason.rawValue): \(message)",
             code: "job_failed"
+        )
+        fputs("[JobService] job failed id=\(job.id) code=\(reason.rawValue): \(message)\n", stderr)
+        await JobFailureUserReporter.report(
+            job: job,
+            steps: steps,
+            failedStep: failedStep,
+            reason: reason,
+            detail: detail
         )
     }
 
@@ -141,8 +160,28 @@ actor JobServiceExecutor {
             "[JobService] runTool done tool=\(payload.toolName) ok=\(result.ok) isError=\(result.isError)\n",
             stderr
         )
+        try validateToolResult(result, toolName: payload.toolName)
         let data = try JSONEncoder.service.encode(result)
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private func validateToolResult(_ result: MCPToolCallResultDTO, toolName: String) throws {
+        guard result.ok else {
+            let message = result.message.isEmpty ? "MCP tool call failed (\(toolName))" : result.message
+            fputs("[JobService] runTool failed transport ok=false tool=\(toolName) message=\(message)\n", stderr)
+            throw JobServiceError.stepFailed(message)
+        }
+        guard !result.isError else {
+            let detail: String
+            if !result.message.isEmpty, result.message != "tool reported error" {
+                detail = result.message
+            } else {
+                detail = String(result.text.prefix(500))
+            }
+            let message = detail.isEmpty ? "tool \(toolName) reported error" : detail
+            fputs("[JobService] runTool failed isError=true tool=\(toolName) detail=\(message.prefix(200))\n", stderr)
+            throw JobServiceError.stepFailed(message)
+        }
     }
 
     private func runToolBatchStep(payloadJSON: String, principalJSON: String) async throws -> String {

@@ -39,6 +39,7 @@ final class JobServiceScheduler: @unchecked Sendable {
         do {
             let repo = try await JobServiceStore.shared.sharedRepository()
             let reason = JobFailureReason.interruptedDeviceUnavailable
+            let running = try await repo.listRunningJobs(limit: 50)
             let count = try await repo.failInterruptedRunningJobs(
                 errorMessage: reason.lastAttemptMessage(),
                 errorCode: reason.rawValue
@@ -50,6 +51,15 @@ final class JobServiceScheduler: @unchecked Sendable {
                     message: "reaped \(count) interrupted running job(s)",
                     code: "job_reap_interrupted"
                 )
+                for (job, steps) in running {
+                    await JobFailureUserReporter.report(
+                        job: job,
+                        steps: steps,
+                        failedStep: nil,
+                        reason: reason,
+                        detail: nil
+                    )
+                }
             }
         } catch {
             fputs("[JobService] reap interrupted failed: \(error.localizedDescription)\n", stderr)

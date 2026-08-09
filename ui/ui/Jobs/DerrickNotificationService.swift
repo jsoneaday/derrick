@@ -9,20 +9,18 @@ import UserNotifications
 enum DerrickNotificationPayload {
     static let kindKey = "kind"
     static let approvalIDKey = "approvalID"
-    static let jobResultIDKey = "jobResultID"
 
     static let kindHITL = "hitl-approval"
-    static let kindJobResult = "job-result"
 
     static let categoryHITL = "derrick.hitl-approval"
 }
 
-/// Single macOS notification **tap** path for scheduled-job HITL and job completion.
+/// Single macOS notification **tap** path for scheduled-job HITL.
 ///
 /// Delivery rules:
 /// - Live chat HITL (UI connected): modal via `HITLLiveApprovalHandlers` — no notification.
 /// - Scheduled job HITL: UI still posts (migration); tap → Allow/Deny alert.
-/// - Job completion: **posted by derrickd** via `JobResultNotifier`; UI only handles taps.
+/// - Job completion: posted and tapped in derrickd; modal via Darwin wake / panel-only argv.
 /// - Info/errors during UI session: modal only (`PolicyEventPresenter`), never notifications.
 @MainActor
 final class DerrickNotificationService {
@@ -95,8 +93,7 @@ final class DerrickNotificationService {
     func handleResponse(
         actionIdentifier: String,
         kind: String?,
-        approvalID: String?,
-        jobResultID: String?
+        approvalID: String?
     ) async {
         guard let kind else { return }
         guard await ensureRepository() != nil else {
@@ -114,16 +111,6 @@ final class DerrickNotificationService {
                 fputs("[HumanDecision] dismissed id=\(approvalID) (no decision)\n", stderr)
             default:
                 fputs("[HumanDecision] unhandled action=\(actionIdentifier)\n", stderr)
-            }
-        case DerrickNotificationPayload.kindJobResult, UserNotificationKind.jobResult.rawValue:
-            guard let jobResultID else { return }
-            switch actionIdentifier {
-            case UNNotificationDefaultActionIdentifier:
-                await presentJobResultFromNotificationTap(id: jobResultID)
-            case UNNotificationDismissActionIdentifier:
-                await markJobResultRead(id: jobResultID)
-            default:
-                await presentJobResultFromNotificationTap(id: jobResultID)
             }
         default:
             break
@@ -315,32 +302,11 @@ final class DerrickNotificationService {
         await presentJobResultFromNotificationTap(id: id)
     }
 
-    /// Live delivery from AgentService reverse XPC — present immediately from DTO (no DB fetch race).
-    func presentJobResultLive(_ dto: JobResultDTO) async {
-        DerrickMainWindowBridge.ensureMainWindow()
-        let row = DBRepository.JobResultRow(
-            id: dto.id,
-            jobID: dto.jobID,
-            jobSessionID: dto.jobSessionID,
-            parentSessionID: dto.parentSessionID,
-            responseText: dto.responseText,
-            createdAt: dto.createdAt
-        )
-        var scheduledAt: Date?
-        if let repository = await ensureRepository() {
-            scheduledAt = try? await repository.fetchJobRunAt(jobID: dto.jobID)
-        }
-        JobResultPresenter.shared.present(
-            row: row,
-            scheduledAt: scheduledAt,
-            ephemeralSession: false
-        )
-        await markJobResultRead(id: dto.id)
-        fputs("[HumanDecision] job result live modal id=\(dto.id)\n", stderr)
-    }
-
     private func presentJobResultFromNotificationTap(id: String) async {
-        // Standalone floating panel only — do not reopen the main chat window.
+        // Single presentation path for notification tap (Darwin wake or panel-only argv).
+        if JobResultPresenter.interactiveSessionActive {
+            DerrickMainWindowBridge.ensureMainWindow()
+        }
         guard await ensureRepository() != nil else { return }
         guard let repository else { return }
         guard let row = try? await repository.fetchJobResult(id: id) else {
@@ -349,12 +315,25 @@ final class DerrickNotificationService {
             return
         }
         let scheduledAt = try? await repository.fetchJobRunAt(jobID: row.jobID)
+        let jobFailed = (try? await repository.fetchJobStatus(id: row.jobID)) == JobStatus.failed.rawValue
+        let failureDetail: String?
+        let failureCode: String?
+        if jobFailed, let message = try? await repository.fetchJobFailureMessage(id: row.jobID) {
+            failureDetail = JobFailureDisplay.technicalDetail(from: message)
+            failureCode = try? await repository.fetchJobErrorCode(id: row.jobID)
+        } else {
+            failureDetail = nil
+            failureCode = nil
+        }
         try? await Task.sleep(nanoseconds: 150_000_000)
         hideMainWindowsForPanelOnlyIfNeeded()
         JobResultPresenter.shared.present(
             row: row,
             scheduledAt: scheduledAt,
-            ephemeralSession: JobResultPresenter.shouldUseEphemeralSession
+            ephemeralSession: JobResultPresenter.shouldUseEphemeralSession,
+            failed: jobFailed,
+            failureDetail: failureDetail,
+            failureCode: failureCode
         )
         await markJobResultRead(id: id)
     }

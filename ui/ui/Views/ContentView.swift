@@ -549,6 +549,8 @@ struct ContentView: View {
                     message: "Connecting to Derrick daemon…"
                 )
 
+                await DaemonProcessHygiene.reconcile()
+
                 let health = try await ServiceEnsureUp.shared.ensureDaemon()
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
@@ -605,6 +607,7 @@ struct ContentView: View {
 
     /// Install/ensure derrickd off the UI critical path (`launchctl kickstart` can wedge).
     private static func registerDaemonInBackground() async {
+        await DaemonProcessHygiene.reconcile()
         do {
             let result = try await MainActor.run {
                 try JobServiceLoginAgent.ensureRegistered()

@@ -44,6 +44,10 @@ enum HITLLiveApprovalHandlers {
             payloadPreview: request.payloadPreview,
             rememberKey: request.rememberKey
         )
+        if kind == .failure || kind == .notice {
+            await AppEventBus.shared.publish(event)
+            return agentPolicyDecision(requestID: request.requestID, decision: .dismissed)
+        }
         let decision = await AppEventBus.shared.initDecision(event)
         return agentPolicyDecision(requestID: request.requestID, decision: decision)
     }

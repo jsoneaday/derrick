@@ -171,6 +171,29 @@ import Testing
         }
     }
 
+    @Test func stripsSpuriousTrailingBraceFromNestedToolArguments() throws {
+        let valid = #"{"run_after_seconds":9,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import sys\nprint('scheduled test failure', file=sys.stderr)\nsys.exit(1)"},"wake_after":true,"wake_prompt":"Report the scheduled script failure result."}"#
+        let corrupted = valid + "}"
+        #expect(strictParse(corrupted) == false)
+        let args = try parseToolArgumentsObject(corrupted)
+        #expect(args["tool_name"] != nil)
+    }
+
+    @Test func repairsScheduledTestFailureScriptWithRealNewlines() throws {
+        var broken = #"{"run_after_seconds":9,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        broken += "import sys\nprint('scheduled test failure', file=sys.stderr)\nsys.exit(1)"
+        broken += #""},"wake_after":true,"wake_prompt":"Report the scheduled script failure result."}"#
+        #expect(strictParse(broken) == false)
+        let args = try parseToolArgumentsObject(broken)
+        #expect(args["tool_name"] != nil)
+        if case .object(let ta)? = args["tool_arguments"], case .string(let script)? = ta["script"] {
+            #expect(script.contains("scheduled test failure"))
+            #expect(script.contains("sys.exit(1)"))
+        } else {
+            Issue.record("expected nested tool_arguments.script")
+        }
+    }
+
     @Test func repairsTruncatedNestedScriptWithRealNewlines() throws {
         var trunc = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
         trunc += "import random\nprint(random.randint(1, 1000000))"

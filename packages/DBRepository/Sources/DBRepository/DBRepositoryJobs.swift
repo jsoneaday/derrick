@@ -202,6 +202,22 @@ public extension DBRepository {
         }
     }
 
+    public func fetchJobStatus(id: String) throws -> String? {
+        try fetchJob(id: id)?.0.status
+    }
+
+    public func fetchJobFailureMessage(id: String) throws -> String? {
+        try fetchJob(id: id)?.0.errorMessage
+    }
+
+    public func fetchJobErrorCode(id: String) throws -> String? {
+        try fetchJob(id: id)?.0.errorCode
+    }
+
+    public func listRunningJobs(limit: Int = 50) throws -> [(JobRow, [JobStepRow])] {
+        try listJobs(status: "running", limit: limit)
+    }
+
     func listJobs(status: String? = nil, scheduleID: String? = nil, limit: Int = 50) throws -> [(JobRow, [JobStepRow])] {
         let cap = max(1, min(limit, 500))
         return try withDatabaseHandle { handle in

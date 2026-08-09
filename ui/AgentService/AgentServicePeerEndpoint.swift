@@ -75,5 +75,4 @@ private final class AgentServicePeerSilentSink: NSObject, AgentServiceClientSink
     func requestPolicyDecision(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         reply(Data() as NSData)
     }
-    func presentJobResult(_ resultJSON: NSData) {}
 }

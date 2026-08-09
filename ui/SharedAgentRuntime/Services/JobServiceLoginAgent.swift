@@ -154,6 +154,36 @@ public enum JobServiceLoginAgent {
         )
     }
 
+    public static func kickstartRegisteredDaemon() {
+        let domain = "gui/\(getuid())/\(label)"
+        guard isLaunchdJobLoaded() else {
+            fputs("[derrickd] kickstart skipped — launchd job not loaded\n", stderr)
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["kickstart", "-k", domain]
+        let err = Pipe()
+        let out = Pipe()
+        process.standardError = err
+        process.standardOutput = out
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            if process.terminationStatus != 0 {
+                fputs(
+                    "[derrickd] kickstart status=\(process.terminationStatus) \(output)\n",
+                    stderr
+                )
+            } else {
+                fputs("[derrickd] kickstart ok domain=\(domain)\n", stderr)
+            }
+        } catch {
+            fputs("[derrickd] kickstart failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
     public static func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }

@@ -4,7 +4,7 @@ import Foundation
 public enum AgentTurnDelivery: String, Codable, Sendable, Hashable {
     /// Stream chunks into the active chat (default).
     case chatStream
-    /// Collect completion and surface as a job-result modal/notification (no chat injection).
+    /// Scheduled job wake: collect completion, notify via derrickd (no chat stream).
     case jobResultModal
 }
 

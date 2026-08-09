@@ -16,7 +16,7 @@ final class AgentServicePrimaryUISink: @unchecked Sendable {
 
     /// Adopt `connection` only when it exports `AgentServiceClientSinkXPC` (AgentServiceClient).
     /// Job/MCP host clients open additional daemon Mach connections from the same UI process;
-    /// they must not replace the reverse sink used for job-result modals.
+    /// they must not replace the reverse sink used for HITL and turn streaming.
     func attach(connection: NSXPCConnection) {
         lock.lock()
         defer { lock.unlock() }

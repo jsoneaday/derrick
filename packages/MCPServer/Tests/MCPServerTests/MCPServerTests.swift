@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import MCPClient
 @testable import MCPServer
@@ -422,6 +423,27 @@ import MCPClient
         #expect(result.status == .failed)
         #expect(result.decision == .allow)
         #expect(result.failureStage == .execution)
+        #expect(result.indicatesToolError)
+        #expect(result.failureSummary == "ValueError: boom")
+        #expect(MCPToolOutcomeSemantics.isError(toolName: "python_script_exec", text: encodeJSON(result), transportIsError: false))
+    }
+
+    @Test func pythonScriptSuccessIsNotSemanticError() {
+        let result = PythonScriptExecutionResult.runnerOutcome(
+            timedOut: false,
+            exitCode: 0,
+            stdout: "ok",
+            stderr: "",
+            durationMS: 5,
+            phaseTiming: nil
+        )
+        #expect(!result.indicatesToolError)
+        #expect(!MCPToolOutcomeSemantics.isError(toolName: "python_script_exec", text: encodeJSON(result), transportIsError: false))
+    }
+
+    private func encodeJSON(_ value: some Encodable) -> String {
+        let data = (try? JSONEncoder().encode(value)) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 
     @Test func runnerOutcomeClassifiesEgress() {

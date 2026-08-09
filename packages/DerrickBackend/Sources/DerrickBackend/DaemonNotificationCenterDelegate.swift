@@ -65,12 +65,7 @@ public enum DaemonUILauncher: Sendable {
         // Pending file first — UI can present even if argv is dropped by Launch Services.
         DerrickNotificationLaunch.postShowJobResult(id)
 
-        let uiApps = NSRunningApplication
-            .runningApplications(withBundleIdentifier: DerrickServiceID.ui.rawValue)
-        // Any live derrick.ui process should consume the Darwin wake in-process.
-        // Spawning `open -n` while the main UI is up races the pending-result file and
-        // often produces an invisible accessory panel.
-        if !uiApps.isEmpty {
+        if DerrickUIPresence.isInteractiveUIRunning() {
             fputs("[derrickd] present-job-result wake \(id) (UI already running)\n", stderr)
             return
         }

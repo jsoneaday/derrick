@@ -34,6 +34,24 @@ if installOnly || installAndRun {
     if installOnly { exit(0) }
 }
 
+// Orphan `Products/Debug/JobKeepAlive.app` shares the DB and steals scheduled jobs but
+// cannot resolve ui.app Resources (.env) — refuse to run outside LoginItems.
+if !installAndRun && !testNotify && !DerrickAppSupport.isEmbeddedLoginItemDaemon() {
+    fputs(
+        "[derrickd] FATAL: refusing orphan JobKeepAlive at \(Bundle.main.bundleURL.path)\n",
+        stderr
+    )
+    fputs(
+        "[derrickd] Only ui.app/Contents/Library/LoginItems/JobKeepAlive.app should run the daemon.\n",
+        stderr
+    )
+    fputs(
+        "[derrickd] Kill stray copies: pkill -f 'Products/Debug/JobKeepAlive.app'\n",
+        stderr
+    )
+    exit(78)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 

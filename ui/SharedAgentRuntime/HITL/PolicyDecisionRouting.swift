@@ -27,9 +27,13 @@ enum PolicyDecisionRouting {
     }
 
     static func publishNotice(_ event: PolicyUserEvent) async {
+        if let remote = TurnProcessContext.effectivePolicyNoticePublisher {
+            await remote(event)
+            return
+        }
         if isAgentServiceProcess {
             fputs(
-                "[AgentRuntime] policy notice kind=\(event.kind.rawValue) title=\(event.title) summary=\(event.summary)\n",
+                "[AgentRuntime] policy notice (no UI sink) kind=\(event.kind.rawValue) title=\(event.title) summary=\(event.summary)\n",
                 stderr
             )
             return

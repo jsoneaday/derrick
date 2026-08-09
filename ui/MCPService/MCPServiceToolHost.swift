@@ -122,12 +122,24 @@ actor MCPServiceToolHost {
             )
         }
         let result = try await client.callTool(named: request.toolName, arguments: args)
+        let isError = MCPToolOutcomeSemantics.isError(
+            toolName: request.toolName,
+            text: result.text,
+            transportIsError: result.isError
+        )
+        let message: String
+        if isError {
+            message = MCPToolOutcomeSemantics.errorMessage(toolName: request.toolName, text: result.text)
+                ?? "tool reported error"
+        } else {
+            message = "ok"
+        }
         return MCPToolCallResultDTO(
             requestID: request.requestID,
             ok: true,
-            isError: result.isError,
+            isError: isError,
             text: result.text,
-            message: result.isError ? "tool reported error" : "ok"
+            message: message
         )
     }
 }

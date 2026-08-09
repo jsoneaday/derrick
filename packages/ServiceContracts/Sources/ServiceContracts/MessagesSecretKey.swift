@@ -252,6 +252,9 @@ enum DotEnvReader {
             if parent.path == dir.path { break }
             dir = parent
         }
+        if let host = DerrickAppSupport.hostUIApplicationURL(bundleURL: bundleURL) {
+            urls.append(host.appendingPathComponent("Contents/Resources/.env"))
+        }
         return urls
     }
 
