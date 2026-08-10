@@ -62,12 +62,20 @@ public struct AgentTurnAccepted: Codable, Sendable, Hashable {
 /// One streamed chunk (mirrors AgentResponseNextChunk fields for XPC JSON).
 public struct AgentTurnChunkDTO: Codable, Sendable, Hashable {
     public let turnID: String
+    public let sessionID: String?
     public let status: String
     public let chunk: String?
     public let toolName: String?
 
-    public init(turnID: String, status: String, chunk: String? = nil, toolName: String? = nil) {
+    public init(
+        turnID: String,
+        sessionID: String? = nil,
+        status: String,
+        chunk: String? = nil,
+        toolName: String? = nil
+    ) {
         self.turnID = turnID
+        self.sessionID = sessionID
         self.status = status
         self.chunk = chunk
         self.toolName = toolName

@@ -12,8 +12,19 @@ public final class AgentServiceClient: @unchecked Sendable {
     /// True after a successful full ensure-up; cleared when the XPC link dies.
     private var isReady = false
     private let sink = AgentServiceClientSink()
+    private let turnStreamHub = TurnStreamHub()
 
-    private init() {}
+    private init() {
+        sink.updateTurnHandlers(
+            onChunk: { [turnStreamHub] turnID, dto in
+                turnStreamHub.deliverChunk(turnID: turnID, dto: dto)
+            },
+            onFinish: { [turnStreamHub, sink] turnID, errorDTO in
+                sink.endForegroundTurn(turnID)
+                turnStreamHub.deliverFinish(turnID: turnID, errorDTO: errorDTO)
+            }
+        )
+    }
 
     /// Install the UI approval handler used when AgentService needs tool confirmation.
     public func setApprovalHandler(
@@ -134,31 +145,22 @@ public final class AgentServiceClient: @unchecked Sendable {
     public func streamTurn(_ request: AgentTurnRequest) -> AsyncThrowingStream<AgentTurnChunkDTO, Error> {
         AsyncThrowingStream { continuation in
             let turnID = request.turnID
-            let finishGate = FinishGate()
-
-            // Preserve approval + background handlers; bind this turn's chunk/finish stream.
+            let finishGate = turnStreamHub.register(turnID: turnID, continuation: continuation)
             sink.beginForegroundTurn(turnID)
-            sink.updateTurnHandlers(
-                onChunk: { id, dto in
-                    guard id == turnID else { return }
-                    continuation.yield(dto)
-                },
-                onFinish: { [weak sink] id, errorDTO in
-                    guard id == turnID else { return }
+
+            continuation.onTermination = { @Sendable [weak self, weak sink] terminal in
+                if case .cancelled = terminal {
                     sink?.endForegroundTurn(turnID)
-                    guard finishGate.markFinished() else { return }
-                    if let errorDTO {
-                        continuation.finish(throwing: AgentServiceClientError.turnFailed(errorDTO.message))
-                    } else {
-                        continuation.finish()
+                    self?.turnStreamHub.remove(turnID: turnID)
+                    Task {
+                        try? await self?.cancelTurn(turnID: turnID)
                     }
                 }
-            )
+            }
 
             Task {
                 do {
-                    let proxy = try remoteProxy()
-                    // Signed ServiceMessage envelope (HMAC) — UI → Agent injectUserMessage.
+                    let proxy = try self.remoteProxy()
                     let payload = try AgentServiceXPCCodec.encodeSignedTurnRequest(request) as NSData
                     let accepted = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AgentTurnAccepted, Error>) in
                         proxy.startTurn(requestJSON: payload) { data in
@@ -171,8 +173,10 @@ public final class AgentServiceClient: @unchecked Sendable {
                     }
                     guard accepted.ok else {
                         sink.endForegroundTurn(turnID)
-                        guard finishGate.markFinished() else { return }
-                        continuation.finish(throwing: AgentServiceClientError.turnFailed(accepted.message))
+                        turnStreamHub.deliverFinish(
+                            turnID: turnID,
+                            errorDTO: AgentTurnErrorDTO(turnID: turnID, message: accepted.message, code: "rejected")
+                        )
                         return
                     }
                     await MainActor.run {
@@ -182,16 +186,6 @@ public final class AgentServiceClient: @unchecked Sendable {
                     sink.endForegroundTurn(turnID)
                     guard finishGate.markFinished() else { return }
                     continuation.finish(throwing: error)
-                }
-            }
-
-            // Only cancel in-flight work on client cancel — not after a normal finish.
-            continuation.onTermination = { @Sendable [weak self, weak sink] terminal in
-                if case .cancelled = terminal {
-                    sink?.endForegroundTurn(turnID)
-                    Task {
-                        try? await self?.cancelTurn(turnID: turnID)
-                    }
                 }
             }
         }
@@ -362,21 +356,6 @@ public final class AgentServiceClient: @unchecked Sendable {
         lock.unlock()
         // Invalidate outside the lock to avoid re-entrancy with invalidationHandler.
         conn?.invalidate()
-    }
-}
-
-/// One-shot gate so stream finish is only applied once.
-private final class FinishGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var finished = false
-
-    /// Returns true the first time; false if already finished.
-    func markFinished() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if finished { return false }
-        finished = true
-        return true
     }
 }
 

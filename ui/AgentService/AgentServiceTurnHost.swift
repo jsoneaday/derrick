@@ -48,60 +48,61 @@ private final class ChunkCounter: @unchecked Sendable {
 actor AgentServiceTurnHost {
     static let shared = AgentServiceTurnHost()
 
-    /// Live chat conversation (single primary UI session).
-    private var conversation: ConversationModel?
-    /// Isolated job wake conversations keyed by job session id (`job-…`).
-    private var jobConversations: [String: ConversationModel] = [:]
+    private var conversations: [String: ConversationModel] = [:]
+    /// Primary interactive UI session (when client omits `sessionID`).
+    private var primaryUISessionID: String?
     private var repository: DBRepository?
     private var helperModelSettings: LLMModelSettings?
+    /// Per-session serial turn chains (one in-flight turn per session).
+    private var sessionTurnTails: [String: Task<Void, Never>] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
-    private var sessionID: String?
 
-    func ensureConversation(applicationName: String) async throws -> ConversationModel {
-        if let conversation {
-            return conversation
-        }
-        try await ensureRuntimeReady()
-        guard let repo = repository, let settings = helperModelSettings else {
-            throw AgentServiceError.notReady
-        }
-
-        let model = try await ConversationModel.makeDefault(
-            repository: repo,
-            helperModelSettings: settings
-        )
-        conversation = model
-        sessionID = model.sessionKey.sessionID
-        await AgentServiceStore.shared.log(
-            level: .info,
-            message: "Turn host session ready session=\(model.sessionKey.sessionID)",
-            code: "turn_host_ready"
-        )
-        return model
-    }
-
-    /// Job-isolated session memory (never the live chat session).
-    private func ensureJobConversation(jobSessionID: String) async throws -> ConversationModel {
-        if let existing = jobConversations[jobSessionID] {
+    func ensureConversation(
+        sessionID: String,
+        applicationName: String,
+        agentIDOverride: String? = nil
+    ) async throws -> ConversationModel {
+        if let existing = conversations[sessionID] {
             return existing
         }
         try await ensureRuntimeReady()
         guard let repo = repository, let settings = helperModelSettings else {
             throw AgentServiceError.notReady
         }
+
         let model = try await ConversationModel.makeDefault(
             repository: repo,
             helperModelSettings: settings,
-            sessionID: jobSessionID,
-            agentIDOverride: JobSessionID.agentID
+            sessionID: sessionID,
+            agentIDOverride: agentIDOverride
         )
-        jobConversations[jobSessionID] = model
+        conversations[sessionID] = model
+        if agentIDOverride == nil, JobSessionID.isJobSession(sessionID) == false {
+            primaryUISessionID = sessionID
+        }
         await AgentServiceStore.shared.log(
             level: .info,
-            message: "Job conversation ready session=\(jobSessionID)",
-            code: "job_session_ready"
+            message: "Turn host session ready session=\(sessionID)",
+            code: "turn_host_ready"
         )
         return model
+    }
+
+    private func resolveSessionID(
+        request: AgentTurnRequest,
+        isJobWake: Bool
+    ) -> String {
+        if isJobWake {
+            return request.sessionID ?? JobSessionID.make()
+        }
+        if let explicit = request.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return explicit
+        }
+        if let primary = primaryUISessionID {
+            return primary
+        }
+        return UUID().uuidString
     }
 
     private func ensureRuntimeReady() async throws {
@@ -129,16 +130,13 @@ actor AgentServiceTurnHost {
         do {
             let isJobWake = request.delivery == .jobResultModal
                 || JobSessionID.isJobSession(request.sessionID)
-            let model: ConversationModel
-            let sid: String
-            if isJobWake {
-                let jobSession = request.sessionID ?? JobSessionID.make()
-                model = try await ensureJobConversation(jobSessionID: jobSession)
-                sid = jobSession
-            } else {
-                model = try await ensureConversation(applicationName: request.applicationName)
-                sid = sessionID ?? model.sessionKey.sessionID
-            }
+            let sid = resolveSessionID(request: request, isJobWake: isJobWake)
+            let agentOverride = isJobWake ? JobSessionID.agentID : nil
+            let model = try await ensureConversation(
+                sessionID: sid,
+                applicationName: request.applicationName,
+                agentIDOverride: agentOverride
+            )
             let llmModel = try JSONDecoder().decode(LLMModelChoice.self, from: request.modelJSON)
             let turnID = request.turnID
             let prompt = request.prompt
@@ -149,7 +147,7 @@ actor AgentServiceTurnHost {
             let parentSessionID = request.parentSessionID
 
             tasks[turnID]?.cancel()
-            tasks[turnID] = Task {
+            let turnTask = enqueueSessionTurn(sessionID: sid) {
                 await self.executeTurn(
                     turnID: turnID,
                     conversation: model,
@@ -163,6 +161,7 @@ actor AgentServiceTurnHost {
                     parentSessionID: parentSessionID
                 )
             }
+            tasks[turnID] = turnTask
 
             await AgentServiceStore.shared.log(
                 level: .info,
@@ -186,7 +185,7 @@ actor AgentServiceTurnHost {
             return AgentTurnAccepted(
                 ok: false,
                 turnID: request.turnID,
-                sessionID: sessionID ?? "",
+                sessionID: primaryUISessionID ?? "",
                 message: message
             )
         }
@@ -195,6 +194,20 @@ actor AgentServiceTurnHost {
     func cancelTurn(turnID: String) {
         tasks[turnID]?.cancel()
         tasks[turnID] = nil
+    }
+
+    private func enqueueSessionTurn(
+        sessionID: String,
+        operation: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+        let previous = sessionTurnTails[sessionID]
+        let task = Task {
+            _ = await previous?.value
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+        sessionTurnTails[sessionID] = task
+        return task
     }
 
     private func executeTurn(
@@ -209,6 +222,10 @@ actor AgentServiceTurnHost {
         jobSessionID: String,
         parentSessionID: String?
     ) async {
+        guard !Task.isCancelled else {
+            tasks[turnID] = nil
+            return
+        }
         await AgentServiceStore.shared.log(
             level: .info,
             message: "turn started id=\(turnID) chars=\(prompt.count) delivery=\(delivery.rawValue)",
@@ -238,8 +255,6 @@ actor AgentServiceTurnHost {
                 }
             )
         }
-        // Process-wide slots: MCP tool tasks do not inherit TaskLocal from the turn task.
-        // Job wakes still install here; concurrent user turns remain a known gap (queued later).
         let jobPreflight: TurnProcessContext.JobSchedulingPreflight = { toolName, toolArgumentsJSON in
             try await AgentServiceJobPreflight.approveBeforeSchedulingIfNeeded(
                 toolName: toolName,
@@ -252,49 +267,57 @@ actor AgentServiceTurnHost {
         let policyNotice: TurnProcessContext.PolicyNoticePublisher = { event in
             _ = await AgentServiceHITLRouter.requestPolicyDecisionViaUISink(event)
         }
-        TurnProcessContext.installProcessTurnContext(
+        let contextID = ExecutionContextID(
+            sessionID: jobSessionID,
+            agentID: conversation.sessionKey.agentID
+        )
+        TurnProcessContext.install(
+            for: contextID,
             apiKey: apiKey,
             networkAccessPrompt: networkPrompt,
             jobSchedulingPreflight: isJobWake ? nil : jobPreflight,
             policyDecisionPrompt: policyDecision,
             policyNoticePublisher: policyNotice
         )
-        defer { TurnProcessContext.clearProcessTurnContext() }
+        defer { TurnProcessContext.clear(contextID: contextID) }
         do {
-            try await TurnProcessContext.$conversationAPIKey.withValue(apiKey) {
-                try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
-                    try await TurnProcessContext.$policyDecisionPrompt.withValue(policyDecision) {
-                        try await TurnProcessContext.$policyNoticePublisher.withValue(policyNotice) {
-                            try await conversation.runTurn(
-                            prompt: prompt,
-                            apiKey: apiKey,
-                            model: model,
-                            approvalPresenter: approvalPresenter
-                        ) { chunk in
-                            let n = counter.increment()
-                            if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
-                                responseBox.append(text)
+            try await TurnProcessContext.$executionContextID.withValue(contextID) {
+                try await TurnProcessContext.$conversationAPIKey.withValue(apiKey) {
+                    try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
+                        try await TurnProcessContext.$policyDecisionPrompt.withValue(policyDecision) {
+                            try await TurnProcessContext.$policyNoticePublisher.withValue(policyNotice) {
+                                try await conversation.runTurn(
+                                    prompt: prompt,
+                                    apiKey: apiKey,
+                                    model: model,
+                                    approvalPresenter: approvalPresenter
+                                ) { chunk in
+                                    let n = counter.increment()
+                                    if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
+                                        responseBox.append(text)
+                                    }
+                                    guard !suppressChatStream else { return }
+                                    let dto = AgentTurnChunkDTO(
+                                        turnID: turnID,
+                                        sessionID: jobSessionID,
+                                        status: chunk.status.rawValue,
+                                        chunk: chunk.chunk,
+                                        toolName: chunk.toolName
+                                    )
+                                    guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
+                                        fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
+                                        return
+                                    }
+                                    let delivered = Self.deliverChunk(
+                                        turnID: turnID,
+                                        data: data as NSData,
+                                        connectionContext: connectionContext
+                                    )
+                                    if !delivered {
+                                        fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
+                                    }
+                                }
                             }
-                            guard !suppressChatStream else { return }
-                            let dto = AgentTurnChunkDTO(
-                                turnID: turnID,
-                                status: chunk.status.rawValue,
-                                chunk: chunk.chunk,
-                                toolName: chunk.toolName
-                            )
-                            guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
-                                fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
-                                return
-                            }
-                            let delivered = Self.deliverChunk(
-                                turnID: turnID,
-                                data: data as NSData,
-                                connectionContext: connectionContext
-                            )
-                            if !delivered {
-                                fputs("[AgentService] drop chunk #\(n) (nil sink) turn=\(turnID)\n", stderr)
-                            }
-                        }
                         }
                     }
                 }

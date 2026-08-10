@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "DBRepository",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(
             name: "DBRepository",
@@ -12,12 +12,14 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../MemorySystem")
+        .package(path: "../MemorySystem"),
+        .package(path: "../AgentRuntime"),
+        .package(path: "../ServiceContracts")
     ],
     targets: [
         .target(
             name: "DBRepository",
-            dependencies: ["MemorySystem"],
+            dependencies: ["MemorySystem", "AgentRuntime", "ServiceContracts"],
             resources: [
                 .process("Resources")
             ],

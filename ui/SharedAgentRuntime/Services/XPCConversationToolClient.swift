@@ -2,6 +2,7 @@ import Foundation
 import Lib
 import MCP
 import MCPClient
+import AgentRuntime
 import ServiceContracts
 
 /// Effector tools → MCPService over XPC.
@@ -29,6 +30,14 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
         name.hasPrefix("agents_") || name.hasPrefix("jobs_")
     }
 
+    /// Routes effector calls to the active agent when TaskLocal caller is set (worker spawn path).
+    private func effectivePrincipal() -> ServicePrincipal {
+        if let caller = AgentCallContext.caller {
+            return .agent(sessionID: caller.sessionID, agentID: caller.agentID)
+        }
+        return principal
+    }
+
     public func searchTools(matching query: String) async throws -> [MCPToolDescriptor] {
         var byName: [String: MCPToolDescriptor] = [:]
 
@@ -40,7 +49,7 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             }
         }
 
-        let remote = try await MCPServiceClient.shared.searchTools(principal: principal, query: query)
+        let remote = try await MCPServiceClient.shared.searchTools(principal: effectivePrincipal(), query: query)
         guard remote.ok else {
             throw MCPServiceClientError.meshUnverified(
                 remote.message.isEmpty ? "searchTools failed" : remote.message
@@ -71,8 +80,9 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
 
         let argumentsJSON = try toolArgumentsToJSON(arguments)
         let reviewerModelJSON = await helperReviewerModelJSONProvider()
+        let activePrincipal = effectivePrincipal()
         let request = MCPToolCallRequest(
-            principal: principal,
+            principal: activePrincipal,
             toolName: name,
             argumentsJSON: argumentsJSON,
             helperAPIKey: helperAPIKeyProvider(),
@@ -80,7 +90,7 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
         )
         await MainActor.run {
             debugLog(
-                "MCPService XPC callTool tool=\(name) principal=\(principal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ",")) reviewerModel=\(reviewerModelJSON ?? "default")"
+                "MCPService XPC callTool tool=\(name) principal=\(activePrincipal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ",")) reviewerModel=\(reviewerModelJSON ?? "default")"
             )
         }
         let dto = try await MCPServiceClient.shared.callTool(request)

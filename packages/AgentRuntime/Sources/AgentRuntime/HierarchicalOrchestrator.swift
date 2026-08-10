@@ -26,12 +26,12 @@ public struct SpawnWorkerResult: Sendable, Hashable {
     }
 }
 
-/// Hierarchical task protocol helpers on top of `InMemoryAgentDirectory`.
+/// Hierarchical task protocol helpers on top of `AgentDirectorying`.
 ///
 /// Spawn-and-await runs a worker turn via the supplied executor and returns the result
 /// to the parent tool call (mailbox + serial turns still apply).
 public actor HierarchicalOrchestrator {
-    public let directory: InMemoryAgentDirectory
+    private let directory: any AgentDirectorying
 
     /// Results reported via `agents_complete_task` during a worker turn (keyed by child ref).
     private var explicitTaskResults: [AgentRef: String] = [:]
@@ -40,7 +40,7 @@ public actor HierarchicalOrchestrator {
     /// Worker turns currently inside `runTurn` (for complete_task identity when TaskLocal is unavailable across MCP).
     private var activeWorkerTurns: Set<AgentRef> = []
 
-    public init(directory: InMemoryAgentDirectory) {
+    public init(directory: any AgentDirectorying) {
         self.directory = directory
     }
 

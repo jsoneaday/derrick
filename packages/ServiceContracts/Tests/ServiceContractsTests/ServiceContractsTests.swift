@@ -65,11 +65,12 @@ import Testing
         #expect(decoded.prompt == "hello")
         #expect(decoded.sessionID == "s1")
 
-        let chunk = AgentTurnChunkDTO(turnID: "t1", status: "complete", chunk: "hi", toolName: nil)
+        let chunk = AgentTurnChunkDTO(turnID: "t1", sessionID: "s1", status: "complete", chunk: "hi", toolName: nil)
         let chunkData = try AgentServiceXPCCodec.encodeTurnChunk(chunk)
         let decodedChunk = try AgentServiceXPCCodec.decodeTurnChunk(chunkData)
         #expect(decodedChunk.chunk == "hi")
         #expect(decodedChunk.status == "complete")
+        #expect(decodedChunk.sessionID == "s1")
     }
 
     @Test func mcpToolCallRoundTrip() throws {
@@ -551,5 +552,13 @@ import Testing
         )
         #expect(secret == "dev-secret-xyz")
         MessagesSecretKey.resetCacheForTesting()
+    }
+
+    @Test func containerLifecyclePolicyDefaults() {
+        let policy = ContainerLifecyclePolicy.derrickDefault
+        #expect(policy.maxAliveContainers == 3)
+        #expect(policy.warmStandbyCount == 1)
+        #expect(policy.destroyAfterEveryRun)
+        #expect(policy.neverReusePostExecution)
     }
 }

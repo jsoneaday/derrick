@@ -262,6 +262,7 @@ struct ContentView: View {
     
     @ObservedObject private var debugLogStore = DebugLogStore.shared
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
+    @StateObject private var chatSessions = ChatSessionStore()
 
     private var secretStore: SecretStore {
         SecretStore(account: "\(selectedProvider.rawValue)-api-key")
@@ -271,10 +272,7 @@ struct ContentView: View {
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
     @State private var prompt = "create a job that runs in 9 seconds that tells me what's on apple.com"
-    @State private var turns: [ChatTurn] = []
-    @State private var isStreaming = false
     @State private var errorMessage: String?
-    @State private var requestTask: Task<Void, Never>?
     @State private var isPresentingAPIKeyPrompt = false
     @State private var isPresentingDockerRequiredAlert = false
     @State private var dockerRequiredMessage = ""
@@ -284,7 +282,6 @@ struct ContentView: View {
     @State private var selectedModel: LLMModelChoice = .openai(.gpt56Luna)
     @State private var helperModelSettings: LLMModelSettings?
     @State private var promptFocusToken = 0
-    @State private var scrollToBottomToken = 0
     @State private var shouldAutoScroll = true
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var jobPreflightPresenter = JobPreflightApprovalPresenter.shared
@@ -292,12 +289,20 @@ struct ContentView: View {
 
     private var canSendPrompt: Bool {
         sessionReady
-            && !isStreaming
+            && !chatSessions.isSelectedTabStreaming
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var visibleModels: [LLMModelChoice] {
         selectedProvider.models
+    }
+
+    private var activeTurns: [ChatTurn] {
+        chatSessions.selectedTab?.turns ?? []
+    }
+
+    private var isActiveTabStreaming: Bool {
+        chatSessions.isSelectedTabStreaming
     }
 
     private var isDebugEnabled: Bool {
@@ -307,7 +312,7 @@ struct ContentView: View {
     var body: some View {
         HStack(spacing: 0) {
             if let helperModelSettings = helperModelSettings {
-                SidebarView(helperModelSettings: helperModelSettings)
+                SidebarView(helperModelSettings: helperModelSettings, chatSessions: chatSessions)
                     .frame(width: 296)
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
             } else {
@@ -315,7 +320,10 @@ struct ContentView: View {
                     .frame(width: 296)
             }
 
-            mainPanel
+            VStack(spacing: 0) {
+                ChatTabBarView(store: chatSessions)
+                mainPanel
+            }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -565,6 +573,7 @@ struct ContentView: View {
 
                 sessionReady = true
                 bootstrapStatus.markReady()
+                await chatSessions.configure(repository: repo)
                 await DerrickNotificationService.shared.activateSession(repository: repo)
                 await EgressAllowlistService.shared.pushToHelper()
                 if isDebugEnabled {
@@ -627,6 +636,7 @@ struct ContentView: View {
         do {
             let repo = try await ensureSessionStoreLoaded()
             sessionReady = true
+            await chatSessions.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
             if isDebugEnabled {
                 debugLogStore.log("UI client session synced after bootstrap ready")
@@ -652,7 +662,10 @@ struct ContentView: View {
     }
 
     func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        let turns = chatSessions.selectedTab?.turns ?? []
+        let isStreaming = chatSessions.isSelectedTabStreaming
+
+        return VStack(spacing: 0) {
             if turns.isEmpty {
                 Spacer()
 
@@ -713,7 +726,7 @@ struct ContentView: View {
                         shouldAutoScroll = true
                         scrollToBottom(proxy, animated: false)
                     }
-                    .onChange(of: scrollToBottomToken) { _, _ in
+                    .onChange(of: chatSessions.scrollToBottomToken) { _, _ in
                         if shouldAutoScroll {
                             scrollToBottom(proxy)
                         }
@@ -785,7 +798,7 @@ struct ContentView: View {
                         startStreaming()
                     }, focusToken: promptFocusToken)
                     .frame(height: inputHeight)
-                    .disabled(!sessionReady || isStreaming)
+                    .disabled(!sessionReady || isActiveTabStreaming)
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
@@ -823,7 +836,7 @@ struct ContentView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .disabled(isStreaming)
+                    .disabled(isActiveTabStreaming)
 
                     Menu {
                         Picker("Model", selection: $selectedModel) {
@@ -844,38 +857,40 @@ struct ContentView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .disabled(isStreaming)
+                    .disabled(isActiveTabStreaming)
 
                     Button {
-                        startStreaming()
+                        if isActiveTabStreaming {
+                            chatSessions.cancelSelectedTabStream()
+                        } else {
+                            startStreaming()
+                        }
                     } label: {
-                        Image(systemName: isStreaming ? "stop.circle.fill" : "mic")
+                        Image(systemName: isActiveTabStreaming ? "stop.circle.fill" : "mic")
                             .font(.system(size: bottomPromptFontSize))
                             .foregroundStyle(
-                                isStreaming
+                                isActiveTabStreaming
                                     ? Color.red
                                     : Color(nsColor: .labelColor)
                             )
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canSendPrompt && !isStreaming)
+                    .disabled(!canSendPrompt && !isActiveTabStreaming)
 
                     Button {
-                        if isStreaming {
-                            requestTask?.cancel()
-                            requestTask = nil
-                            isStreaming = false
+                        if isActiveTabStreaming {
+                            chatSessions.cancelSelectedTabStream()
                         } else {
-                            turns.removeAll()
+                            chatSessions.clearSelectedTabTurns()
                             errorMessage = nil
                         }
                     } label: {
-                        Image(systemName: turns.isEmpty && !isStreaming ? "waveform" : "trash")
+                        Image(systemName: activeTurns.isEmpty && !isActiveTabStreaming ? "waveform" : "trash")
                             .font(.system(size: bottomPromptFontSize))
-                            .foregroundStyle(Color(nsColor: turns.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor))
+                            .foregroundStyle(Color(nsColor: activeTurns.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor))
                     }
                     .buttonStyle(.plain)
-                    .disabled(turns.isEmpty && !isStreaming)
+                    .disabled(activeTurns.isEmpty && !isActiveTabStreaming)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
@@ -954,42 +969,16 @@ struct ContentView: View {
     private func startStreaming() {
         guard sessionReady, !prompt.isEmpty else { return }
 
-        isStreaming = true
         let currentPrompt = prompt
-        let currentModel = selectedModel
         prompt = ""
-        turns.append(ChatTurn(prompt: currentPrompt, response: ""))
-        scrollToBottomToken += 1
         promptFocusToken += 1
 
-        requestTask = Task {
-            do {
-                // App bootstrap already ensure-up'd Agent; only reconnect if the link died.
-                try await AgentServiceClient.shared.ensureReadyForTurn()
-                let modelJSON = try JSONEncoder().encode(currentModel)
-                let request = AgentTurnRequest(
-                    prompt: currentPrompt,
-                    apiKey: resolveAPIKey() ?? "",
-                    modelJSON: modelJSON
-                )
-                let stream = AgentServiceClient.shared.streamTurn(request)
-                for try await dto in stream {
-                    if let lastIndex = turns.indices.last {
-                        let status = AgentResponseStatus(rawValue: dto.status) ?? .thinking
-                        turns[lastIndex].response = turns[lastIndex].response.isEmpty
-                            ? (dto.chunk ?? "")
-                            : turns[lastIndex].response + (dto.chunk ?? "")
-                        turns[lastIndex].status = status
-                        turns[lastIndex].toolName = dto.toolName
-                        scrollToBottomToken += 1
-                    }
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-                let failure = LLMFailureClassifier.classify(error, provider: currentModel.provider)
-                LLMFailureReporter.shared.report(failure)
-            }
-            isStreaming = false
+        chatSessions.sendPrompt(
+            currentPrompt,
+            apiKey: resolveAPIKey() ?? "",
+            model: selectedModel
+        ) { message in
+            errorMessage = message
         }
     }
 

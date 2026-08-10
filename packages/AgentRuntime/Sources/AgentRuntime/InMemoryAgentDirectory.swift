@@ -94,6 +94,13 @@ public actor InMemoryAgentDirectory: AgentDirectorying {
         )
     }
 
+    /// Rehydrates a persisted agent without re-validating hierarchy caps (DB restore path).
+    public func restore(_ record: AgentRecord) async throws {
+        guard slots[record.ref] == nil else { return }
+        let mailbox = InMemoryMailbox(ref: record.ref, limit: limits.maxMailboxDepth)
+        slots[record.ref] = RuntimeSlot(record: record, mailbox: mailbox, turnTail: nil)
+    }
+
     public func updateStatus(_ ref: AgentRef, status: AgentStatus) async throws {
         guard var slot = slots[ref] else {
             throw AgentRuntimeError.agentNotFound(ref)
@@ -113,7 +120,7 @@ public actor InMemoryAgentDirectory: AgentDirectorying {
 
     public func deliver(
         _ envelope: AgentEnvelope,
-        execute: @escaping @Sendable (AgentEnvelope) async throws -> Void
+        execute: nonisolated(nonsending) @escaping @Sendable (AgentEnvelope) async throws -> Void
     ) async throws {
         guard var slot = slots[envelope.to] else {
             throw AgentRuntimeError.agentNotFound(envelope.to)
@@ -179,7 +186,7 @@ public actor InMemoryAgentDirectory: AgentDirectorying {
 
     private func runTurn(
         envelope: AgentEnvelope,
-        execute: @Sendable (AgentEnvelope) async throws -> Void
+        execute: nonisolated(nonsending) @Sendable (AgentEnvelope) async throws -> Void
     ) async throws {
         if var slot = slots[envelope.to] {
             _ = await slot.mailbox.dequeue()

@@ -1,31 +1,14 @@
 import SwiftUI
 import DBRepository
+import ServiceContracts
 
 private let sideMenuRecentsFontSize = CGFloat(12)
 
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    @ObservedObject var chatSessions: ChatSessionStore
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
-
-    private static let topActions: [SidebarRow] = [
-        SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat", isProminent: true),
-        SidebarRow(id: "chats", icon: "message.fill", title: "Chats"),
-        SidebarRow(id: "projects", icon: "folder.fill", title: "Projects"),
-        SidebarRow(id: "artifacts", icon: "square.grid.2x2.fill", title: "Artifacts"),
-        SidebarRow(id: "code", icon: "chevron.left.forwardslash.chevron.right", title: "Code", isDisabled: true),
-        SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
-    ]
-
-    private static let recents = [
-        "React Native desktop adoption",
-        "RDS compute charges when idle",
-        "Unsupported media type error",
-        "React.cache compatibility",
-        "AI coding models with flat-rate plans",
-        "Next.js fetch retry behavior",
-        "Rust SDKs for major LLM vendors"
-    ]
 
     private static let starred = [
         "Subscribing to GitHub repos in S..."
@@ -53,9 +36,26 @@ struct SidebarView: View {
             .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(Self.topActions) { row in
-                    SidebarActionRow(row: row)
+                SidebarActionRow(
+                    row: SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat", isProminent: true)
+                ) {
+                    chatSessions.openNewChat()
                 }
+                SidebarActionRow(
+                    row: SidebarRow(id: "chats", icon: "message.fill", title: "Chats")
+                )
+                SidebarActionRow(
+                    row: SidebarRow(id: "projects", icon: "folder.fill", title: "Projects")
+                )
+                SidebarActionRow(
+                    row: SidebarRow(id: "artifacts", icon: "square.grid.2x2.fill", title: "Artifacts")
+                )
+                SidebarActionRow(
+                    row: SidebarRow(id: "code", icon: "chevron.left.forwardslash.chevron.right", title: "Code", isDisabled: true)
+                )
+                SidebarActionRow(
+                    row: SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -89,12 +89,29 @@ struct SidebarView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(Self.recents, id: \.self) { recent in
-                            Text(recent)
+                        if chatSessions.recentSessions.isEmpty {
+                            Text("No recent chats")
                                 .font(.system(size: sideMenuRecentsFontSize))
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(.primary.opacity(0.9))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(chatSessions.recentSessions) { session in
+                                Button {
+                                    chatSessions.selectSession(id: session.sessionID)
+                                } label: {
+                                    Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                         ? session.title!
+                                         : "Chat")
+                                        .font(.system(size: sideMenuRecentsFontSize))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .foregroundStyle(
+                                            chatSessions.selectedSessionID == session.sessionID
+                                                ? Color.primary
+                                                : Color.primary.opacity(0.9)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -144,7 +161,11 @@ struct SidebarView: View {
         username: "ui",
         password: "ui"
     )
-    SidebarView(helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)))
+    let store = ChatSessionStore()
+    SidebarView(
+        helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
+        chatSessions: store
+    )
 }
 
 struct SidebarRow: Identifiable, Hashable, Sendable {
@@ -165,23 +186,35 @@ struct SidebarRow: Identifiable, Hashable, Sendable {
 
 struct SidebarActionRow: View {
     let row: SidebarRow
+    var action: (() -> Void)?
+
+    init(row: SidebarRow, action: (() -> Void)? = nil) {
+        self.row = row
+        self.action = action
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: row.icon)
-                .frame(width: 18)
-                .foregroundStyle(row.isDisabled ? Color.secondary.opacity(0.5) : Color.primary)
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: row.icon)
+                    .frame(width: 18)
+                    .foregroundStyle(row.isDisabled ? Color.secondary.opacity(0.5) : Color.primary)
 
-            Text(row.title)
-                .foregroundStyle(row.isDisabled ? Color.secondary.opacity(0.5) : Color.primary)
+                Text(row.title)
+                    .foregroundStyle(row.isDisabled ? Color.secondary.opacity(0.5) : Color.primary)
 
-            if row.isProminent {
-                Spacer()
+                if row.isProminent {
+                    Spacer()
+                }
             }
+            .font(.callout)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(row.isProminent ? Color.black.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         }
-        .font(.callout)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(row.isProminent ? Color.black.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .buttonStyle(.plain)
+        .disabled(row.isDisabled || action == nil)
     }
 }

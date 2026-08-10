@@ -1,11 +1,12 @@
 import Foundation
 import AgentRuntime
 import MemorySystem
+import DBRepository
 
 /// Session-scoped multi-agent entry point (MA-1–MA-3).
 final class SessionOrchestrator: Sendable {
     let sessionID: String
-    let directory: InMemoryAgentDirectory
+    let directory: any AgentDirectorying
     let hierarchy: HierarchicalOrchestrator
     let limits: OrchestrationLimits
     let userFacingRef: AgentRef
@@ -15,7 +16,7 @@ final class SessionOrchestrator: Sendable {
 
     init(
         sessionID: String,
-        directory: InMemoryAgentDirectory = InMemoryAgentDirectory(),
+        directory: any AgentDirectorying,
         limits: OrchestrationLimits = .recommended
     ) {
         self.sessionID = sessionID
@@ -24,6 +25,32 @@ final class SessionOrchestrator: Sendable {
         self.limits = limits
         self.userFacingRef = AgentRef.userFacing(sessionID: sessionID)
         self.turnContext = TurnContextStore()
+    }
+
+    static func make(
+        sessionID: String,
+        repository: DBRepository,
+        limits: OrchestrationLimits = .recommended
+    ) async throws -> SessionOrchestrator {
+        let directory = try await DBAgentDirectory(
+            repository: repository,
+            applicationName: await repository.applicationName,
+            sessionID: sessionID,
+            limits: limits
+        )
+        return SessionOrchestrator(sessionID: sessionID, directory: directory, limits: limits)
+    }
+
+    /// In-memory directory for tests and previews without DB persistence.
+    static func makeInMemory(
+        sessionID: String,
+        limits: OrchestrationLimits = .recommended
+    ) -> SessionOrchestrator {
+        SessionOrchestrator(
+            sessionID: sessionID,
+            directory: InMemoryAgentDirectory(limits: limits),
+            limits: limits
+        )
     }
 
     func bootstrapUserFacingAgent() async throws {

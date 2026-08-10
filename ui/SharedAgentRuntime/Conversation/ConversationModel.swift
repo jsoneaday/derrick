@@ -91,7 +91,10 @@ final class ConversationModel {
         agentIDOverride: String? = nil
     ) async throws -> ConversationModel {
         let sessionID = sessionID ?? UUID().uuidString
-        let orchestrator = SessionOrchestrator(sessionID: sessionID)
+        let orchestrator = try await SessionOrchestrator.make(
+            sessionID: sessionID,
+            repository: repository
+        )
         try await orchestrator.bootstrapUserFacingAgent()
         var sessionKey = orchestrator.memorySessionKey
         if let agentIDOverride {
@@ -203,30 +206,32 @@ final class ConversationModel {
         let workerApiKey = resolveAPIKey(for: workerModel, turnFallback: apiKey) ?? apiKey
 
         let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
-            let childKey = MemorySessionKey(agentRef: child.ref)
-            let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
-            let rag = [ragInstructions, overlay].joined(separator: "\n\n")
-            let stream = await Self.makePolicyStream(
-                prompt: envelope.body,
-                apiKey: workerApiKey,
-                model: workerModel,
-                sessionKey: childKey,
-                memoryCoordinator: memoryCoordinator,
-                policyStore: policyStore,
-                mcpClient: toolClient,
-                ragInstructions: rag,
-                mcpToolInstructions: mcpToolInstructions,
-                responseSchema: responseSchema,
-                interceptor: interceptor,
-                approvalPresenter: nil
-            )
-            var completeText = ""
-            for try await chunk in stream {
-                if chunk.status == .complete {
-                    completeText += chunk.chunk ?? ""
+            try await ExecutionContextScope.runWorkerTurn(agentRef: child.ref) {
+                let childKey = MemorySessionKey(agentRef: child.ref)
+                let overlay = child.systemOverlay ?? WorkerOverlays.workerDefault
+                let rag = [ragInstructions, overlay].joined(separator: "\n\n")
+                let stream = await Self.makePolicyStream(
+                    prompt: envelope.body,
+                    apiKey: workerApiKey,
+                    model: workerModel,
+                    sessionKey: childKey,
+                    memoryCoordinator: memoryCoordinator,
+                    policyStore: policyStore,
+                    mcpClient: toolClient,
+                    ragInstructions: rag,
+                    mcpToolInstructions: mcpToolInstructions,
+                    responseSchema: responseSchema,
+                    interceptor: interceptor,
+                    approvalPresenter: nil
+                )
+                var completeText = ""
+                for try await chunk in stream {
+                    if chunk.status == .complete {
+                        completeText += chunk.chunk ?? ""
+                    }
                 }
+                return completeText
             }
-            return completeText
         }
 
         try await orchestrator.withWorkerRunner(workerRunner) {

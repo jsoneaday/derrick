@@ -20,11 +20,18 @@ public protocol AgentDirectorying: Sendable {
 
     func updateStatus(_ ref: AgentRef, status: AgentStatus) async throws
 
+    /// Ensures the default user-facing agent exists for a session.
+    @discardableResult
+    func ensureUserFacingAgent(sessionID: String) async throws -> AgentRecord
+
+    /// Enqueue without starting a turn (parent mid-tool-call).
+    func enqueueOnly(_ envelope: AgentEnvelope) async throws
+
     /// Enqueue envelope for `envelope.to` and process turns serially for that agent.
     /// `execute` runs one turn; directory enforces one active turn per agent and global concurrent turn cap.
     func deliver(
         _ envelope: AgentEnvelope,
-        execute: @escaping @Sendable (AgentEnvelope) async throws -> Void
+        execute: nonisolated(nonsending) @escaping @Sendable (AgentEnvelope) async throws -> Void
     ) async throws
 }
 
