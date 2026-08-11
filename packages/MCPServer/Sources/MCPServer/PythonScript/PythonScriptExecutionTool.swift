@@ -69,8 +69,10 @@ public enum PythonScriptFailureStage: String, Codable, Sendable, Equatable {
     case llmReview
     /// Script ran and exited non-zero (not a pre-run policy deny).
     case execution
-    /// Script timed out.
+    /// Script timed out inside the container.
     case timeout
+    /// Container lease TTL exceeded (anti-hoarding); distinct from script timeout.
+    case containerLease
     /// Egress proxy / network policy blocked a destination during run.
     case egress
 }
@@ -288,6 +290,30 @@ public struct PythonScriptExecutionResult: Codable, Sendable {
             stderr: stderr,
             exitCode: exitCode,
             timedOut: timedOut,
+            durationMS: durationMS,
+            phaseTiming: phaseTiming
+        )
+    }
+
+    /// Container lease TTL hit — run stopped to free the slot for other agents.
+    public static func containerLeaseExceeded(
+        durationMS: Int,
+        maxSeconds: Int = DockerScriptPreparer.containerRunMaxTTLSeconds,
+        phaseTiming: PythonScriptPhaseTiming? = nil,
+        verifier: String = "static-check-v1"
+    ) -> PythonScriptExecutionResult {
+        let explanation = DockerScriptPreparer.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
+        return PythonScriptExecutionResult(
+            status: .timeout,
+            decision: .allow,
+            failureStage: .containerLease,
+            verifier: verifier,
+            validationFindings: [explanation],
+            reviewerAssessment: nil,
+            stdout: "",
+            stderr: explanation,
+            exitCode: -1,
+            timedOut: true,
             durationMS: durationMS,
             phaseTiming: phaseTiming
         )
@@ -714,13 +740,29 @@ public extension MCPServerHost {
                 return blockedJSON
             }
 
-            var result = try await runner.run(
-                script: parsed.script,
-                timeoutSeconds: parsed.timeoutSeconds,
-                allowNetwork: parsed.allowNetwork,
-                pythonPackages: parsed.pythonPackages,
-                allowDependencyInstall: parsed.allowDependencyInstall
+            var result: PythonScriptExecutionResult
+            let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(
+                requested: parsed.timeoutSeconds
             )
+            do {
+                result = try await runner.run(
+                    script: parsed.script,
+                    timeoutSeconds: effectiveTimeout,
+                    allowNetwork: parsed.allowNetwork,
+                    pythonPackages: parsed.pythonPackages,
+                    allowDependencyInstall: parsed.allowDependencyInstall
+                )
+            } catch let error as DockerNetworkContainerPoolError {
+                if case .leaseTTLExceeded(let maxSeconds) = error {
+                    let totalMS = PythonScriptPhaseTiming.elapsedMS(from: toolStarted)
+                    result = PythonScriptExecutionResult.containerLeaseExceeded(
+                        durationMS: totalMS,
+                        maxSeconds: maxSeconds
+                    )
+                } else {
+                    throw error
+                }
+            }
             let totalMS = PythonScriptPhaseTiming.elapsedMS(from: toolStarted)
             var phaseTiming = result.phaseTiming ?? PythonScriptPhaseTiming()
             phaseTiming.staticValidateMS = staticValidateMS

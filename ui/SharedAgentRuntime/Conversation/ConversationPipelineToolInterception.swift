@@ -309,6 +309,12 @@ extension ConversationPipeline {
             )
         case .timeout:
             event = PolicyUserEventFactory.scriptExecutionTimedOut(toolName: toolName)
+        case .containerLease:
+            let detail = payload.validationFindings.joined(separator: "\n")
+            event = PolicyUserEventFactory.scriptExecutionContainerLeaseExceeded(
+                detail: detail.isEmpty ? nil : detail,
+                toolName: toolName
+            )
         case .egress:
             let detailFromIO = [payload.stderr, payload.stdout]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

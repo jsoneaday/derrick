@@ -537,6 +537,7 @@ struct ContentView: View {
                 await EgressAllowlistService.shared.configure(repository: repo)
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
+                await ContainerLifecycleSettingsService.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)

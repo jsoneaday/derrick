@@ -556,9 +556,23 @@ import Testing
 
     @Test func containerLifecyclePolicyDefaults() {
         let policy = ContainerLifecyclePolicy.derrickDefault
-        #expect(policy.maxAliveContainers == 3)
+        #expect(policy.maxNetworkContainers == 2)
+        #expect(policy.maxOfflineContainers == 1)
         #expect(policy.warmStandbyCount == 1)
+        #expect(policy.containerRunMaxTTLSeconds == 7 * 60)
         #expect(policy.destroyAfterEveryRun)
         #expect(policy.neverReusePostExecution)
+    }
+
+    @Test func containerLifecycleSettingsClampMinutes() {
+        let low = ContainerLifecycleSettings(containerRunMaxTTLSeconds: 10).clamped()
+        #expect(low.containerRunMaxTTLSeconds == ContainerLifecycleSettings.minimumTTLSeconds)
+
+        let high = ContainerLifecycleSettings(containerRunMaxTTLSeconds: 9_999).clamped()
+        #expect(high.containerRunMaxTTLSeconds == ContainerLifecycleSettings.maximumTTLSeconds)
+
+        let fromMinutes = ContainerLifecycleSettings.fromMinutes(12)
+        #expect(fromMinutes.containerRunMaxTTLSeconds == 12 * 60)
+        #expect(fromMinutes.containerRunMaxTTLMinutes == 12)
     }
 }

@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "MCPServer",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(
             name: "MCPServer",
@@ -16,7 +16,8 @@ let package = Package(
         .package(path: "../MCPClient"),
         .package(path: "../LLMAgentClient"),
         .package(path: "../DockerRunnerXPC"),
-        .package(path: "../MCPToolCatalog")
+        .package(path: "../MCPToolCatalog"),
+        .package(path: "../ServiceContracts")
     ],
     targets: [
         .target(
@@ -26,7 +27,8 @@ let package = Package(
                 "MCPClient",
                 "LLMAgentClient",
                 "DockerRunnerXPC",
-                "MCPToolCatalog"
+                "MCPToolCatalog",
+                "ServiceContracts"
             ],
             path: "Sources/MCPServer"
         ),

@@ -456,80 +456,29 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("Pre-warming: Baseline image built successfully.")
     }
 
-    private func ensureWarmContainer(allowNetwork: Bool) async throws {
-        let name = DockerScriptPreparer.warmContainerName(allowNetwork: allowNetwork)
+    private func prewarmNetworkPool() async throws {
+        try await DockerNetworkContainerPool.shared.prewarm(executor: makeCLIExecutor())
+    }
 
-        let imageInspect = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerInspectContainerImageArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let pathInspect = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerInspectContainerPathArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let imageName = String(decoding: imageInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let path = String(decoding: pathInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let needsRecreate =
-            imageInspect.exitCode != 0
-            || imageName != DockerScriptPreparer.defaultImage
-            || path != DockerScriptPreparer.warmContainerHoldPath(allowNetwork: allowNetwork)
-
-        if needsRecreate {
-            debugLog("Pre-warming: Recreating warm container '\(name)' (image=\(imageName), path=\(path))...")
-            _ = try await runXPCCommand(
-                dockerArguments: DockerScriptPreparer.dockerRmForceArguments(container: name),
-                timeoutSeconds: 15
+    private func makeCLIExecutor() -> DockerCLIExecutor {
+        { arguments, timeoutSeconds in
+            let response = try await self.runXPCCommand(
+                dockerArguments: arguments,
+                timeoutSeconds: timeoutSeconds
             )
-            let create = try await runXPCCommand(
-                dockerArguments: DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: allowNetwork),
-                timeoutSeconds: 30
-            )
-            if create.exitCode != 0 {
-                let stderr = String(decoding: create.stderr, as: UTF8.self)
-                throw NSError(domain: "XPCDockerRunner", code: 14, userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container \(name): \(stderr)"])
+            if let launchError = response.launchError {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 503,
+                    userInfo: [NSLocalizedDescriptionKey: launchError]
+                )
             }
-        }
-
-        let runningInspect = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let running = String(decoding: runningInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if running == "true" {
-            debugLog("Warm container already running: \(name)")
-            return
-        }
-
-        debugLog("Pre-warming: Starting warm container '\(name)'...")
-        let start = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerStartArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 30
-        )
-        if start.exitCode != 0 {
-            let stderr = String(decoding: start.stderr, as: UTF8.self)
-            throw NSError(domain: "XPCDockerRunner", code: 15, userInfo: [NSLocalizedDescriptionKey: "Failed to start warm container \(name): \(stderr)"])
-        }
-
-        let verify = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let ok = String(decoding: verify.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if ok != "true" {
-            let stderr = String(decoding: start.stderr, as: UTF8.self)
-            throw NSError(
-                domain: "XPCDockerRunner",
-                code: 19,
-                userInfo: [NSLocalizedDescriptionKey: "Warm container \(name) is not running after start. \(stderr)"]
+            return DockerCLIResult(
+                exitCode: response.exitCode,
+                stdout: response.stdout,
+                stderr: response.stderr
             )
         }
-        debugLog("Pre-warming: Warm container '\(name)' is running.")
     }
 
     private func smokeTestBaseline() async throws {
@@ -576,8 +525,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             try await ensureBaselineImage()
 
             await reportBootstrap(phase: .startingContainers, message: "Starting secure runtime containers…")
-            try await ensureWarmContainer(allowNetwork: true)
-            try await ensureWarmContainer(allowNetwork: false)
+            try await prewarmNetworkPool()
 
             await reportBootstrap(phase: .verifyingEnvironment, message: "Verifying runtime environment…")
             // Do NOT run full baseline package smoke on the critical path. A hung docker-exec
@@ -658,17 +606,14 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
     }
 
-    /// Ensures warm containers exist even if app-start prewarm failed or was still running.
-    private func ensureReadyForRun(allowNetwork: Bool) async throws {
+    /// Ensures volumes, image, and pool are ready even if app-start prewarm failed or was still running.
+    private func ensureReadyForRun() async throws {
         if !prewarmState.isCompleted() {
             try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
             try await ensureVolume(DockerScriptPreparer.packagesVolume)
             try await ensureBaselineImage()
-            try await ensureWarmContainer(allowNetwork: true)
-            try await ensureWarmContainer(allowNetwork: false)
+            try await prewarmNetworkPool()
             prewarmState.markCompleted()
-        } else {
-            try await ensureWarmContainer(allowNetwork: allowNetwork)
         }
     }
 
@@ -691,13 +636,14 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
 
         let ensureStarted = Date()
-        try await ensureReadyForRun(allowNetwork: allowNetwork)
+        try await ensureReadyForRun()
         let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
         debugLog("[TIME_METRIC] python_script_exec ensure_ms=\(ensureMS)")
 
         let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
         debugLog("Extra (non-baseline) python packages: \(extras.isEmpty ? "(none)" : extras.joined(separator: ", "))")
-        debugLog("Request flags: allowNetwork=\(allowNetwork), allowDependencyInstall=\(allowDependencyInstall), timeoutSeconds=\(timeoutSeconds)")
+        let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: timeoutSeconds)
+        debugLog("Request flags: allowNetwork=\(allowNetwork), allowDependencyInstall=\(allowDependencyInstall), timeoutSeconds=\(effectiveTimeout)")
         let executionScript = DockerScriptPreparer.makeExecutionScript(
             script: script,
             installPackages: extras,
@@ -708,46 +654,47 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog(
             "[python_script_exec] wrapper size: chars=\(executionScript.utf8.count) script_chars=\(scriptMetrics.chars) script_lines=\(scriptMetrics.lines)"
         )
-        let dockerArgs = DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
-
         guard let stdinData = executionScript.data(using: .utf8) else {
             throw NSError(domain: "XPCDockerRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode execution script."])
         }
 
-        let request = DockerHostLaunch.makeRequest(
-            dockerArguments: dockerArgs,
-            stdinData: stdinData,
-            timeoutSeconds: timeoutSeconds,
-            environment: DockerScriptPreparer.processEnvironment()
-        )
-        let requestData = try JSONEncoder().encode(request)
-        debugLog("Prepared XPC payload for helper: bytes=\(requestData.count)")
-
         let execStarted = Date()
         debugLog("Sending request to XPC helper service.")
-        let responseData: Data = try await withCheckedThrowingContinuation { continuation in
-            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
-                let nsError = error as NSError
-                debugLog("XPC proxy error from service \(Self.serviceName): domain=\(nsError.domain), code=\(nsError.code), description=\(nsError.localizedDescription)")
-                continuation.resume(throwing: error)
-            }
-            guard let service = proxy as? any DockerProcessRunnerXPC else {
-                let error = NSError(
-                    domain: "XPCDockerRunner", code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."])
-                continuation.resume(throwing: error)
-                return
-            }
-            Task { @MainActor in
-                service.runProcess(requestData: requestData as NSData) { replyNSData in
-                    continuation.resume(returning: replyNSData as Data)
+        let response: DockerRunResponse = try await DockerNetworkContainerPool.shared.withContainer(
+            allowNetwork: allowNetwork,
+            executor: makeCLIExecutor()
+        ) { containerName in
+            let request = DockerHostLaunch.makeRequest(
+                dockerArguments: DockerScriptPreparer.dockerExecArguments(containerName: containerName),
+                stdinData: stdinData,
+                timeoutSeconds: effectiveTimeout,
+                environment: DockerScriptPreparer.processEnvironment()
+            )
+            let requestData = try JSONEncoder().encode(request)
+            debugLog("Prepared XPC payload for helper: bytes=\(requestData.count)")
+            let responseData: Data = try await withCheckedThrowingContinuation { continuation in
+                let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                    let nsError = error as NSError
+                    debugLog("XPC proxy error from service \(Self.serviceName): domain=\(nsError.domain), code=\(nsError.code), description=\(nsError.localizedDescription)")
+                    continuation.resume(throwing: error)
+                }
+                guard let service = proxy as? any DockerProcessRunnerXPC else {
+                    let error = NSError(
+                        domain: "XPCDockerRunner", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."])
+                    continuation.resume(throwing: error)
+                    return
+                }
+                Task { @MainActor in
+                    service.runProcess(requestData: requestData as NSData) { replyNSData in
+                        continuation.resume(returning: replyNSData as Data)
+                    }
                 }
             }
+            return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         }
-
         debugLog("Received response from XPC helper.")
 
-        let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
         debugLog("[TIME_METRIC] python_script_exec exec_ms=\(execMS)")
 

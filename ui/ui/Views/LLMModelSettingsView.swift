@@ -1,9 +1,11 @@
 import SwiftUI
 import DBRepository
 import LLMAgentClient
+import ServiceContracts
 
 private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels
+    case containers
     case networkAccess
     case sensitiveContent
     case usageLimits
@@ -14,6 +16,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
         switch self {
         case .helperModels:
             return "Select helper models"
+        case .containers:
+            return "Containers"
         case .networkAccess:
             return "Network access"
         case .sensitiveContent:
@@ -27,6 +31,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
         switch self {
         case .helperModels:
             return "brain.head.profile"
+        case .containers:
+            return "shippingbox"
         case .networkAccess:
             return "network"
         case .sensitiveContent:
@@ -42,11 +48,13 @@ struct LLMModelSettingsView: View {
     @ObservedObject private var egressAllowlist = EgressAllowlistService.shared
     @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @ObservedObject private var usageLimits = UsageLimitsService.shared
+    @ObservedObject private var containerLifecycle = ContainerLifecycleSettingsService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
     @State private var newSuffixDraft = ""
     @State private var networkError: String?
     @State private var contentError: String?
     @State private var draftLimits: UsageLimits = .default
+    @State private var draftContainerTTLMinutes: Int = ContainerLifecycleSettings.default.containerRunMaxTTLMinutes
 
     var body: some View {
         // Prefer a plain HStack over NavigationSplitView: split views often leave a blank
@@ -71,6 +79,8 @@ struct LLMModelSettingsView: View {
                     switch selectedItem {
                     case .helperModels:
                         helperModelDetail
+                    case .containers:
+                        containersDetail
                     case .networkAccess:
                         networkAccessDetail
                     case .sensitiveContent:
@@ -91,15 +101,24 @@ struct LLMModelSettingsView: View {
         .frame(minWidth: 800, minHeight: 520)
         .onAppear {
             draftLimits = usageLimits.permanentLimits.clamped()
+            draftContainerTTLMinutes = containerLifecycle.settings.containerRunMaxTTLMinutes
         }
         .onChange(of: selectedItem) { _, item in
             if item == .usageLimits {
                 draftLimits = usageLimits.permanentLimits.clamped()
             }
+            if item == .containers {
+                draftContainerTTLMinutes = containerLifecycle.settings.containerRunMaxTTLMinutes
+            }
         }
         .onChange(of: usageLimits.permanentLimits) { _, newValue in
             if selectedItem == .usageLimits {
                 draftLimits = newValue.clamped()
+            }
+        }
+        .onChange(of: containerLifecycle.settings) { _, newValue in
+            if selectedItem == .containers {
+                draftContainerTTLMinutes = newValue.containerRunMaxTTLMinutes
             }
         }
     }
@@ -138,6 +157,56 @@ struct LLMModelSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var containersDetail: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Containers")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+
+            Text("Controls how long a single python_script_exec run may keep a Docker container before it is released for other agents. Queue wait time does not count toward this limit.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Container run time limit")
+                    .font(.headline)
+
+                limitControlRow(
+                    title: "Maximum minutes per run",
+                    value: $draftContainerTTLMinutes,
+                    range: ContainerLifecycleSettings.minimumTTLSeconds / 60 ... ContainerLifecycleSettings.maximumTTLSeconds / 60,
+                    step: 1
+                )
+
+                Text("Current limit: \(draftContainerTTLMinutes) minute\(draftContainerTTLMinutes == 1 ? "" : "s") (\(draftContainerTTLMinutes * 60)s). Network pool: up to 2 containers (1 warm). Offline pool: 1 container, queued.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Button("Reset to default") {
+                    draftContainerTTLMinutes = ContainerLifecycleSettings.default.containerRunMaxTTLMinutes
+                    Task {
+                        await containerLifecycle.savePermanentSettings(.default)
+                    }
+                }
+                Spacer(minLength: 12)
+                Button("Save") {
+                    Task {
+                        await containerLifecycle.savePermanentSettings(
+                            ContainerLifecycleSettings.fromMinutes(draftContainerTTLMinutes)
+                        )
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

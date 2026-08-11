@@ -64,6 +64,11 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
     }
 
+    /// Prewarm the networked Docker pool (daemon embedded helper or UI peer).
+    func prewarmNetworkPool() async throws {
+        try await DockerNetworkContainerPool.shared.prewarm(executor: makeCLIExecutor())
+    }
+
     var hasPeerEndpoint: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -79,9 +84,6 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
     ) async throws -> PythonScriptExecutionResult {
         let totalStarted = Date()
         let ensureStarted = Date()
-
-        // UI prewarms; still ensure warm container is running via helper (start if stopped).
-        try await ensureWarmContainerRunning(allowNetwork: allowNetwork)
         let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
 
         let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
@@ -95,24 +97,29 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
             throw MCPServiceDockerHelperError.encodeFailed("execution script")
         }
 
-        let dockerArgs = DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
-        let request = DockerHostLaunch.makeRequest(
-            dockerArguments: dockerArgs,
-            stdinData: stdinData,
-            timeoutSeconds: timeoutSeconds,
-            environment: DockerScriptPreparer.processEnvironment()
-        )
-        let requestData = try JSONEncoder().encode(request)
-
         let execStarted = Date()
-        let responseData: Data = try await withProxy { proxy in
-            try await withCheckedThrowingContinuation { cont in
-                proxy.runProcess(requestData: requestData as NSData) { reply in
-                    cont.resume(returning: reply as Data)
+        let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: timeoutSeconds)
+        let response: DockerRunResponse = try await DockerNetworkContainerPool.shared.withContainer(
+            allowNetwork: allowNetwork,
+            executor: makeCLIExecutor()
+        ) { containerName in
+            let dockerArgs = DockerScriptPreparer.dockerExecArguments(containerName: containerName)
+            let request = DockerHostLaunch.makeRequest(
+                dockerArguments: dockerArgs,
+                stdinData: stdinData,
+                timeoutSeconds: effectiveTimeout,
+                environment: DockerScriptPreparer.processEnvironment()
+            )
+            let requestData = try JSONEncoder().encode(request)
+            let responseData: Data = try await self.withProxy { proxy in
+                try await withCheckedThrowingContinuation { cont in
+                    proxy.runProcess(requestData: requestData as NSData) { reply in
+                        cont.resume(returning: reply as Data)
+                    }
                 }
             }
+            return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         }
-        let response = try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
 
         if let launchError = response.launchError {
@@ -159,32 +166,15 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         )
     }
 
-    // MARK: - Warm container (via helper, not local docker CLI)
+    // MARK: - Docker pool (via helper XPC)
 
-    private func ensureWarmContainerRunning(allowNetwork: Bool) async throws {
-        let name = DockerScriptPreparer.warmContainerName(allowNetwork: allowNetwork)
-        let running = try await runDocker(
-            DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let isRunning = String(decoding: running.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
-        if isRunning { return }
-
-        fputs("[MCPService] warm container \(name) not running; starting via helper\n", stderr)
-        let start = try await runDocker(
-            DockerScriptPreparer.dockerStartArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 30
-        )
-        if start.exitCode != 0 {
-            let stderr = String(decoding: start.stderr, as: UTF8.self)
-            throw NSError(
-                domain: "MCPServer",
-                code: 503,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Warm container \(name) is not running and could not be started. UI prewarm may have failed. \(stderr)"
-                ]
+    private func makeCLIExecutor() -> DockerCLIExecutor {
+        { arguments, timeoutSeconds in
+            let response = try await self.runDocker(arguments, timeoutSeconds: timeoutSeconds)
+            return DockerCLIResult(
+                exitCode: response.exitCode,
+                stdout: response.stdout,
+                stderr: response.stderr
             )
         }
     }

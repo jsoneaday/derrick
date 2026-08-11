@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ServiceContracts
 import DockerRunnerXPC
 
 /// Utilities for preparing docker run arguments and Python execution scripts.
@@ -43,9 +44,51 @@ public enum DockerScriptPreparer {
     public static let pipCacheVolume = "derrick-pip-cache"
     public static let packagesVolume = "derrick-python-packages"
     /// Bump when create-args change (e.g. forced egress / limits / crawlee storage) so warm containers recreate.
-    public static let warmContainerGeneration = "px4"
+    public static let warmContainerGeneration = "px5"
     public static var warmContainerNetwork: String { "derrick-runner-net-\(warmContainerGeneration)" }
     public static var warmContainerNoNetwork: String { "derrick-runner-nonet-\(warmContainerGeneration)" }
+
+    /// Networked execution pool: two slots max, one warm standby (slot 0).
+    public static let networkPoolSlotCount = 2
+    public static let networkPoolStandbySlotIndex = 0
+    public static let networkPoolWarmStandbyCount = 1
+
+    /// Offline execution pool: one slot max, queued, no warm standby.
+    public static let offlinePoolSlotCount = 1
+
+    /// Hard cap on how long one container lease may run (seconds). Queue wait is excluded.
+    public static var containerRunMaxTTLSeconds: Int {
+        ContainerLifecycleRuntime.containerRunMaxTTLSeconds
+    }
+
+    public static func effectiveScriptTimeoutSeconds(requested: Int) -> Int {
+        min(max(requested, 1), containerRunMaxTTLSeconds)
+    }
+
+    public static func containerLeaseExceededExplanation(maxSeconds: Int = containerRunMaxTTLSeconds) -> String {
+        let minutes = maxSeconds / 60
+        return """
+        Docker container lease expired after \(maxSeconds)s (\(minutes) minutes). Each python_script_exec run may hold a container for at most \(maxSeconds)s so other agents are not blocked. Shorten the script, lower timeout_seconds, or split the work into smaller runs.
+        """
+    }
+
+    public static func networkPoolContainerName(slotIndex: Int) -> String {
+        "\(warmContainerNetwork)-\(slotIndex)"
+    }
+
+    public static func offlinePoolContainerName(slotIndex: Int) -> String {
+        "\(warmContainerNoNetwork)-\(slotIndex)"
+    }
+
+    public static func dockerCreateOfflineContainerArguments(containerName: String) -> [String] {
+        dockerCreateNetworkedWarmContainerArguments(containerName: containerName, allowNetwork: false)
+    }
+
+    /// Prior single-container names removed during pool prewarm.
+    public static let legacyWarmContainerNames: [String] = [
+        "derrick-runner-net-px4",
+        "derrick-runner-nonet-px4"
+    ]
 
     /// Pip install specs baked into the image (extras syntax allowed).
     public static let baselinePipSpecs: [String] = [
@@ -348,13 +391,26 @@ exec /bin/sleep infinity
     /// Image reference is always last (aside from optional offline hold args). Never insert
     /// flags after the image — Docker reports "invalid reference format" if env leaks into
     /// the image position.
+    public static func dockerCreateNetworkPoolContainerArguments(containerName: String) -> [String] {
+        dockerCreateNetworkedWarmContainerArguments(containerName: containerName)
+    }
+
     public static func dockerCreateWarmContainerArguments(allowNetwork: Bool) -> [String] {
-        let name = warmContainerName(allowNetwork: allowNetwork)
+        dockerCreateNetworkedWarmContainerArguments(
+            containerName: warmContainerName(allowNetwork: allowNetwork),
+            allowNetwork: allowNetwork
+        )
+    }
+
+    private static func dockerCreateNetworkedWarmContainerArguments(
+        containerName: String,
+        allowNetwork: Bool = true
+    ) -> [String] {
         if allowNetwork {
             var options: [String] = [
                 "create",
                 "--network", "bridge",
-                "--name", name,
+                "--name", containerName,
                 "--init",
                 "--read-only",
                 "--tmpfs", "/tmp:rw,nosuid,size=\(warmContainerTmpfsSize)",
@@ -393,7 +449,7 @@ exec /bin/sleep infinity
         return [
             "create",
             "--network", "none",
-            "--name", name,
+            "--name", containerName,
             "--init",
             "--read-only",
             "--tmpfs", "/tmp:rw,nosuid,size=\(warmContainerTmpfsSize)",
@@ -441,9 +497,22 @@ exec /bin/sleep infinity
         ["start", warmContainerName(allowNetwork: allowNetwork)]
     }
 
+    public static func dockerStartArguments(containerName: String) -> [String] {
+        ["start", containerName]
+    }
+
+    public static func dockerInspectContainerRunningArguments(containerName: String) -> [String] {
+        ["inspect", "-f", "{{.State.Running}}", containerName]
+    }
+
     /// Exec into the warm container and run python reading the execution script from stdin.
     public static func dockerExecArguments(allowNetwork: Bool) -> [String] {
-        ["exec", "-i", warmContainerName(allowNetwork: allowNetwork), baselinePythonPath, "-I", "-u", "-"]
+        dockerExecArguments(containerName: warmContainerName(allowNetwork: allowNetwork))
+    }
+
+    /// Exec into a specific pool container.
+    public static func dockerExecArguments(containerName: String) -> [String] {
+        ["exec", "-i", containerName, baselinePythonPath, "-I", "-u", "-"]
     }
 
     /// Detects a docker-unavailable condition from stderr and exit code.
@@ -506,6 +575,7 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
         let totalStarted = Date()
         let ensureStarted = Date()
         try await ensureWarmEnvironment()
+        let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
 
         let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
         let executionScript = DockerScriptPreparer.makeExecutionScript(
@@ -514,53 +584,65 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
             allowDependencyInstall: allowDependencyInstall,
             nonBaselinePackages: extras
         )
-
-        try await ensureWarmContainer(allowNetwork: allowNetwork)
-        let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
+        guard let stdinData = executionScript.data(using: .utf8) else {
+            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to encode execution script."])
+        }
 
         let execStarted = Date()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
-        process.arguments = DockerHostLaunch.dockerCLIArguments(
-            DockerScriptPreparer.dockerExecArguments(allowNetwork: allowNetwork)
-        )
-        process.environment = DockerScriptPreparer.processEnvironment()
+        let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: timeoutSeconds)
+        let processResult: (stdout: String, stderr: String, exitCode: Int32, timedOut: Bool) =
+            try await DockerNetworkContainerPool.shared.withContainer(
+                allowNetwork: allowNetwork,
+                executor: Self.dockerCLIExecutor
+            ) { containerName in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
+                process.arguments = DockerHostLaunch.dockerCLIArguments(
+                    DockerScriptPreparer.dockerExecArguments(containerName: containerName)
+                )
+                process.environment = DockerScriptPreparer.processEnvironment()
 
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+                let stdinPipe = Pipe()
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
+                process.standardInput = stdinPipe
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
 
-        do {
-            try process.run()
-        } catch {
-            throw NSError(
-                domain: "MCPServer",
-                code: 503,
-                userInfo: [NSLocalizedDescriptionKey: "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."]
-            )
-        }
+                do {
+                    try process.run()
+                } catch {
+                    throw NSError(
+                        domain: "MCPServer",
+                        code: 503,
+                        userInfo: [NSLocalizedDescriptionKey: "Docker Desktop is required for python_script_exec. Install Docker Desktop and ensure `docker` is available in PATH."]
+                    )
+                }
 
-        if let data = executionScript.data(using: .utf8) {
-            stdinPipe.fileHandleForWriting.write(data)
-        }
-        stdinPipe.fileHandleForWriting.closeFile()
+                stdinPipe.fileHandleForWriting.write(stdinData)
+                stdinPipe.fileHandleForWriting.closeFile()
 
-        let timedOut = await waitForExit(process: process, timeoutSeconds: timeoutSeconds)
-        if timedOut { process.terminate() }
+                let timedOut = await Self.waitForDockerExit(process: process, timeoutSeconds: effectiveTimeout)
+                if timedOut { process.terminate() }
 
-        let stdoutData = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-        let stderrData = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-        let stdout = String(decoding: stdoutData, as: UTF8.self)
-        let stderr = String(decoding: stderrData, as: UTF8.self)
+                let stdoutData = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+                let stderrData = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+                let exitCode = timedOut ? -1 : process.terminationStatus
+                return (
+                    stdout: String(decoding: stdoutData, as: UTF8.self),
+                    stderr: String(decoding: stderrData, as: UTF8.self),
+                    exitCode: exitCode,
+                    timedOut: timedOut
+                )
+            }
         let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
         let totalMS = PythonScriptPhaseTiming.elapsedMS(from: totalStarted)
-        let exitCode = timedOut ? -1 : process.terminationStatus
         let scriptMetrics = PythonScriptPhaseTiming.scriptMetrics(script)
 
-        if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: exitCode) {
+        if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(
+            stderr: processResult.stderr,
+            exitCode: processResult.exitCode
+        ) {
             throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: dockerMessage])
         }
 
@@ -574,13 +656,42 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
         )
 
         return PythonScriptExecutionResult.runnerOutcome(
-            timedOut: timedOut,
-            exitCode: exitCode,
-            stdout: stdout,
-            stderr: stderr,
+            timedOut: processResult.timedOut,
+            exitCode: processResult.exitCode,
+            stdout: processResult.stdout,
+            stderr: processResult.stderr,
             durationMS: totalMS,
             phaseTiming: phaseTiming
         )
+    }
+
+    private static let dockerCLIExecutor: DockerCLIExecutor = { arguments, timeoutSeconds in
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
+        process.arguments = DockerHostLaunch.dockerCLIArguments(arguments)
+        process.environment = DockerScriptPreparer.processEnvironment()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        let timedOut = await waitForDockerExit(process: process, timeoutSeconds: timeoutSeconds)
+        if timedOut { process.terminate() }
+        let stdout = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let stderr = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+        return DockerCLIResult(
+            exitCode: timedOut ? -1 : process.terminationStatus,
+            stdout: stdout,
+            stderr: stderr
+        )
+    }
+
+    private static func waitForDockerExit(process: Process, timeoutSeconds: Int) async -> Bool {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutSeconds, 1)))
+        while process.isRunning, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return process.isRunning
     }
 
     private func ensureWarmEnvironment() async throws {
@@ -589,8 +700,7 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
         try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
         try await ensureVolume(DockerScriptPreparer.packagesVolume)
         try await ensureBaselineImage()
-        try await ensureWarmContainer(allowNetwork: true)
-        try await ensureWarmContainer(allowNetwork: false)
+        try await DockerNetworkContainerPool.shared.prewarm(executor: Self.dockerCLIExecutor)
 
         ensureState.markCompleted()
     }
@@ -622,78 +732,6 @@ public final class DockerPythonScriptRunner: PythonScriptRunner, @unchecked Send
         if build.exitCode != 0 {
             let stderr = String(decoding: build.stderr, as: UTF8.self)
             throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to build baseline image: \(stderr)"])
-        }
-    }
-
-    private func ensureWarmContainer(allowNetwork: Bool) async throws {
-        try await recreateWarmContainerIfNeeded(allowNetwork: allowNetwork)
-        try await startWarmContainerIfNeeded(allowNetwork: allowNetwork)
-    }
-
-    private func recreateWarmContainerIfNeeded(allowNetwork: Bool) async throws {
-        let imageInspect = try await runDocker(
-            DockerScriptPreparer.dockerInspectContainerImageArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let pathInspect = try await runDocker(
-            DockerScriptPreparer.dockerInspectContainerPathArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let imageName = String(decoding: imageInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let path = String(decoding: pathInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let needsRecreate =
-            imageInspect.exitCode != 0
-            || imageName != DockerScriptPreparer.defaultImage
-            || path != DockerScriptPreparer.warmContainerHoldPath(allowNetwork: allowNetwork)
-
-        guard needsRecreate else { return }
-
-        _ = try await runDocker(
-            DockerScriptPreparer.dockerRmForceArguments(container: DockerScriptPreparer.warmContainerName(allowNetwork: allowNetwork)),
-            timeoutSeconds: 15
-        )
-        let create = try await runDocker(
-            DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 30
-        )
-        if create.exitCode != 0 {
-            let stderr = String(decoding: create.stderr, as: UTF8.self)
-            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container: \(stderr)"])
-        }
-    }
-
-    private func startWarmContainerIfNeeded(allowNetwork: Bool) async throws {
-        let runningInspect = try await runDocker(
-            DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let running = String(decoding: runningInspect.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if running == "true" { return }
-
-        let start = try await runDocker(DockerScriptPreparer.dockerStartArguments(allowNetwork: allowNetwork), timeoutSeconds: 30)
-        if start.exitCode != 0 {
-            let stderr = String(decoding: start.stderr, as: UTF8.self)
-            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Failed to start warm container: \(stderr)"])
-        }
-
-        let verify = try await runDocker(
-            DockerScriptPreparer.dockerInspectContainerRunningArguments(allowNetwork: allowNetwork),
-            timeoutSeconds: 15
-        )
-        let ok = String(decoding: verify.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if ok != "true" {
-            let err = String(decoding: start.stderr, as: UTF8.self)
-            throw NSError(
-                domain: "MCPServer",
-                code: 503,
-                userInfo: [NSLocalizedDescriptionKey: "Warm container is not running after start. \(err)"]
-            )
         }
     }
 

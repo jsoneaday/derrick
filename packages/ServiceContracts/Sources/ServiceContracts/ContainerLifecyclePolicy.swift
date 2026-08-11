@@ -1,33 +1,43 @@
 import Foundation
 
-/// Documented container pool policy for Phase 4 (Apple Container runtime).
-/// Types only — no runtime implementation in this module.
+/// Documented Docker container pool policy.
 public struct ContainerLifecyclePolicy: Sendable, Hashable {
-    /// Maximum containers alive at once (warm standby + in-flight exec).
-    public let maxAliveContainers: Int
-    /// Count of pristine warm standbys kept ready (never ran user code).
+    /// Maximum networked containers alive at once (warm + in-flight).
+    public let maxNetworkContainers: Int
+    /// Maximum offline (`--network none`) containers alive at once.
+    public let maxOfflineContainers: Int
+    /// Count of pristine warm standbys kept ready when possible (network pool only).
     public let warmStandbyCount: Int
     /// Every exec container is destroyed after each run (success or failure).
     public let destroyAfterEveryRun: Bool
-    /// Containers that executed user code are never returned to the warm pool.
+    /// Containers that executed user code are never returned without recreate.
     public let neverReusePostExecution: Bool
 
+    /// Maximum seconds a single container lease may be held (queue wait excluded).
+    public let containerRunMaxTTLSeconds: Int
+
     public init(
-        maxAliveContainers: Int,
+        maxNetworkContainers: Int,
+        maxOfflineContainers: Int,
         warmStandbyCount: Int,
+        containerRunMaxTTLSeconds: Int,
         destroyAfterEveryRun: Bool,
         neverReusePostExecution: Bool
     ) {
-        self.maxAliveContainers = maxAliveContainers
+        self.maxNetworkContainers = maxNetworkContainers
+        self.maxOfflineContainers = maxOfflineContainers
         self.warmStandbyCount = warmStandbyCount
+        self.containerRunMaxTTLSeconds = containerRunMaxTTLSeconds
         self.destroyAfterEveryRun = destroyAfterEveryRun
         self.neverReusePostExecution = neverReusePostExecution
     }
 
-    /// Locked product policy: one pristine warm standby, max three alive, destroy-after-run.
+    /// Locked product policy: network max 2 (1 warm), offline max 1 (queued, on-demand), 7m lease TTL.
     public static let derrickDefault = ContainerLifecyclePolicy(
-        maxAliveContainers: 3,
+        maxNetworkContainers: 2,
+        maxOfflineContainers: 1,
         warmStandbyCount: 1,
+        containerRunMaxTTLSeconds: 7 * 60,
         destroyAfterEveryRun: true,
         neverReusePostExecution: true
     )

@@ -223,6 +223,21 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func scriptExecutionContainerLeaseExceeded(
+        detail: String? = nil,
+        toolName: String = "python_script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        failure(
+            source: .system,
+            title: "Container time limit reached",
+            summary: "The Docker container was released after the configured maximum run time so other agents are not blocked.",
+            detail: detail,
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
     public static func egressDenied(
         detail: String,
         toolName: String = "python_script_exec",

@@ -40,6 +40,7 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
         Task {
             do {
                 let repo = try await MCPServiceStore.shared.sharedRepository()
+                await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 _ = try await MCPServiceToolHost.shared.ensureReady()
                 _ = MCPServicePeerEndpoint.shared.endpointForHandoff()
                 let path = await repo.databaseURL.path

@@ -153,8 +153,9 @@ enum ToolFollowUpFormatter {
         }
 
         let findings = (result.validationFindings ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        // Only surface findings when blocked/failed pre-run (no stdout yet).
-        if !findings.isEmpty, result.stdout?.isEmpty != false {
+        let showFindingsDespiteStdout = result.failureStage == "containerLease"
+        // Surface findings when blocked/failed pre-run, or when lease TTL explains a stopped run.
+        if !findings.isEmpty, showFindingsDespiteStdout || result.stdout?.isEmpty != false {
             lines.append("findings:")
             for finding in findings.prefix(8) {
                 lines.append("- \(finding)")

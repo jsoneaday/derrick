@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import MCPClient
+import ServiceContracts
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
@@ -244,11 +245,46 @@ import MCPClient
         #expect(summary.contains("reviewer_model=gpt-5.6-luna"))
     }
 
-    @Test func dockerExecUsesWarmContainer() {
-        let args = DockerScriptPreparer.dockerExecArguments(allowNetwork: true)
+    @Test func dockerExecUsesPoolContainer() {
+        let name = DockerScriptPreparer.networkPoolContainerName(slotIndex: 0)
+        let args = DockerScriptPreparer.dockerExecArguments(containerName: name)
         #expect(args.contains("exec"))
-        #expect(args.contains(DockerScriptPreparer.warmContainerNetwork))
+        #expect(args.contains(name))
         #expect(args.contains(DockerScriptPreparer.baselinePythonPath))
+    }
+
+    @Test func networkPoolStandbyIsSlotZeroOnly() {
+        #expect(DockerScriptPreparer.networkPoolStandbySlotIndex == 0)
+        #expect(DockerScriptPreparer.networkPoolWarmStandbyCount == 1)
+        #expect(DockerScriptPreparer.networkPoolSlotCount == 2)
+    }
+
+    @Test func offlinePoolContainerUsesNoNetworkPrefix() {
+        let name = DockerScriptPreparer.offlinePoolContainerName(slotIndex: 0)
+        #expect(name.hasPrefix(DockerScriptPreparer.warmContainerNoNetwork + "-"))
+        let offline = DockerScriptPreparer.dockerCreateOfflineContainerArguments(containerName: name)
+        #expect(offline.contains("--network"))
+        #expect(offline.contains("none"))
+        #expect(offline.contains(name))
+    }
+
+    @Test func offlinePoolSlotCountMatchesPolicy() {
+        #expect(DockerScriptPreparer.offlinePoolSlotCount == 1)
+    }
+
+    @Test func networkPoolSlotCountMatchesPolicy() {
+        #expect(DockerScriptPreparer.networkPoolSlotCount == 2)
+    }
+
+    @Test func networkPoolCreateMountsPackagesVolume() {
+        let name = DockerScriptPreparer.networkPoolContainerName(slotIndex: 1)
+        let online = DockerScriptPreparer.dockerCreateNetworkPoolContainerArguments(containerName: name)
+        #expect(online.contains(name))
+        #expect(online.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
+                online.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
+        #expect(online.contains(DockerScriptPreparer.forcedEgressHoldPath))
+        #expect(online.contains("NET_ADMIN"))
+        #expect(online.last == DockerScriptPreparer.defaultImage)
     }
 
     @Test func warmContainerCreateMountsPackagesVolume() {
@@ -472,6 +508,26 @@ import MCPClient
         #expect(result.status == .timeout)
         #expect(result.decision == .allow)
         #expect(result.failureStage == .timeout)
+    }
+
+    @Test func effectiveScriptTimeoutCapsAtContainerLeaseTTL() {
+        ContainerLifecycleRuntime.resetToDefaultForTesting()
+        defer { ContainerLifecycleRuntime.resetToDefaultForTesting() }
+        #expect(DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: 30) == 30)
+        #expect(DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: 900) == DockerScriptPreparer.containerRunMaxTTLSeconds)
+        #expect(DockerScriptPreparer.containerRunMaxTTLSeconds == 7 * 60)
+    }
+
+    @Test func containerLeaseExceededProducesClearLLMMessage() {
+        ContainerLifecycleRuntime.resetToDefaultForTesting()
+        defer { ContainerLifecycleRuntime.resetToDefaultForTesting() }
+        let result = PythonScriptExecutionResult.containerLeaseExceeded(durationMS: 420_000)
+        #expect(result.status == .timeout)
+        #expect(result.failureStage == .containerLease)
+        #expect(result.timedOut)
+        #expect(result.validationFindings.first?.contains("7 minutes") == true)
+        #expect(result.stderr.contains("container lease expired"))
+        #expect(result.failureSummary?.contains("container lease expired") == true)
     }
 
     @Test func allowAssessmentSurvivesSuccessfulRunWithoutDenyStage() async throws {

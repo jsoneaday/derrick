@@ -58,6 +58,7 @@ enum DaemonModuleBootstrap {
             let suffixes = rows.filter(\.enabled).map(\.suffix)
             await MCPServiceDockerHelperRunner.shared.pushEgressAllowedDomainSuffixes(suffixes)
             try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
+            try await MCPServiceDockerHelperRunner.shared.prewarmNetworkPool()
             fputs("[derrickd] embedded Docker helper verified (egress count=\(suffixes.count))\n", stderr)
         } catch {
             fputs("[derrickd] embedded Docker helper sync failed: \(error.localizedDescription)\n", stderr)
