@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ServiceContracts
 @testable import AgentRuntime
 
 @Suite struct AgentRuntimeTests {

@@ -1,4 +1,5 @@
 import Foundation
+import ServiceContracts
 
 /// FIFO mailbox for a single agent.
 public protocol AgentMailboxing: Sendable {

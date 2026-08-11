@@ -5,6 +5,7 @@ import ServiceContracts
 
 private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels
+    case multiAgent
     case containers
     case networkAccess
     case sensitiveContent
@@ -16,6 +17,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
         switch self {
         case .helperModels:
             return "Select helper models"
+        case .multiAgent:
+            return "Multi-agent"
         case .containers:
             return "Containers"
         case .networkAccess:
@@ -31,6 +34,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
         switch self {
         case .helperModels:
             return "brain.head.profile"
+        case .multiAgent:
+            return "person.3"
         case .containers:
             return "shippingbox"
         case .networkAccess:
@@ -49,12 +54,14 @@ struct LLMModelSettingsView: View {
     @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @ObservedObject private var usageLimits = UsageLimitsService.shared
     @ObservedObject private var containerLifecycle = ContainerLifecycleSettingsService.shared
+    @ObservedObject private var orchestrationLimits = OrchestrationLimitsSettingsService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
     @State private var newSuffixDraft = ""
     @State private var networkError: String?
     @State private var contentError: String?
     @State private var draftLimits: UsageLimits = .default
     @State private var draftContainerTTLMinutes: Int = ContainerLifecycleSettings.default.containerRunMaxTTLMinutes
+    @State private var draftOrchestrationLimits: OrchestrationLimits = .default
 
     var body: some View {
         // Prefer a plain HStack over NavigationSplitView: split views often leave a blank
@@ -79,6 +86,8 @@ struct LLMModelSettingsView: View {
                     switch selectedItem {
                     case .helperModels:
                         helperModelDetail
+                    case .multiAgent:
+                        multiAgentDetail
                     case .containers:
                         containersDetail
                     case .networkAccess:
@@ -102,6 +111,7 @@ struct LLMModelSettingsView: View {
         .onAppear {
             draftLimits = usageLimits.permanentLimits.clamped()
             draftContainerTTLMinutes = containerLifecycle.settings.containerRunMaxTTLMinutes
+            draftOrchestrationLimits = orchestrationLimits.limits
         }
         .onChange(of: selectedItem) { _, item in
             if item == .usageLimits {
@@ -109,6 +119,9 @@ struct LLMModelSettingsView: View {
             }
             if item == .containers {
                 draftContainerTTLMinutes = containerLifecycle.settings.containerRunMaxTTLMinutes
+            }
+            if item == .multiAgent {
+                draftOrchestrationLimits = orchestrationLimits.limits
             }
         }
         .onChange(of: usageLimits.permanentLimits) { _, newValue in
@@ -119,6 +132,11 @@ struct LLMModelSettingsView: View {
         .onChange(of: containerLifecycle.settings) { _, newValue in
             if selectedItem == .containers {
                 draftContainerTTLMinutes = newValue.containerRunMaxTTLMinutes
+            }
+        }
+        .onChange(of: orchestrationLimits.limits) { _, newValue in
+            if selectedItem == .multiAgent {
+                draftOrchestrationLimits = newValue
             }
         }
     }
@@ -157,6 +175,80 @@ struct LLMModelSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var multiAgentDetail: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Multi-agent")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+
+            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel python_script_exec runs may still queue on the Docker container pool.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Hierarchy")
+                    .font(.headline)
+
+                limitControlRow(
+                    title: "Max hierarchy depth",
+                    value: $draftOrchestrationLimits.maxDepth,
+                    range: 0 ... OrchestrationLimits.absoluteMax.maxDepth,
+                    step: 1
+                )
+                limitControlRow(
+                    title: "Max workers per parent",
+                    value: $draftOrchestrationLimits.maxChildrenPerAgent,
+                    range: 1 ... OrchestrationLimits.absoluteMax.maxChildrenPerAgent,
+                    step: 1
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Session")
+                    .font(.headline)
+
+                limitControlRow(
+                    title: "Max parallel agent turns",
+                    value: $draftOrchestrationLimits.maxConcurrentTurns,
+                    range: 1 ... OrchestrationLimits.absoluteMax.maxConcurrentTurns,
+                    step: 1
+                )
+                limitControlRow(
+                    title: "Max agents per session",
+                    value: $draftOrchestrationLimits.maxAgentsPerSession,
+                    range: 2 ... OrchestrationLimits.absoluteMax.maxAgentsPerSession,
+                    step: 1
+                )
+                limitControlRow(
+                    title: "Max mailbox queue depth",
+                    value: $draftOrchestrationLimits.maxMailboxDepth,
+                    range: 8 ... OrchestrationLimits.absoluteMax.maxMailboxDepth,
+                    step: 8
+                )
+            }
+
+            Text("Defaults: depth 2, 4 workers per parent, 4 parallel turns, 8 agents, mailbox 64. See docs/orchestration-limits.md.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Reset to defaults") {
+                    draftOrchestrationLimits = .default
+                    Task { await orchestrationLimits.savePermanentLimits(.default) }
+                }
+                Spacer(minLength: 12)
+                Button("Save") {
+                    Task { await orchestrationLimits.savePermanentLimits(draftOrchestrationLimits.clamped()) }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

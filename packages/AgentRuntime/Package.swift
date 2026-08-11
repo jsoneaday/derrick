@@ -10,9 +10,13 @@ let package = Package(
     products: [
         .library(name: "AgentRuntime", targets: ["AgentRuntime"])
     ],
+    dependencies: [
+        .package(path: "../ServiceContracts")
+    ],
     targets: [
         .target(
             name: "AgentRuntime",
+            dependencies: ["ServiceContracts"],
             path: "Sources/AgentRuntime",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

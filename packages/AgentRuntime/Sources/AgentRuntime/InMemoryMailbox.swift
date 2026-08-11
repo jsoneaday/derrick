@@ -1,4 +1,5 @@
 import Foundation
+import ServiceContracts
 
 /// Simple FIFO mailbox. Actor-isolated; not shared across processes.
 public actor InMemoryMailbox: AgentMailboxing {

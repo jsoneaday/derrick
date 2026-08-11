@@ -2,6 +2,7 @@ import Foundation
 import AgentRuntime
 import MemorySystem
 import DBRepository
+import ServiceContracts
 
 /// Session-scoped multi-agent entry point (MA-1–MA-3).
 final class SessionOrchestrator: Sendable {
@@ -17,7 +18,7 @@ final class SessionOrchestrator: Sendable {
     init(
         sessionID: String,
         directory: any AgentDirectorying,
-        limits: OrchestrationLimits = .recommended
+        limits: OrchestrationLimits = OrchestrationLimitsRuntime.current
     ) {
         self.sessionID = sessionID
         self.directory = directory
@@ -30,7 +31,7 @@ final class SessionOrchestrator: Sendable {
     static func make(
         sessionID: String,
         repository: DBRepository,
-        limits: OrchestrationLimits = .recommended
+        limits: OrchestrationLimits = OrchestrationLimitsRuntime.current
     ) async throws -> SessionOrchestrator {
         let directory = try await DBAgentDirectory(
             repository: repository,

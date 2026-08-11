@@ -564,6 +564,31 @@ import Testing
         #expect(policy.neverReusePostExecution)
     }
 
+    @Test func orchestrationLimitsDefaults() {
+        let limits = OrchestrationLimits.default
+        #expect(limits.maxDepth == 2)
+        #expect(limits.maxChildrenPerAgent == 4)
+        #expect(limits.maxConcurrentTurns == 4)
+        #expect(limits.maxAgentsPerSession == 8)
+        #expect(limits.maxMailboxDepth == 64)
+        #expect(OrchestrationLimits.recommended == limits)
+    }
+
+    @Test func orchestrationLimitsClamp() {
+        let high = OrchestrationLimits(
+            maxDepth: 99,
+            maxChildrenPerAgent: 99,
+            maxConcurrentTurns: 99,
+            maxAgentsPerSession: 99,
+            maxMailboxDepth: 999
+        ).clamped()
+        #expect(high.maxDepth == OrchestrationLimits.absoluteMax.maxDepth)
+        #expect(high.maxChildrenPerAgent == OrchestrationLimits.absoluteMax.maxChildrenPerAgent)
+        #expect(high.maxConcurrentTurns == OrchestrationLimits.absoluteMax.maxConcurrentTurns)
+        #expect(high.maxAgentsPerSession == OrchestrationLimits.absoluteMax.maxAgentsPerSession)
+        #expect(high.maxMailboxDepth == OrchestrationLimits.absoluteMax.maxMailboxDepth)
+    }
+
     @Test func containerLifecycleSettingsClampMinutes() {
         let low = ContainerLifecycleSettings(containerRunMaxTTLSeconds: 10).clamped()
         #expect(low.containerRunMaxTTLSeconds == ContainerLifecycleSettings.minimumTTLSeconds)
