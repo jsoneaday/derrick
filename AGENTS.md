@@ -17,4 +17,5 @@ You are a careful and methodocial Swift and SwiftUI developer.
 
 ## Project Configuration
 - This project is on Xcode 27 and MacOS 27
+- **Python script runtime is Docker only** (`DockerRunnerHelper` + `DockerNetworkContainerPool`). Do not reintroduce Apple Container / `container` CLI without a new ADR — see `docs/adr-docker-script-runtime.md`.
 - **Run the `ui` scheme only.** The daemon (`derrickd`) lives at `ui.app/Contents/Library/LoginItems/JobKeepAlive.app` and is started by Login Items when you run the main app. Do not run the standalone `Products/Debug/JobKeepAlive.app` — it shares the database and steals scheduled jobs. The `JobKeepAlive` scheme is build-only (⌘R builds, does not launch).

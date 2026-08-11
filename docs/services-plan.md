@@ -14,7 +14,7 @@
 | **UI** | `derrick.ui` | Chat, settings, approvals; XPC client of Daemon; ensure Daemon up |
 | **Daemon (`derrickd`)** | `derrick.ui.Daemon` | Headless LoginAgent: agent turns, jobs, MCP host, AppEventBus, **sole** UserNotifications poster |
 | **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent (future) |
-| **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained process runner (existing) |
+| **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained `docker` CLI runner (sole python_script_exec backend — see [adr-docker-script-runtime.md](adr-docker-script-runtime.md)) |
 
 See [adr-headless-backend.md](adr-headless-backend.md).
 
