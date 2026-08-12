@@ -10,10 +10,6 @@ struct SidebarView: View {
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
 
-    private static let starred = [
-        "Subscribing to GitHub repos in S..."
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -56,23 +52,6 @@ struct SidebarView: View {
                 SidebarActionRow(
                     row: SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
                 )
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Starred")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Self.starred, id: \.self) { item in
-                        Text(item)
-                            .font(.system(size: sideMenuRecentsFontSize))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundStyle(Color(nsColor: .labelColor))
-                    }
-                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
