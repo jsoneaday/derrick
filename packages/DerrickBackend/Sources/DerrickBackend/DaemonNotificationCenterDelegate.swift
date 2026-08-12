@@ -16,6 +16,8 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        // Job results + HITL (network/tool) always banner — tap opens the approval/result UI.
+        // Do not suppress while interactive; scheduling no longer uses an in-app preflight modal.
         completionHandler([.banner, .list, .sound])
     }
 
@@ -29,20 +31,30 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
             ?? info["kind"] as? String
         let jobResultID = info[UserNotificationUserInfoKey.jobResultID.rawValue] as? String
             ?? info["jobResultID"] as? String
+        let approvalID = info[UserNotificationUserInfoKey.approvalID.rawValue] as? String
+            ?? info["approvalID"] as? String
         completionHandler()
-        guard kind == UserNotificationKind.jobResult.rawValue || kind == "job-result",
-              let jobResultID,
-              !jobResultID.isEmpty
-        else {
-            fputs("[derrickd] notification tap ignored kind=\(kind ?? "nil")\n", stderr)
+        if kind == UserNotificationKind.jobResult.rawValue || kind == "job-result",
+           let jobResultID,
+           !jobResultID.isEmpty {
+            DispatchQueue.main.async {
+                Task {
+                    await DaemonUILauncher.openJobResult(id: jobResultID)
+                }
+            }
             return
         }
-        // Leave the UN callback stack before AppKit / NSWorkspace work.
-        DispatchQueue.main.async {
-            Task {
-                await DaemonUILauncher.openJobResult(id: jobResultID)
+        if kind == UserNotificationKind.hitlApproval.rawValue || kind == "hitl-approval",
+           let approvalID,
+           !approvalID.isEmpty {
+            DispatchQueue.main.async {
+                Task {
+                    await DaemonUILauncher.openHITLApproval(id: approvalID)
+                }
             }
+            return
         }
+        fputs("[derrickd] notification tap ignored kind=\(kind ?? "nil")\n", stderr)
     }
 }
 
@@ -51,9 +63,33 @@ public enum DaemonUILauncher: Sendable {
     // Debounce only — not a security boundary.
     nonisolated(unsafe) private static var lastOpenedID: String?
     nonisolated(unsafe) private static var lastOpenedAt: Date = .distantPast
+    nonisolated(unsafe) private static var lastHITLOpenedID: String?
+    nonisolated(unsafe) private static var lastHITLOpenedAt: Date = .distantPast
+
+    public static func openHITLApproval(id: String) async {
+        let skip = (lastHITLOpenedID == id && Date().timeIntervalSince(lastHITLOpenedAt) < 45)
+        if skip {
+            fputs("[derrickd] present-hitl-approval skipped (debounce) \(id)\n", stderr)
+            return
+        }
+        lastHITLOpenedID = id
+        lastHITLOpenedAt = Date()
+
+        DerrickNotificationLaunch.postShowHITLApproval(id)
+
+        if DerrickUIPresence.isInteractiveUIRunning() {
+            fputs("[derrickd] present-hitl-approval wake \(id) (UI already running)\n", stderr)
+            return
+        }
+
+        guard let uiURL = locateUIApp() else {
+            fputs("[derrickd] cannot locate derrick.ui to present HITL approval \(id)\n", stderr)
+            return
+        }
+        openHITLViaOpenCLI(uiURL: uiURL, approvalID: id)
+    }
 
     public static func openJobResult(id: String) async {
-        // Debounce: daemon restarts / UN redelivery must not spawn panel spam.
         let skip = (lastOpenedID == id && Date().timeIntervalSince(lastOpenedAt) < 45)
         if skip {
             fputs("[derrickd] present-job-result skipped (debounce) \(id)\n", stderr)
@@ -77,6 +113,25 @@ public enum DaemonUILauncher: Sendable {
         // Prefer `/usr/bin/open -n --args` so argv always reaches a fresh process
         // (NSWorkspace often ignores arguments when any derrick.ui instance exists).
         openViaOpenCLI(uiURL: uiURL, resultID: id)
+    }
+
+    /// `open -n --args` is the most reliable way to pass argv to a GUI app.
+    private static func openHITLViaOpenCLI(uiURL: URL, approvalID: String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = [
+            "-n",
+            "-a", uiURL.path,
+            "--args",
+            DerrickNotificationLaunch.showHITLApprovalArgument,
+            approvalID,
+        ]
+        do {
+            try proc.run()
+            fputs("[derrickd] /usr/bin/open -n HITL approval for \(approvalID)\n", stderr)
+        } catch {
+            fputs("[derrickd] /usr/bin/open HITL failed: \(error.localizedDescription)\n", stderr)
+        }
     }
 
     /// `open -n --args` is the most reliable way to pass argv to a GUI app.

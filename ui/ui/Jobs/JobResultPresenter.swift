@@ -10,6 +10,7 @@ enum JobResultPanelSession {
     nonisolated(unsafe) static var allowsTermination = true
     nonisolated(unsafe) static var isPanelOnlyLaunch =
         DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
     nonisolated(unsafe) static var swallowMouseEventsUntil = Date.distantPast
     nonisolated(unsafe) private static var mouseMonitor: Any?
 
@@ -43,7 +44,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panelOnlyLaunch
             || !interactiveSessionActive
             || DerrickNotificationLaunch.hasJobResultPresentationIntent()
-            || DerrickNotificationLaunch.isPollLaunch()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
     }
 
     @Published private(set) var activeResult: PresentedJobResult?

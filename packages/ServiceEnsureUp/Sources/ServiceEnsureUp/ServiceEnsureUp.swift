@@ -29,9 +29,6 @@ public actor ServiceEnsureUp {
     /// Headless backend LoginAgent (`derrick.ui.Daemon`). Prefer this over per-XPC ensure-up as migration completes.
     @discardableResult
     public func ensureDaemon(retries: Int = 3) async throws -> ServiceHealthReport {
-        if let hook = ServiceEnsureUpHooks.beforeEnsureDaemon {
-            await hook()
-        }
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {
@@ -223,15 +220,19 @@ public actor ServiceEnsureUp {
         return proxy
     }
 
-    private func withTimeout<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    /// `nonisolated` so the sleep task does not inherit the actor executor (which can stall timeouts).
+    nonisolated private func withTimeout<T: Sendable>(
+        nanoseconds: UInt64 = 15_000_000_000,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await operation() }
             group.addTask {
-                try await Task.sleep(nanoseconds: self.callTimeoutNanoseconds)
+                try await Task.sleep(nanoseconds: nanoseconds)
                 throw ServiceEnsureUpError.timeout
             }
+            defer { group.cancelAll() }
             guard let first = try await group.next() else { throw ServiceEnsureUpError.timeout }
-            group.cancelAll()
             return first
         }
     }

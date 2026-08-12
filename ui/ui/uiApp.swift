@@ -10,11 +10,12 @@ struct uiApp: App {
 
     /// Captured at process start so Scene content cannot race AppDelegate.
     private let isPanelOnlyOrHeadlessLaunch =
-        DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
+        DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
 
     init() {
-        if DerrickNotificationLaunch.hasJobResultPresentationIntent() {
+        if DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent() {
             JobResultPanelSession.isPanelOnlyLaunch = true
             JobResultPanelSession.allowsTermination = false
         }
@@ -27,7 +28,6 @@ struct uiApp: App {
 
     var body: some Scene {
         let panelOnly = isPanelOnlyOrHeadlessLaunch || JobResultPanelSession.isPanelOnlyLaunch
-        // Distinct window id for panel-only so restored `derrick.main` ContentView is not reused.
         WindowGroup(
             panelOnly ? "Derrick Result" : "Derrick",
             id: panelOnly ? "derrick.job-result-panel" : DerrickMainWindowID.main
@@ -50,7 +50,6 @@ private enum DerrickMainWindowID {
     static let main = "derrick.main"
 }
 
-/// Keeps a live `openWindow` handle so notification taps can recreate the UI after close.
 private struct DerrickMainWindowRegistrar: View {
     @Environment(\.openWindow) private var openWindow
 
@@ -71,10 +70,9 @@ private struct DerrickMainWindowRegistrar: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
-        // Panel-only launches must not restore the main chat window from a prior session.
         !JobResultPanelSession.isPanelOnlyLaunch
-            && !DerrickNotificationLaunch.isPollLaunch()
             && !DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            && !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -83,15 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !JobResultPanelSession.allowsTermination {
-            fputs("[ui] cancel auto-terminate (job result panel active)\n", stderr)
+            fputs("[ui] cancel auto-terminate (panel-only session active)\n", stderr)
             return .terminateCancel
         }
         return .terminateNow
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
+        if DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         {
             return false
         }
@@ -101,17 +99,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserNotificationPoster.configureDelegateIfNeeded()
-        ServiceEnsureUpHooks.beforeEnsureDaemon = {
-            await DaemonBootstrapCoordinator.prepareForHostApp(force: false)
-        }
-        if DerrickNotificationLaunch.isPollLaunch()
-            || DerrickNotificationLaunch.hasJobResultPresentationIntent()
+        ServiceEnsureUpHooks.beforeEnsureDaemon = nil
+        if DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         {
             NSApp.setActivationPolicy(.accessory)
-            if DerrickNotificationLaunch.hasJobResultPresentationIntent() {
+            if DerrickNotificationLaunch.hasJobResultPresentationIntent()
+                || DerrickNotificationLaunch.hasHITLApprovalPresentationIntent() {
                 JobResultPanelSession.isPanelOnlyLaunch = true
                 JobResultPanelSession.allowsTermination = false
-                ProcessInfo.processInfo.disableAutomaticTermination("derrick.job-result-panel-launch")
+                ProcessInfo.processInfo.disableAutomaticTermination("derrick.panel-only-launch")
                 ProcessInfo.processInfo.disableSuddenTermination()
                 dismissRestoredMainWindows()
             }
@@ -119,12 +116,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if DerrickNotificationLaunch.isPollLaunch() {
+        if let approvalID = DerrickNotificationLaunch.hitlApprovalIDToPresent()
+            ?? DerrickHITLApprovalPresentationWake.takePendingApprovalID()
+        {
+            let panelOnly = DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
+                || JobResultPanelSession.isPanelOnlyLaunch
+            JobResultPresenter.interactiveSessionActive = !panelOnly
+            JobResultPanelSession.isPanelOnlyLaunch = panelOnly
+            JobResultPanelSession.allowsTermination = false
+            if panelOnly {
+                dismissRestoredMainWindows()
+            }
+            DerrickNotificationService.shared.prepare()
             Task { @MainActor in
-                await DerrickNotificationService.shared.pollOnceAndFinish()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                JobResultPanelSession.allowsTermination = true
-                NSApp.terminate(nil)
+                if panelOnly {
+                    for window in NSApp.windows where !(window is NSPanel) {
+                        window.orderOut(NSApp)
+                    }
+                }
+                await DerrickNotificationService.shared.presentHITLApprovalWhenReady(id: approvalID)
             }
             return
         }
@@ -157,8 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         JobResultPresenter.interactiveSessionActive = true
+        HITLLiveApprovalHandlers.wireAgentServiceClient()
         DerrickNotificationService.shared.prepare()
-        if !DerrickNotificationLaunch.hasJobResultPresentationIntent() {
+        if !DerrickNotificationLaunch.hasJobResultPresentationIntent()
+            && !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent() {
             activationObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didBecomeActiveNotification,
                 object: nil,
@@ -166,15 +178,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ) { _ in
                 Task { await DaemonBootstrapCoordinator.prepareForHostApp(force: false) }
             }
-            Task { await DaemonBootstrapCoordinator.prepareForHostApp(force: true) }
         }
     }
 
     private var activationObserver: NSObjectProtocol?
 
     func applicationWillTerminate(_ notification: Notification) {
-        guard !DerrickNotificationLaunch.isPollLaunch(),
-              !DerrickNotificationLaunch.hasJobResultPresentationIntent()
+        guard !DerrickNotificationLaunch.hasJobResultPresentationIntent(),
+              !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         else { return }
         DerrickUISessionPresence.clearInteractiveSession()
         DerrickNotificationService.shared.stop()
@@ -186,7 +197,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = sem.wait(timeout: .now() + 5)
     }
 
-    /// State restoration can resurrect `derrick.main` even when this launch is panel-only.
     private func dismissRestoredMainWindows() {
         for window in NSApp.windows {
             let id = window.identifier?.rawValue ?? ""

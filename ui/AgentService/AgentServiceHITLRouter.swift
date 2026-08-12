@@ -6,6 +6,14 @@ import ServiceContracts
 /// Routes human-in-the-loop requests between live UI modals and notification delivery.
 enum AgentServiceHITLRouter {
     static func shouldUseNotificationPath(sessionID: String, isJobWake: Bool) -> Bool {
+        if DerrickUISessionPresence.isInteractiveSessionActive() {
+            // Prefer live UI modals; fall back to notifications if the reverse sink is down.
+            if AgentServicePrimaryUISink.shared.clientSink(logLabel: "hitl-route") != nil {
+                return false
+            }
+            fputs("[AgentServiceHITL] interactive UI active but sink missing — notification fallback\n", stderr)
+            return true
+        }
         if isJobWake || JobSessionID.isJobSession(sessionID) {
             return true
         }
@@ -35,16 +43,31 @@ enum AgentServiceHITLRouter {
     }
 
     static func requestNetworkViaUISink(host: String, toolName: String) async -> PolicyUserDecision {
-        guard let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "network") else {
+        guard let sink = AgentServicePrimaryUISink.shared.clientSink(logLabel: "network")
+            ?? AgentServicePrimaryUISink.shared.clientSink(logLabel: "network-retry") else {
             return .denied(actor: "system-no-ui-sink")
         }
         let request = AgentNetworkAccessRequestDTO(host: host, toolName: toolName)
         do {
             let payload = try AgentServiceXPCCodec.encodeSignedNetworkAccessRequest(request)
-            let replyData = await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
-                sink.requestNetworkAccess(requestJSON: payload as NSData) { reply in
-                    continuation.resume(returning: reply as Data)
+            nonisolated(unsafe) let capturedSink = sink
+            let replyData = try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask {
+                    await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
+                        capturedSink.requestNetworkAccess(requestJSON: payload as NSData) { reply in
+                            continuation.resume(returning: reply as Data)
+                        }
+                    }
                 }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 120_000_000_000)
+                    throw CancellationError()
+                }
+                guard let first = try await group.next() else {
+                    throw CancellationError()
+                }
+                group.cancelAll()
+                return first
             }
             let decision = try AgentServiceXPCCodec.decodeSignedNetworkAccessDecision(replyData)
             return mapNetworkDecision(decision)

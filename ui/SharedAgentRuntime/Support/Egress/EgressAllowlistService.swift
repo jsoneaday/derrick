@@ -48,7 +48,7 @@ final class EgressAllowlistService: ObservableObject {
         }
     }
 
-    func reload() async throws {
+    func reload(clearSessionHosts: Bool = false) async throws {
         guard let repository else {
             suffixes = []
             return
@@ -56,6 +56,10 @@ final class EgressAllowlistService: ObservableObject {
         let rows = try await repository.loadEgressAllowedDomainSuffixes(includeDisabled: true)
         suffixes = rows
         localPolicy.setAllowedDomainSuffixes(rows.filter(\.enabled).map(\.suffix))
+        if clearSessionHosts {
+            // Settings edits must not be shadowed by prior Allow-once / mid-flight grants.
+            localPolicy.clearSessionHosts()
+        }
     }
 
     func enabledSuffixStrings() -> [String] {
@@ -106,8 +110,10 @@ final class EgressAllowlistService: ObservableObject {
     func removeSuffix(id: String) async throws {
         guard let repository else { return }
         try await repository.deleteEgressAllowedDomainSuffix(id: id)
-        try await reload()
+        try await reload(clearSessionHosts: true)
         await pushToHelper()
+        // Daemon embedded helper resyncs from DB on the next JobNetworkPreflight.
+        debugLog("Egress allowlist removed id=\(id) — UI helper synced; daemon resyncs on next job")
     }
 
     /// Preflight network hosts before script execution.
@@ -201,19 +207,6 @@ final class EgressAllowlistService: ObservableObject {
         return nil
     }
 
-    /// Hosts referenced in `script` that still need user approval before a job is scheduled.
-    func uncoveredNetworkHosts(script: String, allowNetwork: Bool) -> [String] {
-        guard allowNetwork else { return [] }
-        return EgressHostExtractor.extractHosts(from: script).filter { host in
-            !localPolicy.isHardBlockedHostname(host) && !localPolicy.isHostCoveredByAllowlist(host)
-        }
-    }
-
-    private func promptForHost(_ host: String, toolName: String) async -> PolicyUserDecision {
-        await promptForHosts([host], toolName: toolName)
-    }
-
-    /// Single modal for one or many hosts. Remote/HITL paths stay per-host when count > 1.
     private func promptForHosts(_ hosts: [String], toolName: String) async -> PolicyUserDecision {
         let unique = Self.uniqueHosts(hosts)
         guard !unique.isEmpty else {

@@ -10,7 +10,6 @@ import ServiceContracts
 /// TaskLocal still preferred when present.
 public enum TurnProcessContext {
     public typealias NetworkPrompt = @Sendable (_ host: String, _ toolName: String) async -> PolicyUserDecision
-    public typealias JobSchedulingPreflight = @Sendable (_ toolName: String, _ toolArgumentsJSON: String) async throws -> Void
     public typealias PolicyDecisionPrompt = @Sendable (_ event: PolicyUserEvent) async -> PolicyUserDecision
     public typealias PolicyNoticePublisher = @Sendable (_ event: PolicyUserEvent) async -> Void
 
@@ -23,8 +22,6 @@ public enum TurnProcessContext {
     /// Optional reverse-XPC network access prompt (host, toolName) → decision.
     @TaskLocal public static var networkAccessPrompt: NetworkPrompt?
 
-    @TaskLocal public static var jobSchedulingPreflight: JobSchedulingPreflight?
-
     /// Optional reverse-XPC for usage limits / content sensitivity (PolicyUserEvent → decision).
     @TaskLocal public static var policyDecisionPrompt: PolicyDecisionPrompt?
 
@@ -35,7 +32,6 @@ public enum TurnProcessContext {
         for contextID: ExecutionContextID,
         apiKey: String?,
         networkAccessPrompt: NetworkPrompt?,
-        jobSchedulingPreflight: JobSchedulingPreflight? = nil,
         policyDecisionPrompt: PolicyDecisionPrompt? = nil,
         policyNoticePublisher: PolicyNoticePublisher? = nil
     ) {
@@ -44,7 +40,6 @@ public enum TurnProcessContext {
             slots: ExecutionContextSlots(
                 apiKey: apiKey,
                 networkAccessPrompt: networkAccessPrompt,
-                jobSchedulingPreflight: jobSchedulingPreflight,
                 policyDecisionPrompt: policyDecisionPrompt,
                 policyNoticePublisher: policyNoticePublisher
             )
@@ -80,13 +75,6 @@ public enum TurnProcessContext {
             return prompt
         }
         return resolvedRegistrySlots()?.networkAccessPrompt
-    }
-
-    public static var effectiveJobSchedulingPreflight: JobSchedulingPreflight? {
-        if let hook = jobSchedulingPreflight {
-            return hook
-        }
-        return resolvedRegistrySlots()?.jobSchedulingPreflight
     }
 
     public static var effectivePolicyDecisionPrompt: PolicyDecisionPrompt? {

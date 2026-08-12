@@ -46,13 +46,21 @@ actor JobServiceExecutor {
             do {
                 switch kind {
                 case .runTool:
-                    let result = try await runToolStep(payloadJSON: step.payloadJSON, principalJSON: job.principalJSON)
+                    let result = try await runToolStep(
+                        payloadJSON: step.payloadJSON,
+                        principalJSON: job.principalJSON,
+                        jobID: job.id
+                    )
                     step.status = JobStepStatus.succeeded.rawValue
                     step.resultJSON = result
                     step.finishedAt = Date()
                     try await repo.updateStep(step)
                 case .runToolBatch:
-                    let result = try await runToolBatchStep(payloadJSON: step.payloadJSON, principalJSON: job.principalJSON)
+                    let result = try await runToolBatchStep(
+                        payloadJSON: step.payloadJSON,
+                        principalJSON: job.principalJSON,
+                        jobID: job.id
+                    )
                     step.status = JobStepStatus.succeeded.rawValue
                     step.resultJSON = result
                     step.finishedAt = Date()
@@ -66,7 +74,8 @@ actor JobServiceExecutor {
                 case .runToolThenWake:
                     let result = try await runToolThenWakeStep(
                         payloadJSON: step.payloadJSON,
-                        principalJSON: job.principalJSON
+                        principalJSON: job.principalJSON,
+                        jobID: job.id
                     )
                     step.status = JobStepStatus.succeeded.rawValue
                     step.resultJSON = result
@@ -131,7 +140,11 @@ actor JobServiceExecutor {
         )
     }
 
-    private func runToolStep(payloadJSON: String, principalJSON: String) async throws -> String {
+    private func runToolStep(
+        payloadJSON: String,
+        principalJSON: String,
+        jobID: String
+    ) async throws -> String {
         let payload = try JSONDecoder.service.decode(
             JobRunToolPayload.self,
             from: Data(payloadJSON.utf8)
@@ -148,6 +161,9 @@ actor JobServiceExecutor {
             )
         }
         fputs("[JobService] runTool \(payload.toolName)\n", stderr)
+        if let preflight = InProcessServiceBridges.jobNetworkPreflight {
+            try await preflight(payload.toolName, payload.argumentsJSON, jobID)
+        }
         let request = MCPToolCallRequest(
             principal: principal,
             toolName: payload.toolName,
@@ -184,7 +200,11 @@ actor JobServiceExecutor {
         }
     }
 
-    private func runToolBatchStep(payloadJSON: String, principalJSON: String) async throws -> String {
+    private func runToolBatchStep(
+        payloadJSON: String,
+        principalJSON: String,
+        jobID: String
+    ) async throws -> String {
         let payload = try JSONDecoder.service.decode(
             JobRunToolBatchPayload.self,
             from: Data(payloadJSON.utf8)
@@ -193,7 +213,11 @@ actor JobServiceExecutor {
         for inv in payload.invocations {
             let one = try JSONEncoder.service.encode(inv)
             let json = String(data: one, encoding: .utf8) ?? "{}"
-            let text = try await runToolStep(payloadJSON: json, principalJSON: principalJSON)
+            let text = try await runToolStep(
+                payloadJSON: json,
+                principalJSON: principalJSON,
+                jobID: jobID
+            )
             if let data = text.data(using: .utf8),
                let dto = try? JSONDecoder.service.decode(MCPToolCallResultDTO.self, from: data)
             {
@@ -215,6 +239,20 @@ actor JobServiceExecutor {
                 "Agent peer mesh not installed on this JobService (UI handoff required)"
             )
         }
+        // Belt-and-suspenders: `agents` FKs to `chat_sessions`. Ensure the job-isolated
+        // session row exists before AgentService registers the wake agent.
+        if let sessionID = payload.sessionID, JobSessionID.isJobSession(sessionID) {
+            let repo = try await JobServiceStore.shared.sharedRepository()
+            let now = Date()
+            try await repo.upsertChatSession(
+                ChatSessionDTO(
+                    applicationName: repo.applicationName,
+                    sessionID: sessionID,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            )
+        }
         fputs("[JobService] wakeAgent session=\(payload.sessionID ?? "?")\n", stderr)
         let accepted = try await JobAgentClient.shared.wakeAgent(payload: payload)
         guard accepted.ok else {
@@ -227,13 +265,21 @@ actor JobServiceExecutor {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    private func runToolThenWakeStep(payloadJSON: String, principalJSON: String) async throws -> String {
+    private func runToolThenWakeStep(
+        payloadJSON: String,
+        principalJSON: String,
+        jobID: String
+    ) async throws -> String {
         let payload = try JSONDecoder.service.decode(
             JobRunToolThenWakePayload.self,
             from: Data(payloadJSON.utf8)
         )
         let toolJSON = String(data: try JSONEncoder.service.encode(payload.tool), encoding: .utf8) ?? "{}"
-        let toolResult = try await runToolStep(payloadJSON: toolJSON, principalJSON: principalJSON)
+        let toolResult = try await runToolStep(
+            payloadJSON: toolJSON,
+            principalJSON: principalJSON,
+            jobID: jobID
+        )
         // Append tool result into wake prompt so the agent sees the outcome.
         var wake = payload.wake
         let combinedPrompt = """
@@ -248,7 +294,7 @@ actor JobServiceExecutor {
             agentID: wake.agentID ?? JobSessionID.agentID,
             modelJSON: wake.modelJSON,
             apiKey: wake.apiKey,
-            jobID: wake.jobID,
+            jobID: wake.jobID ?? jobID,
             parentSessionID: wake.parentSessionID
         )
         let wakeJSON = String(data: try JSONEncoder.service.encode(wake), encoding: .utf8) ?? "{}"

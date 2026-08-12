@@ -115,6 +115,8 @@ public actor DBAgentDirectory: AgentDirectorying {
     }
 
     private func ensureChatSessionExists(sessionID: String) async throws {
+        // Job-isolated sessions still need a chat_sessions row — `agents` FKs to it.
+        // Interactive recents exclude `job-*` via listRecentChatSessions.
         let now = Date.now
         try await repository.upsertChatSession(
             ChatSessionDTO(

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Cross-process nudge so a running UI polls SQLite immediately after AgentService writes.
-public enum DerrickNotificationSignal: Sendable {
-    public static let darwinName = "derrick.ui.pollNotifications"
+/// Cross-process nudge so derrickd polls SQLite for pending HITL approvals immediately.
+public enum DerrickHITLNotificationSignal: Sendable {
+    public static let darwinName = "derrickd.pollHITLApprovals"
 
     public static func postPoll() {
         let name = CFNotificationName(darwinName as CFString)

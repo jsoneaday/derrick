@@ -66,9 +66,6 @@ private final class AgentServicePeerSilentSink: NSObject, AgentServiceClientSink
     func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         reply(Data() as NSData)
     }
-    func requestJobPreflight(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        reply(Data() as NSData)
-    }
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         reply(Data() as NSData)
     }

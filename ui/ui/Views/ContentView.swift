@@ -6,8 +6,6 @@ import SwiftUI
 import DBRepository
 import PolicyUserInteraction
 import ServiceContracts
-import ServiceEnsureUp
-
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
 
@@ -271,7 +269,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "create a job that runs in 9 seconds that tells me what's on apple.com"
+    @State private var prompt = "create a job that runs in 7s and tells me what's on apple.com"
     @State private var errorMessage: String?
     @State private var isPresentingAPIKeyPrompt = false
     @State private var isPresentingDockerRequiredAlert = false
@@ -284,7 +282,6 @@ struct ContentView: View {
     @State private var promptFocusToken = 0
     @State private var shouldAutoScroll = true
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
-    @ObservedObject private var jobPreflightPresenter = JobPreflightApprovalPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
 
     private var canSendPrompt: Bool {
@@ -366,31 +363,6 @@ struct ContentView: View {
                         onDeny: { policyEventPresenter.deny() }
                     )
                 }
-            }
-        )
-        .modalPopup(
-            isPresented: jobPreflightPresenter.isPresented && !bootstrapStatus.isModalPresented,
-            minWidth: 420,
-            minHeight: 0,
-            maxWidth: 520,
-            maxHeight: 420,
-            onBackdropDismiss: { jobPreflightPresenter.deny() },
-            onEscape: { jobPreflightPresenter.deny() },
-            header: {
-                EmptyView()
-            },
-            body: {
-                if let request = jobPreflightPresenter.activeRequest {
-                    JobPreflightModalView(
-                        request: request,
-                        onApprove: { jobPreflightPresenter.approve(grantAlways: false) },
-                        onApproveAlways: { jobPreflightPresenter.approve(grantAlways: true) },
-                        onDeny: { jobPreflightPresenter.deny() }
-                    )
-                }
-            },
-            footer: {
-                EmptyView()
             }
         )
         .modalPopup(
@@ -524,7 +496,7 @@ struct ContentView: View {
                 return
             }
 
-            // Job wakes persist to DB; results arrive via DerrickNotificationService.
+            // Job wakes persist to DB; results and offline HITL arrive via derrickd notifications.
             HITLLiveApprovalHandlers.wireAgentServiceClient()
 
             if isDebugEnabled {
@@ -543,34 +515,31 @@ struct ContentView: View {
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
 
-                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker and Derrick daemon…")
-                _ = XPCDockerRunner.shared
-                await EgressAllowlistService.shared.pushToHelper()
-
-                try await XPCDockerRunner.shared.waitUntilPrewarmed()
-
+                // Connect derrickd before Docker prewarm so Mach XPC is not competing with
+                // long-running DockerRunnerHelper work on the same bootstrap path.
                 bootstrapStatus.update(
                     phase: .connectingHelper,
                     message: "Connecting to Derrick daemon…"
                 )
-
-                let health = try await ServiceEnsureUp.shared.ensureDaemon()
+                let health = try await AgentServiceClient.shared.ensureUpAndHealth()
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
                 )
 
-                // Warm UI clients against the same Mach service (reverse sink for Agent).
-                _ = try await AgentServiceClient.shared.ensureUpAndHealth()
-                _ = try await MCPServiceClient.shared.ensureUpAndHealth()
-                _ = try await JobServiceClient.shared.ensureUpAndHealth()
+                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker runtime…")
+                _ = XPCDockerRunner.shared
 
-                // Hand Docker helper peer to daemon MCP so tools can run without UI.
+                try await XPCDockerRunner.shared.waitUntilPrewarmed()
+                bootstrapStatus.update(phase: .connectingHelper, message: "Finishing setup…")
+                await EgressAllowlistService.shared.pushToHelper()
+
+                // Daemon MCP uses its embedded Docker helper; handoff is best-effort while UI is open.
                 do {
                     let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
-                    try await MCPServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
+                    try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
                     debugLog("Docker helper peer endpoint handed to daemon MCP")
                 } catch {
-                    throw MeshBootstrapError.step("Daemon MCP←Docker helper peer handoff", underlying: error)
+                    debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
                 }
 
                 sessionReady = true
@@ -594,11 +563,12 @@ struct ContentView: View {
                     debugLog("Client bootstrap late error ignored (already ready): \(error)")
                 } else {
                     sessionReady = false
-                    errorMessage = error.localizedDescription
+                    let classified = AppBootstrapStatus.classifyError(error)
+                    errorMessage = classified.message
                     debugLog("Client bootstrap failed: \(error)")
                     bootstrapStatus.markFailed(
-                        title: "Startup Failed",
-                        message: "Derrick could not finish client setup.\n\n\(error.localizedDescription)",
+                        title: classified.title,
+                        message: classified.message,
                         technicalDetail: String(describing: error)
                     )
                 }

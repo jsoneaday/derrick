@@ -38,8 +38,6 @@ import CryptoKit
     func turnDidFinish(_ turnID: String, errorJSON: NSData)
     /// Signed `approvalRequest` → reply signed `approvalDecision`.
     func requestApproval(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Signed `jobPreflightRequest` → reply signed `jobPreflightDecision`.
-    func requestJobPreflight(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed `networkAccessRequest` → reply signed `networkAccessDecision`.
     func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed `policyDecisionRequest` → reply signed `policyDecisionReply` (usage limits, content sensitivity).
@@ -211,66 +209,6 @@ public enum AgentServiceXPCCodec {
             data,
             as: AgentApprovalDecisionDTO.self,
             expectedType: .approvalDecision,
-            expectedTo: .agent,
-            key: key
-        ).dto
-    }
-
-    public static func encodeSignedJobPreflightRequest(
-        _ request: JobPreflightRequestDTO,
-        key: SymmetricKey? = nil
-    ) throws -> Data {
-        let key = try key ?? MessagesSecretKey.symmetricKey()
-        return try ServiceMessageEnvelope.encodeSignedDTO(
-            request,
-            from: .agent,
-            to: .ui,
-            type: .jobPreflightRequest,
-            principal: .system,
-            correlationId: request.requestID,
-            key: key
-        )
-    }
-
-    public static func decodeSignedJobPreflightRequest(
-        _ data: Data,
-        key: SymmetricKey? = nil
-    ) throws -> JobPreflightRequestDTO {
-        let key = try key ?? MessagesSecretKey.symmetricKey()
-        return try ServiceMessageEnvelope.decodeSignedDTO(
-            data,
-            as: JobPreflightRequestDTO.self,
-            expectedType: .jobPreflightRequest,
-            expectedTo: .ui,
-            key: key
-        ).dto
-    }
-
-    public static func encodeSignedJobPreflightDecision(
-        _ decision: JobPreflightDecisionDTO,
-        key: SymmetricKey? = nil
-    ) throws -> Data {
-        let key = try key ?? MessagesSecretKey.symmetricKey()
-        return try ServiceMessageEnvelope.encodeSignedDTO(
-            decision,
-            from: .ui,
-            to: .agent,
-            type: .jobPreflightDecision,
-            principal: .ui,
-            correlationId: decision.requestID,
-            key: key
-        )
-    }
-
-    public static func decodeSignedJobPreflightDecision(
-        _ data: Data,
-        key: SymmetricKey? = nil
-    ) throws -> JobPreflightDecisionDTO {
-        let key = try key ?? MessagesSecretKey.symmetricKey()
-        return try ServiceMessageEnvelope.decodeSignedDTO(
-            data,
-            as: JobPreflightDecisionDTO.self,
-            expectedType: .jobPreflightDecision,
             expectedTo: .agent,
             key: key
         ).dto

@@ -10,6 +10,10 @@
 	<array>
 		<string>VUSK4B2YKQ.derrick.shared</string>
 	</array>
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>VUSK4B2YKQ.derrick.shared.daemon</string>
+	</array>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
 	<array>
 		<string>/Library/LaunchAgents/</string>

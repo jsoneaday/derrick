@@ -6,6 +6,7 @@ import ServiceContracts
 public enum DaemonProcessHygiene {
     private static let terminateGraceNanoseconds: UInt64 = 500_000_000
     private static let postKillWaitNanoseconds: UInt64 = 400_000_000
+    private static let acceptedMtimeDefaultsKey = "derrick.daemon.acceptedEmbeddedMtime"
 
     /// Kill stray daemons and stale embedded builds, then kickstart launchd when needed.
     public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async {
@@ -14,6 +15,7 @@ public enum DaemonProcessHygiene {
         let paths = JobServiceLoginAgent.preflightPaths()
         let expectedExe = paths.executable
         guard FileManager.default.isExecutableFile(atPath: expectedExe.path) else {
+            debugLog("[DaemonHygiene] skip — embedded daemon missing at \(expectedExe.path)")
             fputs(
                 "[DaemonHygiene] skip — embedded daemon missing at \(expectedExe.path)\n",
                 stderr
@@ -24,9 +26,15 @@ public enum DaemonProcessHygiene {
         let expectedMtime = modificationDate(expectedExe)
         let hostPath = hostAppBundle.path
         let expectedPath = expectedExe.path
+        let lastAcceptedMtime: Date? = {
+            let raw = UserDefaults.standard.double(forKey: acceptedMtimeDefaultsKey)
+            guard raw > 0 else { return nil }
+            return Date(timeIntervalSince1970: raw)
+        }()
 
         let processes = listJobKeepAliveProcesses()
         if processes.isEmpty {
+            debugLog("[DaemonHygiene] reconcile ok — no JobKeepAlive processes")
             fputs(
                 "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedPath))\n",
                 stderr
@@ -35,6 +43,7 @@ public enum DaemonProcessHygiene {
             return
         }
 
+        debugLog("[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es)")
         fputs(
             "[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es) expected=\(expectedPath)\n",
             stderr
@@ -42,16 +51,20 @@ public enum DaemonProcessHygiene {
 
         var evictedAny = false
         for process in processes {
-            guard let reason = DerrickDaemonHygiene.evictionReason(
+            let startDesc = process.startDate.map { ISO8601DateFormatter().string(from: $0) } ?? "unknown"
+            guard let reason = DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
                 executablePath: process.executablePath,
                 processStartDate: process.startDate,
                 hostAppBundlePath: hostPath,
                 expectedExecutablePath: expectedPath,
-                expectedExecutableModificationDate: expectedMtime
+                expectedExecutableModificationDate: expectedMtime,
+                lastAcceptedExecutableModificationDate: lastAcceptedMtime
             ) else {
+                debugLog("[DaemonHygiene] keep pid=\(process.pid) start=\(startDesc)")
                 continue
             }
             evictedAny = true
+            debugLog("[DaemonHygiene] evict pid=\(process.pid) reason=\(reason.rawValue) start=\(startDesc)")
             terminate(
                 pid: process.pid,
                 reason: reason,
@@ -60,13 +73,16 @@ public enum DaemonProcessHygiene {
         }
 
         let hasHealthy = listJobKeepAliveProcesses().contains { process in
-            DerrickDaemonHygiene.isHealthyExpectedDaemon(
+            DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
                 executablePath: process.executablePath,
                 processStartDate: process.startDate,
                 hostAppBundlePath: hostPath,
                 expectedExecutablePath: expectedPath,
-                expectedExecutableModificationDate: expectedMtime
-            )
+                expectedExecutableModificationDate: expectedMtime,
+                lastAcceptedExecutableModificationDate: lastAcceptedMtime
+            ) == nil
+                && DerrickDaemonHygiene.canonicalPath(process.executablePath)
+                    == DerrickDaemonHygiene.canonicalPath(expectedPath)
         }
 
         await restartDaemonIfNeeded(
@@ -76,6 +92,14 @@ public enum DaemonProcessHygiene {
             expectedPath: expectedPath,
             expectedMtime: expectedMtime
         )
+
+        if let expectedMtime,
+           listJobKeepAliveProcesses().contains(where: {
+               DerrickDaemonHygiene.canonicalPath($0.executablePath)
+                   == DerrickDaemonHygiene.canonicalPath(expectedPath)
+           }) {
+            UserDefaults.standard.set(expectedMtime.timeIntervalSince1970, forKey: acceptedMtimeDefaultsKey)
+        }
     }
 
     private static func restartDaemonIfNeeded(
@@ -101,6 +125,7 @@ public enum DaemonProcessHygiene {
         }
         try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
         JobServiceLoginAgent.kickstartRegisteredDaemon()
+        debugLog("[DaemonHygiene] kickstart requested after evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)")
     }
 
     // MARK: - Process scan

@@ -453,9 +453,6 @@ final class ConversationModel {
         description: String?
     ) async throws -> String {
         debugLog("[jobs_create] begin tool=\(toolName) run_after=\(runAfterSeconds.map(String.init) ?? "nil")")
-        if let preflight = TurnProcessContext.effectiveJobSchedulingPreflight {
-            try await preflight(toolName, toolArgumentsJSON)
-        }
         let runAt = runAtString.flatMap { JobOrderBuilder.parseRunAtString($0) }
         let input = JobCreateOrderInput(
             runAfterSeconds: runAfterSeconds,
@@ -482,7 +479,7 @@ final class ConversationModel {
         iso.formatOptions = [.withInternetDateTime]
         let runAtStr = job.runAt.map { iso.string(from: $0) } ?? "asap"
         return """
-        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. You'll get a notification when it finishes—tap the notification to view the result (it won't appear in this chat)."}
+        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. You'll get a notification when it finishes—tap the notification to view the result."}
         """
     }
 
@@ -503,9 +500,6 @@ final class ConversationModel {
         wakePrompt: String?
     ) async throws -> String {
         debugLog("[jobs_schedule_create] begin name=\(name) recurrence=\(recurrence)")
-        if let preflight = TurnProcessContext.effectiveJobSchedulingPreflight {
-            try await preflight(toolName, toolArgumentsJSON)
-        }
         let kind: JobRecurrenceKind
         switch recurrence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "interval": kind = .interval

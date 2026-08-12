@@ -41,21 +41,29 @@ final class ChatSessionStore: ObservableObject {
     func configure(repository: DBRepository) async {
         self.repository = repository
         await refreshRecents()
+        // Drop any tab that was incorrectly bound to a job-isolated session.
+        tabs.removeAll { JobSessionID.isJobSession($0.id) }
+        if let selected = selectedSessionID, JobSessionID.isJobSession(selected) {
+            selectedSessionID = nil
+        }
         if tabs.isEmpty {
-            if let latest = recentSessions.first {
+            if let latest = recentSessions.first(where: { !JobSessionID.isJobSession($0.sessionID) }) {
                 selectSession(id: latest.sessionID)
             } else {
                 openNewChat()
             }
+        } else if selectedSessionID == nil {
+            selectedSessionID = tabs.last?.id
         }
     }
 
     func refreshRecents() async {
         guard let repository else { return }
-        recentSessions = (try? await repository.listRecentChatSessions(
+        let rows = (try? await repository.listRecentChatSessions(
             applicationName: applicationName,
             limit: 5
         )) ?? []
+        recentSessions = rows.filter { !JobSessionID.isJobSession($0.sessionID) }
     }
 
     func openNewChat() {
@@ -67,6 +75,10 @@ final class ChatSessionStore: ObservableObject {
     }
 
     func selectSession(id: String) {
+        guard !JobSessionID.isJobSession(id) else {
+            openNewChat()
+            return
+        }
         if !tabs.contains(where: { $0.id == id }) {
             let title = recentSessions.first(where: { $0.sessionID == id }).map(displayTitle(for:))
                 ?? "Chat"
@@ -93,7 +105,11 @@ final class ChatSessionStore: ObservableObject {
         model: LLMModelChoice,
         onError: @escaping (String) -> Void
     ) {
+        if let selected = selectedSessionID, JobSessionID.isJobSession(selected) {
+            openNewChat()
+        }
         guard let sessionID = selectedSessionID,
+              !JobSessionID.isJobSession(sessionID),
               let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }),
               !tabs[tabIndex].isStreaming
         else {
@@ -126,7 +142,12 @@ final class ChatSessionStore: ObservableObject {
                     modelJSON: modelJSON
                 )
                 let stream = AgentServiceClient.shared.streamTurn(request)
+                let streamStarted = Date()
+                let streamTimeoutSeconds: TimeInterval = 300
                 for try await dto in stream {
+                    if Date().timeIntervalSince(streamStarted) > streamTimeoutSeconds {
+                        throw AgentServiceClientError.timeout
+                    }
                     applyChunk(dto, expectedSessionID: sessionID)
                 }
                 await refreshRecents()
@@ -141,7 +162,8 @@ final class ChatSessionStore: ObservableObject {
     }
 
     func applyChunk(_ dto: AgentTurnChunkDTO, expectedSessionID: String) {
-        let sessionID = dto.sessionID ?? expectedSessionID
+        // Always paint onto the tab that started the stream — never follow a remapped job-* session.
+        let sessionID = expectedSessionID
         guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }),
               !tabs[tabIndex].turns.isEmpty
         else {

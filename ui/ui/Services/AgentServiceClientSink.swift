@@ -14,8 +14,6 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         public var onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)?
         /// Present network/egress allow UI.
         public var onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)?
-        /// Consolidated job scheduling approval before `jobs_create`.
-        public var onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
         /// Usage limits / content sensitivity / generic PolicyUserEvent decisions.
         public var onPolicyDecision: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)?
 
@@ -27,7 +25,6 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             onBackgroundFinish: (@Sendable (String, AgentTurnErrorDTO?) -> Void)? = nil,
             onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)? = nil,
             onNetworkAccess: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)? = nil,
-            onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)? = nil,
             onPolicyDecision: (@Sendable (AgentPolicyDecisionRequestDTO) async -> AgentPolicyDecisionDTO)? = nil
         ) {
             self.onLog = onLog
@@ -37,7 +34,6 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
             self.onBackgroundFinish = onBackgroundFinish
             self.onApproval = onApproval
             self.onNetworkAccess = onNetworkAccess
-            self.onJobPreflight = onJobPreflight
             self.onPolicyDecision = onPolicyDecision
         }
     }
@@ -85,6 +81,12 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         lock.unlock()
     }
 
+    public var hasForegroundTurns: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !foregroundTurnIDs.isEmpty
+    }
+
     public func setApprovalHandler(
         _ onApproval: (@Sendable (AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO)?
     ) {
@@ -98,14 +100,6 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
     ) {
         lock.lock()
         handlers.onNetworkAccess = onNetworkAccess
-        lock.unlock()
-    }
-
-    public func setJobPreflightHandler(
-        _ onJobPreflight: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
-    ) {
-        lock.lock()
-        handlers.onJobPreflight = onJobPreflight
         lock.unlock()
     }
 
@@ -186,7 +180,7 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         let onApproval = handlers.onApproval
         lock.unlock()
 
-        Task {
+        Task { @MainActor in
             let decisionDTO: AgentApprovalDecisionDTO
             do {
                 let request = try AgentServiceXPCCodec.decodeSignedApprovalRequest(data)
@@ -220,44 +214,13 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         }
     }
 
-    public func requestJobPreflight(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        let data = requestJSON as Data
-        lock.lock()
-        let onJobPreflight = handlers.onJobPreflight
-        lock.unlock()
-
-        Task {
-            let decisionDTO: JobPreflightDecisionDTO
-            do {
-                let request = try AgentServiceXPCCodec.decodeSignedJobPreflightRequest(data)
-                if let onJobPreflight {
-                    decisionDTO = await onJobPreflight(request)
-                } else {
-                    decisionDTO = JobPreflightDecisionDTO(
-                        requestID: request.requestID,
-                        approved: false,
-                        actor: "system-no-ui-handler"
-                    )
-                }
-            } catch {
-                decisionDTO = JobPreflightDecisionDTO(
-                    requestID: "",
-                    approved: false,
-                    actor: "system-decode-failed"
-                )
-            }
-            let payload = (try? AgentServiceXPCCodec.encodeSignedJobPreflightDecision(decisionDTO)) ?? Data()
-            reply(payload as NSData)
-        }
-    }
-
     public func requestNetworkAccess(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         let data = requestJSON as Data
         lock.lock()
         let onNetwork = handlers.onNetworkAccess
         lock.unlock()
 
-        Task {
+        Task { @MainActor in
             let decisionDTO: AgentNetworkAccessDecisionDTO
             do {
                 let request = try AgentServiceXPCCodec.decodeSignedNetworkAccessRequest(data)
@@ -295,7 +258,7 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         let onPolicyDecision = handlers.onPolicyDecision
         lock.unlock()
 
-        Task {
+        Task { @MainActor in
             let decisionDTO: AgentPolicyDecisionDTO
             do {
                 let request = try AgentServiceXPCCodec.decodeSignedPolicyDecisionRequest(data)

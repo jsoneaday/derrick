@@ -13,6 +13,7 @@ public final class AgentServiceClient: @unchecked Sendable {
     private var isReady = false
     private let sink = AgentServiceClientSink()
     private let turnStreamHub = TurnStreamHub()
+    private let callTimeoutNanoseconds: UInt64 = 15_000_000_000
 
     private init() {
         sink.updateTurnHandlers(
@@ -38,12 +39,6 @@ public final class AgentServiceClient: @unchecked Sendable {
         _ handler: (@Sendable (AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO)?
     ) {
         sink.setNetworkAccessHandler(handler)
-    }
-
-    public func setJobPreflightHandler(
-        _ handler: (@Sendable (JobPreflightRequestDTO) async -> JobPreflightDecisionDTO)?
-    ) {
-        sink.setJobPreflightHandler(handler)
     }
 
     public func setPolicyDecisionHandler(
@@ -78,13 +73,15 @@ public final class AgentServiceClient: @unchecked Sendable {
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {
-                let proxy = try remoteProxy()
-                let boot = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
-                    proxy.bootstrap { data in
-                        do {
-                            cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
-                        } catch {
-                            cont.resume(throwing: error)
+                nonisolated(unsafe) let proxy = try remoteProxy()
+                let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
+                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
+                        proxy.bootstrap { data in
+                            do {
+                                cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
+                            } catch {
+                                cont.resume(throwing: error)
+                            }
                         }
                     }
                 }
@@ -97,12 +94,14 @@ public final class AgentServiceClient: @unchecked Sendable {
                     throw AgentServiceClientError.bootstrapFailed(boot.message)
                 }
 
-                let report = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
-                    proxy.health { data in
-                        do {
-                            cont.resume(returning: try AgentServiceXPCCodec.decodeHealth(data as Data))
-                        } catch {
-                            cont.resume(throwing: error)
+                let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
+                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
+                        proxy.health { data in
+                            do {
+                                cont.resume(returning: try AgentServiceXPCCodec.decodeHealth(data as Data))
+                            } catch {
+                                cont.resume(throwing: error)
+                            }
                         }
                     }
                 }
@@ -204,6 +203,52 @@ public final class AgentServiceClient: @unchecked Sendable {
                 cont.resume(returning: endpoint)
             }
         }
+    }
+
+    /// Deliver DockerRunnerHelper peer endpoint into daemon MCP (best-effort; daemon uses embedded helper when UI is quit).
+    public func setDockerHelperPeerEndpoint(_ endpoint: NSXPCListenerEndpoint) async throws {
+        guard let daemonProxy = try remoteProxy() as? DerrickDaemonServiceXPC else {
+            throw AgentServiceClientError.unavailable
+        }
+        nonisolated(unsafe) let proxy = daemonProxy
+        let auth = try MCPServiceXPCCodec.encodeSignedPeerHandoffAuth(
+            PeerHandoffAuthDTO(kind: .installDockerHelperPeer),
+            from: .ui,
+            to: .mcp
+        ) as NSData
+        try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                proxy.setDockerHelperPeerEndpoint(endpoint, authJSON: auth) { data in
+                    do {
+                        let ack = try Self.decodeDockerHelperHandoffAck(data as Data)
+                        if ack.ok {
+                            cont.resume()
+                        } else {
+                            cont.resume(
+                                throwing: AgentServiceClientError.turnFailed(
+                                    ack.message.isEmpty ? "Docker helper peer mesh verification failed" : ack.message
+                                )
+                            )
+                        }
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        await MainActor.run {
+            debugLog("Daemon MCP Docker helper peer endpoint handoff ok")
+        }
+    }
+
+    private static func decodeDockerHelperHandoffAck(_ data: Data) throws -> ServiceAckDTO {
+        if data.isEmpty {
+            throw AgentServiceClientError.turnFailed("empty docker helper handoff reply")
+        }
+        if let signed = try? MCPServiceXPCCodec.decodeSignedAck(data, expectedTo: .ui) {
+            return signed
+        }
+        return try DerrickDaemonXPCCodec.decodeAck(data)
     }
 
     public func cancelTurn(turnID: String) async throws {
@@ -313,6 +358,12 @@ public final class AgentServiceClient: @unchecked Sendable {
                 argumentIndex: 0,
                 ofReply: false
             )
+            remote.setClasses(
+                endpointClasses,
+                for: #selector(DerrickDaemonServiceXPC.setDockerHelperPeerEndpoint(_:authJSON:withReply:)),
+                argumentIndex: 0,
+                ofReply: false
+            )
             conn.remoteObjectInterface = remote
             conn.exportedInterface = NSXPCInterface(with: AgentServiceClientSinkXPC.self)
             conn.exportedObject = sink
@@ -350,12 +401,34 @@ public final class AgentServiceClient: @unchecked Sendable {
 
     private nonisolated func invalidate() {
         lock.lock()
+        let hasActiveTurn = sink.hasForegroundTurns
         let conn = connection
+        // Always drop the dead handle so the next ensureReadyForTurn reconnects.
+        // Do not call invalidate() again while a turn is in flight — that races the reply path.
         connection = nil
         isReady = false
         lock.unlock()
-        // Invalidate outside the lock to avoid re-entrancy with invalidationHandler.
+        if hasActiveTurn {
+            fputs("[AgentServiceClient] cleared dead XPC handle (foreground turn still active)\n", stderr)
+            return
+        }
         conn?.invalidate()
+    }
+
+    private func invoke<T: Sendable>(
+        timeout nanoseconds: UInt64,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: nanoseconds)
+                throw AgentServiceClientError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw AgentServiceClientError.timeout }
+            return first
+        }
     }
 }
 
@@ -363,6 +436,7 @@ public enum AgentServiceClientError: Error, LocalizedError {
     case unavailable
     case bootstrapFailed(String)
     case turnFailed(String)
+    case timeout
 
     public var errorDescription: String? {
         switch self {
@@ -372,6 +446,8 @@ public enum AgentServiceClientError: Error, LocalizedError {
             return "AgentService bootstrap failed: \(message)"
         case .turnFailed(let message):
             return "AgentService turn failed: \(message)"
+        case .timeout:
+            return "AgentService XPC call timed out."
         }
     }
 }

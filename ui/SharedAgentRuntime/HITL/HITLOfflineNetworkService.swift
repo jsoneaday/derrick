@@ -46,8 +46,7 @@ public enum HITLOfflineNetworkService {
             }
         }
 
-        DerrickNotificationWake.wakeUIIfNeeded()
-        DerrickNotificationSignal.postPoll()
+        DerrickHITLNotificationSignal.postPoll()
 
         let deadline = Date().addingTimeInterval(Double(timeoutNanoseconds) / 1_000_000_000)
         while Date() < deadline {
@@ -93,7 +92,11 @@ public enum HITLOfflineNetworkService {
     private static func mapDecision(row: PendingHITLApprovalRow) -> PolicyUserDecision {
         switch row.status {
         case .approved:
-            return .approvedOnce(actor: row.actor)
+            let actor = row.actor
+            if actor?.contains("always") == true {
+                return .approvedPermanently(actor: actor)
+            }
+            return .approvedOnce(actor: actor)
         case .cancelled:
             return .denied(actor: row.actor)
         case .timeout:

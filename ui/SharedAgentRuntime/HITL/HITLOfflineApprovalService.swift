@@ -31,8 +31,7 @@ public enum HITLOfflineApprovalService {
             return .cancelled(actor: "system-persist-failed")
         }
 
-        DerrickNotificationWake.wakeUIIfNeeded()
-        DerrickNotificationSignal.postPoll()
+        DerrickHITLNotificationSignal.postPoll()
 
         let deadline = Date().addingTimeInterval(Double(timeoutNanoseconds) / 1_000_000_000)
         while Date() < deadline {

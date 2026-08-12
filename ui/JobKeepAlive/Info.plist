@@ -19,7 +19,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
+	<string>15.6</string>
 	<!-- Headless LoginAgent host; required for UserNotifications TCC. -->
 	<key>LSUIElement</key>
 	<true/>

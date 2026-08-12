@@ -4,12 +4,13 @@ import ServiceContracts
 /// Single entry for UI-hosted daemon hygiene: evict stale copies, refresh registration, kickstart.
 enum DaemonBootstrapCoordinator {
     nonisolated(unsafe) private static var lastPrepareAt = Date.distantPast
-    private static let debounceInterval: TimeInterval = 15
+    private static let debounceInterval: TimeInterval = 1_800
 
     /// Evict orphan/stale `JobKeepAlive` and ensure launchd targets this host app bundle.
     static func prepareForHostApp(force: Bool = false) async {
         guard !JobResultPanelSession.isPanelOnlyLaunch,
-              !DerrickNotificationLaunch.hasJobResultPresentationIntent()
+              !DerrickNotificationLaunch.hasJobResultPresentationIntent(),
+              !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         else {
             return
         }

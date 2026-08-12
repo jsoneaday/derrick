@@ -182,6 +182,12 @@ final class AppBootstrapStatus: ObservableObject {
                 "Docker Desktop is installed but not running, or Derrick cannot reach the Docker engine. Start Docker Desktop, wait until it is idle, then restart Derrick."
             )
         }
+        if lower.contains("timed out") || lower.contains("xpc call timed out") {
+            return (
+                "Daemon Connection Timed Out",
+                "Derrick could not reach its background service in time. Quit Derrick, confirm Docker Desktop is running, then launch again from Xcode (⌘R)."
+            )
+        }
         if lower.contains("xpc") && (lower.contains("unavailable") || lower.contains("interrupted") || lower.contains("invalidat")) {
             return (
                 "Helper Service Unavailable",

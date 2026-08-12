@@ -432,6 +432,34 @@ import Testing
         #expect(reason == .staleBuild)
     }
 
+    @Test func derrickDaemonHygieneStaleWhenAcceptedMtimeDiffers() {
+        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let reason = DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
+            executablePath: embedded,
+            processStartDate: nil,
+            hostAppBundlePath: host,
+            expectedExecutablePath: embedded,
+            expectedExecutableModificationDate: Date(timeIntervalSince1970: 2_000),
+            lastAcceptedExecutableModificationDate: Date(timeIntervalSince1970: 1_000)
+        )
+        #expect(reason == .staleBuild)
+    }
+
+    @Test func derrickDaemonHygieneAcceptsFirstObserveWithoutStartDate() {
+        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let reason = DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
+            executablePath: embedded,
+            processStartDate: nil,
+            hostAppBundlePath: host,
+            expectedExecutablePath: embedded,
+            expectedExecutableModificationDate: Date(timeIntervalSince1970: 2_000),
+            lastAcceptedExecutableModificationDate: nil
+        )
+        #expect(reason == nil)
+    }
+
     @Test func derrickDaemonHygieneKeepsFreshEmbeddedDaemon() {
         let host = "/Users/me/DerivedData/.../Debug/ui.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"

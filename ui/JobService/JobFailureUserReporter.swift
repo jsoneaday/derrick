@@ -104,13 +104,20 @@ enum JobFailureUserReporter {
                     createdAt: result.createdAt
                 )
             )
-            await JobResultNotifier.notifyCompletion(
+            let posted = await JobResultNotifier.notifyCompletion(
                 resultID: result.id,
                 jobID: result.jobID,
                 responseText: result.responseText,
                 repository: repo
             )
-            fputs("[JobService] failure fallback notified job=\(jobID) id=\(result.id)\n", stderr)
+            if posted {
+                fputs("[JobService] failure fallback notified job=\(jobID) id=\(result.id)\n", stderr)
+            } else {
+                fputs(
+                    "[JobService] failure fallback persisted but notify did not post job=\(jobID) id=\(result.id)\n",
+                    stderr
+                )
+            }
         } catch {
             fputs(
                 "[JobService] failure fallback persist failed job=\(jobID): \(error.localizedDescription)\n",

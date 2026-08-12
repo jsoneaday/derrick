@@ -13,9 +13,6 @@ enum HITLLiveApprovalHandlers {
         AgentServiceClient.shared.setNetworkAccessHandler { request in
             await presentNetworkAccess(request)
         }
-        AgentServiceClient.shared.setJobPreflightHandler { request in
-            await JobPreflightApprovalPresenter.shared.present(request)
-        }
         AgentServiceClient.shared.setPolicyDecisionHandler { request in
             await presentPolicyDecision(request)
         }

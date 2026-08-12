@@ -56,6 +56,7 @@ actor AgentServiceTurnHost {
     /// Per-session serial turn chains (one in-flight turn per session).
     private var sessionTurnTails: [String: Task<Void, Never>] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
+    private var turnSessionIDs: [String: String] = [:]
 
     func ensureConversation(
         sessionID: String,
@@ -93,16 +94,31 @@ actor AgentServiceTurnHost {
         isJobWake: Bool
     ) -> String {
         if isJobWake {
-            return request.sessionID ?? JobSessionID.make()
+            if let explicit = request.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !explicit.isEmpty {
+                return explicit
+            }
+            return JobSessionID.make()
         }
         if let explicit = request.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
            !explicit.isEmpty {
+            // Live chat must never reuse a job-isolated session (queues behind hung wakes).
+            if JobSessionID.isJobSession(explicit) {
+                if let primary = primaryUISessionID, !JobSessionID.isJobSession(primary) {
+                    return primary
+                }
+                let fresh = UUID().uuidString
+                primaryUISessionID = fresh
+                return fresh
+            }
             return explicit
         }
-        if let primary = primaryUISessionID {
+        if let primary = primaryUISessionID, !JobSessionID.isJobSession(primary) {
             return primary
         }
-        return UUID().uuidString
+        let fresh = UUID().uuidString
+        primaryUISessionID = fresh
+        return fresh
     }
 
     private func ensureRuntimeReady() async throws {
@@ -131,9 +147,12 @@ actor AgentServiceTurnHost {
     ) async -> AgentTurnAccepted {
         do {
             let isJobWake = request.delivery == .jobResultModal
-                || JobSessionID.isJobSession(request.sessionID)
             let sid = resolveSessionID(request: request, isJobWake: isJobWake)
             let agentOverride = isJobWake ? JobSessionID.agentID : nil
+            if !isJobWake {
+                // Cancel any stuck background wake on job-* queues so interactive chat is never blocked.
+                cancelAllJobSessionTurns()
+            }
             let model = try await ensureConversation(
                 sessionID: sid,
                 applicationName: request.applicationName,
@@ -164,6 +183,7 @@ actor AgentServiceTurnHost {
                 )
             }
             tasks[turnID] = turnTask
+            turnSessionIDs[turnID] = sid
 
             await AgentServiceStore.shared.log(
                 level: .info,
@@ -196,6 +216,25 @@ actor AgentServiceTurnHost {
     func cancelTurn(turnID: String) {
         tasks[turnID]?.cancel()
         tasks[turnID] = nil
+        turnSessionIDs[turnID] = nil
+    }
+
+    /// Drop hung job-wake turn chains so a live chatStream cannot wait forever behind HITL.
+    private func cancelAllJobSessionTurns() {
+        let jobTurnIDs = turnSessionIDs.compactMap { turnID, sessionID -> String? in
+            JobSessionID.isJobSession(sessionID) ? turnID : nil
+        }
+        for turnID in jobTurnIDs {
+            tasks[turnID]?.cancel()
+            tasks[turnID] = nil
+            turnSessionIDs[turnID] = nil
+            fputs("[AgentService] cancelled job-session turn=\(turnID) to unblock interactive chat\n", stderr)
+        }
+        let jobSessionIDs = sessionTurnTails.keys.filter { JobSessionID.isJobSession($0) }
+        for sessionID in jobSessionIDs {
+            sessionTurnTails[sessionID]?.cancel()
+            sessionTurnTails[sessionID] = nil
+        }
     }
 
     private func enqueueSessionTurn(
@@ -204,7 +243,9 @@ actor AgentServiceTurnHost {
     ) -> Task<Void, Never> {
         let previous = sessionTurnTails[sessionID]
         let task = Task {
-            _ = await previous?.value
+            if let previous {
+                _ = await previous.result
+            }
             guard !Task.isCancelled else { return }
             await operation()
         }
@@ -226,6 +267,7 @@ actor AgentServiceTurnHost {
     ) async {
         guard !Task.isCancelled else {
             tasks[turnID] = nil
+            turnSessionIDs[turnID] = nil
             return
         }
         await AgentServiceStore.shared.log(
@@ -257,12 +299,6 @@ actor AgentServiceTurnHost {
                 }
             )
         }
-        let jobPreflight: TurnProcessContext.JobSchedulingPreflight = { toolName, toolArgumentsJSON in
-            try await AgentServiceJobPreflight.approveBeforeSchedulingIfNeeded(
-                toolName: toolName,
-                toolArgumentsJSON: toolArgumentsJSON
-            )
-        }
         let policyDecision: TurnProcessContext.PolicyDecisionPrompt = { event in
             await AgentServiceHITLRouter.requestPolicyDecisionViaUISink(event)
         }
@@ -277,7 +313,6 @@ actor AgentServiceTurnHost {
             for: contextID,
             apiKey: apiKey,
             networkAccessPrompt: networkPrompt,
-            jobSchedulingPreflight: isJobWake ? nil : jobPreflight,
             policyDecisionPrompt: policyDecision,
             policyNoticePublisher: policyNotice
         )
@@ -402,6 +437,7 @@ actor AgentServiceTurnHost {
             }
         }
         tasks[turnID] = nil
+        turnSessionIDs[turnID] = nil
     }
 
     private static func jobFailureFallbackText(repository: DBRepository?, jobID: String?) async -> String? {
@@ -488,6 +524,10 @@ actor AgentServiceTurnHost {
             ui.turnDidEmitChunk(turnID, chunkJSON: data)
             delivered = true
         }
+        if !delivered, let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "chunk-fallback") {
+            ui.turnDidEmitChunk(turnID, chunkJSON: data)
+            delivered = true
+        }
         return delivered
     }
 
@@ -506,6 +546,10 @@ actor AgentServiceTurnHost {
             connectionContext.attachedConnection()
         )
         if !initiatorIsUI, let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "finish-ui") {
+            ui.turnDidFinish(turnID, errorJSON: errorJSON)
+            delivered = true
+        }
+        if !delivered, let ui = AgentServicePrimaryUISink.shared.clientSink(logLabel: "finish-fallback") {
             ui.turnDidFinish(turnID, errorJSON: errorJSON)
             delivered = true
         }

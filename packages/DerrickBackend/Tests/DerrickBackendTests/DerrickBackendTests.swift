@@ -17,4 +17,17 @@ import Testing
         #expect(decoded.title == "Job finished")
         #expect(decoded.userInfo[UserNotificationUserInfoKey.jobResultID.rawValue] == "abc")
     }
+
+    @Test func hitlApprovalNotificationRequestRoundTrip() throws {
+        let request = UserNotificationRequest(
+            kind: .hitlApproval,
+            title: "Approval needed",
+            body: "Tap to approve",
+            userInfo: [UserNotificationUserInfoKey.approvalID.rawValue: "approval-1"]
+        )
+        let data = try DerrickDaemonXPCCodec.encodeNotificationRequest(request)
+        let decoded = try DerrickDaemonXPCCodec.decodeNotificationRequest(data)
+        #expect(decoded.kind == .hitlApproval)
+        #expect(decoded.userInfo[UserNotificationUserInfoKey.approvalID.rawValue] == "approval-1")
+    }
 }

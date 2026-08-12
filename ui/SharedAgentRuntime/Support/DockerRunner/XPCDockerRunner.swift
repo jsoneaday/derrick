@@ -8,6 +8,50 @@ import ServiceContracts
 extension NSData: @unchecked @retroactive Sendable {}
 
 /// Ensures an XPC reply continuation is resumed at most once (timeout + late reply race).
+private final class XPCPeerEndpointReplyOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<NSXPCListenerEndpoint, Error>?
+
+    init(_ cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) {
+        self.cont = cont
+    }
+
+    func resume(returning value: NSXPCListenerEndpoint) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
+    }
+
+    func resume(throwing error: Error) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(throwing: error)
+    }
+}
+
+/// Ensures an XPC reply continuation is resumed at most once (timeout + late reply race).
+private final class XPCBoolReplyOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<Bool, Never>?
+
+    init(_ cont: CheckedContinuation<Bool, Never>) {
+        self.cont = cont
+    }
+
+    func resume(returning value: Bool) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
+    }
+}
+
+/// Ensures an XPC reply continuation is resumed at most once (timeout + late reply race).
 private final class XPCReplyOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var cont: CheckedContinuation<Data, Error>?
@@ -141,8 +185,26 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                     return
                 }
                 waiters.append(cont)
+                // Lost race: markCompleted drained an empty waiter list just before we appended.
+                if completed {
+                    let err = failure
+                    lock.unlock()
+                    if let err {
+                        cont.resume(throwing: err)
+                    } else {
+                        cont.resume()
+                    }
+                    return
+                }
                 lock.unlock()
             }
+        }
+
+        func failureIfCompleted() -> Error? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard completed else { return nil }
+            return failure
         }
     }
 
@@ -193,6 +255,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("XPCDockerRunner initialized for service \(Self.serviceName).")
 
         Task { @MainActor in
+            guard AppBootstrapStatus.shared.isInitializing else { return }
             AppBootstrapStatus.shared.update(
                 phase: .connectingHelper,
                 message: "Connecting to Docker helper…"
@@ -207,6 +270,10 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     /// Wait until docker volumes/image/warm containers are ready (or throw if prewarm failed).
     /// Ceiling is long enough for a cold Chromium bake; timeout fails instead of fake-ready.
     public func waitUntilPrewarmed() async throws {
+        if prewarmState.isCompleted() { return }
+        if let error = prewarmState.failureIfCompleted() {
+            throw error
+        }
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await self.prewarmState.wait()
@@ -238,23 +305,45 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
     /// Fetch helper anonymous peer endpoint for handoff to MCPService (UI→MCP only).
     public func fetchPeerListenerEndpoint() async throws -> NSXPCListenerEndpoint {
-        try await withCheckedThrowingContinuation { continuation in
-            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
-                continuation.resume(throwing: error)
+        try await withThrowingTaskGroup(of: NSXPCListenerEndpoint.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
+                    let box = XPCPeerEndpointReplyOnce(continuation)
+                    let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                        box.resume(throwing: error)
+                    }
+                    guard let service = proxy as? any DockerProcessRunnerXPC else {
+                        box.resume(
+                            throwing: NSError(
+                                domain: "XPCDockerRunner",
+                                code: 2,
+                                userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]
+                            )
+                        )
+                        return
+                    }
+                    service.peerListenerEndpoint { endpoint in
+                        box.resume(returning: endpoint)
+                    }
+                }
             }
-            guard let service = proxy as? any DockerProcessRunnerXPC else {
-                continuation.resume(
-                    throwing: NSError(
-                        domain: "XPCDockerRunner",
-                        code: 2,
-                        userInfo: [NSLocalizedDescriptionKey: "XPC service proxy unavailable."]
-                    )
+            group.addTask {
+                try await Task.sleep(nanoseconds: 15_000_000_000)
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 504,
+                    userInfo: [NSLocalizedDescriptionKey: "Docker helper peer endpoint timed out."]
                 )
-                return
             }
-            service.peerListenerEndpoint { endpoint in
-                continuation.resume(returning: endpoint)
+            defer { group.cancelAll() }
+            guard let endpoint = try await group.next() else {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 504,
+                    userInfo: [NSLocalizedDescriptionKey: "Docker helper peer endpoint timed out."]
+                )
             }
+            return endpoint
         }
     }
 
@@ -335,17 +424,18 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             debugLog("Failed to encode egress allowlist for helper.")
             return
         }
-        let ok: Bool = await withCheckedContinuation { continuation in
+        nonisolated(unsafe) let payload = data as NSData
+        let ok = await serviceCallWithTimeout(label: "egress allowlist push") { reply in
             let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
                 debugLog("XPC egress allowlist push failed: \(error.localizedDescription)")
-                continuation.resume(returning: false)
+                reply(false)
             }
             guard let service = proxy as? any DockerProcessRunnerXPC else {
-                continuation.resume(returning: false)
+                reply(false)
                 return
             }
-            service.setEgressAllowedDomainSuffixes(suffixesJSON: data as NSData) { success in
-                continuation.resume(returning: success)
+            service.setEgressAllowedDomainSuffixes(suffixesJSON: payload) { success in
+                reply(success)
             }
         }
         debugLog("Pushed egress allowlist to helper (ok=\(ok), count=\(suffixes.count))")
@@ -354,20 +444,46 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     /// Session-only host grants (Allow once) for the helper egress proxy.
     public func grantEgressSessionHosts(_ hosts: [String]) async {
         guard !hosts.isEmpty, let data = try? JSONEncoder().encode(hosts) else { return }
-        let ok: Bool = await withCheckedContinuation { continuation in
+        nonisolated(unsafe) let payload = data as NSData
+        let ok = await serviceCallWithTimeout(label: "egress session grant") { reply in
             let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
                 debugLog("XPC egress session grant failed: \(error.localizedDescription)")
-                continuation.resume(returning: false)
+                reply(false)
             }
             guard let service = proxy as? any DockerProcessRunnerXPC else {
-                continuation.resume(returning: false)
+                reply(false)
                 return
             }
-            service.grantEgressSessionHosts(hostsJSON: data as NSData) { success in
-                continuation.resume(returning: success)
+            service.grantEgressSessionHosts(hostsJSON: payload) { success in
+                reply(success)
             }
         }
         debugLog("Pushed egress session hosts to helper (ok=\(ok), hosts=\(hosts.joined(separator: ",")))")
+    }
+
+    private func serviceCallWithTimeout(
+        label: String,
+        timeoutNanoseconds: UInt64 = 15_000_000_000,
+        call: @escaping @Sendable (@escaping @Sendable (Bool) -> Void) -> Void
+    ) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                    let box = XPCBoolReplyOnce(continuation)
+                    call { success in
+                        box.resume(returning: success)
+                    }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                debugLog("XPC \(label) timed out after \(timeoutNanoseconds / 1_000_000_000)s")
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
     }
 
     private func ensureVolume(_ name: String) async throws {
@@ -527,35 +643,23 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             await reportBootstrap(phase: .startingContainers, message: "Starting secure runtime containers…")
             try await prewarmNetworkPool()
 
-            await reportBootstrap(phase: .verifyingEnvironment, message: "Verifying runtime environment…")
-            // Do NOT run full baseline package smoke on the critical path. A hung docker-exec
-            // over XPC previously froze the init modal. Containers already running is enough;
-            // first python_script_exec still exercises packages.
             debugLog("Pre-warming: Skipping baseline package smoke (containers ready).")
-
             prewarmState.markCompleted()
             debugLog("Docker environment pre-warming completed successfully.")
+            await reportBootstrap(phase: .verifyingEnvironment, message: "Docker runtime ready.")
             // Do not markReady here — UI bootstrap awaits prewarm, then enables prompting.
         } catch {
             let detail = error.localizedDescription
             debugLog("Docker environment pre-warming failed or was skipped: \(detail)")
             prewarmState.markFailed(error)
-            let classified = await MainActor.run {
-                AppBootstrapStatus.classifyError(error)
-            }
-            await MainActor.run {
-                AppBootstrapStatus.shared.markFailed(
-                    title: classified.title,
-                    message: classified.message,
-                    technicalDetail: detail
-                )
-            }
         }
     }
 
     private func reportBootstrap(phase: AppBootstrapStatus.Phase, message: String) async {
         await MainActor.run {
-            AppBootstrapStatus.shared.update(phase: phase, message: message)
+            let status = AppBootstrapStatus.shared
+            guard status.isInitializing else { return }
+            status.update(phase: phase, message: message)
         }
     }
 

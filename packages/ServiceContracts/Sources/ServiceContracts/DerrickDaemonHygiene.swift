@@ -31,9 +31,46 @@ public enum DerrickDaemonHygiene: Sendable {
         if exe != expected {
             return .orphanPath
         }
+        // Binary on disk is newer than process start → rebuild while daemon kept running.
         if let mtime = expectedExecutableModificationDate,
            let start = processStartDate,
            mtime.timeIntervalSince(start) > staleBuildTolerance {
+            return .staleBuild
+        }
+        return nil
+    }
+
+    /// When process start time is unavailable (common under App Sandbox), compare the on-disk
+    /// binary mtime to the mtime last accepted by a successful UI reconcile.
+    public static func evictionReasonUsingAcceptedBinaryMtime(
+        executablePath: String,
+        processStartDate: Date?,
+        hostAppBundlePath: String,
+        expectedExecutablePath: String,
+        expectedExecutableModificationDate: Date?,
+        lastAcceptedExecutableModificationDate: Date?,
+        staleBuildTolerance: TimeInterval = 1.0
+    ) -> EvictionReason? {
+        if let reason = evictionReason(
+            executablePath: executablePath,
+            processStartDate: processStartDate,
+            hostAppBundlePath: hostAppBundlePath,
+            expectedExecutablePath: expectedExecutablePath,
+            expectedExecutableModificationDate: expectedExecutableModificationDate,
+            staleBuildTolerance: staleBuildTolerance
+        ) {
+            return reason
+        }
+        guard processStartDate == nil,
+              let expected = expectedExecutableModificationDate
+        else {
+            return nil
+        }
+        guard let accepted = lastAcceptedExecutableModificationDate else {
+            // First observe with unknown start — accept current binary; next rebuild will differ.
+            return nil
+        }
+        if abs(expected.timeIntervalSince(accepted)) > staleBuildTolerance {
             return .staleBuild
         }
         return nil

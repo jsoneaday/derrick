@@ -22,6 +22,21 @@ enum DaemonModuleBootstrap {
                 return MCPToolSearchResultDTO(ok: true, tools: tools, message: "ok")
             }
             InProcessServiceBridges.jobLocalProxy = JobServiceExportedObject()
+            InProcessServiceBridges.pushEgressAllowlist = { suffixes in
+                await MCPServiceDockerHelperRunner.shared.pushEgressAllowedDomainSuffixes(suffixes)
+            }
+            InProcessServiceBridges.grantEgressSessionHosts = { hosts in
+                await MCPServiceDockerHelperRunner.shared.grantEgressSessionHosts(hosts)
+            }
+            InProcessServiceBridges.jobNetworkPreflight = { toolName, argumentsJSON, jobID in
+                let repo = try await JobServiceStore.shared.sharedRepository()
+                try await JobNetworkPreflight.approvePythonNetworkIfNeeded(
+                    toolName: toolName,
+                    argumentsJSON: argumentsJSON,
+                    jobID: jobID,
+                    repository: repo
+                )
+            }
             await DaemonRuntime.shared.markModuleReady(.mcp)
             fputs("[derrickd] module mcp ready\n", stderr)
             Task {

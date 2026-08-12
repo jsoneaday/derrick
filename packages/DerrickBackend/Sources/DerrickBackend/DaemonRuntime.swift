@@ -28,7 +28,11 @@ public actor DaemonRuntime {
     public func bootstrap() async throws -> DerrickDaemonBootstrapResult {
         if !started {
             try await openDatabase()
-            await NotificationPostingService.shared.prepare()
+            // Defer notification prep and HITL polling so Mach bootstrap replies immediately.
+            Task {
+                await NotificationPostingService.shared.prepare()
+                HITLApprovalPollService.shared.start()
+            }
             // Job/Agent/MCP now run in-process — no UI job-worker wake.
             await DaemonJobWatchdog.shared.stop()
             started = true

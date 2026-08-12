@@ -45,10 +45,13 @@ public extension DBRepository {
 
     func listRecentChatSessions(applicationName: String, limit: Int = 5) throws -> [ChatSessionDTO] {
         try withDatabaseHandle { handle in
+            // Job-isolated sessions (`job-<uuid>`) must never appear in the interactive chat list —
+            // selecting one queues live turns behind hung background wakes.
             let sql = """
             SELECT application_name, session_id, title, created_at, updated_at, metadata_json
             FROM chat_sessions
             WHERE application_name = \(quoted(applicationName))
+              AND session_id NOT LIKE 'job-%'
             ORDER BY updated_at DESC
             LIMIT \(max(1, limit));
             """
