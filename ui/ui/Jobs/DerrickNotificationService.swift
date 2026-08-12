@@ -1,7 +1,5 @@
-import AppEvents
 import AppKit
 import DBRepository
-import EgressProxy
 import Foundation
 import PolicyUserInteraction
 import ServiceContracts
@@ -101,53 +99,8 @@ final class DerrickNotificationService {
     }
 
     private func presentApprovalAlert(for row: PendingHITLApprovalRow) async -> (approved: Bool, always: Bool)? {
-        try? await Task.sleep(nanoseconds: 250_000_000)
-
-        let isNetwork = HITLOfflineNetworkService.isNetworkToolName(row.toolName)
-        let host = HITLOfflineNetworkService.host(fromNetworkToolName: row.toolName)
-        let message: String
-        if isNetwork, let host {
-            let suffix = EgressHostExtractor.permanentSuffix(for: host)
-            message = "Allow *.\(suffix)?\n\nThis includes \(host) and every other subdomain of \(suffix)."
-        } else {
-            message = "Allow the agent to run “\(row.toolName)”?"
-        }
-
-        return await withCheckedContinuation { continuation in
-            let alert = NSAlert()
-            alert.messageText = isNetwork ? "Network access needed" : "Approval needed"
-            alert.informativeText = message
-            alert.alertStyle = .informational
-            if isNetwork {
-                alert.addButton(withTitle: "Always Allow")
-                alert.addButton(withTitle: "Allow Once")
-                alert.addButton(withTitle: "Deny")
-            } else {
-                alert.addButton(withTitle: "Allow")
-                alert.addButton(withTitle: "Deny")
-            }
-
-            let finish: (NSApplication.ModalResponse) -> Void = { response in
-                if isNetwork {
-                    switch response {
-                    case .alertFirstButtonReturn:
-                        continuation.resume(returning: (true, true))
-                    case .alertSecondButtonReturn:
-                        continuation.resume(returning: (true, false))
-                    default:
-                        continuation.resume(returning: (false, false))
-                    }
-                } else {
-                    continuation.resume(returning: (response == .alertFirstButtonReturn, false))
-                }
-            }
-
-            if let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
-                alert.beginSheetModal(for: window, completionHandler: finish)
-            } else {
-                finish(alert.runModal())
-            }
-        }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        return await HITLApprovalPanelPresenter.shared.present(row: row)
     }
 
     private func resolveHITL(approvalID: String, approved: Bool, always: Bool = false, actor: String) async {

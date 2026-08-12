@@ -289,8 +289,8 @@ public enum PolicyUserEventFactory {
                 kind: .networkAccessRequest,
                 source: .egressProxy,
                 title: "Network access",
-                summary: "Allow this script to reach “\(host)”?",
-                detail: "Deny cancels the entire script run. Always saves “\(suffix)” for future runs.",
+                summary: "Allow *.\(suffix)?",
+                detail: "Includes \(host) and every subdomain of \(suffix). Always saves “\(suffix)” for future runs.",
                 toolName: toolName,
                 rememberKey: "egress.suffix:\(host)"
             )
@@ -304,8 +304,8 @@ public enum PolicyUserEventFactory {
             kind: .networkAccessRequest,
             source: .egressProxy,
             title: "Network access",
-            summary: "Allow this script to reach these \(unique.count) hosts?",
-            detail: "Deny cancels the entire script run. Always saves these suffixes for future runs: \(uniqueSuffixes.joined(separator: ", ")).",
+            summary: "Allow these domains and their subdomains?",
+            detail: "Always saves: \(uniqueSuffixes.map { "*.\($0)" }.joined(separator: ", ")).",
             toolName: toolName,
             payloadPreview: list,
             rememberKey: "egress.suffix.batch:\(uniqueSuffixes.joined(separator: ","))"
