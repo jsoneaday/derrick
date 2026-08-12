@@ -1,6 +1,7 @@
 import AppEvents
 import AppKit
 import DBRepository
+import EgressProxy
 import Foundation
 import PolicyUserInteraction
 import ServiceContracts
@@ -106,7 +107,8 @@ final class DerrickNotificationService {
         let host = HITLOfflineNetworkService.host(fromNetworkToolName: row.toolName)
         let message: String
         if isNetwork, let host {
-            message = "Allow network access to \(host)?"
+            let suffix = EgressHostExtractor.permanentSuffix(for: host)
+            message = "Allow *.\(suffix)?\n\nThis includes \(host) and every other subdomain of \(suffix)."
         } else {
             message = "Allow the agent to run “\(row.toolName)”?"
         }

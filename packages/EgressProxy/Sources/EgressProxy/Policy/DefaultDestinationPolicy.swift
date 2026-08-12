@@ -8,6 +8,8 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
     private var allowedDomainSuffixes: [String]
     /// Exact hosts granted for the current app session only (Allow once).
     private var sessionExactHosts: Set<String> = []
+    /// Registrable suffixes granted for this session (Allow once on `www.apple.com` → `*.apple.com`).
+    private var sessionDomainSuffixes: Set<String> = []
     private let blockedHostnames: [String]
     private let blockedIPv4: [IPv4CIDR]
     private let blockedIPv6: [IPv6Prefix]
@@ -50,6 +52,12 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
             let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard !normalized.isEmpty else { continue }
             sessionExactHosts.insert(normalized)
+            // Allow Once on a host also covers sibling subdomains for this session
+            // (www.apple.com → *.apple.com), matching permanent-suffix behavior.
+            let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
+            if !suffix.isEmpty {
+                sessionDomainSuffixes.insert(suffix)
+            }
         }
         lock.unlock()
     }
@@ -57,6 +65,7 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
     public func clearSessionHosts() {
         lock.lock()
         sessionExactHosts.removeAll()
+        sessionDomainSuffixes.removeAll()
         lock.unlock()
     }
 
@@ -132,10 +141,16 @@ public final class DefaultDestinationPolicy: DestinationPolicy, @unchecked Senda
         lock.lock()
         let suffixes = allowedDomainSuffixes
         let session = sessionExactHosts
+        let sessionSuffixes = sessionDomainSuffixes
         lock.unlock()
 
         if session.contains(host) {
             return true
+        }
+        for suffix in sessionSuffixes {
+            if host == suffix || host.hasSuffix("." + suffix) {
+                return true
+            }
         }
         for suffix in suffixes {
             if host == suffix || host.hasSuffix("." + suffix) {

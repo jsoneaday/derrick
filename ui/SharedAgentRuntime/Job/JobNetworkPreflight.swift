@@ -65,7 +65,18 @@ public enum JobNetworkPreflight {
         )
 
         var sessionGrants: [String] = []
+        var allowedSuffixes = suffixes
         for host in uncovered {
+            let coverage = DefaultDestinationPolicy(allowedDomainSuffixes: allowedSuffixes)
+            if coverage.isHostCoveredByAllowlist(host) {
+                continue
+            }
+            // Session grants from earlier Allow Once in this preflight (suffix-scoped).
+            let sessionPolicy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
+            sessionPolicy.grantSessionHosts(sessionGrants)
+            if sessionPolicy.isHostCoveredByAllowlist(host) {
+                continue
+            }
             let decision = await HITLOfflineNetworkService.awaitDecision(
                 host: host,
                 toolName: toolName,
@@ -80,8 +91,8 @@ public enum JobNetworkPreflight {
                 try await repository.saveEgressAllowedDomainSuffix(
                     EgressAllowedDomainSuffix(suffix: suffix, source: actor ?? "job-banner", enabled: true)
                 )
-                let updated = try await loadEnabledSuffixes(repository: repository)
-                await InProcessServiceBridges.pushEgressAllowlist?(updated)
+                allowedSuffixes = try await loadEnabledSuffixes(repository: repository)
+                await InProcessServiceBridges.pushEgressAllowlist?(allowedSuffixes)
                 fputs(
                     "[JobNetworkPreflight] always host=\(host) suffix=\(suffix) actor=\(actor ?? "?")\n",
                     stderr

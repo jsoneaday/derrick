@@ -83,6 +83,21 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(decision == .allow)
     }
 
+    @Test func sessionGrantCoversSiblingSubdomains() async {
+        let policy = DefaultDestinationPolicy(
+            allowedDomainSuffixes: [],
+            resolver: StaticDNSResolver(addresses: [
+                "securemetrics.apple.com": ["17.0.0.1"]
+            ])
+        )
+        policy.grantSessionHosts(["www.apple.com"])
+        #expect(policy.isHostCoveredByAllowlist("securemetrics.apple.com"))
+        let decision = await policy.evaluate(
+            destination: ProxyDestination(host: "securemetrics.apple.com", port: 443)
+        )
+        #expect(decision == .allow)
+    }
+
     @Test func midFlightPrompterAllowOnceGrantsHost() async {
         final class OncePrompter: HostAccessPrompter, @unchecked Sendable {
             var calls = 0

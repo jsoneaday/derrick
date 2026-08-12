@@ -34,7 +34,8 @@ public enum HITLApprovalNotifier: Sendable {
         let title = isNetwork ? "Network access needed" : "Approval needed"
         let body: String
         if isNetwork, let host {
-            body = "The agent wants to reach \(host). Tap to approve or deny."
+            let suffix = Self.registrableSuffix(for: host)
+            body = "Allow *.\(suffix)? Tap to approve or deny. Always Allow covers all subdomains."
         } else {
             let preview = truncated(row.argumentsJSON, limit: 160)
             body = preview.isEmpty
@@ -77,6 +78,14 @@ public enum HITLApprovalNotifier: Sendable {
         guard toolName.hasPrefix("network:") else { return nil }
         let host = String(toolName.dropFirst("network:".count))
         return host.isEmpty ? nil : host
+    }
+
+    /// Last two labels — same rule as egress permanent allow (`*.apple.com` ← `securemetrics.apple.com`).
+    private static func registrableSuffix(for host: String) -> String {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let parts = normalized.split(separator: ".").map(String.init)
+        guard parts.count >= 2 else { return normalized }
+        return parts.suffix(2).joined(separator: ".")
     }
 
     private static func truncated(_ text: String, limit: Int) -> String {
