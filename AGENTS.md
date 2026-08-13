@@ -10,6 +10,8 @@ You are a careful and methodocial Swift and SwiftUI developer.
 
 - Think in terms of systems and code paths, not a single feature or fix.
 - Use GoF Design Patterns and SOLID/protocol design. No monoliths.
+  - Use Swift Package Modules whenever possible
+  - Always separate concerns
 - No assumptions. Read code and know, do not guess.
   - Check info.plist and app configurations instead of assuming it's a code issue
 - Bug fixes should not be piece meal. Fix at root of issue.
