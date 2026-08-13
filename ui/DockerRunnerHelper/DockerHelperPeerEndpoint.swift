@@ -33,9 +33,24 @@ final class DockerHelperPeerEndpoint: NSObject, NSXPCListenerDelegate, @unchecke
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        // Anonymous peer mesh (MCPService). Do not setCodeSigningRequirement here:
-        // Debug ad-hoc signing + anonymous endpoints fail closed and break the mesh.
-        // Application XPC (UI→helper serviceName) still uses peer auth on the service listener.
+        // The UI→helper serviceName connection is authenticated separately by
+        // DockerRunnerHelperDelegate. This anonymous endpoint is only for MCPService.
+        let isDebug = XPCPeerAuthentication.isDebugMode()
+        if isDebug {
+            HelperLogRelay.shared.log(
+                "MCP anonymous XPC peer code-signing requirement skipped because IS_DEBUG=true"
+            )
+        } else {
+            do {
+                try XPCPeerAuthentication.apply(.helperAcceptingMCP, to: connection)
+                HelperLogRelay.shared.log("MCP XPC peer code-signing requirement applied")
+            } catch {
+                let message = "Rejected MCP XPC connection: peer code-signing requirement failed (\(error.localizedDescription))"
+                HelperLogRelay.shared.log(message)
+                return false
+            }
+        }
+
         connection.exportedInterface = NSXPCInterface(with: DockerProcessRunnerXPC.self)
         connection.exportedObject = DockerRunnerService()
         // No remoteObjectInterface / HelperLogRelay.attach — keep UI as sole egress prompt sink.

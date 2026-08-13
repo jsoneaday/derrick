@@ -26,6 +26,8 @@ public enum XPCPeerAuthentication: Sendable {
     public enum PeerRole: Sendable {
         /// Helper accepting connections — peer must be the main app.
         case helperAcceptingApp
+        /// Anonymous helper peer accepting MCPService connections.
+        case helperAcceptingMCP
         /// App connecting to helper — peer must be the helper service.
         case appConnectingToHelper
     }
@@ -77,9 +79,19 @@ public enum XPCPeerAuthentication: Sendable {
         switch role {
         case .helperAcceptingApp:
             return requirementString(allowedPeerIdentifiers: [mainAppIdentifier])
+        case .helperAcceptingMCP:
+            return requirementString(allowedPeerIdentifiers: [mcpServiceIdentifier])
         case .appConnectingToHelper:
             return requirementString(allowedPeerIdentifiers: [dockerHelperIdentifier])
         }
+    }
+
+    /// Development-only escape hatch for ad-hoc Debug builds whose anonymous
+    /// XPC endpoints cannot satisfy a code-signing requirement.
+    public static func isDebugMode(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        environment["IS_DEBUG"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "true"
     }
 
     /// Applies the requirement to `connection`. Call **before** `resume()`.

@@ -18,6 +18,11 @@ struct DockerRunnerXPCTests {
         #expect(requirement.contains("identifier \"derrick.ui.DockerRunnerHelper\""))
     }
 
+    @Test func peerRequirementIncludesMCPIdentifier() {
+        let requirement = XPCPeerAuthentication.requirementString(for: .helperAcceptingMCP)
+        #expect(requirement.contains("identifier \"derrick.ui.MCPService\""))
+    }
+
     @Test func peerRequirementWithoutTeamUsesIdentifierOnly() {
         let requirement = XPCPeerAuthentication.requirementString(
             allowedPeerIdentifiers: ["derrick.ui"],
@@ -34,6 +39,13 @@ struct DockerRunnerXPCTests {
         #expect(requirement.contains("identifier \"derrick.ui\""))
         #expect(requirement.contains("identifier \"derrick.ui.bridge\""))
         #expect(requirement.contains(" or "))
+    }
+
+    @Test func debugModeRequiresExplicitTrue() {
+        #expect(XPCPeerAuthentication.isDebugMode(environment: ["IS_DEBUG": "true"]))
+        #expect(XPCPeerAuthentication.isDebugMode(environment: ["IS_DEBUG": "TRUE"]))
+        #expect(!XPCPeerAuthentication.isDebugMode(environment: ["IS_DEBUG": "false"]))
+        #expect(!XPCPeerAuthentication.isDebugMode(environment: [:]))
     }
 
     private func request(
