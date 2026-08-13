@@ -31,8 +31,17 @@ final class JobServicePeerEndpoint: NSObject, NSXPCListenerDelegate, @unchecked 
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        // Anonymous peer mesh (AgentService). Do not setCodeSigningRequirement here:
-        // Debug ad-hoc signing + anonymous endpoints fail closed and break the mesh.
+        if XPCPeerAuthentication.isDebugMode() {
+            fputs("[JobService] peer code-signing requirement skipped because IS_DEBUG=true\n", stderr)
+        } else {
+            do {
+                try XPCPeerAuthentication.apply(.jobAcceptingAgentAndMCP, to: connection)
+            } catch {
+                fputs("[JobService] peer auth failed: \(error.localizedDescription)\n", stderr)
+                return false
+            }
+        }
+
         let exported = NSXPCInterface(with: JobServiceXPC.self)
         let endpointClasses = NSSet(array: [NSXPCListenerEndpoint.self]) as! Set<AnyHashable>
         exported.setClasses(

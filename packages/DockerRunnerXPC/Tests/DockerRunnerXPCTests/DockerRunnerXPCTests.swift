@@ -23,6 +23,20 @@ struct DockerRunnerXPCTests {
         #expect(requirement.contains("identifier \"derrick.ui.MCPService\""))
     }
 
+    @Test func peerRequirementsRestrictAgentAndJobMesh() {
+        let agentRequirement = XPCPeerAuthentication.requirementString(for: .agentAcceptingJob)
+        #expect(agentRequirement.contains("identifier \"derrick.ui.JobService\""))
+        #expect(!agentRequirement.contains("derrick.ui.MCPService"))
+
+        let jobRequirement = XPCPeerAuthentication.requirementString(for: .jobAcceptingAgentAndMCP)
+        #expect(jobRequirement.contains("identifier \"derrick.ui.AgentService\""))
+        #expect(jobRequirement.contains("identifier \"derrick.ui.MCPService\""))
+
+        let mcpRequirement = XPCPeerAuthentication.requirementString(for: .mcpAcceptingAgentAndJob)
+        #expect(mcpRequirement.contains("identifier \"derrick.ui.AgentService\""))
+        #expect(mcpRequirement.contains("identifier \"derrick.ui.JobService\""))
+    }
+
     @Test func peerRequirementWithoutTeamUsesIdentifierOnly() {
         let requirement = XPCPeerAuthentication.requirementString(
             allowedPeerIdentifiers: ["derrick.ui"],

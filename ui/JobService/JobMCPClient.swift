@@ -96,7 +96,8 @@ final class JobMCPClient: @unchecked Sendable {
                 ofReply: false
             )
             conn.remoteObjectInterface = remote
-            // Anonymous peer: no code-sign requirement (same as Agent→MCP mesh).
+            // The listener enforces the JobService code-signing requirement in
+            // normal builds; signed envelopes remain required at the message layer.
             conn.interruptionHandler = { [weak self] in self?.invalidate() }
             conn.invalidationHandler = { [weak self] in self?.invalidate() }
             conn.resume()

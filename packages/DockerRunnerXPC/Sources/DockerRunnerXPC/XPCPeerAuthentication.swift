@@ -28,6 +28,12 @@ public enum XPCPeerAuthentication: Sendable {
         case helperAcceptingApp
         /// Anonymous helper peer accepting MCPService connections.
         case helperAcceptingMCP
+        /// Anonymous AgentService peer accepting JobService connections.
+        case agentAcceptingJob
+        /// Anonymous JobService peer accepting AgentService and MCPService connections.
+        case jobAcceptingAgentAndMCP
+        /// Anonymous MCPService peer accepting AgentService and JobService connections.
+        case mcpAcceptingAgentAndJob
         /// App connecting to helper — peer must be the helper service.
         case appConnectingToHelper
     }
@@ -81,6 +87,16 @@ public enum XPCPeerAuthentication: Sendable {
             return requirementString(allowedPeerIdentifiers: [mainAppIdentifier])
         case .helperAcceptingMCP:
             return requirementString(allowedPeerIdentifiers: [mcpServiceIdentifier])
+        case .agentAcceptingJob:
+            return requirementString(allowedPeerIdentifiers: [jobServiceIdentifier])
+        case .jobAcceptingAgentAndMCP:
+            return requirementString(
+                allowedPeerIdentifiers: [agentServiceIdentifier, mcpServiceIdentifier]
+            )
+        case .mcpAcceptingAgentAndJob:
+            return requirementString(
+                allowedPeerIdentifiers: [agentServiceIdentifier, jobServiceIdentifier]
+            )
         case .appConnectingToHelper:
             return requirementString(allowedPeerIdentifiers: [dockerHelperIdentifier])
         }
