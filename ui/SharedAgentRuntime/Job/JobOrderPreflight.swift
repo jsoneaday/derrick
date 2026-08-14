@@ -1,9 +1,9 @@
 import EgressProxy
 import Foundation
 
-/// Helpers for inspecting job tool arguments (network hosts, python flags).
+/// Helpers for inspecting job tool arguments (network hosts, script flags).
 public enum JobOrderPreflight {
-    public static func pythonAllowNetwork(toolArgumentsJSON: String) -> Bool {
+    public static func scriptAllowNetwork(toolArgumentsJSON: String) -> Bool {
         guard let data = toolArgumentsJSON.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
@@ -17,7 +17,7 @@ public enum JobOrderPreflight {
         return false
     }
 
-    public static func pythonScript(from toolArgumentsJSON: String) -> String {
+    public static func scriptSource(from toolArgumentsJSON: String) -> String {
         guard let data = toolArgumentsJSON.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let script = object["script"] as? String else {

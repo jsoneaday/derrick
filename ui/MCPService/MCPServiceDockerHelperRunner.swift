@@ -3,6 +3,7 @@ import DBRepository
 import DockerRunnerXPC
 import EgressProxy
 import MCPServer
+import MCPToolCatalog
 import PolicyUserInteraction
 import ServiceContracts
 
@@ -23,7 +24,7 @@ private final class MCPDockerHelperLogSink: NSObject, DockerHelperLogSinkXPC, @u
                 let repo = try await MCPServiceStore.shared.sharedRepository()
                 let policyDecision = await HITLOfflineNetworkService.awaitDecision(
                     host: host,
-                    toolName: "python_script_exec",
+                    toolName: AllowedMCPTool.scriptExec.rawValue,
                     turnID: "midflight-\(host)",
                     isJobContext: true,
                     repository: repo,
@@ -59,10 +60,10 @@ private final class MCPDockerHelperLogSink: NSObject, DockerHelperLogSinkXPC, @u
     }
 }
 
-/// PythonScriptRunner in MCPService that runs docker **only** via DockerRunnerHelper peer XPC.
+/// ScriptRunner in MCPService that runs docker **only** via DockerRunnerHelper peer XPC.
 /// UI prewarms volumes/image/warm containers; this path only docker-execs into them.
 /// Mid-flight egress prompts stay on the UI↔helper serviceName reverse channel.
-final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendable {
+final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
     static let shared = MCPServiceDockerHelperRunner()
 
     private let lock = NSLock()
@@ -120,20 +121,14 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         script: String,
         timeoutSeconds: Int,
         allowNetwork: Bool,
-        pythonPackages: [String],
+        packages: [String],
         allowDependencyInstall: Bool
-    ) async throws -> PythonScriptExecutionResult {
+    ) async throws -> ScriptExecutionResult {
         let totalStarted = Date()
         let ensureStarted = Date()
-        let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
+        let ensureMS = ScriptPhaseTiming.elapsedMS(from: ensureStarted)
 
-        let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
-        let executionScript = DockerScriptPreparer.makeExecutionScript(
-            script: script,
-            installPackages: extras,
-            allowDependencyInstall: allowDependencyInstall,
-            nonBaselinePackages: extras
-        )
+        let executionScript = script
         guard let stdinData = executionScript.data(using: .utf8) else {
             throw MCPServiceDockerHelperError.encodeFailed("execution script")
         }
@@ -161,7 +156,7 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
             }
             return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
         }
-        let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
+        let execMS = ScriptPhaseTiming.elapsedMS(from: execStarted)
 
         if let launchError = response.launchError {
             throw NSError(
@@ -173,8 +168,8 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
 
         let stdoutText = String(decoding: response.stdout, as: UTF8.self)
         let stderrText = String(decoding: response.stderr, as: UTF8.self)
-        let totalMS = PythonScriptPhaseTiming.elapsedMS(from: totalStarted)
-        let scriptMetrics = PythonScriptPhaseTiming.scriptMetrics(script)
+        let totalMS = ScriptPhaseTiming.elapsedMS(from: totalStarted)
+        let scriptMetrics = ScriptPhaseTiming.scriptMetrics(script)
 
         if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(
             stderr: stderrText,
@@ -187,7 +182,7 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
             )
         }
 
-        let phaseTiming = PythonScriptPhaseTiming(
+        let phaseTiming = ScriptPhaseTiming(
             ensureMS: ensureMS,
             execMS: execMS,
             totalMS: totalMS,
@@ -197,7 +192,7 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         )
         fputs("[MCPService] \(phaseTiming.summaryLine) runner=helper-xpc\n", stderr)
 
-        return PythonScriptExecutionResult.runnerOutcome(
+        return ScriptExecutionResult.runnerOutcome(
             timedOut: response.timedOut,
             exitCode: response.exitCode,
             stdout: stdoutText,
@@ -209,9 +204,21 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
 
     // MARK: - Docker pool (via helper XPC)
 
-    private func makeCLIExecutor() -> DockerCLIExecutor {
+    func makeCLIExecutor() -> DockerCLIExecutor {
         { arguments, timeoutSeconds in
-            let response = try await self.runDocker(arguments, timeoutSeconds: timeoutSeconds)
+            let response = try await self.runDocker(arguments, stdin: Data(), timeoutSeconds: timeoutSeconds)
+            return DockerCLIResult(
+                exitCode: response.exitCode,
+                stdout: response.stdout,
+                stderr: response.stderr
+            )
+        }
+    }
+
+    /// Executor that can attach stdin (script writes, invoke JSON).
+    func makeStdinCLIExecutor() -> @Sendable ([String], Data, Int) async throws -> DockerCLIResult {
+        { arguments, stdin, timeoutSeconds in
+            let response = try await self.runDocker(arguments, stdin: stdin, timeoutSeconds: timeoutSeconds)
             return DockerCLIResult(
                 exitCode: response.exitCode,
                 stdout: response.stdout,
@@ -221,9 +228,17 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
     }
 
     private func runDocker(_ dockerArguments: [String], timeoutSeconds: Int) async throws -> DockerRunResponse {
+        try await runDocker(dockerArguments, stdin: Data(), timeoutSeconds: timeoutSeconds)
+    }
+
+    private func runDocker(
+        _ dockerArguments: [String],
+        stdin: Data,
+        timeoutSeconds: Int
+    ) async throws -> DockerRunResponse {
         let request = DockerHostLaunch.makeRequest(
             dockerArguments: dockerArguments,
-            stdinData: Data(),
+            stdinData: stdin,
             timeoutSeconds: timeoutSeconds,
             environment: DockerScriptPreparer.processEnvironment()
         )
@@ -238,24 +253,41 @@ final class MCPServiceDockerHelperRunner: PythonScriptRunner, @unchecked Sendabl
         return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
     }
 
-    /// XPC `runProcess` with single-resume + timeout so helper death cannot leak a continuation.
+    /// XPC `runProcess` with a racing timeout. Do not invalidate the connection unless
+    /// the timeout wins — a leaked sleep used to kill the helper mid-review.
     private func invokeHelper(timeoutNanoseconds: UInt64, requestData: NSData) async throws -> Data {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
-            let box = OnceResumeBox(cont)
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+                    let box = OnceResumeBox(cont)
+                    do {
+                        let proxy = try self.remoteProxy(onError: { error in
+                            box.resume(throwing: error)
+                        })
+                        proxy.runProcess(requestData: requestData) { reply in
+                            box.resume(returning: reply as Data)
+                        }
+                    } catch {
+                        box.resume(throwing: error)
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                throw MCPServiceDockerHelperError.timeout
+            }
             do {
-                let proxy = try self.remoteProxy(onError: { error in
-                    box.resume(throwing: error)
-                })
-                proxy.runProcess(requestData: requestData) { reply in
-                    box.resume(returning: reply as Data)
+                guard let first = try await group.next() else {
+                    throw MCPServiceDockerHelperError.timeout
                 }
-                Task {
-                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                    self.invalidateConnection()
-                    box.resume(throwing: MCPServiceDockerHelperError.timeout)
-                }
+                group.cancelAll()
+                return first
             } catch {
-                box.resume(throwing: error)
+                group.cancelAll()
+                if case MCPServiceDockerHelperError.timeout = error {
+                    self.invalidateConnection()
+                }
+                throw error
             }
         }
     }

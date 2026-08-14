@@ -4,12 +4,40 @@ import Testing
 
 @Suite struct ServiceContractsTests {
     @Test func healthRoundTrip() throws {
-        let report = ServiceHealthReport(service: .agent, status: .ok, detail: "up")
+        let report = ServiceHealthReport(
+            service: .agent,
+            status: .ok,
+            detail: "up",
+            guestRuntimeImage: DerrickGuestRuntime.dockerImage
+        )
         let data = try AgentServiceXPCCodec.encodeHealth(report)
         let decoded = try AgentServiceXPCCodec.decodeHealth(data)
         #expect(decoded.service == .agent)
         #expect(decoded.status == .ok)
         #expect(decoded.detail == "up")
+        #expect(decoded.guestRuntimeImage == DerrickGuestRuntime.dockerImage)
+        #expect(decoded.executableFingerprint == nil)
+    }
+
+    @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
+        let json = """
+        {"service":"agent","status":"ok","protocolVersion":1,"serviceVersion":"0.1.0","pid":1,"checkedAt":0}
+        """
+        let decoded = try JSONDecoder().decode(ServiceHealthReport.self, from: Data(json.utf8))
+        #expect(decoded.guestRuntimeImage == nil)
+        #expect(decoded.executableFingerprint == nil)
+    }
+
+    @Test func healthRoundTripsExecutableFingerprint() throws {
+        let report = ServiceHealthReport(
+            service: .daemon,
+            status: .ok,
+            guestRuntimeImage: DerrickGuestRuntime.dockerImage,
+            executableFingerprint: "1-2-3.000"
+        )
+        let data = try DerrickDaemonXPCCodec.encodeHealth(report)
+        let decoded = try DerrickDaemonXPCCodec.decodeHealth(data)
+        #expect(decoded.executableFingerprint == "1-2-3.000")
     }
 
     @Test func principalLabels() {
@@ -78,14 +106,14 @@ import Testing
         let wireJSON = try HelperModelWire.encodeJSON(wire)
         let request = MCPToolCallRequest(
             principal: .agent(sessionID: "s1", agentID: "ui"),
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             argumentsJSON: #"{"script":"print(1)"}"#,
             helperAPIKey: "sk-test",
             helperReviewerModelJSON: wireJSON
         )
         let data = try MCPServiceXPCCodec.encodeToolCallRequest(request)
         let decoded = try MCPServiceXPCCodec.decodeToolCallRequest(data)
-        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.toolName == "script_exec")
         #expect(decoded.principal.logLabel.contains("agent:"))
         #expect(decoded.helperAPIKey == "sk-test")
         #expect(decoded.helperReviewerModelJSON == wireJSON)
@@ -102,10 +130,10 @@ import Testing
 
     @Test func mcpServiceIDAndSearchRoundTrip() throws {
         #expect(DerrickServiceID.mcp.xpcServiceName == "derrick.ui.MCPService")
-        let search = MCPToolSearchRequest(principal: .system, query: "python")
+        let search = MCPToolSearchRequest(principal: .system, query: "script")
         let data = try MCPServiceXPCCodec.encodeToolSearchRequest(search)
         let decoded = try MCPServiceXPCCodec.decodeToolSearchRequest(data)
-        #expect(decoded.query == "python")
+        #expect(decoded.query == "script")
         #expect(decoded.principal == .system)
     }
 
@@ -114,13 +142,13 @@ import Testing
             approvalID: "a1",
             turnID: "t1",
             sessionID: "s1",
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             argumentsJSON: #"{"code":"print(1)"}"#,
             requiredFields: ["review"]
         )
         let data = try AgentServiceXPCCodec.encodeApprovalRequest(request)
         let decoded = try AgentServiceXPCCodec.decodeApprovalRequest(data)
-        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.toolName == "script_exec")
         #expect(decoded.requiredFields == ["review"])
 
         let decision = AgentApprovalDecisionDTO(
@@ -178,13 +206,13 @@ import Testing
         let key = ServiceMessageSigning.developmentKey(seed: "test-messages-secret")
         let request = MCPToolCallRequest(
             principal: .agent(sessionID: "s1", agentID: "ui"),
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             argumentsJSON: #"{"script":"print(1)"}"#,
             helperAPIKey: "sk-test"
         )
         let data = try MCPServiceXPCCodec.encodeSignedToolCallRequest(request, key: key)
         let decoded = try MCPServiceXPCCodec.decodeSignedToolCallRequest(data, key: key)
-        #expect(decoded.toolName == "python_script_exec")
+        #expect(decoded.toolName == "script_exec")
         #expect(decoded.helperAPIKey == "sk-test")
 
         // Tamper fails verify
@@ -220,7 +248,7 @@ import Testing
 
     @Test func jobStepSpecsEncode() throws {
         let tool = try CreateJobStepSpec.runTool(
-            JobRunToolPayload(toolName: "python_script_exec", argumentsJSON: #"{"mode":"readonly"}"#)
+            JobRunToolPayload(toolName: "script_exec", argumentsJSON: #"{"mode":"readonly"}"#)
         )
         #expect(tool.kind == .runTool)
         let wake = try CreateJobStepSpec.wakeAgent(JobWakeAgentPayload(prompt: "hello"))
@@ -241,7 +269,7 @@ import Testing
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let input = JobCreateOrderInput(
             runAfterSeconds: 3,
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             toolArgumentsJSON: #"{"script":"print(1)","mode":"readonly"}"#,
             wakeAfter: true,
             wakePrompt: "Announce the number from the tool result."
@@ -283,7 +311,7 @@ import Testing
             recurrenceKind: .interval,
             intervalSeconds: 3600,
             runAfterSeconds: 0,
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             toolArgumentsJSON: #"{"script":"print(1)","mode":"readonly"}"#,
             wakeAfter: false
         )
@@ -348,7 +376,7 @@ import Testing
 
     @Test func jobFailureDisplaySkipsRedundantFooterWhenSummaryExplainsFailure() {
         let text = JobFailureDisplay.composePresentation(
-            responseText: "The scheduled Python script failed during execution.",
+            responseText: "The scheduled script failed during execution.",
             failureDetail: "something went wrong",
             failureCode: JobFailureReason.stepFailed.rawValue
         )
@@ -460,6 +488,64 @@ import Testing
         #expect(reason == nil)
     }
 
+    @Test func daemonBinaryIdentityFingerprintsDifferWhenStatChanges() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("JobKeepAlive")
+        try Data("v1".utf8).write(to: file)
+        let first = DerrickDaemonBinaryIdentity.snapshot(atPath: file.path)
+        #expect(first != nil)
+        try Data("v2-longer".utf8).write(to: file)
+        let second = DerrickDaemonBinaryIdentity.snapshot(atPath: file.path)
+        #expect(second != nil)
+        #expect(first != second)
+        #expect(first?.fingerprint != second?.fingerprint)
+    }
+
+    @Test func shouldRetireConnectedDaemonOnFingerprintOrRuntimeMismatch() {
+        #expect(
+            !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: "a",
+                expectedFingerprint: "a",
+                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            )
+        )
+        #expect(
+            DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: "old",
+                expectedFingerprint: "new",
+                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            )
+        )
+        #expect(
+            DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: "a",
+                expectedFingerprint: "a",
+                reportedGuestRuntime: "stale-guest:old",
+                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            )
+        )
+        #expect(
+            DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: nil,
+                expectedFingerprint: "a",
+                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: "a",
+                expectedFingerprint: nil,
+                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            )
+        )
+    }
+
     @Test func derrickDaemonHygieneKeepsFreshEmbeddedDaemon() {
         let host = "/Users/me/DerivedData/.../Debug/ui.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
@@ -475,8 +561,8 @@ import Testing
         #expect(reason == nil)
     }
 
-    @Test func normalizePythonScriptArgumentsCoercesInvalidMode() {
-        let normalized = JobOrderBuilder.normalizePythonScriptArgumentsJSON(
+    @Test func normalizeScriptArgumentsCoercesInvalidMode() {
+        let normalized = JobOrderBuilder.normalizeScriptArgumentsJSONLegacy(
             #"{"mode":"run","script":"print(1)"}"#
         )
         #expect(normalized.contains(#""mode":"readonly"#))
@@ -510,7 +596,7 @@ import Testing
     @Test func resolveFailureWakePayloadFromRunToolOnlyJob() throws {
         let toolJSON = try JSONEncoder.service.encode(
             JobRunToolPayload(
-                toolName: "python_script_exec",
+                toolName: "script_exec",
                 argumentsJSON: #"{"mode":"readonly","script":"print(1)"}"#,
                 helperAPIKey: "test-key",
                 helperReviewerModelJSON: #"{"openai":{"_0":"gpt-5.6-luna"}}"#

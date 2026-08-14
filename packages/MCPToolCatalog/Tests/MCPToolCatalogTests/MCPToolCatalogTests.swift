@@ -3,7 +3,7 @@ import Testing
 
 struct MCPToolCatalogTests {
     @Test func allCasesHaveStableRawValues() {
-        #expect(AllowedMCPTool.pythonScriptExec.rawValue == "python_script_exec")
+        #expect(AllowedMCPTool.scriptExec.rawValue == "script_exec")
         #expect(AllowedMCPTool.sessionMemorySearch.rawValue == "session_memory_search")
         #expect(Set(AllowedMCPTool.allCases.map(\.rawValue)).count == AllowedMCPTool.allCases.count)
     }

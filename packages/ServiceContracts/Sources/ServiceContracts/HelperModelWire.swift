@@ -1,6 +1,6 @@
 import Foundation
 
-/// Cross-process helper LLM selection (python reviewer, etc.).
+/// Cross-process helper LLM selection (script reviewer, etc.).
 /// Provider matches `LLMProviderChoice.rawValue` (`openai` / `google`);
 /// model is the provider API model id (`OpenAIModel` / `GeminiModel` rawValue).
 public struct HelperModelWire: Codable, Sendable, Hashable {

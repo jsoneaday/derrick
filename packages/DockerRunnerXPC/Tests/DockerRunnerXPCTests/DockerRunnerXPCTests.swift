@@ -117,7 +117,7 @@ struct DockerRunnerXPCTests {
     }
 
     @Test func processAllowlistRejectsEnvWithoutDocker() {
-        let r = request(arguments: ["python3", "-c", "print(1)"])
+        let r = request(arguments: ["bun", "-e", "print(1)"])
         #expect(DockerRunRequestValidator.validate(r) == .missingDockerInvocation)
     }
 
@@ -171,7 +171,7 @@ struct DockerRunnerXPCTests {
             ["image", "inspect", "img"],
             ["build", "-t", "img", "-"],
             ["pull", "img"],
-            ["exec", "-i", "c", "python", "-"],
+            ["exec", "-i", "c", "bun", "-"],
             ["start", "c"],
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"]

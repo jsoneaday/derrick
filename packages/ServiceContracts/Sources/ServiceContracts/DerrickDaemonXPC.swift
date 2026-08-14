@@ -6,6 +6,8 @@ import Foundation
     func bootstrap(withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Encoded `UserNotificationRequest`. Reply encoded `ServiceAckDTO`.
     func postUserNotification(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Ask this process to exit so launchd KeepAlive re-execs the on-disk binary. Reply `ServiceAckDTO`.
+    func retire(withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 /// Full daemon surface: control + in-process Agent / Job / MCP methods on one Mach connection.

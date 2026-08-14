@@ -4,20 +4,20 @@ import MCPServer
 import MemorySystem
 import ServiceContracts
 
-/// Python security reviewer for MCPService using turn-supplied API key + model settings.
-/// Model selection comes from UI `LLMModelSettings.pythonScriptReviewerModel` via
+/// Script security reviewer for MCPService using turn-supplied API key + model settings.
+/// Model selection comes from UI `LLMModelSettings.scriptReviewerModel` via
 /// `HelperModelWire` on each `callTool` request.
-struct MCPServicePythonReviewer: PythonScriptReviewer {
-    nonisolated let name: String = "mcp-service-python-reviewer"
+struct MCPServiceScriptReviewer: ScriptReviewer {
+    nonisolated let name: String = "mcp-service-script-reviewer"
 
-    func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
+    func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
         guard let apiKey = MCPServiceCallContext.shared.helperAPIKey,
               !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             throw NSError(
                 domain: "MCPService",
                 code: 404,
-                userInfo: [NSLocalizedDescriptionKey: "No API key available for python security reviewer."]
+                userInfo: [NSLocalizedDescriptionKey: "No API key available for script security reviewer."]
             )
         }
 
@@ -77,23 +77,23 @@ struct MCPServicePythonReviewer: PythonScriptReviewer {
     }
 
     private func review(
-        _ args: PythonScriptExecutionArguments,
+        _ args: ScriptExecutionArguments,
         model: ReviewerModel,
         apiKey: String
-    ) async throws -> PythonScriptReviewOutcome {
+    ) async throws -> ScriptReviewOutcome {
         switch model {
         case .openai(let openAIModel):
-            return try await OpenAIPythonScriptReviewer(apiKey: apiKey, model: openAIModel).review(args)
+            return try await OpenAIScriptReviewer(apiKey: apiKey, model: openAIModel).review(args)
         case .gemini(let geminiModel):
-            return try await GeminiPythonScriptReviewer(apiKey: apiKey, model: geminiModel).review(args)
+            return try await GeminiScriptReviewer(apiKey: apiKey, model: geminiModel).review(args)
         }
     }
 
     private func fallbackReview(
-        args: PythonScriptExecutionArguments,
+        args: ScriptExecutionArguments,
         apiKey: String,
         excluding: ReviewerModel
-    ) async -> PythonScriptReviewOutcome? {
+    ) async -> ScriptReviewOutcome? {
         var candidates: [ReviewerModel] = [Self.defaultModel, Self.secondaryDefault]
         candidates.removeAll { $0 == excluding }
         for candidate in candidates {

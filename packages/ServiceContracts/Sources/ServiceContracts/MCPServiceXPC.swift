@@ -40,9 +40,9 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
     public let toolName: String
     /// JSON object string of tool arguments (MCP Value map encoded as JSON object).
     public let argumentsJSON: String
-    /// Conversation API key for in-MCPService helper LLM (python security reviewer).
+    /// Conversation API key for in-MCPService helper LLM (script security reviewer).
     public let helperAPIKey: String?
-    /// JSON `HelperModelWire` for python security reviewer model selection.
+    /// JSON `HelperModelWire` for script security reviewer model selection.
     /// When nil, MCPService uses the default helper model.
     public let helperReviewerModelJSON: String?
 

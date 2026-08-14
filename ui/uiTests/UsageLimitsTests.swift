@@ -6,14 +6,14 @@ import Testing
     @Test func clampsToAbsoluteMax() {
         var limits = UsageLimits(
             maxToolRoundsPerMessage: 99,
-            maxPythonScriptRunsPerMessage: -1,
+            maxScriptRunsPerMessage: -1,
             maxReviewerCallsPerMessage: 50,
             dailyTokenBudget: 9_999_999,
             weeklyTokenBudget: -5
         )
         limits = limits.clamped()
         #expect(limits.maxToolRoundsPerMessage == UsageLimits.absoluteMax.maxToolRoundsPerMessage)
-        #expect(limits.maxPythonScriptRunsPerMessage == 0)
+        #expect(limits.maxScriptRunsPerMessage == 0)
         #expect(limits.maxReviewerCallsPerMessage == UsageLimits.absoluteMax.maxReviewerCallsPerMessage)
         #expect(limits.dailyTokenBudget == UsageLimits.absoluteMax.dailyTokenBudget)
         #expect(limits.weeklyTokenBudget == 0)

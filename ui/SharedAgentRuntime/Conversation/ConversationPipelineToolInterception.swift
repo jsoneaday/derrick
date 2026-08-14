@@ -5,6 +5,7 @@ import MemorySystem
 import PolicyRuntime
 import Lib
 import MCPServer
+import MCPToolCatalog
 import AppEvents
 import PolicyUserInteraction
 import LLMAgentClient
@@ -25,7 +26,7 @@ extension ConversationPipeline {
         // Models often omit user_prompt; inject conversation prompt so the security reviewer
         // can align script intent (empty prompt → false deny on intent checks).
         var arguments = arguments
-        if name == "python_script_exec" {
+        if AllowedMCPTool.isScriptExec(name) {
             let existing = arguments["user_prompt"]?.stringValue?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if existing.isEmpty,
@@ -148,35 +149,20 @@ extension ConversationPipeline {
                     guard let mcpClient else {
                         return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
                     }
-                    if interceptedEvent.toolName == "python_script_exec" {
-                        let pythonAllowed = await UsageLimitsService.shared.allowPythonScriptRun()
-                        if !pythonAllowed {
+                    if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
+                        let scriptAllowed = await UsageLimitsService.shared.allowScriptRun()
+                        if !scriptAllowed {
                             throw MCPClientError.toolExecutionDenied(
                                 toolName: interceptedEvent.toolName,
-                                reason: "Usage limit: max python_script_exec runs for this message."
+                                reason: "Usage limit: max script_exec runs for this message."
                             )
                         }
-                        let allowNetwork = Self.boolArgument(interceptedArguments, key: "allow_network")
-                        if allowNetwork {
-                            let reviewerAllowed = await UsageLimitsService.shared.allowReviewerCall()
-                            if !reviewerAllowed {
-                                throw MCPClientError.toolExecutionDenied(
-                                    toolName: interceptedEvent.toolName,
-                                    reason: "Usage limit: max security reviewer calls for this message."
-                                )
-                            }
-                        }
-                        // Preflight before MCPService/docker: extract hosts, allowlist, reverse-XPC prompt.
-                        // Mid-flight egress remains a backstop for hosts not present in the script text.
-                        let script = interceptedArguments["script"]?.stringValue ?? ""
-                        if let blockedJSON = await EgressAllowlistService.shared.preflightPythonScriptNetwork(
-                            script: script,
-                            allowNetwork: allowNetwork
-                        ) {
-                            await MainActor.run {
-                                debugLog("Egress preflight blocked \(interceptedEvent.toolName) before MCPService")
-                            }
-                            return MCPToolResult(content: [.text(blockedJSON)], isError: true)
+                        let reviewerAllowed = await UsageLimitsService.shared.allowReviewerCall()
+                        if !reviewerAllowed {
+                            throw MCPClientError.toolExecutionDenied(
+                                toolName: interceptedEvent.toolName,
+                                reason: "Usage limit: max security reviewer calls for this message."
+                            )
                         }
                     }
                     await MainActor.run {
@@ -192,7 +178,7 @@ extension ConversationPipeline {
                         "tool=\(interceptedEvent.toolName) mcp_call_ms=\(mcpCallMS) isError=\(result.isError) result_chars=\(result.text.utf8.count)"
                     )
                     // Attribute reviewer-ish tokens from phase timing when present.
-                    if interceptedEvent.toolName == "python_script_exec" {
+                    if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
                         await Self.recordReviewerTokensIfPresent(resultText: result.text)
                     }
                     await MainActor.run {
@@ -266,9 +252,9 @@ extension ConversationPipeline {
     }
 
     private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {
-        guard toolName == "python_script_exec" else { return }
+        guard AllowedMCPTool.isScriptExec(toolName) else { return }
         guard let data = resultText.data(using: .utf8) else { return }
-        guard let payload = try? JSONDecoder().decode(PythonScriptExecutionResult.self, from: data) else { return }
+        guard let payload = try? JSONDecoder().decode(ScriptExecutionResult.self, from: data) else { return }
 
         // Switch only on explicit failureStage — never infer from decision + reviewerAssessment
         // (an allow assessment must not surface as “security review denied”).

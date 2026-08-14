@@ -14,7 +14,7 @@
 | **UI** | `derrick.ui` | Chat, settings, approvals; XPC client of Daemon; ensure Daemon up |
 | **Daemon (`derrickd`)** | `derrick.ui.Daemon` | Headless LoginAgent: agent turns, jobs, MCP host, AppEventBus, **sole** UserNotifications poster |
 | **WebhookService** | `derrick.ui.WebhookService` | Public HTTP → CreateJob / RunTool / WakeAgent (future) |
-| **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained `docker` CLI runner (sole python_script_exec backend — see [adr-docker-script-runtime.md](adr-docker-script-runtime.md)) |
+| **DockerHelper** | `derrick.ui.DockerRunnerHelper` | Constrained `docker` CLI runner (sole `script_exec` backend — see [adr-bun-script-runtime.md](adr-bun-script-runtime.md)) |
 
 See [adr-headless-backend.md](adr-headless-backend.md).
 
@@ -92,7 +92,7 @@ WebhookService (future) ──► derrickd
 | **P0** | done | This ADR + locked decisions |
 | **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
-| **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; python reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
+| **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; script reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
 | **P4** | done | Job + Agent + MCP folded into **derrickd** (in-process); UI → daemon Mach only; peer mesh + job-worker/watchdog removed. Jobs UI / webhook still open. |
 | **P5** | pending | WebhookService |
 | **P6** | pending | Persist agents, cancel trees, diagnostics UI |

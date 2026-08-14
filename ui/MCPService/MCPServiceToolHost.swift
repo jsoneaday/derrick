@@ -8,7 +8,7 @@ import MCPToolCatalog
 import MemorySystem
 import ServiceContracts
 
-/// MCP effectors hosted in MCPService (python + session memory). No agents_* tools.
+/// MCP effectors hosted in MCPService (`script_exec` + session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
 
@@ -28,15 +28,14 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Docker via DockerRunnerHelper peer XPC only — never DockerPythonScriptRunner / local CLI.
+        // Docker via DockerRunnerHelper peer XPC only — never DockerScriptRunner / local CLI.
         // UI prewarms containers and hands the helper peer endpoint at bootstrap.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
         let made = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(
-                runner: MCPServiceDockerHelperRunner.shared,
-                reviewer: MCPServicePythonReviewer(),
-                networkPreflight: { _, _ in nil },
+            await server.registerScriptExecutionTool(
+                stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
+                reviewer: MCPServiceScriptReviewer(),
                 logger: { message in
                     fputs("[MCPService] \(message)\n", stderr)
                     Task {
@@ -62,7 +61,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (python + session_memory; no agents_*)",
+            message: "MCP tool host ready (script_exec + session_memory; no agents_*)",
             code: "tool_host_ready"
         )
         return made
@@ -90,13 +89,15 @@ actor MCPServiceToolHost {
             detailJSON: #"{"requestID":"\#(request.requestID)"}"#
         )
 
-        if request.toolName.hasPrefix("agents_") {
+        let toolName = request.toolName
+
+        if toolName.hasPrefix("agents_") {
             return MCPToolCallResultDTO(
                 requestID: request.requestID,
                 ok: false,
                 isError: true,
                 text: "",
-                message: "Tool \(request.toolName) is owned by AgentService, not MCPService."
+                message: "Tool \(toolName) is owned by AgentService, not MCPService."
             )
         }
 
@@ -121,15 +122,15 @@ actor MCPServiceToolHost {
                 "argumentsJSON did not parse (len=\(request.argumentsJSON.count))"
             )
         }
-        let result = try await client.callTool(named: request.toolName, arguments: args)
+        let result = try await client.callTool(named: toolName, arguments: args)
         let isError = MCPToolOutcomeSemantics.isError(
-            toolName: request.toolName,
+            toolName: toolName,
             text: result.text,
             transportIsError: result.isError
         )
         let message: String
         if isError {
-            message = MCPToolOutcomeSemantics.errorMessage(toolName: request.toolName, text: result.text)
+            message = MCPToolOutcomeSemantics.errorMessage(toolName: toolName, text: result.text)
                 ?? "tool reported error"
         } else {
             message = "ok"

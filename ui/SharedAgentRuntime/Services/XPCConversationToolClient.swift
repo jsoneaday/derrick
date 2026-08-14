@@ -11,7 +11,7 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     private let principal: ServicePrincipal
     private let agentsClient: MCPClient?
     private let helperAPIKeyProvider: @Sendable () -> String?
-    /// JSON `HelperModelWire` for MCP python security reviewer (from `LLMModelSettings`).
+    /// JSON `HelperModelWire` for MCP script security reviewer (from `LLMModelSettings`).
     private let helperReviewerModelJSONProvider: @Sendable () async -> String?
 
     public init(

@@ -30,6 +30,12 @@ public final class DaemonExportedObject: NSObject, DerrickDaemonXPC, @unchecked 
         }
     }
 
+    public func retire(withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let ack = ServiceAckDTO(ok: true, message: "retiring")
+        reply((try? DerrickDaemonXPCCodec.encodeAck(ack)) as NSData? ?? Data() as NSData)
+        DaemonSelfRetirement.requestExit(reason: "XPC retire")
+    }
+
     public func postUserNotification(
         requestJSON: NSData,
         withReply reply: @escaping @Sendable (NSData) -> Void

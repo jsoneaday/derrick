@@ -9,7 +9,7 @@ public struct AgentNetworkAccessRequestDTO: Codable, Sendable, Hashable {
     public init(
         requestID: String = UUID().uuidString,
         host: String,
-        toolName: String = "python_script_exec"
+        toolName: String = "script_exec"
     ) {
         self.requestID = requestID
         self.host = host

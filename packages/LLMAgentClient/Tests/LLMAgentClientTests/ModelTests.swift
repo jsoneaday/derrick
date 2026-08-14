@@ -75,7 +75,7 @@ struct ModelTests {
             "tool_name": "jobs_create",
             "arguments": {
               "run_after_seconds": 5,
-              "tool_name": "python_script_exec",
+              "tool_name": "script_exec",
               "tool_arguments": {
                 "mode": "readonly",
                 "script": "import random\\nprint(1)"
@@ -90,12 +90,12 @@ struct ModelTests {
         #expect(response.status == .toolCall)
         #expect(response.toolCall?.toolName == "jobs_create")
         let args = response.toolCall?.arguments ?? ""
-        #expect(args.contains("python_script_exec"))
+        #expect(args.contains("script_exec"))
         #expect(args.contains("run_after_seconds"))
         // Must be parseable as a JSON object string.
         let data = Data(args.utf8)
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        #expect(obj?["tool_name"] as? String == "python_script_exec")
+        #expect(obj?["tool_name"] as? String == "script_exec")
     }
 
     @Test func openAIModelContextBudgetsArePresent() {

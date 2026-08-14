@@ -140,7 +140,7 @@ import DBRepository
         _ = try! await repo.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
         let settings = LLMModelSettings(repository: repo)
         settings.summarizerModel = .openai(.gpt54)
-        settings.pythonScriptReviewerModel = .gemini(.gemini31FlashLite)
+        settings.scriptReviewerModel = .gemini(.gemini31FlashLite)
         settings.workerAgentModel = .openai(.gpt56Terra)
 
         // Wait for asynchronous saving tasks to complete before reloading
@@ -149,7 +149,7 @@ import DBRepository
         let reloaded = LLMModelSettings(repository: repo)
         await reloaded.loadSettings()
         #expect(reloaded.summarizerModel == .openai(.gpt54))
-        #expect(reloaded.pythonScriptReviewerModel == .gemini(.gemini31FlashLite))
+        #expect(reloaded.scriptReviewerModel == .gemini(.gemini31FlashLite))
         #expect(reloaded.workerAgentModel == .openai(.gpt56Terra))
     }
 
@@ -159,7 +159,7 @@ import DBRepository
         let settings = LLMModelSettings(repository: repo)
         await settings.loadSettings()
         #expect(settings.summarizerModel == .defaultHelperModel)
-        #expect(settings.pythonScriptReviewerModel == .defaultHelperModel)
+        #expect(settings.scriptReviewerModel == .defaultHelperModel)
         #expect(settings.workerAgentModel == .defaultHelperModel)
     }
 

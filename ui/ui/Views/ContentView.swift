@@ -431,7 +431,7 @@ struct ContentView: View {
                     if bootstrapStatus.isInitializing {
                         Text(
                             bootstrapStatus.phase == .preparingImage
-                                ? "First install builds a Python image with Chromium. This often takes several minutes; keep Docker Desktop running."
+                                ? "First install builds the Bun script image. Keep Docker Desktop running."
                                 : "This may take a minute the first time while Docker images and containers are prepared."
                         )
                             .font(.caption)
@@ -521,9 +521,27 @@ struct ContentView: View {
                     phase: .connectingHelper,
                     message: "Connecting to Derrick daemon…"
                 )
-                let health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                var health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                for attempt in 0..<3 {
+                    guard await DaemonProcessHygiene.evictIfStaleGuestRuntime(health) else { break }
+                    AgentServiceClient.shared.dropConnectionForReconnect()
+                    bootstrapStatus.update(
+                        phase: .connectingHelper,
+                        message: "Restarting background service…"
+                    )
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    health = try await AgentServiceClient.shared.ensureUpAndHealth()
+                    if attempt == 2, DaemonProcessHygiene.isStaleConnectedDaemon(health) {
+                        throw NSError(
+                            domain: "DaemonHygiene",
+                            code: 409,
+                            userInfo: [NSLocalizedDescriptionKey:
+                                "Derrick could not replace its background service. Quit Derrick and open it again."]
+                        )
+                    }
+                }
                 debugLog(
-                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) detail=\(health.detail ?? "")"
+                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
                 )
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker runtime…")

@@ -10,7 +10,7 @@ import Testing
         #expect(args["script"] != nil)
     }
 
-    @Test func sanitizesIllegalDollarEscapeFromPythonRegex() throws {
+    @Test func sanitizesIllegalDollarEscapeFromRegex() throws {
         let json = #"{"mode":"readonly","script":"p=re.search(r'\$\s?[0-9]+', s)","allow_network":true}"#
         #expect(strictParse(json) == false)
 
@@ -76,7 +76,7 @@ import Testing
         #expect(recovered.contains("amazon.com"))
         #expect(recovered.contains("s-search-result"))
         #expect(recovered.contains("print(json.dumps"))
-        #expect(args["python_packages"] != nil)
+        #expect(args["packages"] != nil)
         #expect(args["timeout_seconds"] != nil)
         #expect(args["description"] != nil)
     }
@@ -132,7 +132,7 @@ import Testing
 
     @Test func repairsNestedJobsCreateWithRealNewlinesInScript() throws {
         // Simulates jobs_create after outer AgentResponse decode: real newlines in nested script.
-        var broken = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        var broken = #"{"run_after_seconds":5,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":""#
         broken += "import random\nprint(random.randint(1, 1000000))"
         broken += #""},"wake_after":true,"wake_prompt":"Return the random number in chat"}"#
         #expect(strictParse(broken) == false)
@@ -150,14 +150,14 @@ import Testing
     }
 
     @Test func validNestedJobsCreateParses() throws {
-        let json = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the random number in chat"}"#
+        let json = #"{"run_after_seconds":5,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the random number in chat"}"#
         let args = try parseToolArgumentsObject(json)
         #expect(args["tool_arguments"] != nil)
     }
 
     @Test func repairsTruncatedJobsCreateWakePrompt() throws {
         // Production failure shape: stream cut mid wake_prompt (prefix ~200 of log).
-        let trunc = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the ran"#
+        let trunc = #"{"run_after_seconds":5,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":"import random\nprint(random.randint(1, 1000000))"},"wake_after":true,"wake_prompt":"Return the ran"#
         #expect(strictParse(trunc) == false)
 
         let args = try parseToolArgumentsObject(trunc)
@@ -172,7 +172,7 @@ import Testing
     }
 
     @Test func stripsSpuriousTrailingBraceFromNestedToolArguments() throws {
-        let valid = #"{"run_after_seconds":9,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":"import sys\nprint('scheduled test failure', file=sys.stderr)\nsys.exit(1)"},"wake_after":true,"wake_prompt":"Report the scheduled script failure result."}"#
+        let valid = #"{"run_after_seconds":9,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":"import sys\nprint('scheduled test failure', file=sys.stderr)\nsys.exit(1)"},"wake_after":true,"wake_prompt":"Report the scheduled script failure result."}"#
         let corrupted = valid + "}"
         #expect(strictParse(corrupted) == false)
         let args = try parseToolArgumentsObject(corrupted)
@@ -180,7 +180,7 @@ import Testing
     }
 
     @Test func repairsScheduledTestFailureScriptWithRealNewlines() throws {
-        var broken = #"{"run_after_seconds":9,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        var broken = #"{"run_after_seconds":9,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":""#
         broken += "import sys\nprint('scheduled test failure', file=sys.stderr)\nsys.exit(1)"
         broken += #""},"wake_after":true,"wake_prompt":"Report the scheduled script failure result."}"#
         #expect(strictParse(broken) == false)
@@ -195,7 +195,7 @@ import Testing
     }
 
     @Test func repairsTruncatedNestedScriptWithRealNewlines() throws {
-        var trunc = #"{"run_after_seconds":5,"tool_name":"python_script_exec","tool_arguments":{"mode":"readonly","script":""#
+        var trunc = #"{"run_after_seconds":5,"tool_name":"script_exec","tool_arguments":{"mode":"readonly","script":""#
         trunc += "import random\nprint(random.randint(1, 1000000))"
         // cut before closing script / rest of object
         #expect(strictParse(trunc) == false)
@@ -215,7 +215,7 @@ import Testing
         s += "\""
         s += #","timeout_seconds":120"#
         if includePackages {
-            s += #","python_packages":["requests","beautifulsoup4","lxml"]"#
+            s += #","packages":["requests","beautifulsoup4","lxml"]"#
             // Use regular strings carefully so closing quotes are real content.
             s += ",\"description\":\"Fetch Amazon.com search results for bicycle\""
             s += ",\"reason\":\"User requested top 10 bicycles\""

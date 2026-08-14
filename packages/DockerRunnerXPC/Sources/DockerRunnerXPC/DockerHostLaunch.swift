@@ -32,13 +32,19 @@ public enum DockerHostLaunch: Sendable {
         "rm",
         "inspect",
         "volume",
-        "image"
+        "image",
+        "network"
     ]
 
     /// Second-level tokens for `docker volume …`.
     public static let allowedVolumeSubcommands: Set<String> = [
         "create",
         "inspect"
+    ]
+
+    /// Second-level tokens for `docker network …` (cut net after bun install).
+    public static let allowedNetworkSubcommands: Set<String> = [
+        "disconnect"
     ]
 
     /// Second-level tokens for `docker image …`.

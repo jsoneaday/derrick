@@ -121,6 +121,11 @@ public enum JobServiceLoginAgent {
             }
         }
 
+        // SM "enabled" does not reload a job that we just `bootout`. Always try the user plist.
+        if !isLaunchdJobLoaded() {
+            bootstrapUserLaunchAgentIfNeeded()
+        }
+
         let loaded = isLaunchdJobLoaded()
         if loaded {
             return Result(
@@ -154,33 +159,83 @@ public enum JobServiceLoginAgent {
         )
     }
 
+    /// Drop both current and pre-rename launchd jobs so a leftover pid cannot keep the Mach name.
+    public static func bootoutRegisteredDaemon() {
+        let domains = [
+            "gui/\(getuid())/\(label)",
+            "gui/\(getuid())/\(DerrickServiceID.jobKeepAlive.rawValue)",
+        ]
+        for domain in domains {
+            let status = runLaunchctlAllowFail(["bootout", domain])
+            fputs("[derrickd] bootout status=\(status) domain=\(domain)\n", stderr)
+        }
+    }
+
+    /// Load the user LaunchAgent if `bootout` left the job missing, then demand-start it.
+    /// `kickstart` does nothing unless the job is already loaded.
+    public static func reloadRegisteredDaemon() {
+        bootstrapUserLaunchAgentIfNeeded()
+        kickstartRegisteredDaemon()
+    }
+
     public static func kickstartRegisteredDaemon() {
         let domain = "gui/\(getuid())/\(label)"
+        if !isLaunchdJobLoaded() {
+            bootstrapUserLaunchAgentIfNeeded()
+        }
         guard isLaunchdJobLoaded() else {
             fputs("[derrickd] kickstart skipped — launchd job not loaded\n", stderr)
             return
         }
+        let status = runLaunchctlAllowFail(["kickstart", "-k", domain])
+        if status != 0 {
+            fputs("[derrickd] kickstart status=\(status) domain=\(domain)\n", stderr)
+        } else {
+            fputs("[derrickd] kickstart ok domain=\(domain)\n", stderr)
+        }
+    }
+
+    private static func bootstrapUserLaunchAgentIfNeeded() {
+        if isLaunchdJobLoaded() { return }
+        let plist = userLaunchAgentPlistURL()
+        guard FileManager.default.fileExists(atPath: plist.path) else {
+            fputs("[derrickd] bootstrap skipped — missing \(plist.path)\n", stderr)
+            return
+        }
+        let uid = getuid()
+        let status = runLaunchctlAllowFail(["bootstrap", "gui/\(uid)", plist.path])
+        fputs("[derrickd] bootstrap status=\(status) plist=\(plist.path)\n", stderr)
+    }
+
+    private static func userLaunchAgentPlistURL() -> URL {
+        realUserHomeDirectory()
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist", isDirectory: false)
+    }
+
+    private static func realUserHomeDirectory() -> URL {
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    @discardableResult
+    private static func runLaunchctlAllowFail(_ arguments: [String]) -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["kickstart", "-k", domain]
-        let err = Pipe()
-        let out = Pipe()
-        process.standardError = err
-        process.standardOutput = out
+        process.arguments = arguments
+        process.standardError = Pipe()
+        process.standardOutput = Pipe()
         do {
             try process.run()
             process.waitUntilExit()
-            let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            if process.terminationStatus != 0 {
-                fputs(
-                    "[derrickd] kickstart status=\(process.terminationStatus) \(output)\n",
-                    stderr
-                )
-            } else {
-                fputs("[derrickd] kickstart ok domain=\(domain)\n", stderr)
-            }
+            return process.terminationStatus
         } catch {
-            fputs("[derrickd] kickstart failed: \(error.localizedDescription)\n", stderr)
+            fputs(
+                "[derrickd] launchctl \(arguments.joined(separator: " ")) failed: \(error.localizedDescription)\n",
+                stderr
+            )
+            return -1
         }
     }
 
@@ -192,14 +247,9 @@ public enum JobServiceLoginAgent {
         try? smAgent.unregister()
         try? legacySMAgent.unregister()
         let uid = getuid()
-        _ = try? runLaunchctl(["bootout", "gui/\(uid)/\(label)"])
-        _ = try? runLaunchctl(["bootout", "gui/\(uid)/\(DerrickServiceID.jobKeepAlive.rawValue)"])
-        let home: URL = {
-            if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
-                return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
-            }
-            return FileManager.default.homeDirectoryForCurrentUser
-        }()
+        _ = runLaunchctlAllowFail(["bootout", "gui/\(uid)/\(label)"])
+        _ = runLaunchctlAllowFail(["bootout", "gui/\(uid)/\(DerrickServiceID.jobKeepAlive.rawValue)"])
+        let home = realUserHomeDirectory()
         try? FileManager.default.removeItem(
             at: home.appendingPathComponent("Library/LaunchAgents/\(label).plist")
         )
@@ -307,14 +357,6 @@ public enum JobServiceLoginAgent {
         } catch {
             return false
         }
-    }
-
-    private static func runLaunchctl(_ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        try process.run()
-        process.waitUntilExit()
     }
 
     private static func describe(_ status: SMAppService.Status) -> String {

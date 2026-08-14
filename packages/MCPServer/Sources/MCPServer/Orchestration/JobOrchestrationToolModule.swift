@@ -30,11 +30,11 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_name": .object([
                         "type": .string("string"),
-                        "description": .string("Effector to freeze (v1: python_script_exec only).")
+                        "description": .string("Effector to freeze (v1: script_exec only).")
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),
-                        "description": .string("Frozen effector args. For python_script_exec use {mode,script}. Keep script short; put real line breaks as \\n only (one compact JSON line).")
+                        "description": .string("Frozen effector args. For script_exec use {description,reason,script} (raw JS export function handle). Keep script short; put real line breaks as \\n only (one compact JSON line).")
                     ]),
                     "wake_after": .object([
                         "type": .string("boolean"),
@@ -103,7 +103,7 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_name": .object([
                         "type": .string("string"),
-                        "description": .string("Effector template (v1: python_script_exec).")
+                        "description": .string("Effector template (v1: script_exec).")
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),

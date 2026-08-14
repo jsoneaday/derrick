@@ -1,5 +1,5 @@
 //
-//  PythonReviewerConfig.swift
+//  ConfigureScriptReviewer.swift
 //  ui
 //
 //  Created by David Choi on 7/21/26.
@@ -9,8 +9,8 @@ import Foundation
 import MCPServer
 import LLMAgentClient
 
-actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
-    nonisolated let name: String = "configured-python-script-reviewer"
+actor ConfiguredScriptReviewer: ScriptReviewer {
+    nonisolated let name: String = "configured-script-reviewer"
 
     private let settings: LLMModelSettings
 
@@ -18,8 +18,8 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         self.settings = settings
     }
 
-    func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
-        let selectedModel = await MainActor.run { settings.pythonScriptReviewerModel }
+    func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
+        let selectedModel = await MainActor.run { settings.scriptReviewerModel }
         guard let apiKey = await resolveAPIKey(for: selectedModel) else {
             await MainActor.run {
                 debugLog(
@@ -75,10 +75,10 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
         }
     }
 
-    private func defaultReviewerAssessment(for args: PythonScriptExecutionArguments) async -> PythonScriptReviewOutcome? {
+    private func defaultReviewerAssessment(for args: ScriptExecutionArguments) async -> ScriptReviewOutcome? {
         let defaultModel = LLMModelChoice.defaultHelperModel
         // Avoid a useless second call if primary is already the default helper.
-        let selectedModel = await MainActor.run { settings.pythonScriptReviewerModel }
+        let selectedModel = await MainActor.run { settings.scriptReviewerModel }
         if selectedModel == defaultModel {
             return nil
         }
@@ -97,16 +97,16 @@ actor ConfiguredPythonScriptReviewer: PythonScriptReviewer {
     }
 
     private func review(
-        _ args: PythonScriptExecutionArguments,
+        _ args: ScriptExecutionArguments,
         model: LLMModelChoice,
         apiKey: String
-    ) async throws -> PythonScriptReviewOutcome {
+    ) async throws -> ScriptReviewOutcome {
         switch model {
         case .gemini(let geminiModel):
-            let reviewer = GeminiPythonScriptReviewer(apiKey: apiKey, model: geminiModel)
+            let reviewer = GeminiScriptReviewer(apiKey: apiKey, model: geminiModel)
             return try await reviewer.review(args)
         case .openai(let openAIModel):
-            let reviewer = OpenAIPythonScriptReviewer(apiKey: apiKey, model: openAIModel)
+            let reviewer = OpenAIScriptReviewer(apiKey: apiKey, model: openAIModel)
             return try await reviewer.review(args)
         }
     }

@@ -82,7 +82,7 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
     public var errorDescription: String? {
         switch self {
         case .emptyToolName: return "tool_name is required."
-        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs (v1: python_script_exec only)."
+        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs (v1: script_exec only)."
         case .invalidToolArgumentsJSON: return "tool_arguments must be a JSON object."
         case .wakePromptRequired: return "wake_prompt is required when wake_after is true."
         case .invalidRunAfterSeconds(let s): return "run_after_seconds out of range: \(s) (allow 0...86400)."
@@ -96,7 +96,7 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
 /// Pure mapping: agent order intents → JobService create requests.
 public enum JobOrderBuilder {
     /// Effectors the agent may freeze into a job (expand later).
-    public static let allowedToolNames: Set<String> = ["python_script_exec"]
+    public static let allowedToolNames: Set<String> = ["script_exec"]
 
     public static let maxRunAfterSeconds = 86_400
 
@@ -125,8 +125,8 @@ public enum JobOrderBuilder {
             now: now
         )
 
-        let argsJSON = input.toolName == "python_script_exec"
-            ? normalizePythonScriptArgumentsJSON(input.toolArgumentsJSON)
+        let argsJSON = input.toolName == "script_exec"
+            ? normalizeScriptArgumentsJSON(input.toolArgumentsJSON)
             : input.toolArgumentsJSON
 
         let toolPayload = JobRunToolPayload(
@@ -202,8 +202,8 @@ public enum JobOrderBuilder {
             now: now
         )
 
-        let argsJSON = input.toolName == "python_script_exec"
-            ? normalizePythonScriptArgumentsJSON(input.toolArgumentsJSON)
+        let argsJSON = input.toolName == "script_exec"
+            ? normalizeScriptArgumentsJSON(input.toolArgumentsJSON)
             : input.toolArgumentsJSON
 
         let toolPayload = JobRunToolPayload(
@@ -310,8 +310,12 @@ public enum JobOrderBuilder {
         }
     }
 
-    /// Ensure python_script_exec args include fields the MCP tool expects when the model omits them.
-    public static func normalizePythonScriptArgumentsJSON(_ json: String) -> String {
+    public static func normalizeScriptArgumentsJSON(_ json: String) -> String {
+        normalizeScriptArgumentsJSONLegacy(json)
+    }
+
+    /// Ensure script_exec args include fields the tool expects.
+    public static func normalizeScriptArgumentsJSONLegacy(_ json: String) -> String {
         guard var dict = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else {
             return json
         }
@@ -327,7 +331,11 @@ public enum JobOrderBuilder {
         if dict["allow_network"] == nil { dict["allow_network"] = false }
         if dict["description"] == nil { dict["description"] = "Scheduled job script" }
         if dict["reason"] == nil { dict["reason"] = "Background job" }
-        if dict["user_prompt"] == nil { dict["user_prompt"] = "scheduled job" }
+        if dict["user_prompt"] == nil {
+            dict["user_prompt"] = (dict["description"] as? String)
+                ?? (dict["reason"] as? String)
+                ?? "scheduled job"
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
               let s = String(data: data, encoding: .utf8)
         else { return json }

@@ -9,7 +9,7 @@ import Testing
     @Test func reactScaleFollowUpCharReduction() {
         let fixture = ReactScaleToolFixture.make()
         let record = ToolCallRecord(
-            name: "python_script_exec",
+            name: "script_exec",
             arguments: fixture.arguments,
             result: fixture.fullResultJSON
         )
@@ -126,9 +126,9 @@ private enum ReactScaleToolFixture {
         let scraped = String(repeating: "<div class=\"news\">React release filler content \(UUID().uuidString.prefix(8)). </div>\n", count: 120)
         // Useful facts first (what a good script prints); bulk scrape after — slim caps at 4k.
         let wrapperStdout = """
-        [python_script_exec] wiped /tmp and /var/tmp
-        [python_script_exec] verified baseline package: requests -> requests
-        [python_script_exec] verified baseline package: urllib3 -> urllib3
+        [script_exec] wiped /tmp and /var/tmp
+        [script_exec] verified baseline package: requests -> requests
+        [script_exec] verified baseline package: urllib3 -> urllib3
         \(answerMarker)
         headline-0
         headline-1
@@ -180,7 +180,7 @@ private enum ReactScaleToolFixture {
             "reason": "User asked for current React version from the web",
             "script": script,
             "allow_network": "true",
-            "python_packages": "[]",
+            "packages": "[]",
             "timeout_seconds": "60"
         ]
         return (arguments, json)

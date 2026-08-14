@@ -21,14 +21,14 @@ final class UsageLimitsService: ObservableObject {
 
     /// Session-only raises (never written as permanent unless user edits Settings).
     private var sessionToolRounds: Int?
-    private var sessionPythonRuns: Int?
+    private var sessionScriptRuns: Int?
     private var sessionReviewerCalls: Int?
     private var sessionDailyTokens: Int?
     private var sessionWeeklyTokens: Int?
 
     /// Per-user-message counters (reset each stream).
     private(set) var messageToolRounds = 0
-    private(set) var messagePythonRuns = 0
+    private(set) var messageScriptRuns = 0
     private(set) var messageReviewerCalls = 0
 
     private var repository: DBRepository?
@@ -77,7 +77,7 @@ final class UsageLimitsService: ObservableObject {
 
     func resetMessageCounters() {
         messageToolRounds = 0
-        messagePythonRuns = 0
+        messageScriptRuns = 0
         messageReviewerCalls = 0
     }
 
@@ -87,8 +87,8 @@ final class UsageLimitsService: ObservableObject {
         max(permanentLimits.maxToolRoundsPerMessage, sessionToolRounds ?? 0)
     }
 
-    var effectiveMaxPythonRuns: Int {
-        max(permanentLimits.maxPythonScriptRunsPerMessage, sessionPythonRuns ?? 0)
+    var effectiveMaxScriptRuns: Int {
+        max(permanentLimits.maxScriptRunsPerMessage, sessionScriptRuns ?? 0)
     }
 
     var effectiveMaxReviewerCalls: Int {
@@ -128,21 +128,21 @@ final class UsageLimitsService: ObservableObject {
         ) && roundIndex < effectiveMaxToolRounds
     }
 
-    func allowPythonScriptRun() async -> Bool {
-        let limit = effectiveMaxPythonRuns
-        if messagePythonRuns < limit {
-            messagePythonRuns += 1
+    func allowScriptRun() async -> Bool {
+        let limit = effectiveMaxScriptRuns
+        if messageScriptRuns < limit {
+            messageScriptRuns += 1
             return true
         }
         let raised = await offerSessionRaise(
-            dimension: .pythonScripts,
+            dimension: .scriptRuns,
             currentEffective: limit,
-            presets: UsageLimits.pythonRunPresets,
-            absoluteMax: UsageLimits.absoluteMax.maxPythonScriptRunsPerMessage,
-            applySession: { self.sessionPythonRuns = $0 }
+            presets: UsageLimits.scriptRunPresets,
+            absoluteMax: UsageLimits.absoluteMax.maxScriptRunsPerMessage,
+            applySession: { self.sessionScriptRuns = $0 }
         )
-        if raised, messagePythonRuns < effectiveMaxPythonRuns {
-            messagePythonRuns += 1
+        if raised, messageScriptRuns < effectiveMaxScriptRuns {
+            messageScriptRuns += 1
             return true
         }
         return false
@@ -320,9 +320,9 @@ final class UsageLimitsService: ObservableObject {
         case .toolRounds:
             limits.maxToolRoundsPerMessage = newLimit
             sessionToolRounds = nil
-        case .pythonScripts:
-            limits.maxPythonScriptRunsPerMessage = newLimit
-            sessionPythonRuns = nil
+        case .scriptRuns:
+            limits.maxScriptRunsPerMessage = newLimit
+            sessionScriptRuns = nil
         case .reviewerCalls:
             limits.maxReviewerCallsPerMessage = newLimit
             sessionReviewerCalls = nil
@@ -348,8 +348,8 @@ final class UsageLimitsService: ObservableObject {
         switch dimension {
         case .toolRounds:
             return "This message has used \(messageToolRounds) tool round(s)."
-        case .pythonScripts:
-            return "This message has used \(messagePythonRuns) python_script_exec run(s)."
+        case .scriptRuns:
+            return "This message has used \(messageScriptRuns) script_exec run(s)."
         case .reviewerCalls:
             return "This message has used \(messageReviewerCalls) security review(s)."
         case .dailyTokens:

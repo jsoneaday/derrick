@@ -8,7 +8,7 @@
 import Foundation
 import LLMAgentClient
 
-public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
+public struct GeminiScriptReviewer: ScriptReviewer {
     public let name: String
     private let model: GeminiModel
     private let client: GeminiAgentClient
@@ -22,15 +22,15 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
     public static func fromEnvironment(
         variable: String = "GEMINI_API_KEY",
         model: GeminiModel = .gemini25FlashLite
-    ) -> GeminiPythonScriptReviewer? {
+    ) -> GeminiScriptReviewer? {
         guard let apiKey = ProcessInfo.processInfo.environment[variable], !apiKey.isEmpty else {
             return nil
         }
-        return GeminiPythonScriptReviewer(apiKey: apiKey, model: model)
+        return GeminiScriptReviewer(apiKey: apiKey, model: model)
     }
 
-    public func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
-        let userContent = PythonScriptReviewerRuntime.reviewInput(from: args)
+    public func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
+        let userContent = ScriptReviewerRuntime.reviewInput(from: args)
         let request = AgentRequest(
             messages: [
                 .init(role: .system, content: ReviewerSystemPrompt),
@@ -39,7 +39,7 @@ public struct GeminiPythonScriptReviewer: PythonScriptReviewer {
             temperature: 0
         )
         let stream = client.stream(request, model: model)
-        return try await PythonScriptReviewerRuntime.runStreamedReview(
+        return try await ScriptReviewerRuntime.runStreamedReview(
             modelLabel: model.rawValue,
             args: args,
             stream: stream

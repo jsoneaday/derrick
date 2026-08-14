@@ -95,6 +95,7 @@ fputs(
     "[derrickd] starting pid=\(ProcessInfo.processInfo.processIdentifier) mach=\(DerrickServiceID.daemon.machServiceName)\n",
     stderr
 )
+DaemonSelfRetirement.install()
 
 let listenerDelegate = DaemonUnifiedListenerDelegate()
 let listener = NSXPCListener(machServiceName: DerrickServiceID.daemon.machServiceName)

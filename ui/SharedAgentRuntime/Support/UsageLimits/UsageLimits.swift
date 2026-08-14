@@ -3,7 +3,7 @@ import Foundation
 /// Permanent usage limits (Settings). Session bumps may raise effective values until the app quits.
 struct UsageLimits: Codable, Equatable, Sendable {
     var maxToolRoundsPerMessage: Int
-    var maxPythonScriptRunsPerMessage: Int
+    var maxScriptRunsPerMessage: Int
     var maxReviewerCallsPerMessage: Int
     /// Provider-reported (or estimated) tokens per local calendar day. `0` = disabled.
     var dailyTokenBudget: Int
@@ -12,7 +12,7 @@ struct UsageLimits: Codable, Equatable, Sendable {
 
     static let `default` = UsageLimits(
         maxToolRoundsPerMessage: 3,
-        maxPythonScriptRunsPerMessage: 3,
+        maxScriptRunsPerMessage: 3,
         maxReviewerCallsPerMessage: 3,
         dailyTokenBudget: 200_000,
         weeklyTokenBudget: 1_000_000
@@ -21,14 +21,14 @@ struct UsageLimits: Codable, Equatable, Sendable {
     /// Hard ceilings for permanent Settings and session raises.
     static let absoluteMax = UsageLimits(
         maxToolRoundsPerMessage: 10,
-        maxPythonScriptRunsPerMessage: 10,
+        maxScriptRunsPerMessage: 10,
         maxReviewerCallsPerMessage: 10,
         dailyTokenBudget: 2_000_000,
         weeklyTokenBudget: 10_000_000
     )
 
     static let toolRoundPresets = [3, 5, 8, 10]
-    static let pythonRunPresets = [3, 5, 8, 10]
+    static let scriptRunPresets = [3, 5, 8, 10]
     static let reviewerPresets = [3, 5, 8, 10]
     static let dailyTokenPresets = [50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000]
     static let weeklyTokenPresets = [250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000]
@@ -36,7 +36,7 @@ struct UsageLimits: Codable, Equatable, Sendable {
     func clamped() -> UsageLimits {
         UsageLimits(
             maxToolRoundsPerMessage: Self.clamp(maxToolRoundsPerMessage, min: 1, max: Self.absoluteMax.maxToolRoundsPerMessage),
-            maxPythonScriptRunsPerMessage: Self.clamp(maxPythonScriptRunsPerMessage, min: 0, max: Self.absoluteMax.maxPythonScriptRunsPerMessage),
+            maxScriptRunsPerMessage: Self.clamp(maxScriptRunsPerMessage, min: 0, max: Self.absoluteMax.maxScriptRunsPerMessage),
             maxReviewerCallsPerMessage: Self.clamp(maxReviewerCallsPerMessage, min: 0, max: Self.absoluteMax.maxReviewerCallsPerMessage),
             dailyTokenBudget: Self.clamp(dailyTokenBudget, min: 0, max: Self.absoluteMax.dailyTokenBudget),
             weeklyTokenBudget: Self.clamp(weeklyTokenBudget, min: 0, max: Self.absoluteMax.weeklyTokenBudget)
@@ -66,7 +66,7 @@ struct UsageLimits: Codable, Equatable, Sendable {
 
 enum UsageLimitDimension: String, Sendable, Codable, CaseIterable {
     case toolRounds
-    case pythonScripts
+    case scriptRuns
     case reviewerCalls
     case dailyTokens
     case weeklyTokens
@@ -74,7 +74,7 @@ enum UsageLimitDimension: String, Sendable, Codable, CaseIterable {
     var title: String {
         switch self {
         case .toolRounds: return "Tool rounds"
-        case .pythonScripts: return "Python script runs"
+        case .scriptRuns: return "Script runs"
         case .reviewerCalls: return "Security reviews"
         case .dailyTokens: return "Daily token budget"
         case .weeklyTokens: return "Weekly token budget"

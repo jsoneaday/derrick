@@ -135,7 +135,7 @@ public enum PolicyUserEventFactory {
 
     public static func staticValidationDenied(
         findings: [String],
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         scriptPreview: String? = nil,
         correlationId: String? = nil
     ) -> PolicyUserEvent {
@@ -153,7 +153,7 @@ public enum PolicyUserEventFactory {
     public static func reviewerDenied(
         summary: String,
         concerns: [String],
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         failure(
@@ -169,7 +169,7 @@ public enum PolicyUserEventFactory {
     public static func scriptExecutionFailed(
         exitCode: Int32,
         stderr: String,
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -211,7 +211,7 @@ public enum PolicyUserEventFactory {
     }
 
     public static func scriptExecutionTimedOut(
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         failure(
@@ -225,7 +225,7 @@ public enum PolicyUserEventFactory {
 
     public static func scriptExecutionContainerLeaseExceeded(
         detail: String? = nil,
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         failure(
@@ -240,7 +240,7 @@ public enum PolicyUserEventFactory {
 
     public static func egressDenied(
         detail: String,
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         failure(
@@ -255,7 +255,7 @@ public enum PolicyUserEventFactory {
 
     public static func egressAccessRequest(
         host: String,
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         egressAccessRequest(hosts: [host], toolName: toolName, correlationId: correlationId)
@@ -264,7 +264,7 @@ public enum PolicyUserEventFactory {
     /// One decision for one or many hosts (mid-flight / preflight batching).
     public static func egressAccessRequest(
         hosts: [String],
-        toolName: String = "python_script_exec",
+        toolName: String = "script_exec",
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         let unique = normalizedUniqueHosts(hosts)

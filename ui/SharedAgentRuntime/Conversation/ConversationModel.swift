@@ -127,7 +127,7 @@ final class ConversationModel {
             agentsClient: agentsHost.client,
             helperReviewerModelJSONProvider: {
                 await MainActor.run {
-                    try? helperModelSettings.pythonScriptReviewerModel.encodeHelperModelWireJSON()
+                    try? helperModelSettings.scriptReviewerModel.encodeHelperModelWireJSON()
                 }
             }
         )
@@ -364,7 +364,7 @@ final class ConversationModel {
         let placer: any JobOrderPlacing = JobServiceClientOrderPlacer(from: .agent)
         // Snapshot reviewer wire JSON once at host build — never read MainActor settings inside a tool call.
         let reviewerJSON: String? = await MainActor.run {
-            try? helperModelSettings.pythonScriptReviewerModel.encodeHelperModelWireJSON()
+            try? helperModelSettings.scriptReviewerModel.encodeHelperModelWireJSON()
         }
         return try await MCPLocalBridge.make { server in
             await server.register(

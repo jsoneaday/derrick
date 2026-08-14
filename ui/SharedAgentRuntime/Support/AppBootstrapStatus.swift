@@ -159,8 +159,7 @@ final class AppBootstrapStatus: ObservableObject {
     /// Maps prewarm / Docker errors into a short title and user-facing explanation.
     static func classifyError(_ error: Error) -> (title: String, message: String) {
         let ns = error as NSError
-        let text = (ns.localizedDescription + " " + (ns.userInfo[NSLocalizedDescriptionKey] as? String ?? ""))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = ns.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = text.lowercased()
 
         if lower.contains("docker desktop is required")
@@ -197,7 +196,7 @@ final class AppBootstrapStatus: ObservableObject {
         if lower.contains("failed to build baseline") || lower.contains("failed to pull parent") {
             return (
                 "Environment Image Setup Failed",
-                "Derrick could not build or download the Python runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
+                "Derrick could not build or download the Bun runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
             )
         }
         if lower.contains("failed to create warm container")
@@ -212,7 +211,15 @@ final class AppBootstrapStatus: ObservableObject {
         if lower.contains("smoke test") || lower.contains("baseline package") {
             return (
                 "Environment Verification Failed",
-                "The runtime started but failed a basic Python environment check. Rebuild may help after updating Docker Desktop. See the debug log for technical details."
+                "The runtime started but failed a basic Bun environment check. Rebuild may help after updating Docker Desktop. See the debug log for technical details."
+            )
+        }
+        if lower.contains("could not replace its background service")
+            || lower.contains("leftover derrick")
+            || lower.contains("previous runtime") {
+            return (
+                "Initialization Failed",
+                "Derrick could not replace its background service. Quit Derrick and open it again."
             )
         }
         if lower.contains("volume") {

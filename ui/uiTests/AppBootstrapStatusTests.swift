@@ -8,7 +8,7 @@ import Testing
         let error = NSError(
             domain: "MCPServer",
             code: 503,
-            userInfo: [NSLocalizedDescriptionKey: "Docker Desktop is required for python_script_exec."]
+            userInfo: [NSLocalizedDescriptionKey: "Docker Desktop is required for script_exec."]
         )
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Docker"))
@@ -32,7 +32,7 @@ import Testing
         let error = NSError(
             domain: "XPCDockerRunner",
             code: 14,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container derrick-runner-net-px4: invalid reference format"]
+            userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container derrick-runner-bun-1-0: invalid reference format"]
         )
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Container"))

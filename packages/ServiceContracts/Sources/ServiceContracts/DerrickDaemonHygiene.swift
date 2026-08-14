@@ -105,4 +105,21 @@ public enum DerrickDaemonHygiene: Sendable {
     ) -> Bool {
         evictedAny || !hasHealthyExpectedDaemon
     }
+
+    /// Connected daemon should exit (KeepAlive re-execs) when guest runtime or binary identity differs.
+    /// A missing reported fingerprint is stale (pre-identity daemon). A missing expected fingerprint
+    /// is not — the UI could not stat its embedded binary.
+    public static func shouldRetireConnectedDaemon(
+        reportedFingerprint: String?,
+        expectedFingerprint: String?,
+        reportedGuestRuntime: String?,
+        expectedGuestRuntime: String
+    ) -> Bool {
+        if reportedGuestRuntime != expectedGuestRuntime {
+            return true
+        }
+        guard let expectedFingerprint else { return false }
+        guard let reportedFingerprint else { return true }
+        return reportedFingerprint != expectedFingerprint
+    }
 }

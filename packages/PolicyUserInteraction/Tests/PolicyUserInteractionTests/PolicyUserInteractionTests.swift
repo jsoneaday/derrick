@@ -38,15 +38,14 @@ import AppEvents
 
     @Test func factoryBuildsReadableSummaryForJSONDecodeError() {
         let stderr = """
-        Traceback (most recent call last):
-          File "/usr/lib/python3.13/json/decoder.py", line 345, in decode
-            obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-        json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+        SyntaxError: Unexpected token '<', "<html>" is not valid JSON
+            at JSON.parse (<anonymous>)
+            at handle (file:///workspace/script.js:4:18)
         """
         let event = PolicyUserEventFactory.scriptExecutionFailed(exitCode: 1, stderr: stderr)
         #expect(event.summary.localizedCaseInsensitiveContains("JSON"))
         #expect(event.summary.localizedCaseInsensitiveContains("non-JSON") || event.summary.localizedCaseInsensitiveContains("HTML"))
-        #expect(event.detail?.contains("JSONDecodeError") == true)
+        #expect(event.detail?.contains("SyntaxError") == true)
     }
 
     @Test func factoryBuildsEgressDenied() {
@@ -82,7 +81,7 @@ import AppEvents
         let bus = AppEventBus()
         let event = PolicyUserEventFactory.approvalRequired(
             summary: "Allow tool?",
-            toolName: "python_script_exec",
+            toolName: "script_exec",
             payloadPreview: "{\"x\":1}"
         )
         await bus.subscribe { anyEvent in

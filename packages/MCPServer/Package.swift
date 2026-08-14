@@ -17,7 +17,8 @@ let package = Package(
         .package(path: "../LLMAgentClient"),
         .package(path: "../DockerRunnerXPC"),
         .package(path: "../MCPToolCatalog"),
-        .package(path: "../ServiceContracts")
+        .package(path: "../ServiceContracts"),
+        .package(path: "../Plugin")
     ],
     targets: [
         .target(
@@ -28,7 +29,8 @@ let package = Package(
                 "LLMAgentClient",
                 "DockerRunnerXPC",
                 "MCPToolCatalog",
-                "ServiceContracts"
+                "ServiceContracts",
+                "Plugin"
             ],
             path: "Sources/MCPServer"
         ),

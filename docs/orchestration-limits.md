@@ -28,7 +28,7 @@ Settings → **Multi-agent** edits persisted limits. **New chat sessions** pick 
 
 - **Depth 2** matches the common pattern: orchestrator spawns workers; a worker may spawn one specialist sub-agent. Depth 0 blocks all workers; depth 1 allows only direct workers.
 - **4 children per parent** aligns with batch `agents_spawn` of a small worker set without unbounded fan-out.
-- **4 concurrent turns** keeps LLM parallelism reasonable on one Mac. It is **independent** of the Docker container pool (network max 2 + offline max 1). Many parallel workers running `python_script_exec` may queue on containers even when turn concurrency allows 4.
+- **4 concurrent turns** keeps LLM parallelism reasonable on one Mac. It is **independent** of the Docker container pool (max 3, 1 warm). Many parallel workers running `script_exec` may queue on containers even when turn concurrency allows 4.
 - **8 agents per session** = 1 user-facing + up to 7 workers/specialists — enough for typical research/delegate flows without runaway registry growth.
 - **Mailbox 64** is a safety valve for message bursts; rarely hit in normal chat.
 

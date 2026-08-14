@@ -32,16 +32,16 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                     applicationName: "ui",
                     name: "disabled-deny",
                     scope: "tool_invocation",
-                    matcherJSON: #"{"tool_name":"python_script_exec"}"#,
+                    matcherJSON: #"{"tool_name":"script_exec"}"#,
                     outcomeJSON: #"{"action":"deny","reason":"should not run"}"#,
                     priority: 1000,
                     enabled: false
                 ),
                 PolicyRule(
                     applicationName: "ui",
-                    name: "allow-python",
+                    name: "allow-script",
                     scope: "tool_invocation",
-                    matcherJSON: #"{"tool_name":"python_script_exec"}"#,
+                    matcherJSON: #"{"tool_name":"script_exec"}"#,
                     outcomeJSON: #"{"action":"allow"}"#,
                     priority: 1,
                     enabled: true
@@ -50,7 +50,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         ])
         let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
         let outcome = try await policy.evaluateToolInvocation(
-            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+            ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(outcome, .allow)
     }
@@ -59,7 +59,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         let store = MockPolicyStore(rulesByScope: [:])
         let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
         let outcome = try await policy.evaluateToolInvocation(
-            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+            ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(outcome, .deny(reason: StoreBackedToolGovernancePolicy.noRulesConfiguredReason))
     }
@@ -79,7 +79,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         ])
         let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
         let outcome = try await policy.evaluateToolInvocation(
-            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+            ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(outcome, .deny(reason: StoreBackedToolGovernancePolicy.noMatchingRuleReason))
     }
@@ -178,9 +178,9 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
             "tool_invocation": [
                 PolicyRule(
                     applicationName: "ui",
-                    name: "all-python-with-code",
+                    name: "all-script-with-code",
                     scope: "tool_invocation",
-                    matcherJSON: #"{"all":[{"tool_name":"python_script_exec"},{"argument_key":"code","argument_exists":true}]}"#,
+                    matcherJSON: #"{"all":[{"tool_name":"script_exec"},{"argument_key":"code","argument_exists":true}]}"#,
                     outcomeJSON: #"{"action":"confirm","required_fields":["review"]}"#
                 ),
                 PolicyRule(
@@ -198,7 +198,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         let withCode = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
                 sessionID: "s1",
-                toolName: "python_script_exec",
+                toolName: "script_exec",
                 argumentsJSON: #"{"code":"print(1)"}"#
             )
         )
@@ -207,7 +207,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         let withoutCode = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
                 sessionID: "s1",
-                toolName: "python_script_exec",
+                toolName: "script_exec",
                 argumentsJSON: #"{"script":"print(1)"}"#
             )
         )
@@ -289,16 +289,16 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         XCTAssertEqual(sessionTool, .allow)
 
         let otherTool = try await policy.evaluateToolInvocation(
-            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+            ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(otherTool, .deny(reason: "only session memory allowed"))
     }
 
     func test_toolPolicy_nested_combinators() async throws {
-        // (python OR shell) AND NOT (argument network_hosts exists)
+        // (script OR shell) AND NOT (argument network_hosts exists)
         let matcher = """
         {"all":[
-          {"any":[{"tool_name":"python_script_exec"},{"tool_name":"shell_exec"}]},
+          {"any":[{"tool_name":"script_exec"},{"tool_name":"shell_exec"}]},
           {"not":{"argument_key":"network_hosts","argument_exists":true}}
         ]}
         """
@@ -323,23 +323,23 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         ])
         let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
 
-        let offlinePython = try await policy.evaluateToolInvocation(
+        let offlineScript = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
                 sessionID: "s1",
-                toolName: "python_script_exec",
+                toolName: "script_exec",
                 argumentsJSON: #"{"code":"x"}"#
             )
         )
-        XCTAssertEqual(offlinePython, .confirm(requiredFields: ["offline_ok"]))
+        XCTAssertEqual(offlineScript, .confirm(requiredFields: ["offline_ok"]))
 
-        let networkedPython = try await policy.evaluateToolInvocation(
+        let networkedScript = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
                 sessionID: "s1",
-                toolName: "python_script_exec",
+                toolName: "script_exec",
                 argumentsJSON: #"{"code":"x","network_hosts":["a.com"]}"#
             )
         )
-        XCTAssertEqual(networkedPython, .allow)
+        XCTAssertEqual(networkedScript, .allow)
 
         let otherTool = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(sessionID: "s1", toolName: "read_file", argumentsJSON: "{}")
@@ -374,7 +374,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         XCTAssertEqual(sessionTool, .confirm(requiredFields: ["ok"]))
 
         let otherTool = try await policy.evaluateToolInvocation(
-            ToolInvocationEvent(sessionID: "s1", toolName: "python_script_exec", argumentsJSON: "{}")
+            ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(otherTool, .allow)
     }

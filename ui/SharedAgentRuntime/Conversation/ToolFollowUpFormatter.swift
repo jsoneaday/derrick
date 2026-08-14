@@ -1,5 +1,6 @@
 import Foundation
 import MemorySystem
+import MCPToolCatalog
 
 /// Builds slim tool payloads for the next agent turn.
 /// Full tool JSON stays in debug logs and `ToolCallRecord.result`; only this formatter shapes model context.
@@ -32,9 +33,9 @@ enum ToolFollowUpFormatter {
             """
         }
 
-        // Prefer structured python_script_exec JSON when present.
-        if let python = decodePythonResult(from: trimmed) {
-            return formatPythonResult(toolName: toolName, result: python, stdoutCap: stdoutCap)
+        // Prefer structured script_exec JSON when present.
+        if let script = decodeScriptResult(from: trimmed) {
+            return formatScriptResult(toolName: toolName, result: script, stdoutCap: stdoutCap)
         }
 
         // Fallback: strip wrapper noise and cap opaque text (never pass raw multi-kb JSON dumps when possible).
@@ -50,18 +51,18 @@ enum ToolFollowUpFormatter {
     // MARK: - Request description
 
     static func slimRequestDescription(name: String, arguments: [String: String]) -> String {
-        if name == "python_script_exec" || name.hasSuffix("python_script_exec") {
-            return slimPythonRequestDescription(name: name, arguments: arguments)
+        if AllowedMCPTool.isScriptExec(name) || name.hasSuffix("script_exec") {
+            return slimScriptRequestDescription(name: name, arguments: arguments)
         }
         return slimGenericRequestDescription(name: name, arguments: arguments)
     }
 
-    private static func slimPythonRequestDescription(name: String, arguments: [String: String]) -> String {
+    private static func slimScriptRequestDescription(name: String, arguments: [String: String]) -> String {
         var parts: [String] = [name]
         if let allowNetwork = arguments["allow_network"] ?? arguments["allowNetwork"] {
             parts.append("allow_network=\(allowNetwork)")
         }
-        if let packages = arguments["python_packages"] ?? arguments["pythonPackages"] ?? arguments["packages"] {
+        if let packages = arguments["packages"] {
             let count = packageCount(from: packages)
             if count > 0 {
                 parts.append("packages=\(count)")
@@ -102,10 +103,10 @@ enum ToolFollowUpFormatter {
         return trimmed.split(separator: ",").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
     }
 
-    // MARK: - Python result
+    // MARK: - Script result
 
     /// Fields we care about for agent context (ignores timing/reviewer/verifier).
-    struct PythonSlimDecode: Decodable, Equatable {
+    struct ScriptSlimDecode: Decodable, Equatable {
         var status: String?
         var failureStage: String?
         var stdout: String?
@@ -115,7 +116,7 @@ enum ToolFollowUpFormatter {
         var validationFindings: [String]?
     }
 
-    static func decodePythonResult(from raw: String) -> PythonSlimDecode? {
+    static func decodeScriptResult(from raw: String) -> ScriptSlimDecode? {
         // result may be prefixed with "toolName: " from some summary paths
         let jsonCandidate: String
         if let brace = raw.firstIndex(of: "{") {
@@ -124,19 +125,19 @@ enum ToolFollowUpFormatter {
             jsonCandidate = raw
         }
         guard let data = jsonCandidate.data(using: .utf8) else { return nil }
-        guard let decoded = try? JSONDecoder().decode(PythonSlimDecode.self, from: data) else { return nil }
-        // Require at least one execution-shaped field so random JSON objects are not treated as python results.
-        let looksLikePython =
+        guard let decoded = try? JSONDecoder().decode(ScriptSlimDecode.self, from: data) else { return nil }
+        // Require at least one execution-shaped field so random JSON objects are not treated as script results.
+        let looksLikeScript =
             decoded.stdout != nil
             || decoded.stderr != nil
             || decoded.exitCode != nil
             || decoded.timedOut != nil
             || decoded.failureStage != nil
             || (decoded.status.map { ["completed", "failed", "timeout", "blocked"].contains($0) } ?? false)
-        return looksLikePython ? decoded : nil
+        return looksLikeScript ? decoded : nil
     }
 
-    static func formatPythonResult(toolName: String, result: PythonSlimDecode, stdoutCap: Int) -> String {
+    static func formatScriptResult(toolName: String, result: ScriptSlimDecode, stdoutCap: Int) -> String {
         var lines: [String] = ["tool: \(toolName)"]
 
         if let status = result.status, !status.isEmpty {
@@ -189,7 +190,7 @@ enum ToolFollowUpFormatter {
         let filtered = text.split(separator: "\n", omittingEmptySubsequences: false).filter { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { return true }
-            if trimmed.hasPrefix("[python_script_exec]") { return false }
+            if trimmed.hasPrefix("[script_exec]") { return false }
             if trimmed.hasPrefix("[TIME_METRIC]") { return false }
             // Common package-verify noise without the bracket prefix (defensive).
             if trimmed.localizedCaseInsensitiveContains("baseline package verification") { return false }

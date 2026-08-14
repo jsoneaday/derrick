@@ -67,6 +67,11 @@ public final class AgentServiceClient: @unchecked Sendable {
         return connection != nil && isReady
     }
 
+    /// Drop a dead Mach connection so the next ensure-up opens a new one (e.g. after daemon eviction).
+    public func dropConnectionForReconnect() {
+        invalidate()
+    }
+
     /// Connect (launch-on-demand), bootstrap DB/logs, return health. Retries a few times.
     /// Use at app startup (and when `ensureReadyForTurn` finds the link dead).
     public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {

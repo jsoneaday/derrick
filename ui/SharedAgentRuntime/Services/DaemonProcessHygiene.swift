@@ -8,6 +8,142 @@ public enum DaemonProcessHygiene {
     private static let postKillWaitNanoseconds: UInt64 = 400_000_000
     private static let acceptedMtimeDefaultsKey = "derrick.daemon.acceptedEmbeddedMtime"
 
+    /// After XPC health: ask a stale connected daemon to exit so launchd KeepAlive re-execs.
+    /// Sandboxed `kill(pid, 0)` cannot see JobKeepAlive — liveness is XPC health only.
+    /// Returns true when the caller should drop its connection and reconnect.
+    @discardableResult
+    public static func evictIfStaleGuestRuntime(_ health: ServiceHealthReport) async -> Bool {
+        guard isStaleConnectedDaemon(health) else {
+            debugLog(
+                "[DaemonHygiene] connected pid=\(health.pid) guestRuntime=\(health.guestRuntimeImage ?? "?") fingerprint=\(health.executableFingerprint ?? "?")"
+            )
+            return false
+        }
+        debugLog(
+            "[DaemonHygiene] stale connected daemon pid=\(health.pid) reportedRuntime=\(health.guestRuntimeImage ?? "none") reportedFP=\(health.executableFingerprint ?? "none") expectedFP=\(expectedFingerprint() ?? "none") — retiring"
+        )
+        fputs(
+            "[DaemonHygiene] stale connected daemon pid=\(health.pid) reportedRuntime=\(health.guestRuntimeImage ?? "none") reportedFP=\(health.executableFingerprint ?? "none")\n",
+            stderr
+        )
+        // Pre-identity daemons have no `retire` selector. Sandboxed kill() cannot
+        // confirm death — if XPC retire is missing or health still shows this pid, bootout.
+        let retired: Bool
+        if health.executableFingerprint == nil {
+            retired = false
+        } else {
+            retired = await requestRetirementOverXPC()
+            try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
+        }
+        let stillStale = retired ? await stillSameStaleProcess(pid: health.pid) : true
+        if stillStale {
+            fputs(
+                "[DaemonHygiene] retire xpc=\(retired) still pid=\(health.pid) — bootout+reload\n",
+                stderr
+            )
+            JobServiceLoginAgent.bootoutRegisteredDaemon()
+            await MainActor.run {
+                try? JobServiceLoginAgent.ensureRegistered()
+            }
+            JobServiceLoginAgent.reloadRegisteredDaemon()
+            await waitUntilReplacementDaemon(replacing: health.pid)
+        } else {
+            debugLog("[DaemonHygiene] retired pid=\(health.pid) xpc=\(retired) — KeepAlive will re-exec")
+        }
+        return true
+    }
+
+    public static func isStaleConnectedDaemon(_ health: ServiceHealthReport) -> Bool {
+        DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+            reportedFingerprint: health.executableFingerprint,
+            expectedFingerprint: expectedFingerprint(),
+            reportedGuestRuntime: health.guestRuntimeImage,
+            expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+        )
+    }
+
+    private static func expectedFingerprint() -> String? {
+        DerrickDaemonBinaryIdentity.snapshot(
+            atPath: JobServiceLoginAgent.preflightPaths().executable.path
+        )?.fingerprint
+    }
+
+    private static func stillSameStaleProcess(pid: Int32) async -> Bool {
+        guard let probe = await probeDaemonHealth() else {
+            return false
+        }
+        return probe.pid == pid && isStaleConnectedDaemon(probe)
+    }
+
+    private static func waitUntilReplacementDaemon(replacing pid: Int32) async {
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let probe = await probeDaemonHealth() else { continue }
+            if probe.pid != pid && !isStaleConnectedDaemon(probe) {
+                debugLog("[DaemonHygiene] replacement daemon pid=\(probe.pid) fingerprint=\(probe.executableFingerprint ?? "?")")
+                return
+            }
+        }
+        fputs("[DaemonHygiene] replacement daemon not confirmed after reload\n", stderr)
+    }
+
+    private static func requestRetirementOverXPC() async -> Bool {
+        await invokeDaemon { proxy, once in
+            proxy.retire { _ in
+                once.finish(true)
+            }
+        }
+    }
+
+    private static func probeDaemonHealth() async -> ServiceHealthReport? {
+        await withCheckedContinuation { (cont: CheckedContinuation<ServiceHealthReport?, Never>) in
+            let box = OptionalResume(cont)
+            nonisolated(unsafe) let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+            conn.remoteObjectInterface = NSXPCInterface(with: DerrickDaemonXPC.self)
+            conn.invalidationHandler = { box.finish(nil) }
+            conn.resume()
+            guard let proxy = conn.remoteObjectProxyWithErrorHandler({ error in
+                fputs("[DaemonHygiene] health probe error: \(error.localizedDescription)\n", stderr)
+                box.finish(nil)
+            }) as? DerrickDaemonXPC else {
+                conn.invalidate()
+                box.finish(nil)
+                return
+            }
+            proxy.health { data in
+                let report = try? DerrickDaemonXPCCodec.decodeHealth(data as Data)
+                box.finish(report)
+                conn.invalidate()
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                box.finish(nil)
+                conn.invalidate()
+            }
+        }
+    }
+
+    private static func invokeDaemon(_ body: (DerrickDaemonXPC, OnceResume) -> Void) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let once = OnceResume(cont)
+            nonisolated(unsafe) let conn = NSXPCConnection(machServiceName: DerrickServiceID.daemon.machServiceName)
+            conn.remoteObjectInterface = NSXPCInterface(with: DerrickDaemonXPC.self)
+            conn.resume()
+            guard let proxy = conn.remoteObjectProxyWithErrorHandler({ error in
+                fputs("[DaemonHygiene] retire proxy error: \(error.localizedDescription)\n", stderr)
+                once.finish(false)
+            }) as? DerrickDaemonXPC else {
+                conn.invalidate()
+                once.finish(false)
+                return
+            }
+            body(proxy, once)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                once.finish(false)
+                conn.invalidate()
+            }
+        }
+    }
+
     /// Kill stray daemons and stale embedded builds, then kickstart launchd when needed.
     public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async {
         guard !DerrickProcessRole.isDaemon else { return }
@@ -124,8 +260,8 @@ public enum DaemonProcessHygiene {
             try? JobServiceLoginAgent.ensureRegistered()
         }
         try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
-        JobServiceLoginAgent.kickstartRegisteredDaemon()
-        debugLog("[DaemonHygiene] kickstart requested after evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)")
+        JobServiceLoginAgent.reloadRegisteredDaemon()
+        debugLog("[DaemonHygiene] reload requested after evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)")
     }
 
     // MARK: - Process scan
@@ -139,9 +275,11 @@ public enum DaemonProcessHygiene {
     private static func listJobKeepAliveProcesses() -> [RunningDaemon] {
         pgrepPIDs().compactMap { pid in
             guard let path = executablePath(forPID: pid) else { return nil }
-            guard URL(fileURLWithPath: path).lastPathComponent == JobServiceLoginAgent.executableName else {
-                return nil
-            }
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            let looksLikeDaemon = name == JobServiceLoginAgent.executableName
+                || path.contains(DerrickAppSupport.loginItemDaemonPathMarker)
+                || path.contains("/JobKeepAlive.app/")
+            guard looksLikeDaemon else { return nil }
             return RunningDaemon(
                 pid: pid,
                 executablePath: path,
@@ -153,7 +291,7 @@ public enum DaemonProcessHygiene {
     private static func pgrepPIDs() -> [pid_t] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-x", JobServiceLoginAgent.executableName]
+        process.arguments = ["-f", "JobKeepAlive"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
@@ -171,6 +309,10 @@ public enum DaemonProcessHygiene {
         return text
             .split(whereSeparator: \.isNewline)
             .compactMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    public static func debugExecutablePath(pid: Int32) -> String? {
+        executablePath(forPID: pid)
     }
 
     private static func executablePath(forPID pid: pid_t) -> String? {
@@ -203,9 +345,53 @@ public enum DaemonProcessHygiene {
             kill(pid, SIGKILL)
             fputs("[DaemonHygiene] sigkill pid=\(pid)\n", stderr)
         }
+        if kill(pid, 0) == 0 {
+            let killer = Process()
+            killer.executableURL = URL(fileURLWithPath: "/bin/kill")
+            killer.arguments = ["-9", "\(pid)"]
+            killer.standardError = Pipe()
+            killer.standardOutput = Pipe()
+            try? killer.run()
+            killer.waitUntilExit()
+            fputs("[DaemonHygiene] /bin/kill -9 pid=\(pid) status=\(killer.terminationStatus)\n", stderr)
+        }
     }
 
     private static func modificationDate(_ url: URL) -> Date? {
         try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+    }
+}
+
+private final class OnceResume: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func finish(_ value: Bool) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: value)
+    }
+}
+
+private final class OptionalResume: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ServiceHealthReport?, Never>?
+
+    init(_ continuation: CheckedContinuation<ServiceHealthReport?, Never>) {
+        self.continuation = continuation
+    }
+
+    func finish(_ value: ServiceHealthReport?) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: value)
     }
 }

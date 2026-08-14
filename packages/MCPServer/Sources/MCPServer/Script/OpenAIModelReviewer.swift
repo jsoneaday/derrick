@@ -8,7 +8,7 @@
 import Foundation
 import LLMAgentClient
 
-public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
+public struct OpenAIScriptReviewer: ScriptReviewer {
     public let name: String
     private let model: OpenAIModel
     private let client: OpenAIAgentClient
@@ -22,15 +22,15 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
     public static func fromEnvironment(
         variable: String = "OPENAI_API_KEY",
         model: OpenAIModel = .gpt56Luna
-    ) -> OpenAIPythonScriptReviewer? {
+    ) -> OpenAIScriptReviewer? {
         guard let apiKey = ProcessInfo.processInfo.environment[variable], !apiKey.isEmpty else {
             return nil
         }
-        return OpenAIPythonScriptReviewer(apiKey: apiKey, model: model)
+        return OpenAIScriptReviewer(apiKey: apiKey, model: model)
     }
 
-    public func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
-        let userContent = PythonScriptReviewerRuntime.reviewInput(from: args)
+    public func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
+        let userContent = ScriptReviewerRuntime.reviewInput(from: args)
         let request = AgentRequest(
             messages: [
                 .init(role: .system, content: ReviewerSystemPrompt),
@@ -39,7 +39,7 @@ public struct OpenAIPythonScriptReviewer: PythonScriptReviewer {
             temperature: 0
         )
         let stream = client.stream(request, model: model)
-        return try await PythonScriptReviewerRuntime.runStreamedReview(
+        return try await ScriptReviewerRuntime.runStreamedReview(
             modelLabel: model.rawValue,
             args: args,
             stream: stream

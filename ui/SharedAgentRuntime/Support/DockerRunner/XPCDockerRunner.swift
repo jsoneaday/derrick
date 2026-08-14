@@ -126,7 +126,7 @@ public final class XPCDockerRunnerState: @unchecked Sendable {
 ///
 /// MCPService does **not** use this type — it uses `MCPServiceDockerHelperRunner` over the
 /// helper peer endpoint handed off by the UI after prewarm.
-public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
+public final class XPCDockerRunner: ScriptRunner, @unchecked Sendable {
     public static let shared = XPCDockerRunner()
 
     private static let serviceName = "derrick.ui.DockerRunnerHelper"
@@ -281,7 +281,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             group.addTask {
                 try await Task.sleep(nanoseconds: Self.prewarmWaitCeilingSeconds * 1_000_000_000)
                 let message =
-                    "Docker environment setup timed out after \(Self.prewarmWaitCeilingSeconds)s while preparing the Python runtime. Keep Docker Desktop running and retry — first install downloads Chromium and can take several minutes."
+                    "Docker environment setup timed out after \(Self.prewarmWaitCeilingSeconds)s while preparing the Bun runtime. Keep Docker Desktop running and retry."
                 debugLog("Docker prewarm wait hit \(Self.prewarmWaitCeilingSeconds)s ceiling — failing wait (not forcing ready).")
                 throw NSError(
                     domain: "XPCDockerRunner",
@@ -486,23 +486,6 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
     }
 
-    private func ensureVolume(_ name: String) async throws {
-        let inspect = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerVolumeInspectArguments(name),
-            timeoutSeconds: 15
-        )
-        if inspect.exitCode == 0 { return }
-        debugLog("Pre-warming: Creating volume '\(name)'...")
-        let create = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerVolumeCreateArguments(name),
-            timeoutSeconds: 15
-        )
-        if create.exitCode != 0 {
-            let stderr = String(decoding: create.stderr, as: UTF8.self)
-            throw NSError(domain: "XPCDockerRunner", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to create volume \(name): \(stderr)"])
-        }
-    }
-
     private func ensureBaselineImage() async throws {
         let inspect = try await runXPCCommand(
             dockerArguments: DockerScriptPreparer.dockerImageInspectArguments(DockerScriptPreparer.defaultImage),
@@ -520,7 +503,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         if parentInspect.exitCode != 0 {
             await reportBootstrap(
                 phase: .preparingImage,
-                message: "Downloading base Python image…"
+                message: "Downloading Bun runtime image…"
             )
             debugLog("Pre-warming: Pulling parent image '\(DockerScriptPreparer.parentImage)'...")
             let pull = try await runXPCCommand(
@@ -535,7 +518,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         await reportBootstrap(
             phase: .preparingImage,
-            message: "Building Python runtime (includes Chromium). First install can take several minutes…"
+            message: "Building Bun script runtime. First install can take a minute…"
         )
         debugLog("Pre-warming: Building baseline image '\(DockerScriptPreparer.defaultImage)'...")
         guard let dockerfileData = DockerScriptPreparer.baselineDockerfile.data(using: .utf8) else {
@@ -553,7 +536,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
                 let elapsedLabel = minutes > 0 ? "\(minutes)m \(seconds)s" : "\(seconds)s"
                 await self.reportBootstrap(
                     phase: .preparingImage,
-                    message: "Still building Python runtime… (\(elapsedLabel) elapsed). Chromium download is large on first install."
+                    message: "Still building Bun runtime… (\(elapsedLabel) elapsed)."
                 )
             }
         }
@@ -568,7 +551,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             let stderr = String(decoding: build.stderr, as: UTF8.self)
             throw NSError(domain: "XPCDockerRunner", code: 13, userInfo: [NSLocalizedDescriptionKey: "Failed to build baseline image: \(stderr)"])
         }
-        await reportBootstrap(phase: .preparingImage, message: "Python runtime image ready.")
+        await reportBootstrap(phase: .preparingImage, message: "Bun runtime image ready.")
         debugLog("Pre-warming: Baseline image built successfully.")
     }
 
@@ -597,34 +580,6 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
     }
 
-    private func smokeTestBaseline() async throws {
-        let smoke = DockerScriptPreparer.makeBaselineSmokeScript()
-        guard let stdinData = smoke.data(using: .utf8) else {
-            throw NSError(domain: "XPCDockerRunner", code: 16, userInfo: [NSLocalizedDescriptionKey: "Failed to encode baseline smoke script."])
-        }
-        debugLog("Pre-warming: Smoke-testing baseline packages via docker exec...")
-        let response = try await runXPCCommand(
-            dockerArguments: DockerScriptPreparer.dockerExecArguments(allowNetwork: true),
-            stdinData: stdinData,
-            timeoutSeconds: 60
-        )
-        let stdout = String(decoding: response.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        let stderr = String(decoding: response.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !stdout.isEmpty {
-            debugLog("[baseline smoke stdout] \(stdout)")
-        }
-        if !stderr.isEmpty {
-            debugLog("[baseline smoke stderr] \(stderr)")
-        }
-        if let launchError = response.launchError {
-            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: launchError])
-        }
-        if response.exitCode != 0 {
-            throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: "Baseline package smoke test failed with exit code \(response.exitCode)."])
-        }
-        debugLog("Pre-warming: Baseline package smoke test succeeded.")
-    }
-
     private func prewarmEnvironment() async {
         debugLog("Checking if Docker environment needs pre-warming...")
         XPCDockerRunnerState.shared.isCreating = true
@@ -633,11 +588,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
             await reportBootstrap(phase: .checkingDocker, message: "Checking Docker Desktop…")
             try await probeDockerAvailable()
 
-            await reportBootstrap(phase: .preparingVolumes, message: "Preparing Docker volumes…")
-            try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
-            try await ensureVolume(DockerScriptPreparer.packagesVolume)
-
-            await reportBootstrap(phase: .preparingImage, message: "Preparing Python runtime image…")
+            await reportBootstrap(phase: .preparingImage, message: "Preparing Bun script runtime…")
             try await ensureBaselineImage()
 
             await reportBootstrap(phase: .startingContainers, message: "Starting secure runtime containers…")
@@ -713,8 +664,6 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
     /// Ensures volumes, image, and pool are ready even if app-start prewarm failed or was still running.
     private func ensureReadyForRun() async throws {
         if !prewarmState.isCompleted() {
-            try await ensureVolume(DockerScriptPreparer.pipCacheVolume)
-            try await ensureVolume(DockerScriptPreparer.packagesVolume)
             try await ensureBaselineImage()
             try await prewarmNetworkPool()
             prewarmState.markCompleted()
@@ -729,9 +678,9 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         script: String,
         timeoutSeconds: Int,
         allowNetwork: Bool,
-        pythonPackages: [String],
+        packages: [String],
         allowDependencyInstall: Bool
-    ) async throws -> PythonScriptExecutionResult {
+    ) async throws -> ScriptExecutionResult {
         let totalStarted = Date()
         if XPCDockerRunnerState.shared.isCreating {
             debugLog("XPC run request received while script environment is being created.")
@@ -741,22 +690,16 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         let ensureStarted = Date()
         try await ensureReadyForRun()
-        let ensureMS = PythonScriptPhaseTiming.elapsedMS(from: ensureStarted)
-        debugLog("[TIME_METRIC] python_script_exec ensure_ms=\(ensureMS)")
+        let ensureMS = ScriptPhaseTiming.elapsedMS(from: ensureStarted)
+        debugLog("[TIME_METRIC] script_exec ensure_ms=\(ensureMS)")
 
-        let extras = DockerScriptPreparer.extraPackages(from: pythonPackages)
-        debugLog("Extra (non-baseline) python packages: \(extras.isEmpty ? "(none)" : extras.joined(separator: ", "))")
+        debugLog("Packages: \(packages.isEmpty ? "(none)" : packages.joined(separator: ", "))")
         let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: timeoutSeconds)
         debugLog("Request flags: allowNetwork=\(allowNetwork), allowDependencyInstall=\(allowDependencyInstall), timeoutSeconds=\(effectiveTimeout)")
-        let executionScript = DockerScriptPreparer.makeExecutionScript(
-            script: script,
-            installPackages: extras,
-            allowDependencyInstall: allowDependencyInstall,
-            nonBaselinePackages: extras
-        )
-        let scriptMetrics = PythonScriptPhaseTiming.scriptMetrics(script)
+        let executionScript = script
+        let scriptMetrics = ScriptPhaseTiming.scriptMetrics(script)
         debugLog(
-            "[python_script_exec] wrapper size: chars=\(executionScript.utf8.count) script_chars=\(scriptMetrics.chars) script_lines=\(scriptMetrics.lines)"
+            "[script_exec] wrapper size: chars=\(executionScript.utf8.count) script_chars=\(scriptMetrics.chars) script_lines=\(scriptMetrics.lines)"
         )
         guard let stdinData = executionScript.data(using: .utf8) else {
             throw NSError(domain: "XPCDockerRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode execution script."])
@@ -799,8 +742,8 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         }
         debugLog("Received response from XPC helper.")
 
-        let execMS = PythonScriptPhaseTiming.elapsedMS(from: execStarted)
-        debugLog("[TIME_METRIC] python_script_exec exec_ms=\(execMS)")
+        let execMS = ScriptPhaseTiming.elapsedMS(from: execStarted)
+        debugLog("[TIME_METRIC] script_exec exec_ms=\(execMS)")
 
         await MainActor.run {
             debugLog("--- Helper Logs ---")
@@ -818,14 +761,14 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
 
         let stdout = String(decoding: response.stdout, as: UTF8.self)
         let stderr = String(decoding: response.stderr, as: UTF8.self)
-        let totalMS = PythonScriptPhaseTiming.elapsedMS(from: totalStarted)
+        let totalMS = ScriptPhaseTiming.elapsedMS(from: totalStarted)
 
         if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: response.exitCode) {
             debugLog("Docker unavailable message detected: \(dockerMessage)")
             throw NSError(domain: "MCPServer", code: 503, userInfo: [NSLocalizedDescriptionKey: dockerMessage])
         }
 
-        let phaseTiming = PythonScriptPhaseTiming(
+        let phaseTiming = ScriptPhaseTiming(
             ensureMS: ensureMS,
             execMS: execMS,
             totalMS: totalMS,
@@ -836,7 +779,7 @@ public final class XPCDockerRunner: PythonScriptRunner, @unchecked Sendable {
         debugLog("\(phaseTiming.summaryLine) runner=xpc")
         debugLog("XPC run request finished successfully.")
 
-        return PythonScriptExecutionResult.runnerOutcome(
+        return ScriptExecutionResult.runnerOutcome(
             timedOut: response.timedOut,
             exitCode: response.exitCode,
             stdout: stdout,

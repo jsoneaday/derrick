@@ -4,17 +4,17 @@ import Testing
 @testable import ui
 
 @Suite struct ToolFollowUpFormatterTests {
-    @Test func stripsPythonWrapperLinesFromStdout() {
+    @Test func stripsScriptWrapperLinesFromStdout() {
         let raw = """
-        [python_script_exec] wiped /tmp and /var/tmp
-        [python_script_exec] verified baseline package: requests -> requests
+        [script_exec] wiped /tmp and /var/tmp
+        [script_exec] verified baseline package: requests -> requests
         real data line
-        [TIME_METRIC] python_script_exec total_ms=1
+        [TIME_METRIC] script_exec total_ms=1
         more data
         """
         let cleaned = ToolFollowUpFormatter.stripWrapperLines(from: raw)
         #expect(cleaned == "real data line\nmore data")
-        #expect(!cleaned.contains("[python_script_exec]"))
+        #expect(!cleaned.contains("[script_exec]"))
         #expect(!cleaned.contains("[TIME_METRIC]"))
     }
 
@@ -26,7 +26,7 @@ import Testing
         #expect(ToolFollowUpFormatter.cap("short", maxChars: 40) == "short")
     }
 
-    @Test func slimsPythonJSONDroppingReviewerAndTiming() throws {
+    @Test func slimsScriptJSONDroppingReviewerAndTiming() throws {
         let json = """
         {
           "status": "completed",
@@ -41,7 +41,7 @@ import Testing
             "concerns": ["noise"],
             "summary": "ok"
           },
-          "stdout": "[python_script_exec] wiped /tmp and /var/tmp\\nHELLO_WORLD\\n",
+          "stdout": "[script_exec] wiped /tmp and /var/tmp\\nHELLO_WORLD\\n",
           "stderr": "",
           "exitCode": 0,
           "timedOut": false,
@@ -58,8 +58,8 @@ import Testing
           }
         }
         """
-        let slim = ToolFollowUpFormatter.slim(toolName: "python_script_exec", rawResult: json, stdoutCap: 4_000)
-        #expect(slim.contains("tool: python_script_exec"))
+        let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json, stdoutCap: 4_000)
+        #expect(slim.contains("tool: script_exec"))
         #expect(slim.contains("status: completed"))
         #expect(slim.contains("exitCode: 0"))
         #expect(slim.contains("timedOut: false"))
@@ -73,12 +73,12 @@ import Testing
         #expect(!slim.contains("failureStage"))
     }
 
-    @Test func capsStdoutInPythonSlimResult() {
+    @Test func capsStdoutInScriptSlimResult() {
         let big = String(repeating: "x", count: 6_000)
         let json = """
         {"status":"completed","stdout":"\(big)","stderr":"","exitCode":0,"timedOut":false,"failureStage":"none"}
         """
-        let slim = ToolFollowUpFormatter.slim(toolName: "python_script_exec", rawResult: json, stdoutCap: 100)
+        let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json, stdoutCap: 100)
         #expect(slim.contains("…[truncated]…"))
         #expect(slim.count < 6_000)
     }
@@ -89,33 +89,33 @@ import Testing
           "status": "failed",
           "failureStage": "execution",
           "stdout": "",
-          "stderr": "[python_script_exec] Syntax error: bad\\nTraceback (most recent call last):\\n  File x",
+          "stderr": "[script_exec] Syntax error: bad\\nTraceback (most recent call last):\\n  File x",
           "exitCode": 1,
           "timedOut": false
         }
         """
-        let slim = ToolFollowUpFormatter.slim(toolName: "python_script_exec", rawResult: json)
+        let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json)
         #expect(slim.contains("failureStage: execution"))
         #expect(slim.contains("stderr:"))
         #expect(slim.contains("Traceback"))
-        #expect(!slim.contains("[python_script_exec] Syntax error"))
+        #expect(!slim.contains("[script_exec] Syntax error"))
     }
 
-    @Test func pythonRequestOmitsFullScriptBody() {
+    @Test func scriptRequestOmitsFullScriptBody() {
         let script = """
         import json
         print(1)
         print(2)
         """
         let line = ToolFollowUpFormatter.slimRequestDescription(
-            name: "python_script_exec",
+            name: "script_exec",
             arguments: [
                 "allow_network": "true",
                 "script": script,
-                "python_packages": #"["requests"]"#
+                "packages": #"["requests"]"#
             ]
         )
-        #expect(line.contains("python_script_exec"))
+        #expect(line.contains("script_exec"))
         #expect(line.contains("allow_network=true"))
         #expect(line.contains("script_lines="))
         #expect(line.contains("packages=1"))
@@ -126,7 +126,7 @@ import Testing
     @Test func slimToolResultsUsesRecordsAndKeepsFullResultElsewhere() {
         let full = #"{"status":"completed","stdout":"answer-42","stderr":"","exitCode":0,"timedOut":false,"failureStage":"none","reviewerAssessment":{"alignedWithRequest":true,"confidence":1,"suggestedAction":"allow","concerns":[],"summary":"ok"},"phaseTiming":{"staticValidateMS":1,"reviewerMS":1,"ensureMS":1,"execMS":1,"totalMS":4,"scriptCharCount":1,"scriptLineCount":1,"wrapperCharCount":1}}"#
         let record = ToolCallRecord(
-            name: "python_script_exec",
+            name: "script_exec",
             arguments: ["script": "print('answer-42')\n"],
             result: full
         )
@@ -140,17 +140,17 @@ import Testing
         #expect(!slim.contains("phaseTiming"))
 
         let request = ToolFollowUpFormatter.slimToolRequestLine(records: [record])
-        #expect(request.contains("python_script_exec"))
+        #expect(request.contains("script_exec"))
         #expect(!request.contains("print('answer-42')"))
     }
 
     @Test func nonJSONResultIsStillStrippedAndCapped() {
         let noise = """
-        [python_script_exec] wiped /tmp and /var/tmp
+        [script_exec] wiped /tmp and /var/tmp
         \(String(repeating: "z", count: 50))
         """
         let slim = ToolFollowUpFormatter.slim(toolName: "other_tool", rawResult: noise, stdoutCap: 20)
-        #expect(!slim.contains("[python_script_exec]"))
+        #expect(!slim.contains("[script_exec]"))
         #expect(slim.contains("…[truncated]…"))
         #expect(slim.contains("tool: other_tool"))
     }

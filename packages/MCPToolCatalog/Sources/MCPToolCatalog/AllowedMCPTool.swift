@@ -5,7 +5,7 @@ import Foundation
 /// This is the **tool catalog** (what exists), not **policy** (what actions are allowed).
 /// Add a case here when introducing a new first-class tool; wire registration + policy allows from `allCases`.
 public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
-    case pythonScriptExec = "python_script_exec"
+    case scriptExec = "script_exec"
     case sessionMemorySearch = "session_memory_search"
     case agentsSpawn = "agents_spawn"
     case agentsCompleteTask = "agents_complete_task"
@@ -20,10 +20,14 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
 
+    public static func isScriptExec(_ name: String) -> Bool {
+        name == scriptExec.rawValue
+    }
+
     public var defaultDescription: String {
         switch self {
-        case .pythonScriptExec:
-            return "Run declared Python script in a constrained Docker container after verification."
+        case .scriptExec:
+            return "Run declared JavaScript (Bun) in a constrained Docker container after verification. Use netFetch for HTTP; the host performs the request."
         case .sessionMemorySearch:
             return "Search prior session memory entries with optional query and paging."
         case .agentsSpawn:

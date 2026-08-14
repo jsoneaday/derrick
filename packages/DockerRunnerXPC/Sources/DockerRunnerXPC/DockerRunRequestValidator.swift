@@ -148,6 +148,12 @@ public enum DockerRunRequestValidator: Sendable {
                 return .disallowedDockerSubcommand("image \(dockerArgs.dropFirst().first ?? "<missing>")")
             }
         }
+        if subcommand == "network" {
+            guard let second = dockerArgs.dropFirst().first,
+                  DockerHostLaunch.allowedNetworkSubcommands.contains(second) else {
+                return .disallowedDockerSubcommand("network \(dockerArgs.dropFirst().first ?? "<missing>")")
+            }
+        }
 
         var index = 0
         while index < dockerArgs.count {

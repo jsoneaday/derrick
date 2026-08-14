@@ -1,8 +1,11 @@
-# ADR: Docker-only Python script runtime
+# ADR: Docker-only guest script runtime (archived)
 
-**Status:** Accepted  
+**Status:** Superseded  
 **Date:** 2026-08-11  
+**Superseded by:** [adr-bun-script-runtime.md](adr-bun-script-runtime.md) (2026-08-13) — Bun, one container style, host-side blacklist egress  
 **Supersedes:** Experimental Apple Container (`Containerization` / `container` CLI) integration (never shipped)
+
+This file is an archive of the previous guest-language decision. Do not implement from it.
 
 ## Context
 

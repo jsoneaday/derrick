@@ -5,17 +5,17 @@ import ServiceContracts
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
-    private struct StubPythonRunner: PythonScriptRunner {
+    private struct StubScriptRunner: ScriptRunner {
         func run(
             script: String,
             timeoutSeconds: Int,
             allowNetwork: Bool,
-            pythonPackages: [String],
+            packages: [String],
             allowDependencyInstall: Bool
-        ) async throws -> PythonScriptExecutionResult {
-            _ = pythonPackages
+        ) async throws -> ScriptExecutionResult {
+            _ = packages
             _ = allowDependencyInstall
-            return PythonScriptExecutionResult(
+            return ScriptExecutionResult(
                 status: .completed,
                 decision: .allow,
                 failureStage: .none,
@@ -27,7 +27,7 @@ import ServiceContracts
                 exitCode: 0,
                 timedOut: false,
                 durationMS: 1,
-                phaseTiming: PythonScriptPhaseTiming(
+                phaseTiming: ScriptPhaseTiming(
                     ensureMS: 1,
                     execMS: 1,
                     totalMS: 1,
@@ -39,15 +39,19 @@ import ServiceContracts
         }
     }
 
-    private struct StubReviewer: PythonScriptReviewer {
-        let name: String = "stub-reviewer"
-        let assessment: PythonScriptReviewAssessment
+    private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { _, _, _ in
+        DockerCLIResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data())
+    }
 
-        func review(_ args: PythonScriptExecutionArguments) async throws -> PythonScriptReviewOutcome {
+    private struct StubReviewer: ScriptReviewer {
+        let name: String = "stub-reviewer"
+        let assessment: ScriptReviewAssessment
+
+        func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
             _ = args
-            return PythonScriptReviewOutcome(
+            return ScriptReviewOutcome(
                 assessment: assessment,
-                timing: PythonScriptReviewerTiming(
+                timing: ScriptReviewerTiming(
                     ttfbMS: 1,
                     streamMS: 1,
                     decodeMS: 0,
@@ -124,96 +128,34 @@ import ServiceContracts
         #expect(result.isError == false)
     }
 
-    @Test func pythonScriptToolIsDiscoverable() async throws {
+    @Test func scriptToolIsDiscoverable() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(runner: StubPythonRunner())
+            await server.registerScriptExecutionTool(
+                stdinExecutor: { _, _, _ in DockerCLIResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data()) }
+            )
         }
 
-        let tools = try await bridge.client.searchTools(matching: "python")
-        #expect(tools.map(\.name).contains("python_script_exec"))
+        let tools = try await bridge.client.searchTools(matching: "script")
+        #expect(tools.map(\.name).contains("script_exec"))
     }
 
-    @Test func baselinePackagesIncludeCrawleeAndPlaywright() {
-        #expect(DockerScriptPreparer.baselinePackages.contains("requests"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("beautifulsoup4"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("chardet"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("lxml"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("crawlee"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("crawlee[playwright,beautifulsoup]"))
-        #expect(DockerScriptPreparer.baselinePackages.contains("playwright"))
-        #expect(DockerScriptPreparer.baselinePipSpecs.contains("crawlee[playwright,beautifulsoup]"))
-        #expect(!DockerScriptPreparer.baselinePipSpecs.contains("beautifulsoup4"))
-        #expect(!DockerScriptPreparer.baselinePipSpecs.contains("crawlee[playwright]"))
-    }
-
-    @Test func executionScriptVerifiesBaselinePackagesBeforeRunningUserCode() {
-        let script = DockerScriptPreparer.makeExecutionScript(
-            script: "print('hello')",
-            installPackages: [],
-            allowDependencyInstall: false,
-            nonBaselinePackages: []
-        )
-
-        #expect(script.contains("verified baseline package"))
-        #expect(script.contains("baseline package verification failed"))
-        #expect(script.contains("lxml"))
-        #expect(script.contains("crawlee"))
-        #expect(script.contains("playwright"))
-        #expect(script.contains("sys.path.insert(0, \"/packages\")"))
-        #expect(!script.contains("installing packages: requests"))
-        #expect(script.contains("_wipe_ephemeral_dir(\"/tmp\")"))
-        #expect(script.contains("_wipe_ephemeral_dir(\"/var/tmp\")"))
-        #expect(script.contains("wiped /tmp and /var/tmp"))
-    }
-
-    @Test func verifierBlocksNonPackageWritesUnderPackagesVolume() {
-        let args = PythonScriptExecutionArguments(
-            mode: .write,
-            description: "save report",
-            reason: "user asked for a file",
-            script: "open('/packages/report.json', 'w').write('{}')",
-            userPrompt: "save a report",
-            expectedEffects: ["write report"],
-            pythonPackages: [],
-            allowDependencyInstall: false,
-            timeoutSeconds: 30,
-            allowNetwork: false
-        )
-        let findings = PythonScriptExecutionVerifier.validate(args)
-        #expect(findings.contains(where: { $0.contains("/packages") }))
-    }
-
-    @Test func verifierAllowsScriptsThatDoNotWritePackagesVolume() {
-        let args = PythonScriptExecutionArguments(
-            mode: .readonly,
-            description: "fetch data",
-            reason: "user asked for info",
-            script: "import requests\nprint(requests.get('https://example.com').status_code)",
-            userPrompt: "check example.com",
-            expectedEffects: [],
-            pythonPackages: [],
-            allowDependencyInstall: false,
-            timeoutSeconds: 30,
-            allowNetwork: true
-        )
-        let findings = PythonScriptExecutionVerifier.validate(args)
-        #expect(!findings.contains(where: { $0.contains("/packages") }))
-    }
-
-    @Test func extraPackagesExcludesBaseline() {
-        let extras = DockerScriptPreparer.extraPackages(from: [
-            "requests", "pandas", "lxml", "numpy", "crawlee", "crawlee[playwright]",
-            "crawlee[playwright,beautifulsoup]", "beautifulsoup4", "playwright"
-        ])
-        #expect(Set(extras) == Set(["pandas", "numpy"]))
+    @Test func bunBaselineDockerfileHasNoPythonToolchain() {
+        let dockerfile = DockerScriptPreparer.baselineDockerfile
+        #expect(dockerfile.contains(DockerScriptPreparer.parentImage))
+        #expect(dockerfile.contains("oven/bun:1-debian"))
+        #expect(!dockerfile.contains("uv venv"))
+        #expect(!dockerfile.contains("uv pip install"))
+        #expect(!dockerfile.contains("playwright"))
+        #expect(!dockerfile.contains("crawlee"))
+        #expect(dockerfile.contains("runner.js") || dockerfile.contains("base64 -d"))
     }
 
     @Test func phaseTimingScriptMetricsCountLinesAndChars() {
         let script = "import json\nprint(1)\n"
-        let metrics = PythonScriptPhaseTiming.scriptMetrics(script)
+        let metrics = ScriptPhaseTiming.scriptMetrics(script)
         #expect(metrics.chars == script.utf8.count)
         #expect(metrics.lines == 3)
-        var phase = PythonScriptPhaseTiming(
+        var phase = ScriptPhaseTiming(
             staticValidateMS: 1,
             reviewerMS: 10,
             ensureMS: 2,
@@ -224,7 +166,7 @@ import ServiceContracts
             wrapperCharCount: 100
         )
         phase.applyReviewerTiming(
-            PythonScriptReviewerTiming(
+            ScriptReviewerTiming(
                 ttfbMS: 4,
                 streamMS: 5,
                 decodeMS: 1,
@@ -245,125 +187,39 @@ import ServiceContracts
         #expect(summary.contains("reviewer_model=gpt-5.6-luna"))
     }
 
-    @Test func dockerExecUsesPoolContainer() {
-        let name = DockerScriptPreparer.networkPoolContainerName(slotIndex: 0)
+    @Test func bunPoolCreateUsesSleepHoldAndBunImage() {
+        let name = DockerScriptPreparer.poolContainerName(slotIndex: 0)
+        #expect(name == "derrick-runner-bun-1-0")
+        let args = DockerScriptPreparer.dockerCreateWarmContainerArguments(containerName: name)
+        #expect(args.contains("--name"))
+        #expect(args.contains(name))
+        #expect(args.contains("/bin/sleep"))
+        #expect(args.contains("infinity"))
+        #expect(args.contains(DerrickGuestRuntime.dockerImage))
+        #expect(!args.contains("NET_ADMIN"))
+        #expect(!args.contains { $0.contains("PLAYWRIGHT") })
+    }
+
+    @Test func bunPoolExecUsesRunner() {
+        let name = DockerScriptPreparer.poolContainerName(slotIndex: 0)
         let args = DockerScriptPreparer.dockerExecArguments(containerName: name)
         #expect(args.contains("exec"))
         #expect(args.contains(name))
-        #expect(args.contains(DockerScriptPreparer.baselinePythonPath))
-    }
-
-    @Test func networkPoolStandbyIsSlotZeroOnly() {
-        #expect(DockerScriptPreparer.networkPoolStandbySlotIndex == 0)
-        #expect(DockerScriptPreparer.networkPoolWarmStandbyCount == 1)
-        #expect(DockerScriptPreparer.networkPoolSlotCount == 2)
-    }
-
-    @Test func offlinePoolContainerUsesNoNetworkPrefix() {
-        let name = DockerScriptPreparer.offlinePoolContainerName(slotIndex: 0)
-        #expect(name.hasPrefix(DockerScriptPreparer.warmContainerNoNetwork + "-"))
-        let offline = DockerScriptPreparer.dockerCreateOfflineContainerArguments(containerName: name)
-        #expect(offline.contains("--network"))
-        #expect(offline.contains("none"))
-        #expect(offline.contains(name))
-    }
-
-    @Test func offlinePoolSlotCountMatchesPolicy() {
-        #expect(DockerScriptPreparer.offlinePoolSlotCount == 1)
-    }
-
-    @Test func networkPoolSlotCountMatchesPolicy() {
-        #expect(DockerScriptPreparer.networkPoolSlotCount == 2)
-    }
-
-    @Test func networkPoolCreateMountsPackagesVolume() {
-        let name = DockerScriptPreparer.networkPoolContainerName(slotIndex: 1)
-        let online = DockerScriptPreparer.dockerCreateNetworkPoolContainerArguments(containerName: name)
-        #expect(online.contains(name))
-        #expect(online.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
-                online.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
-        #expect(online.contains(DockerScriptPreparer.forcedEgressHoldPath))
-        #expect(online.contains("NET_ADMIN"))
-        #expect(online.last == DockerScriptPreparer.defaultImage)
-    }
-
-    @Test func warmContainerCreateMountsPackagesVolume() {
-        let offline = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: false)
-        #expect(offline.contains(DockerScriptPreparer.packagesVolume + ":/packages") ||
-                offline.contains { $0.contains(DockerScriptPreparer.packagesVolume) })
-        #expect(offline.contains(DockerScriptPreparer.warmContainerNoNetwork))
-        #expect(offline.contains("--entrypoint"))
-        #expect(offline.contains(DockerScriptPreparer.offlineHoldBinary))
-        #expect(offline.contains(DockerScriptPreparer.offlineHoldArg))
-        #expect(offline.contains("--network"))
-        #expect(offline.contains("none"))
-
-        let online = DockerScriptPreparer.dockerCreateWarmContainerArguments(allowNetwork: true)
-        #expect(online.contains(DockerScriptPreparer.forcedEgressHoldPath))
-        #expect(online.contains("NET_ADMIN"))
-        #expect(online.contains { $0.contains("HTTPS_PROXY=") })
-        #expect(online.contains(DockerScriptPreparer.warmContainerNetwork))
-        #expect(online.contains("--shm-size"))
-        #expect(online.contains(DockerScriptPreparer.warmContainerShmSize))
-        #expect(online.contains("--memory"))
-        #expect(online.contains(DockerScriptPreparer.warmContainerMemory))
-        #expect(online.contains("--cpus"))
-        #expect(online.contains(DockerScriptPreparer.warmContainerCPUs))
-        #expect(online.contains("--pids-limit"))
-        #expect(online.contains(DockerScriptPreparer.warmContainerPIDsLimit))
-        #expect(online.contains { $0.contains("PLAYWRIGHT_BROWSERS_PATH=") })
-        #expect(online.contains { $0.hasPrefix("CRAWLEE_STORAGE_DIR=") && $0.contains(DockerScriptPreparer.crawleeStorageDir) })
-        // Image must be last so Docker does not treat an -e value as the image ref.
-        #expect(online.last == DockerScriptPreparer.defaultImage)
-        if let imageIndex = online.lastIndex(of: DockerScriptPreparer.defaultImage) {
-            #expect(online[..<imageIndex].allSatisfy { !$0.hasPrefix("derrick-python:") || $0 == DockerScriptPreparer.defaultImage })
-            #expect(!online[..<imageIndex].contains { $0.contains("://") && !$0.hasPrefix("-") && !$0.contains("=") })
-        }
-    }
-
-    @Test func baselineDockerfileIncludesForcedEgressHold() {
-        let dockerfile = DockerScriptPreparer.baselineDockerfile
-        #expect(dockerfile.contains("iptables"))
-        #expect(dockerfile.contains(DockerScriptPreparer.forcedEgressHoldPath))
-        #expect(dockerfile.contains("base64 -d"))
-        #expect(DockerScriptPreparer.forcedEgressHoldScript.contains("OUTPUT DROP"))
-        #expect(DockerScriptPreparer.forcedEgressHoldScript.contains("exec /bin/sleep infinity"))
-        #expect(!DockerScriptPreparer.forcedEgressHoldScript.contains("awk \"{print"))
-    }
-
-    @Test func baselineDockerfileInstallsBaselinePackages() {
-        let dockerfile = DockerScriptPreparer.baselineDockerfile
-        #expect(dockerfile.contains(DockerScriptPreparer.parentImage))
-        #expect(dockerfile.contains("uv venv"))
-        #expect(dockerfile.contains("uv pip install"))
-        #expect(dockerfile.contains("--system") == false)
-        #expect(dockerfile.contains(DockerScriptPreparer.baselineVenvPath))
-        #expect(dockerfile.contains("requests"))
-        #expect(dockerfile.contains("lxml"))
-        #expect(dockerfile.contains("crawlee[playwright,beautifulsoup]"))
-        #expect(dockerfile.contains("playwright install --with-deps chromium"))
-        #expect(dockerfile.contains("PLAYWRIGHT_BROWSERS_PATH=\(DockerScriptPreparer.playwrightBrowsersPath)"))
-    }
-
-    @Test func dockerExecUsesBaselineVenvPython() {
-        let args = DockerScriptPreparer.dockerExecArguments(allowNetwork: false)
-        #expect(args.contains(DockerScriptPreparer.baselinePythonPath))
-        #expect(!args.contains("python3"))
+        #expect(args.contains("bun"))
+        #expect(args.contains(DockerScriptPreparer.runnerPath))
     }
 
     @Test func dockerUnavailableMessageIgnoresPackageLoadFailures() {
-        let stderr = "[python_script_exec] baseline package verification failed: charset_normalizer -> charset_normalizer: Error loading shared library /packages/charset_normalizer/cd.cpython-312-aarch64-linux-musl.so: Operation not permitted"
+        let stderr = "[script_exec] baseline package verification failed: charset_normalizer -> charset_normalizer: Error loading shared library /workspace/node_modules/charset_normalizer/cd.node: Operation not permitted"
 
         #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 1) == nil)
         #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 127) != nil)
     }
 
-    @Test func pythonScriptToolBlocksReadonlyViolations() async throws {
+    @Test func scriptToolBlocksReadonlyViolations() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(
-                runner: StubPythonRunner(),
-                reviewer: StubReviewer(
-                    assessment: PythonScriptReviewAssessment(
+            await server.registerScriptExecutionTool(stdinExecutor: Self.dummyStdin, reviewer: StubReviewer(
+                    assessment: ScriptReviewAssessment(
                         alignedWithRequest: true,
                         confidence: 0.9,
                         suggestedAction: "allow",
@@ -375,12 +231,12 @@ import ServiceContracts
         }
 
         let result = try await bridge.client.callTool(
-            named: "python_script_exec",
+            named: "script_exec",
             arguments: [
                 "mode": .string("readonly"),
                 "description": .string("attempt write"),
                 "reason": .string("test"),
-                "script": .string("open('/tmp/a', 'w').write('x')")
+                "script": .string("export function handle() { writeFile('/tmp/a', 'x'); return []; }")
             ]
         )
 
@@ -390,18 +246,18 @@ import ServiceContracts
         #expect(result.text.contains("\"failureStage\":\"staticValidation\""))
     }
 
-    @Test func pythonScriptToolDeniesWriteWhenReviewerMissing() async throws {
+    @Test func scriptToolDeniesWriteWhenReviewerMissing() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(runner: StubPythonRunner(), reviewer: nil)
+            await server.registerScriptExecutionTool(stdinExecutor: Self.dummyStdin, reviewer: nil)
         }
 
         let result = try await bridge.client.callTool(
-            named: "python_script_exec",
+            named: "script_exec",
             arguments: [
                 "mode": .string("write"),
                 "description": .string("create report file"),
                 "reason": .string("user asked for file output"),
-                "script": .string("print('hello')"),
+                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hello' }]; }"),
                 "expected_effects": .array([.string("write /tmp/report.txt")]),
                 "allow_network": .bool(true)
             ]
@@ -413,12 +269,10 @@ import ServiceContracts
         #expect(result.text.contains("requires configured reviewer"))
     }
 
-    @Test func pythonScriptToolDeniesWhenReviewerFlagsMisalignment() async throws {
+    @Test func scriptToolDeniesWhenReviewerFlagsMisalignment() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(
-                runner: StubPythonRunner(),
-                reviewer: StubReviewer(
-                    assessment: PythonScriptReviewAssessment(
+            await server.registerScriptExecutionTool(stdinExecutor: Self.dummyStdin, reviewer: StubReviewer(
+                    assessment: ScriptReviewAssessment(
                         alignedWithRequest: false,
                         confidence: 0.95,
                         suggestedAction: "deny",
@@ -430,12 +284,12 @@ import ServiceContracts
         }
 
         let result = try await bridge.client.callTool(
-            named: "python_script_exec",
+            named: "script_exec",
             arguments: [
                 "mode": .string("readonly"),
                 "description": .string("inspect csv"),
                 "reason": .string("analyze user-provided data"),
-                "script": .string("print('hi')"),
+                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hi' }]; }"),
                 "user_prompt": .string("summarize this csv"),
                 "allow_network": .bool(true)
             ]
@@ -448,7 +302,7 @@ import ServiceContracts
     }
 
     @Test func runnerOutcomeDoesNotPolicyDenyOnNonZeroExit() {
-        let result = PythonScriptExecutionResult.runnerOutcome(
+        let result = ScriptExecutionResult.runnerOutcome(
             timedOut: false,
             exitCode: 1,
             stdout: "",
@@ -461,11 +315,11 @@ import ServiceContracts
         #expect(result.failureStage == .execution)
         #expect(result.indicatesToolError)
         #expect(result.failureSummary == "ValueError: boom")
-        #expect(MCPToolOutcomeSemantics.isError(toolName: "python_script_exec", text: encodeJSON(result), transportIsError: false))
+        #expect(MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(result), transportIsError: false))
     }
 
-    @Test func pythonScriptSuccessIsNotSemanticError() {
-        let result = PythonScriptExecutionResult.runnerOutcome(
+    @Test func scriptSuccessIsNotSemanticError() {
+        let result = ScriptExecutionResult.runnerOutcome(
             timedOut: false,
             exitCode: 0,
             stdout: "ok",
@@ -474,7 +328,7 @@ import ServiceContracts
             phaseTiming: nil
         )
         #expect(!result.indicatesToolError)
-        #expect(!MCPToolOutcomeSemantics.isError(toolName: "python_script_exec", text: encodeJSON(result), transportIsError: false))
+        #expect(!MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(result), transportIsError: false))
     }
 
     private func encodeJSON(_ value: some Encodable) -> String {
@@ -483,7 +337,7 @@ import ServiceContracts
     }
 
     @Test func runnerOutcomeClassifiesEgress() {
-        let result = PythonScriptExecutionResult.runnerOutcome(
+        let result = ScriptExecutionResult.runnerOutcome(
             timedOut: false,
             exitCode: 1,
             stdout: "",
@@ -497,7 +351,7 @@ import ServiceContracts
     }
 
     @Test func runnerOutcomeTimeoutIsNotPolicyDeny() {
-        let result = PythonScriptExecutionResult.runnerOutcome(
+        let result = ScriptExecutionResult.runnerOutcome(
             timedOut: true,
             exitCode: -1,
             stdout: "",
@@ -521,7 +375,7 @@ import ServiceContracts
     @Test func containerLeaseExceededProducesClearLLMMessage() {
         ContainerLifecycleRuntime.resetToDefaultForTesting()
         defer { ContainerLifecycleRuntime.resetToDefaultForTesting() }
-        let result = PythonScriptExecutionResult.containerLeaseExceeded(durationMS: 420_000)
+        let result = ScriptExecutionResult.containerLeaseExceeded(durationMS: 420_000)
         #expect(result.status == .timeout)
         #expect(result.failureStage == .containerLease)
         #expect(result.timedOut)
@@ -532,10 +386,8 @@ import ServiceContracts
 
     @Test func allowAssessmentSurvivesSuccessfulRunWithoutDenyStage() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerPythonScriptExecutionTool(
-                runner: StubPythonRunner(),
-                reviewer: StubReviewer(
-                    assessment: PythonScriptReviewAssessment(
+            await server.registerScriptExecutionTool(stdinExecutor: Self.dummyStdin, reviewer: StubReviewer(
+                    assessment: ScriptReviewAssessment(
                         alignedWithRequest: true,
                         confidence: 0.9,
                         suggestedAction: "allow",
@@ -547,12 +399,12 @@ import ServiceContracts
         }
 
         let result = try await bridge.client.callTool(
-            named: "python_script_exec",
+            named: "script_exec",
             arguments: [
                 "mode": .string("readonly"),
                 "description": .string("fetch page"),
                 "reason": .string("test"),
-                "script": .string("print('hi')"),
+                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hi' }]; }"),
                 "allow_network": .bool(true)
             ]
         )

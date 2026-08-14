@@ -147,7 +147,7 @@ struct LLMModelSettingsView: View {
             Text("Helper models")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Choose the models Derrick uses for memory summarization, Python script review, and secondary agents spawned during a chat.")
+            Text("Choose the models Derrick uses for memory summarization, script review, and secondary agents spawned during a chat.")
                 .foregroundStyle(.secondary)
 
             Form {
@@ -158,10 +158,10 @@ struct LLMModelSettingsView: View {
                     )
                 }
 
-                Section("Python script reviewer model") {
+                Section("Script reviewer model") {
                     helperModelPicker(
-                        selection: $helperModelSettings.pythonScriptReviewerModel,
-                        accessibilityLabel: "Python script reviewer model"
+                        selection: $helperModelSettings.scriptReviewerModel,
+                        accessibilityLabel: "Script reviewer model"
                     )
                 }
 
@@ -185,7 +185,7 @@ struct LLMModelSettingsView: View {
             Text("Multi-agent")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel python_script_exec runs may still queue on the Docker container pool.")
+            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel script_exec runs may still queue on the Docker container pool.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -259,7 +259,7 @@ struct LLMModelSettingsView: View {
             Text("Containers")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Controls how long a single python_script_exec run may keep a Docker container before it is released for other agents. Queue wait time does not count toward this limit.")
+            Text("Controls how long a single script_exec run may keep a Docker container before it is released for other agents. Queue wait time does not count toward this limit.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -439,7 +439,7 @@ struct LLMModelSettingsView: View {
             Text("Usage limits")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Caps apply per user message (tool / python / reviewer) and over daily / weekly windows (provider token counts when available). When a limit is hit you can raise it for this session or save a permanent cap from the modal (presets or custom). Values here are permanent and cannot exceed built-in maximums.")
+            Text("Caps apply per user message (tool / script / reviewer) and over daily / weekly windows (provider token counts when available). When a limit is hit you can raise it for this session or save a permanent cap from the modal (presets or custom). Values here are permanent and cannot exceed built-in maximums.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -455,9 +455,9 @@ struct LLMModelSettingsView: View {
                     step: 1
                 )
                 limitControlRow(
-                    title: "Max python script runs",
-                    value: $draftLimits.maxPythonScriptRunsPerMessage,
-                    range: 0...UsageLimits.absoluteMax.maxPythonScriptRunsPerMessage,
+                    title: "Max script runs",
+                    value: $draftLimits.maxScriptRunsPerMessage,
+                    range: 0...UsageLimits.absoluteMax.maxScriptRunsPerMessage,
                     step: 1
                 )
                 limitControlRow(

@@ -30,7 +30,7 @@ enum DaemonModuleBootstrap {
             }
             InProcessServiceBridges.jobNetworkPreflight = { toolName, argumentsJSON, jobID in
                 let repo = try await JobServiceStore.shared.sharedRepository()
-                try await JobNetworkPreflight.approvePythonNetworkIfNeeded(
+                try await JobNetworkPreflight.approveScriptNetworkIfNeeded(
                     toolName: toolName,
                     argumentsJSON: argumentsJSON,
                     jobID: jobID,

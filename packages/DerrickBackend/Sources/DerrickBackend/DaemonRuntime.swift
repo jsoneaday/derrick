@@ -57,7 +57,9 @@ public actor DaemonRuntime {
         return ServiceHealthReport(
             service: .daemon,
             status: ok ? .ok : .degraded,
-            detail: ok ? nil : "not bootstrapped"
+            detail: ok ? nil : "not bootstrapped",
+            guestRuntimeImage: DerrickGuestRuntime.dockerImage,
+            executableFingerprint: DaemonSelfRetirement.launchedFingerprint
         )
     }
 

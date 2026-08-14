@@ -7,6 +7,11 @@ public enum ServiceHealthStatus: String, Codable, Sendable, Hashable {
     case unavailable
 }
 
+/// Guest container image the current product expects the daemon to use.
+public enum DerrickGuestRuntime: Sendable {
+    public static let dockerImage = "derrick-bun:baseline-1"
+}
+
 public struct ServiceHealthReport: Codable, Sendable, Hashable {
     public let service: DerrickServiceID
     public let status: ServiceHealthStatus
@@ -15,6 +20,10 @@ public struct ServiceHealthReport: Codable, Sendable, Hashable {
     public let detail: String?
     public let pid: Int32
     public let checkedAt: Date
+    /// Absent on older daemons. UI evicts the process when this is missing or mismatched.
+    public let guestRuntimeImage: String?
+    /// Fingerprint of the executable this process launched from. Absent on older daemons.
+    public let executableFingerprint: String?
 
     public init(
         service: DerrickServiceID,
@@ -23,7 +32,9 @@ public struct ServiceHealthReport: Codable, Sendable, Hashable {
         serviceVersion: String = "0.1.0",
         detail: String? = nil,
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
-        checkedAt: Date = .now
+        checkedAt: Date = .now,
+        guestRuntimeImage: String? = nil,
+        executableFingerprint: String? = nil
     ) {
         self.service = service
         self.status = status
@@ -32,5 +43,7 @@ public struct ServiceHealthReport: Codable, Sendable, Hashable {
         self.detail = detail
         self.pid = pid
         self.checkedAt = checkedAt
+        self.guestRuntimeImage = guestRuntimeImage
+        self.executableFingerprint = executableFingerprint
     }
 }

@@ -1,6 +1,7 @@
 import DBRepository
 import EgressProxy
 import Foundation
+import MCPToolCatalog
 import PolicyUserInteraction
 import ServiceContracts
 
@@ -23,16 +24,16 @@ public enum JobNetworkPreflight {
         }
     }
 
-    public static func approvePythonNetworkIfNeeded(
+    public static func approveScriptNetworkIfNeeded(
         toolName: String,
         argumentsJSON: String,
         jobID: String,
         repository: DBRepository
     ) async throws {
-        guard toolName == "python_script_exec" else { return }
-        guard JobOrderPreflight.pythonAllowNetwork(toolArgumentsJSON: argumentsJSON) else { return }
+        guard AllowedMCPTool.isScriptExec(toolName) else { return }
+        guard JobOrderPreflight.scriptAllowNetwork(toolArgumentsJSON: argumentsJSON) else { return }
 
-        let script = JobOrderPreflight.pythonScript(from: argumentsJSON)
+        let script = JobOrderPreflight.scriptSource(from: argumentsJSON)
         let hosts = JobOrderPreflight.extractNetworkHosts(script: script)
         guard !hosts.isEmpty else { return }
 

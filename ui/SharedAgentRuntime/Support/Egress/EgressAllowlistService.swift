@@ -24,7 +24,7 @@ final class EgressAllowlistService: ObservableObject {
     private var midFlightPending: [String: [CheckedContinuation<PolicyUserDecision, Never>]] = [:]
     private var midFlightFlushTask: Task<Void, Never>?
     private var midFlightPresenting = false
-    private var midFlightToolName = "python_script_exec"
+    private var midFlightToolName = "script_exec"
     private static let midFlightCoalesceNanoseconds: UInt64 = 500_000_000
 
     private init() {}
@@ -118,10 +118,10 @@ final class EgressAllowlistService: ObservableObject {
 
     /// Preflight network hosts before script execution.
     /// - Returns: nil if allowed to proceed; blocked tool-result JSON if user denied or hard-blocked.
-    func preflightPythonScriptNetwork(
+    func preflightScriptNetwork(
         script: String,
         allowNetwork: Bool,
-        toolName: String = "python_script_exec"
+        toolName: String = "script_exec"
     ) async -> String? {
         guard allowNetwork else { return nil }
 
@@ -340,7 +340,7 @@ final class EgressAllowlistService: ObservableObject {
 
     /// Mid-flight CONNECT hold from the helper (reverse XPC).
     /// Persists always-allow suffixes and session grants so the helper can complete the tunnel.
-    func handleMidFlightHostAccess(host: String, toolName: String = "python_script_exec") async -> EgressHostAccessReply {
+    func handleMidFlightHostAccess(host: String, toolName: String = "script_exec") async -> EgressHostAccessReply {
         let midStarted = Date()
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized.isEmpty {
