@@ -34,7 +34,7 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),
-                        "description": .string("Frozen effector args. For script_exec use {description,reason,script} (raw JS export function handle). Keep script short; put real line breaks as \\n only (one compact JSON line).")
+                        "description": .string("Frozen effector args. For script_exec use {description,reason,script} (TypeScript export function handle(event: HandleEvent): HandleResult). Keep script short; put real line breaks as \\n only (one compact JSON line).")
                     ]),
                     "wake_after": .object([
                         "type": .string("boolean"),

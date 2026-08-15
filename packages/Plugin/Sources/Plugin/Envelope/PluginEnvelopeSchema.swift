@@ -1,24 +1,7 @@
 import Foundation
 
-/// Canonical JSON Schema for `handle()` stdout. Same text is injected into conversation RAG.
+/// Canonical JSON Schema for `handle()` stdout. RAG text is `ragSection` (includes generated TS).
 public enum PluginEnvelopeSchema {
-    public static let ragSection = """
-    # handle() return (JSON wire)
-
-    `export function handle(event)` runs in Bun. Swift decodes **stdout only**.
-    Return value MUST be a JSON **array** of envelope objects. Never a string, number, or bare object.
-    One result → an array of one element.
-
-    ```json
-    \(jsonSchema)
-    ```
-
-    Examples:
-    `[{ "verb": "http.request", "method": "GET", "url": "https://example.com" }]`
-    `[{ "verb": "result.emit", "title": "Apple", "summary": "…" }]`
-    `return netFetch({ url: "https://example.com" })` — `netFetch` already returns an array.
-    """
-
     public static let jsonSchema = """
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

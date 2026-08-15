@@ -25,6 +25,24 @@ public enum ScriptLease {
             throw ScriptLeaseError.execFailed("write script", scriptResult)
         }
 
+        let tsconfig = try await exec(
+            DockerScriptPreparer.dockerExecWriteTSConfigArguments(containerName: containerName),
+            Data(DerrickGuestTypeScript.tsconfigJSON.utf8),
+            30
+        )
+        if tsconfig.exitCode != 0 {
+            throw ScriptLeaseError.execFailed("write tsconfig", tsconfig)
+        }
+
+        let check = try await exec(
+            DockerScriptPreparer.dockerExecWriteHandleCheckArguments(containerName: containerName),
+            Data(DerrickGuestTypeScript.handleCheckTS.utf8),
+            30
+        )
+        if check.exitCode != 0 {
+            throw ScriptLeaseError.execFailed("write handle-check", check)
+        }
+
         let packageJSON = DockerScriptPreparer.makePackageJSON(dependencies: dependencies)
         let pkgResult = try await exec(
             DockerScriptPreparer.dockerExecWritePackageJSONArguments(containerName: containerName),
@@ -45,6 +63,27 @@ public enum ScriptLease {
                 throw ScriptLeaseError.execFailed("bun install", install)
             }
         }
+
+        let tsc = try await exec(
+            DockerScriptPreparer.dockerExecTscArguments(containerName: containerName),
+            Data(),
+            60
+        )
+        if tsc.exitCode != 0 {
+            let out = String(decoding: tsc.stdout, as: UTF8.self)
+            let err = String(decoding: tsc.stderr, as: UTF8.self)
+            var message = [out, err]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            if message.isEmpty {
+                message = "tsc failed (exit \(tsc.exitCode)) with no output."
+            }
+            if message.count > 8_000 {
+                message = String(message.prefix(8_000)) + "\n…"
+            }
+            throw ScriptLeaseError.typecheckFailed(message)
+        }
     }
 
     public static func isolateNetwork(
@@ -52,8 +91,8 @@ public enum ScriptLease {
         exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult
     ) async throws {
         do {
-            try await DockerNetworkContainerPool.shared.handoffToOffline(containerName: containerName) { args, timeout in
-                try await exec(args, Data(), timeout)
+            try await DockerNetworkContainerPool.shared.handoffToOffline(containerName: containerName) { args, stdin, timeout in
+                try await exec(args, stdin, timeout)
             }
         } catch {
             throw ScriptLeaseError.execFailed(
@@ -91,12 +130,15 @@ public enum ScriptLease {
 
 public enum ScriptLeaseError: Error, LocalizedError {
     case execFailed(String, DockerCLIResult)
+    case typecheckFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .execFailed(let step, let result):
             let stderr = String(decoding: result.stderr, as: UTF8.self)
             return "\(step) failed (exit \(result.exitCode)): \(stderr)"
+        case .typecheckFailed(let message):
+            return "TypeScript check failed:\n\(message)"
         }
     }
 }

@@ -40,6 +40,8 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
     public var requestID: String
     public var status: Int
     public var headers: [String: String]
+    /// Guest-facing payload. UTF-8 text (HTML, JSON, or plain). Never `Data` — JSONEncoder would base64 it.
+    public var body: String
     public var json: Data?
     public var fileHandle: String?
     public var error: String?
@@ -48,6 +50,7 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
         requestID: String,
         status: Int,
         headers: [String: String] = [:],
+        body: String = "",
         json: Data? = nil,
         fileHandle: String? = nil,
         error: String? = nil
@@ -55,6 +58,7 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
         self.requestID = requestID
         self.status = status
         self.headers = PluginSSRFPolicy.stripResponseHeaders(headers)
+        self.body = body
         self.json = json
         self.fileHandle = fileHandle
         self.error = error
@@ -65,7 +69,7 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case requestID = "request_id"
-        case status, headers, json
+        case status, headers, body, json
         case fileHandle = "file_handle"
         case error
     }

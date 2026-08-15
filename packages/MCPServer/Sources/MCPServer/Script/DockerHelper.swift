@@ -5,7 +5,7 @@ import DockerRunnerXPC
 /// Docker image, create/exec argv, and guest helpers for the Bun script runtime.
 public enum DockerScriptPreparer {
     public static let parentImage = "oven/bun:1-debian"
-    public static let baselineImageVersion = "1"
+    public static let baselineImageVersion = "3"
     public static var defaultImage: String {
         DerrickGuestRuntime.dockerImage
     }
@@ -76,7 +76,7 @@ public enum DockerScriptPreparer {
           process.exit(1);
         }
         const { pathToFileURL } = await import("url");
-        const mod = await import(pathToFileURL("/workspace/script.js").href);
+        const mod = await import(pathToFileURL("/workspace/script.ts").href);
         if (typeof mod.handle !== "function") {
           console.error("script must export function handle");
           process.exit(1);
@@ -133,9 +133,12 @@ public enum DockerScriptPreparer {
         let derrickB64 = Data(guestDerrickJS.utf8).base64EncodedString()
         return """
         FROM \(parentImage)
+        ENV BUN_INSTALL=/usr/local
         RUN apt-get update \\
          && apt-get install -y --no-install-recommends ca-certificates \\
          && rm -rf /var/lib/apt/lists/* \\
+         && bun add -g typescript@7 \\
+         && tsc --version | grep -q '^Version 7\\.' \\
          && mkdir -p \(helpersPath) \\
          && echo \(runnerB64) | base64 -d > \(runnerPath) \\
          && echo \(derrickB64) | base64 -d > \(derrickModulePath)
@@ -288,8 +291,19 @@ public enum DockerScriptPreparer {
     }
 
     public static func dockerExecWriteScriptArguments(containerName: String) -> [String] {
-        // Reads script.js from stdin.
-        ["exec", "-i", containerName, "bun", "-e", "await Bun.write('/workspace/script.js', await Bun.stdin.text())"]
+        ["exec", "-i", containerName, "bun", "-e", "await Bun.write('/workspace/script.ts', await Bun.stdin.text())"]
+    }
+
+    public static func dockerExecWriteTSConfigArguments(containerName: String) -> [String] {
+        ["exec", "-i", containerName, "bun", "-e", "await Bun.write('/workspace/tsconfig.json', await Bun.stdin.text())"]
+    }
+
+    public static func dockerExecWriteHandleCheckArguments(containerName: String) -> [String] {
+        ["exec", "-i", containerName, "bun", "-e", "await Bun.write('/workspace/handle-check.ts', await Bun.stdin.text())"]
+    }
+
+    public static func dockerExecTscArguments(containerName: String) -> [String] {
+        ["exec", "-w", workspacePath, containerName, "tsc", "--pretty", "false", "-p", "/workspace/tsconfig.json"]
     }
 
     public static func dockerExecWriteRunnerArguments(containerName: String) -> [String] {

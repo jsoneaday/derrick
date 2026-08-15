@@ -20,7 +20,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "script": .object([
                     "type": .string("string"),
-                    "description": .string("Raw JavaScript. export function handle(event) must return a JSON array of envelope objects (see handle() return schema). Never a string. One result: [{ verb, ... }]. netFetch({url}) already returns that array.")
+                    "description": .string("TypeScript 7. import { netFetch, type HandleEvent, type HandleResult } from \"derrick\". export function handle(event: HandleEvent): HandleResult. Must return Envelope[] JSON. Native tsc runs in the guest; failures abort with the compiler output.")
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),

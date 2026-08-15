@@ -18,6 +18,7 @@ import Foundation
     #expect(PluginFailureSemantics.isFailure("timeout"))
     #expect(HostHTTPResponse(requestID: "r", status: 200, error: nil).succeeded)
     #expect(!HostHTTPResponse(requestID: "r", status: 0, error: "ssrf").succeeded)
+    #expect(HostHTTPResponse(requestID: "r", status: 200, body: "<html>").body == "<html>")
 }
 
 @Test func jsonWireTurnsOptionalNoneIntoJSONNull() throws {
@@ -48,8 +49,15 @@ import Foundation
 
 @Test func envelopeSchemaRequiresArrayAndVerb() {
     #expect(PluginEnvelopeSchema.jsonSchema.contains("\"type\": \"array\""))
-    #expect(PluginEnvelopeSchema.jsonSchema.contains("http.request"))
-    #expect(PluginEnvelopeSchema.ragSection.contains("Never a string"))
+    #expect(PluginEnvelopeSchema.verbCases.contains("http.request"))
+    #expect(PluginEnvelopeSchema.verbCases.contains("result.emit"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export type HandleResult = Envelope[]"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export function httpBody"))
+    #expect(DerrickGuestTypeScript.verbUnion.contains("\"http.request\""))
+    #expect(PluginEnvelopeSchema.ragSection.contains("TypeScript"))
+    #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
+    #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"types\": []"))
+    #expect(!DerrickGuestTypeScript.handleCheckTS.contains("./script.ts"))
 }
 
 @Test func nestedResultObjectFlattensIntoPayload() throws {

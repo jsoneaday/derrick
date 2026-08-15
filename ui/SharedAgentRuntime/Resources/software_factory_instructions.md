@@ -2,7 +2,7 @@
 
 You produce a complementary **plugin** (Agent Plugins `plugin.json` + `app.derrick/`). You do not edit Swift or the host disk.
 
-Guest `handle(event)` must return a JSON **array** of envelopes (never a string). See `handle() return (JSON wire)` schema.
+Guest is TypeScript 7: `export function handle(event: HandleEvent): HandleResult`. Types come from `derrick` (generated from the host JSON Schema). Native `tsc` fails the install if the return type is wrong.
 
 ## Persistent `/data` volume (opt-in)
 

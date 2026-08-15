@@ -9,7 +9,7 @@ public enum ServiceHealthStatus: String, Codable, Sendable, Hashable {
 
 /// Guest container image the current product expects the daemon to use.
 public enum DerrickGuestRuntime: Sendable {
-    public static let dockerImage = "derrick-bun:baseline-1"
+    public static let dockerImage = "derrick-bun:baseline-3"
 }
 
 public struct ServiceHealthReport: Codable, Sendable, Hashable {

@@ -560,9 +560,10 @@ public final class XPCDockerRunner: ScriptRunner, @unchecked Sendable {
     }
 
     private func makeCLIExecutor() -> DockerCLIExecutor {
-        { arguments, timeoutSeconds in
+        { arguments, stdin, timeoutSeconds in
             let response = try await self.runXPCCommand(
                 dockerArguments: arguments,
+                stdinData: stdin,
                 timeoutSeconds: timeoutSeconds
             )
             if let launchError = response.launchError {

@@ -24,6 +24,17 @@ import AppEvents
         #expect(event.summary.contains("not allowed"))
     }
 
+    @Test func factoryBuildsTypecheckFailed() {
+        let event = PolicyUserEventFactory.typecheckFailed(
+            message: "script.ts(1,1): error TS2322: Type 'string' is not assignable to type 'HandleResult'."
+        )
+        #expect(event.kind == .failure)
+        #expect(event.source == .system)
+        #expect(event.title == "TypeScript check failed")
+        #expect(event.summary.contains("TS2322"))
+        #expect(event.detail?.contains("HandleResult") == true)
+    }
+
     @Test func factoryBuildsScriptExecutionFailed() {
         let event = PolicyUserEventFactory.scriptExecutionFailed(
             exitCode: 1,

@@ -205,8 +205,8 @@ final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
     // MARK: - Docker pool (via helper XPC)
 
     func makeCLIExecutor() -> DockerCLIExecutor {
-        { arguments, timeoutSeconds in
-            let response = try await self.runDocker(arguments, stdin: Data(), timeoutSeconds: timeoutSeconds)
+        { arguments, stdin, timeoutSeconds in
+            let response = try await self.runDocker(arguments, stdin: stdin, timeoutSeconds: timeoutSeconds)
             return DockerCLIResult(
                 exitCode: response.exitCode,
                 stdout: response.stdout,

@@ -269,6 +269,10 @@ extension ConversationPipeline {
                 toolName: toolName,
                 scriptPreview: nil
             )
+        case .typecheck:
+            let message = payload.validationFindings.joined(separator: "\n")
+            let detail = message.isEmpty ? payload.stderr : message
+            event = PolicyUserEventFactory.typecheckFailed(message: detail, toolName: toolName)
         case .llmReview:
             if let assessment = payload.reviewerAssessment,
                assessment.suggestedAction.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "deny"

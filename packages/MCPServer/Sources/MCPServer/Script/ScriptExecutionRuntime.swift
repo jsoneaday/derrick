@@ -71,8 +71,8 @@ public enum ScriptExecutionRuntime {
         let timeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: parsed.timeoutSeconds)
         do {
             let result = try await DockerNetworkContainerPool.shared.withContainer(
-                executor: { args, seconds in
-                    try await stdinExecutor(args, Data(), seconds)
+                executor: { args, stdin, seconds in
+                    try await stdinExecutor(args, stdin, seconds)
                 }
             ) { containerName in
                 try await ScriptLease.writeAndInstall(
@@ -100,6 +100,16 @@ public enum ScriptExecutionRuntime {
                 )
             }
             throw error
+        } catch let error as ScriptLeaseError {
+            if case .typecheckFailed(let message) = error {
+                return encode(typecheckFailed(message, started: started, parsed: parsed))
+            }
+            return encode(blocked(
+                findings: [error.localizedDescription],
+                stage: .execution,
+                started: started,
+                parsed: parsed
+            ))
         } catch {
             return encode(blocked(
                 findings: [error.localizedDescription],
@@ -294,6 +304,24 @@ public enum ScriptExecutionRuntime {
             reviewerAssessment: assessment,
             stdout: "",
             stderr: "",
+            exitCode: -1,
+            timedOut: false,
+            durationMS: ScriptPhaseTiming.elapsedMS(from: started),
+            phaseTiming: nil
+        )
+    }
+
+    private static func typecheckFailed(_ message: String, started: Date, parsed: Parsed) -> ScriptExecutionResult {
+        _ = parsed
+        return ScriptExecutionResult(
+            status: .blocked,
+            decision: .allow,
+            failureStage: .typecheck,
+            verifier: "tsc",
+            validationFindings: [message],
+            reviewerAssessment: nil,
+            stdout: "",
+            stderr: message,
             exitCode: -1,
             timedOut: false,
             durationMS: ScriptPhaseTiming.elapsedMS(from: started),

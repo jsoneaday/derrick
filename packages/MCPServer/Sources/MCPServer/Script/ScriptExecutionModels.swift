@@ -65,6 +65,8 @@ public enum ScriptFailureStage: String, Codable, Sendable, Equatable {
     case none
     /// Static verifier rejected the request before run.
     case staticValidation
+    /// Guest TypeScript (`tsc --noEmit`) rejected the script.
+    case typecheck
     /// LLM security reviewer rejected (or could not complete when required).
     case llmReview
     /// Script ran and exited non-zero (not a pre-run policy deny).

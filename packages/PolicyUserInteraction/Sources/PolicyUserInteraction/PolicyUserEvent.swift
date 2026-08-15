@@ -166,6 +166,23 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func typecheckFailed(
+        message: String,
+        toolName: String = "script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
+        return failure(
+            source: .system,
+            title: "TypeScript check failed",
+            summary: firstLine ?? "Guest tsc rejected the script.",
+            detail: trimmed.isEmpty ? nil : trimmed,
+            toolName: toolName,
+            correlationId: correlationId
+        )
+    }
+
     public static func scriptExecutionFailed(
         exitCode: Int32,
         stderr: String,

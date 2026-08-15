@@ -20,11 +20,8 @@ public enum ScriptJSVerifier: Sendable {
                 findings.append(message)
             }
         }
-        if text.contains("interface ") || text.range(of: #":\s*(string|number|boolean)\b"#, options: .regularExpression) != nil {
-            findings.append("Raw JavaScript only; TypeScript syntax is not allowed.")
-        }
         if !text.contains("export function handle") && !text.contains("export async function handle") {
-            findings.append("Script must export function handle(event).")
+            findings.append("Script must export function handle.")
         }
         for name in dependencies.keys {
             if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

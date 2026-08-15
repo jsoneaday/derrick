@@ -28,7 +28,7 @@ Plugins cannot modify Swift, the host filesystem, or intercept in-box services.
 
 | Layer | Today |
 | --- | --- |
-| Tool | `script_exec` — raw JS (`handle` + envelope array) |
+| Tool | `script_exec` — TypeScript (`handle: HandleResult` + envelope array) |
 | Network | Guest `--network none` after setup; Swift host HTTP + blacklist policy |
 | Pool | One shared queue, max 3, 1 warm (`DockerNetworkContainerPool`) |
 | Persistence | One-shot scripts are not installed; jobs freeze `script_exec` args |
@@ -63,7 +63,7 @@ One-shot scripts cannot become a reusable feature. Users who do not write softwa
 
 ### Non-goals (v1)
 
-- TypeScript, official vendor SDKs (`@slack/bolt`, `googleapis`, …).
+- Official vendor SDKs (`@slack/bolt`, `googleapis`, …).
 - Plugin-opened `fetch` / `net` / `Bun.connect` after handoff.
 - Plugin XPC, WKWebView login, Apple Container.
 - Playwright / Chromium in this image (separate browser-UI tool).
@@ -137,7 +137,7 @@ flowchart TB
 
 | | `script_exec` | `plugin.invoke` |
 | --- | --- | --- |
-| Language | Bun, raw JS | Same |
+| Language | Bun, TypeScript | Same |
 | Lease | Two-phase, destroy after | Same |
 | Bus | Same 7 verbs | Same |
 | HTTP | Host client + blacklist | Same |
@@ -434,7 +434,7 @@ In-process scanners (no Bun required for the cheap pass). Ban:
 - `fetch(`, `node:net`, `node:http`, `node:https`, `undici`, `Bun.connect`, `Bun.serve`, `child_process`, `node:child_process`
 - `host.docker.internal`, `169.254.169.254`, `metadata.google.internal`
 - Secret-shaped literals
-- TypeScript syntax (`: string`, `interface `, `.ts` imports) — fail with “raw JS only”
+- Guest TypeScript 7 `tsc --noEmit` (Go compiler; types from `PluginEnvelopeSchema`) — fail with compiler output
 
 Best-effort only. `--network none` is the real net fence.
 
@@ -509,7 +509,7 @@ Install / update / disable / delete: Swift-only promote; delete keeps `plugin_in
 | Two guest languages / two container styles | Rejected. One Bun style. |
 | In-container CONNECT allowlist | Rejected for run path. Policy moved in front of Swift; blacklist. |
 | `--network none` with no setup net | Rejected. Deps declared up front; install hooks allowed during setup. |
-| Official SDKs / TypeScript / Node | Rejected. Host HTTP + raw JS. |
+| Official SDKs / Node | Rejected. Host HTTP + guest TypeScript on Bun. |
 | Plugin speaks XPC | Rejected. |
 | WKWebView login | Deferred. |
 | Host bind-mount plugin dir | Rejected. Named volumes. |
@@ -572,7 +572,7 @@ Playwright browser-UI tool: **separate design**, not this rollout.
 
 ## Open Questions
 
-None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS; setup install hooks; host-side blacklist (empty, `exact` or `*.domain`); Playwright out of this image.
+None. Product owner locked: daily news sample; sidebar plugin list; Bun + TypeScript 7 (Go `tsc` in guest, types from host JSON Schema); setup install hooks; host-side blacklist (empty, `exact` or `*.domain`); Playwright out of this image.
 
 ---
 
@@ -589,7 +589,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS
 
 ## Key Decisions
 
-1. **One Bun runtime** for scripts and plugins. Raw JS. One image.
+1. **One Bun runtime** for scripts and plugins. TypeScript 7 (Go `tsc`) + one image.
 2. **Two-phase lease:** `bun install` (hooks on) → cut net → handoff.
 3. **JSON bus for UI and HTTP.** Guest has no run-path network.
 4. **Review:** scripts every run; plugins once + hash.

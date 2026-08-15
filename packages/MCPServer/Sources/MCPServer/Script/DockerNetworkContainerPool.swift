@@ -13,7 +13,7 @@ public struct DockerCLIResult: Sendable {
     }
 }
 
-public typealias DockerCLIExecutor = @Sendable (_ arguments: [String], _ timeoutSeconds: Int) async throws -> DockerCLIResult
+public typealias DockerCLIExecutor = @Sendable (_ arguments: [String], _ stdin: Data, _ timeoutSeconds: Int) async throws -> DockerCLIResult
 
 /// One shared Bun pool: max 3 live containers, 1 warm after prewarm, FIFO across all agents.
 public actor DockerNetworkContainerPool {
@@ -36,10 +36,7 @@ public actor DockerNetworkContainerPool {
 
     public func prewarm(executor: @escaping DockerCLIExecutor) async throws {
         try await removeLegacyWarmContainers(executor: executor)
-        let stdinExec: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { args, _, timeout in
-            try await executor(args, timeout)
-        }
-        try await DockerVolumeIO.injectHelpers(exec: stdinExec)
+        try await DockerVolumeIO.injectHelpers(exec: executor)
         try await ensureWarmSlot(DockerScriptPreparer.warmStandbySlotIndex, executor: executor)
     }
 
@@ -52,6 +49,7 @@ public actor DockerNetworkContainerPool {
               slots.indices.contains(slotIndex) else {
             let result = try await executor(
                 DockerScriptPreparer.dockerNetworkDisconnectArguments(containerName: containerName),
+                Data(),
                 15
             )
             if result.exitCode != 0 {
@@ -65,7 +63,7 @@ public actor DockerNetworkContainerPool {
         let scratch = slots[slotIndex].scratchVolume
             ?? DockerScriptPreparer.scratchVolumeName(slotIndex: slotIndex)
         let data = slots[slotIndex].dataVolume
-        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: containerName), 15)
+        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: containerName), Data(), 15)
         try await createAndStartContainer(
             name: containerName,
             createArguments: DockerScriptPreparer.dockerCreateHandoffArguments(
@@ -132,9 +130,9 @@ public actor DockerNetworkContainerPool {
             resumeWaiters()
         }
 
-        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), 15)
+        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), Data(), 15)
         if let scratch = slots[slotIndex].scratchVolume, DerrickNamedVolume.isRemovable(scratch) {
-            _ = try? await executor(DockerScriptPreparer.dockerVolumeRmArguments(name: scratch), 15)
+            _ = try? await executor(DockerScriptPreparer.dockerVolumeRmArguments(name: scratch), Data(), 15)
         }
         slots[slotIndex].scratchVolume = nil
         slots[slotIndex].dataVolume = nil
@@ -170,8 +168,8 @@ public actor DockerNetworkContainerPool {
     private func recreateSlot(_ slotIndex: Int, executor: DockerCLIExecutor) async throws {
         let name = DockerScriptPreparer.poolContainerName(slotIndex: slotIndex)
         let scratch = DockerScriptPreparer.scratchVolumeName(slotIndex: slotIndex)
-        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: DerrickNamedVolume.helpers), 15)
-        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: scratch), 15)
+        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: DerrickNamedVolume.helpers), Data(), 15)
+        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: scratch), Data(), 15)
         slots[slotIndex].scratchVolume = scratch
         if try await isHealthyWarmContainer(name, executor: executor) {
             slots[slotIndex].warmName = name
@@ -208,9 +206,9 @@ public actor DockerNetworkContainerPool {
         createArguments: [String],
         executor: DockerCLIExecutor
     ) async throws {
-        _ = try await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), 15)
+        _ = try await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), Data(), 15)
 
-        let create = try await executor(createArguments, 30)
+        let create = try await executor(createArguments, Data(), 30)
         if create.exitCode != 0 {
             let stderr = String(decoding: create.stderr, as: UTF8.self)
             // UI and derrickd both prewarm this name — adopt if the other side won.
@@ -220,7 +218,7 @@ public actor DockerNetworkContainerPool {
             throw DockerNetworkContainerPoolError.createFailed(name, stderr)
         }
 
-        let start = try await executor(DockerScriptPreparer.dockerStartArguments(containerName: name), 30)
+        let start = try await executor(DockerScriptPreparer.dockerStartArguments(containerName: name), Data(), 30)
         if start.exitCode != 0 {
             if try await isHealthyWarmContainer(name, executor: executor) {
                 return
@@ -241,6 +239,7 @@ public actor DockerNetworkContainerPool {
     private func isHealthyWarmContainer(_ name: String, executor: DockerCLIExecutor) async throws -> Bool {
         let running = try await executor(
             DockerScriptPreparer.dockerInspectContainerRunningArguments(containerName: name),
+            Data(),
             15
         )
         return String(decoding: running.stdout, as: UTF8.self)
@@ -250,7 +249,7 @@ public actor DockerNetworkContainerPool {
 
     private func removeLegacyWarmContainers(executor: DockerCLIExecutor) async throws {
         for legacy in DockerScriptPreparer.legacyWarmContainerNames {
-            _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: legacy), 15)
+            _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: legacy), Data(), 15)
         }
     }
 

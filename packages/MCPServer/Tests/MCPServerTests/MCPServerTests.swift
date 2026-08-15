@@ -199,6 +199,54 @@ import Plugin
         let decoded = try JSONDecoder().decode(PluginHostInvoke.self, from: data)
         #expect(decoded.event.httpResults?.first?.succeeded == true)
         #expect(decoded.event.httpResults?.first?.error == nil)
+        #expect(decoded.event.httpResults?.first?.body == "<html>")
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let results = (object?["event"] as? [String: Any])?["http_results"] as? [[String: Any]]
+        #expect(results?.first?["body"] as? String == "<html>")
+        #expect(results?.first?["json"] == nil)
+    }
+
+    @Test func dockerfileInstallsTypeScriptAndGuestIsTS() {
+        let dockerfile = DockerScriptPreparer.baselineDockerfile
+        #expect(dockerfile.contains("bun add -g typescript@7"))
+        #expect(dockerfile.contains("tsc --version"))
+        #expect(DerrickGuestRuntime.dockerImage == "derrick-bun:baseline-3")
+        #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
+        #expect(!DerrickGuestTypeScript.handleCheckTS.contains("./script.ts"))
+        #expect(DockerScriptPreparer.guestRunnerJS.contains("script.ts"))
+        #expect(DerrickGuestTypeScript.handleCheckTS.contains("HandleResult"))
+    }
+
+    @Test func injectHelpersForwardsNonEmptyStdinAndRejectsEmptyWrite() async throws {
+        var stdinBytes: [Int] = []
+        try await DockerVolumeIO.injectHelpers { args, stdin, _ in
+            if args.contains("exec") {
+                stdinBytes.append(stdin.count)
+                return DockerCLIResult(
+                    exitCode: 0,
+                    stdout: Data("\(stdin.count)".utf8),
+                    stderr: Data()
+                )
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        #expect(stdinBytes.count == 4)
+        #expect(stdinBytes.allSatisfy { $0 > 0 })
+
+        await #expect(throws: VolumeIOPathError.self) {
+            try await DockerVolumeIO.writeFile(
+                volume: DerrickNamedVolume.helpers,
+                relativePath: "empty.txt",
+                data: Data(),
+                exec: { _, _, _ in DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data()) }
+            )
+        }
+    }
+
+    @Test func typecheckFailureIsShownToUser() {
+        let err = ScriptLeaseError.typecheckFailed("script.ts(1,1): error TS2322: Type 'string' is not assignable to type 'HandleResult'.")
+        #expect(err.errorDescription?.contains("TS2322") == true)
+        #expect(err.errorDescription?.contains("TypeScript check failed") == true)
     }
 
     @Test func bunPoolCreateUsesSleepHoldAndBunImage() {

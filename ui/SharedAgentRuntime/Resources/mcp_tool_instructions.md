@@ -10,9 +10,9 @@
    - Pass tool `arguments` as a **stringified JSON object** under the `arguments` key (schema requirement). Prefer simple scripts: use single-quoted JS/CSS strings so you need fewer escapes. Avoid embedding unescaped double quotes in the script body.
 6. Users should not have to name tools. Choose tools autonomously from intent.
 7. Prefer `script_exec` when the request needs scripting/automation (data transforms, parsing, computation, structured extraction, format conversion) **or live web access** (search, browse, fetch HTML/JSON from public HTTPS sites).
-   1. Script is **raw JavaScript** (no TypeScript). Export `function handle(event)`. **Return type:** a JSON **array** of envelope objects. Never a string or a bare object. One item → `[{ ... }]`. Follow the `handle() return (JSON wire)` schema in this prompt.
+   1. Script is **TypeScript 7**. `import { netFetch, type HandleEvent, type HandleResult } from "derrick"`. Export `export function handle(event: HandleEvent): HandleResult`. Return a JSON **array** of envelopes (never a string). Native `tsc` (Go) runs in the container; type errors are shown to the user and abort the run.
    2. The container has **no network** after setup. Do **not** call `fetch`, open sockets, or use Playwright. Import `netFetch` from `/opt/derrick/derrick.js` and **return** `netFetch({ url, method })` (`netFetch` already returns an array). The host performs HTTP and re-invokes `handle` with `event.kind === "http_results"`.
-   3. On the first hop return `[{ "verb": "http.request", "url": "…" }]`. On `http_results` return `[{ "verb": "result.emit", "title": "…", "summary": "…" }]` and/or `message.post`.
+   3. On the first hop return `[{ "verb": "http.request", "url": "…" }]`. On `http_results` read `event.http_results[0].body` (UTF-8 HTML/text string, not `json`). Return `[{ "verb": "result.emit", "title": "…", "summary": "…" }]` and/or `message.post`.
    4. Prefer content sites (news, finance, official pages, Wikipedia). Do **not** scrape Google/Bing/Yahoo SERP HTML. For “what is happening now”, fetch 2–3 primary sources (Reuters, BBC, CNBC, etc.).
    5. Declare extra npm packages in `dependencies` (object of name → version). Do not assume Playwright/Crawlee exist.
    6. Keep scripts short (10–30 lines). No comments. Use `timeout_seconds` on the tool args if needed (e.g. 120).

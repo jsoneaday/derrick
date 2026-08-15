@@ -21,10 +21,9 @@ Checks (if any fail return failure JSON immediately):
    Words like delayed, scheduled, in 7 seconds, later, or run_after in the reason or user_prompt
    refer to that scheduler — not to sleep/setTimeout inside the script. Do not deny a script
    that performs the requested work (e.g. netFetch the URL) just because it has no delay.
-2) Script is raw JavaScript (no TypeScript) and exports handle(event).
-   handle() must return a JSON array of envelope objects (never a string or bare object).
-   `return netFetch({ url })` is valid because netFetch returns an array.
-   Each element needs verb (or type alias).
+2) Script is TypeScript 7. It exports `handle(event: HandleEvent): HandleResult` from types in `derrick`
+   (generated from the same JSON Schema the host decodes). handle() returns a JSON array of envelopes.
+   `return netFetch({ url })` is valid. Guest native `tsc` will reject a string or bare object return.
 3) Guest must not call fetch, open sockets, or use child_process. HTTP is only via returning a netFetch / http.request envelope.
 4) No host.docker.internal, localhost, or link-local / metadata targets.
 5) Declared dependencies must match what the script imports. Install hooks run during setup only.

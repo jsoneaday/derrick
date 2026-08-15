@@ -1,5 +1,6 @@
 import Foundation
 import DockerRunnerXPC
+import Plugin
 
 /// Write files onto a named volume: create → start → exec -i (stdin) → rm -f.
 /// Never `docker cp`. Helpers volume is populated this way at prewarm.
@@ -39,7 +40,10 @@ public enum DockerVolumeIO {
                 throw ScriptLeaseError.execFailed("volumeio start", start)
             }
 
-            let js = "const p='/mnt/\(dest)'; await Bun.write(p, await Bun.stdin.bytes())"
+            guard !data.isEmpty else {
+                throw VolumeIOPathError.emptyPayload(dest)
+            }
+            let js = "const p='/mnt/\(dest)';const b=await Bun.stdin.bytes();if(b.byteLength===0)throw new Error('volumeio stdin empty');await Bun.write(p,b);const n=(await Bun.file(p).arrayBuffer()).byteLength;if(n!==b.byteLength)throw new Error('volumeio short write');process.stdout.write(String(n));"
             let write = try await exec(
                 ["exec", "-i", name, "bun", "-e", js],
                 data,
@@ -47,6 +51,16 @@ public enum DockerVolumeIO {
             )
             if write.exitCode != 0 {
                 throw ScriptLeaseError.execFailed("volumeio write \(dest)", write)
+            }
+            let wrote = Int(
+                String(decoding: write.stdout, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            ) ?? -1
+            if wrote != data.count {
+                throw ScriptLeaseError.execFailed(
+                    "volumeio write \(dest) size \(wrote) != \(data.count)",
+                    write
+                )
             }
         } catch {
             _ = try? await exec(DockerScriptPreparer.dockerRmForceArguments(container: name), Data(), 15)
@@ -84,6 +98,18 @@ public enum DockerVolumeIO {
             data: Data(DockerScriptPreparer.guestDerrickJS.utf8),
             exec: exec
         )
+        try await writeFile(
+            volume: DerrickNamedVolume.helpers,
+            relativePath: "derrick.ts",
+            data: Data(DerrickGuestTypeScript.derrickModule.utf8),
+            exec: exec
+        )
+        try await writeFile(
+            volume: DerrickNamedVolume.helpers,
+            relativePath: "handle-return.schema.json",
+            data: Data(PluginEnvelopeSchema.jsonSchema.utf8),
+            exec: exec
+        )
     }
 
     public static func validatedRelativePath(_ raw: String) throws -> String {
@@ -97,11 +123,14 @@ public enum DockerVolumeIO {
 
 public enum VolumeIOPathError: Error, LocalizedError {
     case invalidRelativePath(String)
+    case emptyPayload(String)
 
     public var errorDescription: String? {
         switch self {
         case .invalidRelativePath(let p):
             return "VolumeIO path must be volume-relative: \(p)"
+        case .emptyPayload(let p):
+            return "VolumeIO refused empty payload for \(p)"
         }
     }
 }
