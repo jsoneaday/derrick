@@ -61,6 +61,9 @@ public enum BlacklistMatcher {
         if host.hasPrefix("*.") {
             throw BlacklistValidationError.invalidPattern(host)
         }
+        if host.contains(":") || host.contains("/") {
+            throw BlacklistValidationError.invalidPattern(host)
+        }
         guard isPlausibleHost(host) else {
             throw BlacklistValidationError.invalidPattern(host)
         }
@@ -70,6 +73,9 @@ public enum BlacklistMatcher {
         let suffix = normalize(suffix)
         guard !suffix.isEmpty, suffix != "*" else {
             throw BlacklistValidationError.rejectedPublicSuffix(suffix)
+        }
+        if suffix.contains(":") || suffix.contains("/") {
+            throw BlacklistValidationError.invalidPattern(suffix)
         }
         if rejectedWildcardSuffixes.contains(suffix) {
             throw BlacklistValidationError.rejectedPublicSuffix(suffix)

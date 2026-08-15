@@ -3,6 +3,27 @@ import Testing
 @testable import ServiceContracts
 
 @Suite struct ServiceContractsTests {
+    @Test func egressBlacklistDTOsRoundTrip() throws {
+        let entry = EgressBlacklistEntryDTO(
+            id: "e1",
+            kind: "suffix",
+            pattern: "example.com",
+            displayPattern: "*.example.com"
+        )
+        let listed = try DerrickDaemonXPCCodec.decodeBlacklistList(
+            try DerrickDaemonXPCCodec.encodeBlacklistList(EgressBlacklistListResult(entries: [entry]))
+        )
+        #expect(listed.entries == [entry])
+        let add = try DerrickDaemonXPCCodec.decodeBlacklistAddRequest(
+            try DerrickDaemonXPCCodec.encodeBlacklistAddRequest(EgressBlacklistAddRequest(pattern: "*.bank.com"))
+        )
+        #expect(add.pattern == "*.bank.com")
+        let remove = try DerrickDaemonXPCCodec.decodeBlacklistRemoveRequest(
+            try DerrickDaemonXPCCodec.encodeBlacklistRemoveRequest(EgressBlacklistRemoveRequest(id: "e1"))
+        )
+        #expect(remove.id == "e1")
+    }
+
     @Test func healthRoundTrip() throws {
         let report = ServiceHealthReport(
             service: .agent,

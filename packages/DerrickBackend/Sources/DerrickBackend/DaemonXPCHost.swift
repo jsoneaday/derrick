@@ -53,6 +53,45 @@ public final class DaemonExportedObject: NSObject, DerrickDaemonXPC, @unchecked 
             }
         }
     }
+
+    public func listEgressBlacklist(withReply reply: @escaping @Sendable (NSData) -> Void) {
+        Task {
+            do {
+                let result = try await DaemonRuntime.shared.listEgressBlacklist()
+                reply((try DerrickDaemonXPCCodec.encodeBlacklistList(result)) as NSData)
+            } catch {
+                reply(Data() as NSData)
+            }
+        }
+    }
+
+    public func addEgressBlacklist(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try DerrickDaemonXPCCodec.decodeBlacklistAddRequest(payload)
+                try await DaemonRuntime.shared.addEgressBlacklist(pattern: request.pattern)
+                reply((try DerrickDaemonXPCCodec.encodeAck(.ok)) as NSData)
+            } catch {
+                let ack = ServiceAckDTO.error(error.localizedDescription)
+                reply((try? DerrickDaemonXPCCodec.encodeAck(ack)) as NSData? ?? Data() as NSData)
+            }
+        }
+    }
+
+    public func removeEgressBlacklist(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try DerrickDaemonXPCCodec.decodeBlacklistRemoveRequest(payload)
+                try await DaemonRuntime.shared.removeEgressBlacklist(id: request.id)
+                reply((try DerrickDaemonXPCCodec.encodeAck(.ok)) as NSData)
+            } catch {
+                let ack = ServiceAckDTO.error(error.localizedDescription)
+                reply((try? DerrickDaemonXPCCodec.encodeAck(ack)) as NSData? ?? Data() as NSData)
+            }
+        }
+    }
 }
 
 /// Mach-service listener for the Daemon LaunchAgent.

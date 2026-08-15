@@ -31,6 +31,36 @@ public actor DaemonClient {
         }
     }
 
+    public func listEgressBlacklist() async throws -> [EgressBlacklistEntryDTO] {
+        try await withTimeout {
+            try await self.listBlacklistUnlocked()
+        }
+    }
+
+    public func addEgressBlacklist(pattern: String) async throws {
+        let payload = try DerrickDaemonXPCCodec.encodeBlacklistAddRequest(
+            EgressBlacklistAddRequest(pattern: pattern)
+        )
+        let ack = try await withTimeout {
+            try await self.addBlacklistUnlocked(payload)
+        }
+        guard ack.ok else {
+            throw DaemonClientError.rejected(ack.message)
+        }
+    }
+
+    public func removeEgressBlacklist(id: String) async throws {
+        let payload = try DerrickDaemonXPCCodec.encodeBlacklistRemoveRequest(
+            EgressBlacklistRemoveRequest(id: id)
+        )
+        let ack = try await withTimeout {
+            try await self.removeBlacklistUnlocked(payload)
+        }
+        guard ack.ok else {
+            throw DaemonClientError.rejected(ack.message)
+        }
+    }
+
     private func healthUnlocked() async throws -> ServiceHealthReport {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
             let box = OnceResume(cont)
@@ -74,6 +104,62 @@ public actor DaemonClient {
                 nonisolated(unsafe) let proxy = try remoteProxy { box.resume(throwing: $0) }
                 nonisolated(unsafe) let nsPayload = payload as NSData
                 proxy.postUserNotification(requestJSON: nsPayload) { data in
+                    do {
+                        box.resume(returning: try DerrickDaemonXPCCodec.decodeAck(data as Data))
+                    } catch {
+                        box.resume(throwing: error)
+                    }
+                }
+            } catch {
+                box.resume(throwing: error)
+            }
+        }
+    }
+
+    private func listBlacklistUnlocked() async throws -> [EgressBlacklistEntryDTO] {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[EgressBlacklistEntryDTO], Error>) in
+            let box = OnceResume(cont)
+            do {
+                nonisolated(unsafe) let proxy = try remoteProxy { box.resume(throwing: $0) }
+                proxy.listEgressBlacklist { data in
+                    do {
+                        box.resume(returning: try DerrickDaemonXPCCodec.decodeBlacklistList(data as Data).entries)
+                    } catch {
+                        box.resume(throwing: error)
+                    }
+                }
+            } catch {
+                box.resume(throwing: error)
+            }
+        }
+    }
+
+    private func addBlacklistUnlocked(_ payload: Data) async throws -> ServiceAckDTO {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceAckDTO, Error>) in
+            let box = OnceResume(cont)
+            do {
+                nonisolated(unsafe) let proxy = try remoteProxy { box.resume(throwing: $0) }
+                nonisolated(unsafe) let nsPayload = payload as NSData
+                proxy.addEgressBlacklist(requestJSON: nsPayload) { data in
+                    do {
+                        box.resume(returning: try DerrickDaemonXPCCodec.decodeAck(data as Data))
+                    } catch {
+                        box.resume(throwing: error)
+                    }
+                }
+            } catch {
+                box.resume(throwing: error)
+            }
+        }
+    }
+
+    private func removeBlacklistUnlocked(_ payload: Data) async throws -> ServiceAckDTO {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceAckDTO, Error>) in
+            let box = OnceResume(cont)
+            do {
+                nonisolated(unsafe) let proxy = try remoteProxy { box.resume(throwing: $0) }
+                nonisolated(unsafe) let nsPayload = payload as NSData
+                proxy.removeEgressBlacklist(requestJSON: nsPayload) { data in
                     do {
                         box.resume(returning: try DerrickDaemonXPCCodec.decodeAck(data as Data))
                     } catch {

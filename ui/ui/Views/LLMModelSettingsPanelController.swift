@@ -4,10 +4,12 @@ import SwiftUI
 @MainActor
 final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
     private weak var window: NSWindow?
+    private var escapeMonitor: Any?
 
     func show(helperModelSettings: LLMModelSettings) {
         if let window {
             center(window, relativeTo: preferredParentWindow())
+            installEscapeMonitor()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -34,6 +36,7 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         center(panel, relativeTo: preferredParentWindow())
         window = panel
+        installEscapeMonitor()
 
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -43,7 +46,26 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         guard let closingWindow = notification.object as? NSWindow, closingWindow === window else {
             return
         }
+        removeEscapeMonitor()
         window = nil
+    }
+
+    private func installEscapeMonitor() {
+        removeEscapeMonitor()
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.window, event.keyCode == 53 else {
+                return event
+            }
+            self.window?.performClose(nil)
+            return nil
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        if let escapeMonitor {
+            NSEvent.removeMonitor(escapeMonitor)
+            self.escapeMonitor = nil
+        }
     }
 
     private func preferredParentWindow() -> NSWindow? {

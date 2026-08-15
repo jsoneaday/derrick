@@ -7,7 +7,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
     case helperModels
     case multiAgent
     case containers
-    case networkAccess
+    case networkBlacklist
     case sensitiveContent
     case usageLimits
     case softwareFactory
@@ -22,8 +22,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Multi-agent"
         case .containers:
             return "Containers"
-        case .networkAccess:
-            return "Network access"
+        case .networkBlacklist:
+            return "Network blacklist"
         case .sensitiveContent:
             return "Sensitive content"
         case .usageLimits:
@@ -41,8 +41,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "person.3"
         case .containers:
             return "shippingbox"
-        case .networkAccess:
-            return "network"
+        case .networkBlacklist:
+            return "hand.raised"
         case .sensitiveContent:
             return "eye.slash"
         case .usageLimits:
@@ -55,15 +55,12 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
 
 struct LLMModelSettingsView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
-    @ObservedObject private var egressAllowlist = EgressAllowlistService.shared
     @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @ObservedObject private var usageLimits = UsageLimitsService.shared
     @ObservedObject private var containerLifecycle = ContainerLifecycleSettingsService.shared
     @ObservedObject private var orchestrationLimits = OrchestrationLimitsSettingsService.shared
     @ObservedObject private var softwareFactory = SoftwareFactorySettingsService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
-    @State private var newSuffixDraft = ""
-    @State private var networkError: String?
     @State private var contentError: String?
     @State private var draftLimits: UsageLimits = .default
     @State private var draftContainerTTLMinutes: Int = ContainerLifecycleSettings.default.containerRunMaxTTLMinutes
@@ -96,8 +93,8 @@ struct LLMModelSettingsView: View {
                         multiAgentDetail
                     case .containers:
                         containersDetail
-                    case .networkAccess:
-                        networkAccessDetail
+                    case .networkBlacklist:
+                        NetworkBlacklistSettingsView()
                     case .sensitiveContent:
                         sensitiveContentDetail
                     case .usageLimits:
@@ -307,77 +304,6 @@ struct LLMModelSettingsView: View {
                 .keyboardShortcut(.defaultAction)
             }
             .padding(.top, 8)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private var networkAccessDetail: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Network access")
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
-
-            Text("Domain suffixes the egress proxy may reach from network-enabled scripts. Private and metadata hosts stay blocked.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                TextField("example.com", text: $newSuffixDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await addSuffix() } }
-                Button("Add") {
-                    Task { await addSuffix() }
-                }
-                .disabled(newSuffixDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            if let networkError {
-                Text(networkError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if egressAllowlist.suffixes.isEmpty {
-                Text("No allowed domain suffixes yet. Seeded defaults appear after first app launch, or add a domain above.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(egressAllowlist.suffixes) { row in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.suffix)
-                                    .font(.body.monospaced())
-                                Text(row.source == "seed" ? "Default" : "User")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if !row.enabled {
-                                Text("Disabled")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Button(role: .destructive) {
-                                Task {
-                                    do {
-                                        try await egressAllowlist.removeSuffix(id: row.id)
-                                        networkError = nil
-                                    } catch {
-                                        networkError = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                        .padding(.vertical, 8)
-                        Divider()
-                    }
-                }
-            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -615,18 +541,6 @@ struct LLMModelSettingsView: View {
 
     private func formatUSD(_ value: Double) -> String {
         String(format: "$%.4f", value)
-    }
-
-    private func addSuffix() async {
-        let draft = newSuffixDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.isEmpty else { return }
-        do {
-            try await egressAllowlist.addSuffix(draft, source: "user")
-            newSuffixDraft = ""
-            networkError = nil
-        } catch {
-            networkError = error.localizedDescription
-        }
     }
 
     private func helperModelPicker(

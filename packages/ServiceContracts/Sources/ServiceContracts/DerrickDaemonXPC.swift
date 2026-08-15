@@ -8,6 +8,12 @@ import Foundation
     func postUserNotification(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Ask this process to exit so launchd KeepAlive re-execs the on-disk binary. Reply `ServiceAckDTO`.
     func retire(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Soft egress blacklist. Reply `EgressBlacklistListResult`.
+    func listEgressBlacklist(withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Add `host` or `*.domain`. Request `EgressBlacklistAddRequest`. Reply `ServiceAckDTO`.
+    func addEgressBlacklist(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
+    /// Remove by id. Request `EgressBlacklistRemoveRequest`. Reply `ServiceAckDTO`.
+    func removeEgressBlacklist(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 /// Full daemon surface: control + in-process Agent / Job / MCP methods on one Mach connection.
@@ -66,5 +72,29 @@ public enum DerrickDaemonXPCCodec {
 
     public static func decodeAck(_ data: Data) throws -> ServiceAckDTO {
         try JSONDecoder.service.decode(ServiceAckDTO.self, from: data)
+    }
+
+    public static func encodeBlacklistList(_ result: EgressBlacklistListResult) throws -> Data {
+        try JSONEncoder.service.encode(result)
+    }
+
+    public static func decodeBlacklistList(_ data: Data) throws -> EgressBlacklistListResult {
+        try JSONDecoder.service.decode(EgressBlacklistListResult.self, from: data)
+    }
+
+    public static func encodeBlacklistAddRequest(_ request: EgressBlacklistAddRequest) throws -> Data {
+        try JSONEncoder.service.encode(request)
+    }
+
+    public static func decodeBlacklistAddRequest(_ data: Data) throws -> EgressBlacklistAddRequest {
+        try JSONDecoder.service.decode(EgressBlacklistAddRequest.self, from: data)
+    }
+
+    public static func encodeBlacklistRemoveRequest(_ request: EgressBlacklistRemoveRequest) throws -> Data {
+        try JSONEncoder.service.encode(request)
+    }
+
+    public static func decodeBlacklistRemoveRequest(_ data: Data) throws -> EgressBlacklistRemoveRequest {
+        try JSONDecoder.service.decode(EgressBlacklistRemoveRequest.self, from: data)
     }
 }

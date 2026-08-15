@@ -13,7 +13,8 @@ let package = Package(
     dependencies: [
         .package(path: "../ServiceContracts"),
         .package(path: "../DBRepository"),
-        .package(path: "../DockerRunnerXPC")
+        .package(path: "../DockerRunnerXPC"),
+        .package(path: "../Plugin")
     ],
     targets: [
         .target(
@@ -21,7 +22,8 @@ let package = Package(
             dependencies: [
                 "ServiceContracts",
                 "DBRepository",
-                "DockerRunnerXPC"
+                "DockerRunnerXPC",
+                "Plugin"
             ],
             path: "Sources/DerrickBackend",
             swiftSettings: [

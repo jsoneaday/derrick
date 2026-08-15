@@ -1,5 +1,6 @@
 import DBRepository
 import Foundation
+import Plugin
 import ServiceContracts
 import UserNotifications
 
@@ -78,6 +79,36 @@ public actor DaemonRuntime {
 
     public func postNotification(_ request: UserNotificationRequest) async throws {
         try await NotificationPostingService.shared.post(request)
+    }
+
+    public func listEgressBlacklist() async throws -> EgressBlacklistListResult {
+        let repo = try await sharedRepository()
+        let rows = try await repo.listEgressBlacklist()
+        return EgressBlacklistListResult(entries: rows.map(Self.dto(from:)))
+    }
+
+    public func addEgressBlacklist(pattern: String) async throws {
+        let entry = try BlacklistEntry.parse(pattern)
+        let repo = try await sharedRepository()
+        try await repo.addEgressBlacklistEntry(entry)
+    }
+
+    public func removeEgressBlacklist(id: String) async throws {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw BlacklistValidationError.invalidPattern(id)
+        }
+        let repo = try await sharedRepository()
+        try await repo.deleteEgressBlacklistEntry(id: trimmed)
+    }
+
+    private static func dto(from entry: BlacklistEntry) -> EgressBlacklistEntryDTO {
+        EgressBlacklistEntryDTO(
+            id: entry.id,
+            kind: entry.kind.rawValue,
+            pattern: entry.pattern,
+            displayPattern: entry.displayPattern
+        )
     }
 
     private func openDatabase() async throws {

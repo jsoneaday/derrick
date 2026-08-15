@@ -154,9 +154,25 @@ import Foundation
     #expect(throws: BlacklistValidationError.rejectedPublicSuffix("co.uk")) {
         _ = try BlacklistEntry.parse("*.co.uk")
     }
+    #expect(throws: BlacklistValidationError.rejectedPublicSuffix("xyz")) {
+        _ = try BlacklistEntry.parse("*.xyz")
+    }
     #expect(throws: BlacklistValidationError.self) {
         _ = try BlacklistEntry.parse("*")
     }
+}
+
+@Test func blacklistParseRejectsPortAndNormalizesCase() throws {
+    #expect(throws: BlacklistValidationError.invalidPattern("api.example.com:443")) {
+        _ = try BlacklistEntry.parse("api.example.com:443")
+    }
+    #expect(throws: BlacklistValidationError.invalidPattern("https://example.com")) {
+        _ = try BlacklistEntry.parse("https://example.com")
+    }
+    let entry = try BlacklistEntry.parse("  API.Example.COM  ")
+    #expect(entry.kind == .exact)
+    #expect(entry.pattern == "api.example.com")
+    #expect(entry.displayPattern == "api.example.com")
 }
 
 @Test func ssrfDeniesLocalAndMetadata() {

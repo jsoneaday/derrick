@@ -337,7 +337,69 @@ public final class AgentServiceClient: @unchecked Sendable {
         }
     }
 
-    private func remoteProxy() throws -> AgentServiceXPC {
+    public func listEgressBlacklist() async throws -> [EgressBlacklistEntryDTO] {
+        try await ensureReadyForTurn()
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        return try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[EgressBlacklistEntryDTO], Error>) in
+                proxy.listEgressBlacklist { data in
+                    do {
+                        cont.resume(returning: try DerrickDaemonXPCCodec.decodeBlacklistList(data as Data).entries)
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
+    public func addEgressBlacklist(pattern: String) async throws {
+        try await ensureReadyForTurn()
+        let payload = try DerrickDaemonXPCCodec.encodeBlacklistAddRequest(
+            EgressBlacklistAddRequest(pattern: pattern)
+        )
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        nonisolated(unsafe) let nsPayload = payload as NSData
+        let ack: ServiceAckDTO = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceAckDTO, Error>) in
+                proxy.addEgressBlacklist(requestJSON: nsPayload) { data in
+                    do {
+                        cont.resume(returning: try DerrickDaemonXPCCodec.decodeAck(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard ack.ok else {
+            throw AgentServiceClientError.rejected(ack.message)
+        }
+    }
+
+    public func removeEgressBlacklist(id: String) async throws {
+        try await ensureReadyForTurn()
+        let payload = try DerrickDaemonXPCCodec.encodeBlacklistRemoveRequest(
+            EgressBlacklistRemoveRequest(id: id)
+        )
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        nonisolated(unsafe) let nsPayload = payload as NSData
+        let ack: ServiceAckDTO = try await invoke(timeout: callTimeoutNanoseconds) {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceAckDTO, Error>) in
+                proxy.removeEgressBlacklist(requestJSON: nsPayload) { data in
+                    do {
+                        cont.resume(returning: try DerrickDaemonXPCCodec.decodeAck(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        guard ack.ok else {
+            throw AgentServiceClientError.rejected(ack.message)
+        }
+    }
+
+    private func remoteProxy() throws -> DerrickDaemonServiceXPC {
         lock.lock()
         defer { lock.unlock() }
         if connection == nil {
@@ -441,6 +503,7 @@ public enum AgentServiceClientError: Error, LocalizedError {
     case unavailable
     case bootstrapFailed(String)
     case turnFailed(String)
+    case rejected(String)
     case timeout
 
     public var errorDescription: String? {
@@ -451,6 +514,8 @@ public enum AgentServiceClientError: Error, LocalizedError {
             return "AgentService bootstrap failed: \(message)"
         case .turnFailed(let message):
             return "AgentService turn failed: \(message)"
+        case .rejected(let message):
+            return message
         case .timeout:
             return "AgentService XPC call timed out."
         }
