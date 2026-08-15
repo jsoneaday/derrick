@@ -21,7 +21,7 @@ public enum PluginPath {
 
     public static func validateJSEntrypoint(_ raw: String) throws -> String {
         let path = try validateRelative(raw)
-        guard path.hasSuffix(".js") else {
+        guard path.hasSuffix(".js") || path.hasSuffix(".ts") else {
             throw PluginManifestError.invalidEntrypoint(raw)
         }
         return path

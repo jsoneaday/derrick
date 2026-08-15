@@ -7,8 +7,12 @@ private let sideMenuRecentsFontSize = CGFloat(12)
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject var chatSessions: ChatSessionStore
+    var onSendPluginPrefix: ((String) -> Void)?
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
+    @ObservedObject private var softwareFactory = SoftwareFactorySettingsService.shared
+    @ObservedObject private var pluginList = PluginListStore.shared
+    @State private var sampleInstallMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -52,6 +56,18 @@ struct SidebarView: View {
                 SidebarActionRow(
                     row: SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
                 )
+                if softwareFactory.isEnabled {
+                    SidebarActionRow(
+                        row: SidebarRow(
+                            id: "software-factory",
+                            icon: "hammer.fill",
+                            title: "Software Factory",
+                            isProminent: chatSessions.isFactorySessionSelected
+                        )
+                    ) {
+                        chatSessions.openFactorySession()
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -97,6 +113,72 @@ struct SidebarView: View {
                 }
             }
 
+            if softwareFactory.isEnabled || !pluginList.plugins.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Plugins")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if softwareFactory.isEnabled {
+                            Button("Install daily news") {
+                                Task {
+                                    sampleInstallMessage = await pluginList.installDailyNewsSample()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    if pluginList.plugins.isEmpty {
+                        Text("No installed plugins")
+                            .font(.system(size: sideMenuRecentsFontSize))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pluginList.plugins) { plugin in
+                            HStack(spacing: 8) {
+                                Button {
+                                    onSendPluginPrefix?("/\(plugin.id)")
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(plugin.id)
+                                            .font(.system(size: sideMenuRecentsFontSize))
+                                            .lineLimit(1)
+                                        if !plugin.description.isEmpty {
+                                            Text(plugin.description)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!plugin.enabled)
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { plugin.enabled },
+                                        set: { newValue in
+                                            Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
+                                        }
+                                    )
+                                )
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.mini)
+                            }
+                        }
+                    }
+                    if let sampleInstallMessage, !sampleInstallMessage.isEmpty {
+                        Text(sampleInstallMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Spacer()
 
             Button {
@@ -128,6 +210,9 @@ struct SidebarView: View {
             Rectangle()
                 .fill(.black.opacity(0.08))
                 .frame(width: 1)
+        }
+        .task {
+            await pluginList.reload()
         }
     }
 }

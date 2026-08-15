@@ -459,6 +459,44 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    public static func pluginInstall(
+        pluginID: String,
+        version: String,
+        summary: String,
+        detail: String,
+        payloadPreview: String?,
+        toolName: String = "factory.promote",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        approvalRequired(
+            source: .toolGovernance,
+            title: "Install plugin",
+            summary: summary,
+            detail: detail,
+            toolName: toolName,
+            payloadPreview: payloadPreview,
+            correlationId: correlationId,
+            rememberKey: "plugin.install:\(pluginID):\(version)"
+        )
+    }
+
+    public static func pluginSecretGrant(
+        pluginID: String,
+        provider: String,
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        approvalRequired(
+            source: .toolGovernance,
+            title: "Plugin permission",
+            summary: "\(pluginID) wants to use your \(provider) secret on matching hosts.",
+            detail: "The token stays on this Mac. The plugin never sees it. Deny skips this request.",
+            toolName: "plugin.invoke",
+            payloadPreview: provider,
+            correlationId: correlationId,
+            rememberKey: "plugin.secret:\(pluginID):\(provider)"
+        )
+    }
+
     public static func usageLimitExceeded(
         dimensionTitle: String,
         currentLimit: Int,

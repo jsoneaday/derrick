@@ -334,6 +334,31 @@ import Testing
         let cal = Calendar.current
         #expect(cal.component(.hour, from: at3pm) == 15)
 
+        let invoke = try JobOrderBuilder.createJobRequest(
+            from: JobCreateOrderInput(
+                toolName: "plugin.invoke",
+                toolArgumentsJSON: #"{"plugin_id":"daily-news"}"#,
+                wakeAfter: false
+            ),
+            principal: .system,
+            sessionID: nil,
+            agentID: nil,
+            now: now
+        )
+        #expect(invoke.steps[0].kind == .runTool)
+        #expect(throws: JobOrderBuilderError.invalidToolArgumentsJSON) {
+            _ = try JobOrderBuilder.createJobRequest(
+                from: JobCreateOrderInput(
+                    toolName: "plugin.invoke",
+                    toolArgumentsJSON: #"{"kind":"schedule"}"#,
+                    wakeAfter: false
+                ),
+                principal: .system,
+                sessionID: nil,
+                agentID: nil,
+                now: now
+            )
+        }
         #expect(throws: JobOrderBuilderError.toolNotAllowed("shell_exec")) {
             _ = try JobOrderBuilder.createJobRequest(
                 from: JobCreateOrderInput(

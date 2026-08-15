@@ -4,6 +4,7 @@ import Combine
 import LLMAgentClient
 import SwiftUI
 import DBRepository
+import Plugin
 import PolicyUserInteraction
 import ServiceContracts
 private let bottomPromptFontSize = CGFloat(11)
@@ -13,21 +14,44 @@ struct ChatTurn: Identifiable, Hashable {
     let id: UUID
     let prompt: String
     var response: String
+    var thought: String
     var status: AgentResponseStatus?
     var toolName: String?
+    var pluginTest: PluginInvokePresentation.TestReport?
 
     init(
         id: UUID = UUID(),
         prompt: String,
         response: String = "",
+        thought: String = "",
         status: AgentResponseStatus? = nil,
-        toolName: String? = nil
+        toolName: String? = nil,
+        pluginTest: PluginInvokePresentation.TestReport? = nil
     ) {
         self.id = id
         self.prompt = prompt
         self.response = response
+        self.thought = thought
         self.status = status
         self.toolName = toolName
+        self.pluginTest = pluginTest
+    }
+
+    /// Thinking is the current plan snapshot. Complete appends the user-visible answer.
+    mutating func applyStreamChunk(status: AgentResponseStatus, chunk: String) {
+        switch status {
+        case .thinking:
+            thought = chunk
+        case .complete:
+            if let report = PluginInvokePresentation.decodeTestReport(chunk) {
+                pluginTest = report
+                response = report.body
+                return
+            }
+            response += chunk
+        case .toolCall, .toolBatch:
+            break
+        }
     }
 }
 
@@ -283,6 +307,9 @@ struct ContentView: View {
     @State private var shouldAutoScroll = true
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
+    @ObservedObject private var pluginList = PluginListStore.shared
+    @State private var slashHighlight = 0
+    @State private var slashMenuDismissed = false
 
     private var canSendPrompt: Bool {
         sessionReady
@@ -306,10 +333,30 @@ struct ContentView: View {
         debugConfiguration.isDebugEnabled
     }
 
+    private var slashHandle: String? {
+        PluginPrefix.typingHandle(prompt)
+    }
+
+    private var slashMatches: [PluginSidebarItem] {
+        guard let slashHandle else { return [] }
+        return pluginList.slashMatches(handle: slashHandle)
+    }
+
+    private var showsSlashMenu: Bool {
+        slashHandle != nil && !slashMenuDismissed && sessionReady && !isActiveTabStreaming
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             if let helperModelSettings = helperModelSettings {
-                SidebarView(helperModelSettings: helperModelSettings, chatSessions: chatSessions)
+                SidebarView(
+                    helperModelSettings: helperModelSettings,
+                    chatSessions: chatSessions,
+                    onSendPluginPrefix: { prefix in
+                        prompt = prefix
+                        startStreaming()
+                    }
+                )
                     .frame(width: 296)
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
             } else {
@@ -512,6 +559,7 @@ struct ContentView: View {
                 await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
                 await SoftwareFactorySettingsService.shared.configure(repository: repo)
+                await PluginListStore.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
@@ -782,12 +830,26 @@ struct ContentView: View {
                     .padding(.bottom, 8)
             }
 
+            if showsSlashMenu {
+                PluginSlashMenu(
+                    matches: slashMatches,
+                    highlightedIndex: slashHighlight,
+                    onChoose: { applySlashCompletion($0, submit: false) }
+                )
+                .padding(.bottom, 8)
+            }
+
             VStack(alignment: .leading, spacing: 0) {
                 ZStack(alignment: .topLeading) {
-                    PromptInputView(text: $prompt, onSubmit: {
-                        guard canSendPrompt else { return }
-                        startStreaming()
-                    }, focusToken: promptFocusToken)
+                    PromptInputView(
+                        text: $prompt,
+                        onSubmit: {
+                            guard canSendPrompt else { return }
+                            startStreaming()
+                        },
+                        focusToken: promptFocusToken,
+                        slashKeyHandler: handleSlashKey
+                    )
                     .frame(height: inputHeight)
                     .disabled(!sessionReady || isActiveTabStreaming)
                 }
@@ -889,6 +951,57 @@ struct ContentView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
         }
+        .onChange(of: slashHandle) { _, handle in
+            slashHighlight = 0
+            slashMenuDismissed = false
+            if handle != nil {
+                Task { await pluginList.reload() }
+            }
+        }
+        .onChange(of: slashMatches.map(\.id)) { _, _ in
+            if slashHighlight >= slashMatches.count {
+                slashHighlight = max(slashMatches.count - 1, 0)
+            }
+        }
+    }
+
+    private func handleSlashKey(_ event: NSEvent) -> Bool {
+        guard showsSlashMenu else { return false }
+        let flags = event.modifierFlags.intersection([.option, .shift, .command, .control])
+        switch event.keyCode {
+        case 126: // up
+            guard !slashMatches.isEmpty else { return true }
+            slashHighlight = (slashHighlight + slashMatches.count - 1) % slashMatches.count
+            return true
+        case 125: // down
+            guard !slashMatches.isEmpty else { return true }
+            slashHighlight = (slashHighlight + 1) % slashMatches.count
+            return true
+        case 48: // tab
+            guard flags.isEmpty, slashMatches.indices.contains(slashHighlight) else { return false }
+            applySlashCompletion(slashMatches[slashHighlight], submit: false)
+            return true
+        case 53: // escape
+            slashMenuDismissed = true
+            return true
+        case 36, 76: // return
+            guard flags.isEmpty else { return false }
+            if slashMatches.indices.contains(slashHighlight) {
+                applySlashCompletion(slashMatches[slashHighlight], submit: true)
+                return true
+            }
+            return false
+        default:
+            return false
+        }
+    }
+
+    private func applySlashCompletion(_ plugin: PluginSidebarItem, submit: Bool) {
+        prompt = "/\(plugin.id)"
+        slashHighlight = 0
+        if submit {
+            startStreaming()
+        }
     }
 
     private func promptInputHeight(for availableHeight: CGFloat) -> CGFloat {
@@ -925,6 +1038,10 @@ struct ContentView: View {
     }
 
     private func copyTurn(_ turn: ChatTurn) {
+        if let test = turn.pluginTest {
+            copyToPasteboard("\(test.heading)\n\(test.body)")
+            return
+        }
         let completion = turn.response.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = completion.isEmpty ? turn.prompt : completion
         copyToPasteboard(text)

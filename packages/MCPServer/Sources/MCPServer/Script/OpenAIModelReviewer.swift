@@ -12,11 +12,17 @@ public struct OpenAIScriptReviewer: ScriptReviewer {
     public let name: String
     private let model: OpenAIModel
     private let client: OpenAIAgentClient
+    private let systemPrompt: String
 
-    public init(apiKey: String, model: OpenAIModel = .gpt56Luna) {
+    public init(
+        apiKey: String,
+        model: OpenAIModel = .gpt56Luna,
+        systemPrompt: String = ReviewerSystemPrompt
+    ) {
         self.name = "openai-\(model.rawValue)"
         self.model = model
         self.client = OpenAIAgentClient(provider: OpenAIProvider(apiKey: apiKey))
+        self.systemPrompt = systemPrompt
     }
 
     public static func fromEnvironment(
@@ -33,7 +39,7 @@ public struct OpenAIScriptReviewer: ScriptReviewer {
         let userContent = ScriptReviewerRuntime.reviewInput(from: args)
         let request = AgentRequest(
             messages: [
-                .init(role: .system, content: ReviewerSystemPrompt),
+                .init(role: .system, content: systemPrompt),
                 .init(role: .user, content: userContent)
             ],
             temperature: 0

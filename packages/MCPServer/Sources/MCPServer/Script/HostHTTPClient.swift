@@ -20,10 +20,15 @@ public struct HostHTTPFetch: Sendable {
     }
 }
 
+public protocol HostHTTPSecretAttacher: Sendable {
+    func apply(url: URL) async -> (url: URL, headers: [String: String])
+}
+
 public actor HostHTTPClient {
     public static let shared = HostHTTPClient()
 
     private var accessGate: any HostHTTPAccessGate = AllowAllHostHTTPAccessGate()
+    private var secretAttacher: (any HostHTTPSecretAttacher)?
     private let session: URLSession
 
     public init() {
@@ -40,6 +45,10 @@ public actor HostHTTPClient {
 
     public func setAccessGate(_ gate: any HostHTTPAccessGate) {
         accessGate = gate
+    }
+
+    public func setSecretAttacher(_ attacher: (any HostHTTPSecretAttacher)?) {
+        secretAttacher = attacher
     }
 
     public func perform(method: String, urlString: String, invokeID: String = "") async -> HostHTTPFetch {
@@ -68,10 +77,21 @@ public actor HostHTTPClient {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: reason)
         }
 
-        var request = URLRequest(url: url)
+        var requestURL = url
+        var extraHeaders: [String: String] = [:]
+        if let secretAttacher {
+            let attached = await secretAttacher.apply(url: url)
+            requestURL = attached.url
+            extraHeaders = attached.headers
+        }
+
+        var request = URLRequest(url: requestURL)
         request.httpMethod = method
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = false
+        for (header, value) in extraHeaders {
+            request.setValue(value, forHTTPHeaderField: header)
+        }
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"

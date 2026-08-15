@@ -15,7 +15,17 @@ enum DaemonModuleBootstrap {
                 _ = try await MCPServiceToolHost.shared.ensureReady()
             }
             InProcessServiceBridges.mcpCallTool = { request in
-                try await MCPServiceToolHost.shared.callTool(request: request)
+                do {
+                    return try await MCPServiceToolHost.shared.callTool(request: request)
+                } catch {
+                    return MCPToolCallResultDTO(
+                        requestID: request.requestID,
+                        ok: false,
+                        isError: true,
+                        text: "",
+                        message: error.localizedDescription
+                    )
+                }
             }
             InProcessServiceBridges.mcpSearchTools = { principal, query in
                 let tools = try await MCPServiceToolHost.shared.searchTools(query: query, principal: principal)

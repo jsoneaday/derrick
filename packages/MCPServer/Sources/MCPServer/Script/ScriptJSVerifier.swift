@@ -1,4 +1,5 @@
 import Foundation
+import Plugin
 
 public enum ScriptJSVerifier: Sendable {
     public static func validate(script: String, dependencies: [String: String]) -> [String] {
@@ -22,6 +23,9 @@ public enum ScriptJSVerifier: Sendable {
         }
         if !text.contains("export function handle") && !text.contains("export async function handle") {
             findings.append("Script must export function handle.")
+        }
+        if let markup = PluginMarkup.naiveTagStripFinding(text) {
+            findings.append(markup)
         }
         for name in dependencies.keys {
             if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

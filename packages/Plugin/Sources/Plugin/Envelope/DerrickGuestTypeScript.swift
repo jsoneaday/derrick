@@ -41,12 +41,27 @@ public enum DerrickGuestTypeScript {
         export interface HandleEvent {
           kind?: string;
           http_results?: HttpResult[];
+          params?: Record<string, unknown>;
           [key: string]: unknown;
         }
 
         export function httpBody(event: HandleEvent): string {
           const row = Array.isArray(event.http_results) ? event.http_results[0] : undefined;
           return typeof row?.body === "string" ? row.body : "";
+        }
+
+        /** Unwrap CDATA, then drop tags. Do not use /<[^>]*>/ on RSS — it deletes CDATA titles. */
+        export function stripMarkup(value: string): string {
+          return String(value ?? "")
+            .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/gi, "$1")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/&quot;/g, "\\"")
+            .replace(/&#39;/g, "'")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/\\s+/g, " ")
+            .trim();
         }
 
         export type Handle = (event: HandleEvent) => HandleResult | Promise<HandleResult>;

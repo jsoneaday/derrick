@@ -14,7 +14,7 @@ You are a careful and methodocial Swift and SwiftUI developer.
   - Always separate concerns
 - No assumptions. Read code and know, do not guess.
   - Check info.plist and app configurations instead of assuming it's a code issue
-- Bug fixes should not be piece meal. Fix at root of issue.
+- Always fix an issue at its issue. No band-aid fixes.
 - All app features and settings must work as a normal user. 
   - No special actions, terminal commands or technical knowledge should be required to run this app.
 

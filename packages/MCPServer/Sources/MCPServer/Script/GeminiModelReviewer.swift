@@ -12,11 +12,17 @@ public struct GeminiScriptReviewer: ScriptReviewer {
     public let name: String
     private let model: GeminiModel
     private let client: GeminiAgentClient
+    private let systemPrompt: String
 
-    public init(apiKey: String, model: GeminiModel = .gemini25FlashLite) {
+    public init(
+        apiKey: String,
+        model: GeminiModel = .gemini25FlashLite,
+        systemPrompt: String = ReviewerSystemPrompt
+    ) {
         self.name = "gemini-\(model.rawValue)"
         self.model = model
         self.client = GeminiAgentClient(provider: GeminiProvider(apiKey: apiKey))
+        self.systemPrompt = systemPrompt
     }
 
     public static func fromEnvironment(
@@ -33,7 +39,7 @@ public struct GeminiScriptReviewer: ScriptReviewer {
         let userContent = ScriptReviewerRuntime.reviewInput(from: args)
         let request = AgentRequest(
             messages: [
-                .init(role: .system, content: ReviewerSystemPrompt),
+                .init(role: .system, content: systemPrompt),
                 .init(role: .user, content: userContent)
             ],
             temperature: 0

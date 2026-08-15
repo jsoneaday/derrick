@@ -82,7 +82,7 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
     public var errorDescription: String? {
         switch self {
         case .emptyToolName: return "tool_name is required."
-        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs (v1: script_exec only)."
+        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs (v1: script_exec or plugin.invoke)."
         case .invalidToolArgumentsJSON: return "tool_arguments must be a JSON object."
         case .wakePromptRequired: return "wake_prompt is required when wake_after is true."
         case .invalidRunAfterSeconds(let s): return "run_after_seconds out of range: \(s) (allow 0...86400)."
@@ -95,8 +95,8 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
 
 /// Pure mapping: agent order intents → JobService create requests.
 public enum JobOrderBuilder {
-    /// Effectors the agent may freeze into a job (expand later).
-    public static let allowedToolNames: Set<String> = ["script_exec"]
+    /// Effectors the agent may freeze into a job.
+    public static let allowedToolNames: Set<String> = ["script_exec", "plugin.invoke"]
 
     public static let maxRunAfterSeconds = 86_400
 
@@ -125,9 +125,10 @@ public enum JobOrderBuilder {
             now: now
         )
 
-        let argsJSON = input.toolName == "script_exec"
-            ? normalizeScriptArgumentsJSON(input.toolArgumentsJSON)
-            : input.toolArgumentsJSON
+        let argsJSON = normalizeFrozenArgumentsJSON(
+            toolName: input.toolName,
+            json: input.toolArgumentsJSON
+        )
 
         let toolPayload = JobRunToolPayload(
             toolName: input.toolName,
@@ -202,9 +203,10 @@ public enum JobOrderBuilder {
             now: now
         )
 
-        let argsJSON = input.toolName == "script_exec"
-            ? normalizeScriptArgumentsJSON(input.toolArgumentsJSON)
-            : input.toolArgumentsJSON
+        let argsJSON = normalizeFrozenArgumentsJSON(
+            toolName: input.toolName,
+            json: input.toolArgumentsJSON
+        )
 
         let toolPayload = JobRunToolPayload(
             toolName: input.toolName,
@@ -303,11 +305,38 @@ public enum JobOrderBuilder {
             throw JobOrderBuilderError.toolNotAllowed(trimmed)
         }
         guard let data = argumentsJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              obj is [String: Any]
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             throw JobOrderBuilderError.invalidToolArgumentsJSON
         }
+        if trimmed == "plugin.invoke" {
+            let pluginID = (obj["plugin_id"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if pluginID.isEmpty {
+                throw JobOrderBuilderError.invalidToolArgumentsJSON
+            }
+        }
+    }
+
+    public static func normalizeFrozenArgumentsJSON(toolName: String, json: String) -> String {
+        if toolName == "script_exec" {
+            return normalizeScriptArgumentsJSON(json)
+        }
+        if toolName == "plugin.invoke" {
+            return normalizePluginInvokeArgumentsJSON(json)
+        }
+        return json
+    }
+
+    public static func normalizePluginInvokeArgumentsJSON(_ json: String) -> String {
+        guard var dict = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else {
+            return json
+        }
+        if dict["kind"] == nil { dict["kind"] = "schedule" }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8)
+        else { return json }
+        return s
     }
 
     public static func normalizeScriptArgumentsJSON(_ json: String) -> String {

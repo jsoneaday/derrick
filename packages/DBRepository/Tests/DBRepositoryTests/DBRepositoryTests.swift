@@ -69,6 +69,7 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(try tableExists(named: "egress_blacklist", at: url))
         XCTAssertTrue(try tableExists(named: "egress_blacklist_exceptions", at: url))
         XCTAssertTrue(try tableExists(named: "factory_sessions", at: url))
+        XCTAssertTrue(try tableExists(named: "policy_approvals", at: url))
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
 

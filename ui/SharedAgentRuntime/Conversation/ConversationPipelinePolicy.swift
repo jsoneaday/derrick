@@ -7,6 +7,8 @@ import PartialJSON
 import Lib
 import AppEvents
 import PolicyUserInteraction
+import Plugin
+import ServiceContracts
 
 extension ConversationPipeline {
     func streamWithPolicyInterception(
@@ -76,7 +78,7 @@ extension ConversationPipeline {
                         var chunkIndex = 0
                         var streamedVisibleContent = false
                         var lastYieldedCompletionLength = 0
-                        var lastYieldedThoughtLength = 0
+                        var lastPublishedThought = ""
                         var publishedChunkDenial = false
                         /// When true, stop painting complete deltas (sensitive content pending review).
                         var holdCompleteUI = false
@@ -177,7 +179,11 @@ extension ConversationPipeline {
                                     break
                                 case .toolCall:
                                     if let thought = agentResponse?.thought, agentResponse?.toolCall == nil {
-                                        continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                        Self.publishThoughtSnapshot(
+                                            thought,
+                                            lastPublished: &lastPublishedThought,
+                                            continuation: continuation
+                                        )
                                     } else {
                                         var toolName: String?
                                         if let toolCall = agentResponse?.toolCall {
@@ -197,8 +203,11 @@ extension ConversationPipeline {
                                     break
                                 case .toolBatch:
                                     if let thought = agentResponse?.thought, agentResponse?.toolBatch == nil {
-                                        debugLog("Chunk thinking \(thought)")
-                                        continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: thought))
+                                        Self.publishThoughtSnapshot(
+                                            thought,
+                                            lastPublished: &lastPublishedThought,
+                                            continuation: continuation
+                                        )
                                     } else {
                                         var toolNames: String?
                                         if let toolCall = agentResponse?.toolBatch {
@@ -219,6 +228,13 @@ extension ConversationPipeline {
                                     }
                                     break
                                 case .complete:
+                                    let factoryStillRunning = FactoryTurnGate.nextRequiredStep(
+                                        sessionID: sessionID,
+                                        records: aggregatedToolCalls
+                                    ) != nil
+                                    if factoryStillRunning {
+                                        break
+                                    }
                                     if let assistantResponse = agentResponse?.assistantResponse {
                                         // Smart hold: only pause complete *UI* once ungranted email appears.
                                         // Thinking/tool_call keep streaming; non-sensitive answers stream fully.
@@ -251,15 +267,12 @@ extension ConversationPipeline {
                                     }
                                 case .thinking:
                                     if let thought = agentResponse?.thought, !thought.isEmpty {
-                                        let newLength = thought.count
-                                        if newLength > lastYieldedThoughtLength {
-                                            let index = thought.index(thought.startIndex, offsetBy: lastYieldedThoughtLength)
-                                            let delta = String(thought[index...])
-                                            
+                                        if Self.publishThoughtSnapshot(
+                                            thought,
+                                            lastPublished: &lastPublishedThought,
+                                            continuation: continuation
+                                        ) {
                                             streamedVisibleContent = true
-                                            debugLog("Chunk thinking \(delta)")
-                                            continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: delta))
-                                            lastYieldedThoughtLength = newLength
                                         }
                                     }
                                 default:
@@ -399,7 +412,11 @@ extension ConversationPipeline {
                         }
 
                         // Flush any held complete text after allow/confirm (single paint of remainder).
-                        if agentResponse?.status == .complete || holdCompleteUI {
+                        let factoryStillRunning = FactoryTurnGate.nextRequiredStep(
+                            sessionID: sessionID,
+                            records: aggregatedToolCalls
+                        ) != nil
+                        if factoryStillRunning == false, agentResponse?.status == .complete || holdCompleteUI {
                             let text = interceptedCompletion
                             if holdCompleteUI || lastYieldedCompletionLength < text.count {
                                 let start = min(heldCompleteThroughLength, text.count)
@@ -417,7 +434,10 @@ extension ConversationPipeline {
                         
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch {
                             let limitStarted = Date()
-                            let roundAllowed = await UsageLimitsService.shared.allowToolRound(roundIndex: round)
+                            let roundAllowed = await UsageLimitsService.shared.allowToolRound(
+                                roundIndex: round,
+                                factoryPipeline: FactorySessionID.isFactorySession(sessionID)
+                            )
                             let toolLimitMS = PipelineTiming.elapsedMS(from: limitStarted)
                             if !roundAllowed {
                                 await MainActor.run {
@@ -498,12 +518,41 @@ extension ConversationPipeline {
                                 "\(roundLabel) tool wall_ms=\(toolWallMS) parse_ms=\(parseToolMS) limit_ms=\(toolLimitMS) usage_ms=\(usageMS) records=\(toolExecution.records.count) summary_chars=\(toolExecution.summary.utf8.count) slim_followup_chars=\(slimFollowUpBody.utf8.count) names=\(toolExecution.records.map(\.name).joined(separator: ","))"
                             )
 
+                            if let promoteTest = toolExecution.records.reversed().compactMap({ record -> PluginInvokePresentation.TestReport? in
+                                guard record.name == FactoryTurnGate.factoryPromote
+                                    || record.name == FactoryTurnGate.factoryInstallSample else {
+                                    return nil
+                                }
+                                return PluginInvokePresentation.testReport(fromPromoteResult: record.result ?? "")
+                            }).first {
+                                continuation.yield(
+                                    AgentResponseNextChunk(
+                                        status: .complete,
+                                        chunk: PluginInvokePresentation.encodeTestReport(promoteTest)
+                                    )
+                                )
+                                PipelineTiming.log(
+                                    "\(roundLabel) factory_test_complete plugin=\(promoteTest.heading) kind=\(promoteTest.kind.rawValue)"
+                                )
+                                break
+                            }
+
                             let followUpStarted = Date()
-                            workingPrompt = Self.buildFollowUpPrompt(
+                            if let factoryFollowUp = FactoryTurnGate.continuationPrompt(
+                                sessionID: sessionID,
                                 originalPrompt: prompt,
                                 assistantToolRequest: slimRequestLine,
-                                toolResultSummary: slimFollowUpBody
-                            )
+                                toolResultSummary: slimFollowUpBody,
+                                records: aggregatedToolCalls
+                            ) {
+                                workingPrompt = factoryFollowUp
+                            } else {
+                                workingPrompt = Self.buildFollowUpPrompt(
+                                    originalPrompt: prompt,
+                                    assistantToolRequest: slimRequestLine,
+                                    toolResultSummary: slimFollowUpBody
+                                )
+                            }
                             let followUpBuildMS = PipelineTiming.elapsedMS(from: followUpStarted)
                             PipelineTiming.log(
                                 "\(roundLabel) followup_build_ms=\(followUpBuildMS) followup_chars=\(workingPrompt.utf8.count) slim_result_chars=\(slimFollowUpBody.utf8.count) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
@@ -518,6 +567,23 @@ extension ConversationPipeline {
                             PipelineTiming.log(
                                 "\(roundLabel) tool_payload_invalid round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
                             )
+                            continue
+                        }
+
+                        if let factoryFollowUp = FactoryTurnGate.continuationPrompt(
+                            sessionID: sessionID,
+                            originalPrompt: prompt,
+                            assistantToolRequest: nil,
+                            toolResultSummary: nil,
+                            records: aggregatedToolCalls
+                        ) {
+                            await MainActor.run {
+                                debugLog("Factory session incomplete — continuing to next required tool")
+                            }
+                            PipelineTiming.log(
+                                "\(roundLabel) factory_continue usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) tool_records=\(aggregatedToolCalls.count)"
+                            )
+                            workingPrompt = factoryFollowUp
                             continue
                         }
 
@@ -653,14 +719,27 @@ extension ConversationPipeline {
         
         switch request {
         case .single(let single):
-            let result = try await callToolWithPolicyInterception(
-                named: single.toolName,
-                arguments: single.arguments ?? [:],
-                sessionID: sessionID,
-                userPrompt: userPrompt,
-                approvalPresenter: approvalPresenter
-            )
-            
+            let result: MCPToolResult
+            do {
+                result = try await callToolWithPolicyInterception(
+                    named: single.toolName,
+                    arguments: single.arguments ?? [:],
+                    sessionID: sessionID,
+                    userPrompt: userPrompt,
+                    approvalPresenter: approvalPresenter
+                )
+            } catch {
+                let text = error.localizedDescription
+                return (
+                    "\(single.toolName): \(text)",
+                    [ToolCallRecord(
+                        name: single.toolName,
+                        arguments: Self.toolCallRecordArguments(from: single.arguments ?? [:]),
+                        result: text
+                    )]
+                )
+            }
+
             let record = ToolCallRecord(
                 name: single.toolName,
                 arguments: Self.toolCallRecordArguments(from: single.arguments ?? [:]),
@@ -764,6 +843,20 @@ extension ConversationPipeline {
 
     /// Builds the round-2+ user message. `toolResultSummary` must already be slimmed for the model
     /// (`ToolFollowUpFormatter`); full tool JSON is logged separately before this is called.
+    /// Publishes the current plan as a full snapshot. The UI replaces `thought`; it must not append.
+    @discardableResult
+    private static func publishThoughtSnapshot(
+        _ thought: String,
+        lastPublished: inout String,
+        continuation: AsyncThrowingStream<AgentResponseNextChunk, Error>.Continuation
+    ) -> Bool {
+        let trimmed = thought.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != lastPublished else { return false }
+        lastPublished = trimmed
+        continuation.yield(AgentResponseNextChunk(status: .thinking, chunk: trimmed))
+        return true
+    }
+
     private static func buildFollowUpPrompt(
         originalPrompt: String,
         assistantToolRequest: String,

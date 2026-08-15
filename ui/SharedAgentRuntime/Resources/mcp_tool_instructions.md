@@ -1,5 +1,5 @@
 1. You can use MCP tools that are listed in the prompt context.
-2. Only call tools that exist in the catalog.
+2. Only call tools that exist in the catalog. Do not call `tool_search` when the tool is already listed. Use the listed name (`factory.build`, `script_exec`, …) directly.
 3. Use the provided tool name and input schema exactly.
 4. If `session_memory_search` is available, treat `query` as optional and support `limit`, `page`, and `include_archived` (set true only when you need memory older than 6 months). Results are capped at 100 rows per request.
 5. Respond **strictly** using the provided JSON schema. Never emit plain prose outside JSON. Use the fields as follows:
@@ -17,6 +17,7 @@
    5. Declare extra npm packages in `dependencies` (object of name → version). Do not assume Playwright/Crawlee exist.
    6. Keep scripts short (10–30 lines). No comments. Use `timeout_seconds` on the tool args if needed (e.g. 120).
    7. If the first fetch is empty, issue another `script_exec` with different URLs before answering.
+   8. When Software Factory tools are listed (Software Factory sessions only): `factory.build` → `factory.write_package` → `factory.review` → `factory.harness_run` → `factory.promote` (user approves). Never `complete` before `factory.promote`. Never `tool_search`. `factory.install_sample` installs daily-news. Then `plugin.invoke` with `plugin_id` and optional `params`. Jobs may freeze `script_exec` or `plugin.invoke`. Do not invent `plugin.install`.
 8. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
 9. Multi-agent tools (when listed in the catalog):
    1. If the user names a multi-agent tool or asks to spawn/list/send/cancel agents, issue that `tool_call` (or `tool_batch`) **before** any `complete` answer. Do not invent tool results.

@@ -65,6 +65,56 @@ final class DBPluginTests: XCTestCase {
         XCTAssertEqual(exceptions.map(\.pattern), ["api.example.com"])
     }
 
+    func testFirstPromoteInsertsPluginBeforeVersion() async throws {
+        let repository = try makeTestRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let version = PluginVersionRow(
+            pluginID: "daily-news-summary",
+            version: "1.0.0",
+            contentHash: String(repeating: "cd", count: 32),
+            status: "promoted",
+            manifestJSON: #"{"name":"daily-news-summary"}"#,
+            entrypointSource: "export function handle() { return []; }"
+        )
+        try await repository.installPromotedPluginVersion(
+            version,
+            pluginID: "daily-news-summary",
+            grant: PluginGrantRow(pluginID: "daily-news-summary", versionID: version.id)
+        )
+
+        let plugin = try await repository.plugin(id: "daily-news-summary")
+        XCTAssertEqual(plugin?.enabled, true)
+        XCTAssertEqual(plugin?.currentVersionID, version.id)
+        let loaded = try await repository.pluginVersion(id: version.id)
+        XCTAssertEqual(loaded?.pluginID, "daily-news-summary")
+        let grants = try await repository.listPluginGrants(pluginID: "daily-news-summary")
+        XCTAssertEqual(grants.count, 1)
+    }
+
+    func testVersionInsertWithoutPluginFailsForeignKey() async throws {
+        let repository = try makeTestRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let version = PluginVersionRow(
+            pluginID: "missing-parent",
+            version: "1.0.0",
+            contentHash: String(repeating: "ef", count: 32),
+            status: "promoted",
+            manifestJSON: #"{"name":"missing-parent"}"#
+        )
+        do {
+            try await repository.upsertPluginVersion(version)
+            XCTFail("expected FOREIGN KEY failure")
+        } catch {
+            let text = String(describing: error)
+            XCTAssertTrue(
+                text.localizedCaseInsensitiveContains("foreign key"),
+                "unexpected error: \(text)"
+            )
+        }
+    }
+
     func testFactorySessionUsageBuckets() async throws {
         let repository = try makeTestRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")

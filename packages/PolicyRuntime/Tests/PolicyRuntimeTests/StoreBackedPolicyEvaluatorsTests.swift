@@ -25,6 +25,30 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         XCTAssertEqual(outcome, .deny(reason: "blocked"))
     }
 
+    func test_toolPolicy_allowToolSearchMatchesExactName() async throws {
+        let store = MockPolicyStore(rulesByScope: [
+            "tool_invocation": [
+                PolicyRule(
+                    applicationName: "ui",
+                    name: "allow-tool_search",
+                    scope: "tool_invocation",
+                    matcherJSON: #"{"tool_name":"tool_search"}"#,
+                    outcomeJSON: #"{"action":"allow"}"#,
+                    priority: 1
+                )
+            ]
+        ])
+        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluateToolInvocation(
+            ToolInvocationEvent(
+                sessionID: "factory-1",
+                toolName: "tool_search",
+                argumentsJSON: #"{"query":"factory.build factory.write_package"}"#
+            )
+        )
+        XCTAssertEqual(outcome, .allow)
+    }
+
     func test_toolPolicy_skipsDisabledRuleEvenIfPresentInStore() async throws {
         let store = MockPolicyStore(rulesByScope: [
             "tool_invocation": [

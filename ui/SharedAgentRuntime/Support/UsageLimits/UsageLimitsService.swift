@@ -112,12 +112,19 @@ final class UsageLimitsService: ObservableObject {
     // MARK: - Checks with optional session raise prompt
 
     /// Call at the start of each agent tool round (0-based round index about to run tools after model).
-    func allowToolRound(roundIndex: Int) async -> Bool {
-        let limit = effectiveMaxToolRounds
+    func allowToolRound(roundIndex: Int, factoryPipeline: Bool = false) async -> Bool {
+        // Factory is a host pipeline (build → write → review → harness → promote).
+        // Chat's per-message cap of 3 would stop it mid-install.
+        let limit = factoryPipeline
+            ? UsageLimits.absoluteMax.maxToolRoundsPerMessage
+            : effectiveMaxToolRounds
         // rounds used so far; allowing roundIndex means we need roundIndex < limit for 0..<limit
         if roundIndex < limit {
             messageToolRounds = roundIndex + 1
             return true
+        }
+        if factoryPipeline {
+            return false
         }
         return await offerSessionRaise(
             dimension: .toolRounds,

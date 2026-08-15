@@ -47,12 +47,74 @@ import Foundation
     #expect(one[0].verb == .resultEmit)
 }
 
+@Test func hopEventRoundTripsParams() throws {
+    let event = PluginHopEvent(
+        kind: .manual,
+        params: ["topic": .string("tech"), "limit": .number(5)]
+    )
+    let data = try JSONWire.encode(PluginHostInvoke(seq: 0, event: event))
+    let decoded = try JSONDecoder().decode(PluginHostInvoke.self, from: data)
+    #expect(decoded.event.kind == .manual)
+    #expect(decoded.event.params?["topic"]?.stringValue == "tech")
+}
+
+@Test func pluginPrefixMatchesExactlyOne() {
+    #expect(PluginPrefix.parse("/daily-news")?.handle == "daily-news")
+    #expect(PluginPrefix.parse("/daily-news tech")?.remainder == "tech")
+    #expect(PluginPrefix.parse("hello") == nil)
+    #expect(PluginPrefix.parse("//not-a-plugin") == nil)
+    #expect(PluginPrefix.uniqueMatch(handle: "daily", pluginIDs: ["daily-news"]) == "daily-news")
+    #expect(PluginPrefix.uniqueMatch(handle: "daily", pluginIDs: ["daily-news", "daily-mail"]) == nil)
+    #expect(PluginPrefix.uniqueMatch(handle: "daily-news", pluginIDs: ["daily-news"]) == "daily-news")
+    #expect(PluginPrefix.typingHandle("/") == "")
+    #expect(PluginPrefix.typingHandle("/daily") == "daily")
+    #expect(PluginPrefix.typingHandle("/daily-news more") == nil)
+    #expect(PluginPrefix.typingHandle("hello") == nil)
+    #expect(PluginPrefix.typingHandle("//nope") == nil)
+    #expect(PluginPrefix.matches(handle: "", pluginIDs: ["zeta", "alpha"]) == ["alpha", "zeta"])
+    #expect(PluginPrefix.matches(handle: "daily", pluginIDs: ["daily-news", "daily-mail", "weather"]) == ["daily-mail", "daily-news"])
+    #expect(PluginPrefix.matches(handle: "news", pluginIDs: ["daily-news-summary", "weather"]) == ["daily-news-summary"])
+}
+
+@Test func dailyNewsSampleIsAValidDraft() throws {
+    let draft = DailyNewsSample.draft()
+    #expect(draft.pluginID == "daily-news")
+    #expect(try draft.pluginJSON().contains("daily-news"))
+    #expect(draft.handle.contains("export function handle"))
+    #expect(draft.handle.contains("netFetch"))
+    #expect(!draft.volumeEnabled)
+    let hash = try draft.contentHash()
+    #expect(hash.rawValue.count == 64)
+}
+
+@Test func factoryDraftHashesStableFiles() throws {
+    var draft = FactoryPackageDraft(
+        goal: "headlines",
+        pluginID: "daily-news",
+        version: "1.0.0",
+        description: "Headlines from one host.",
+        handle: "import { netFetch, type HandleEvent, type HandleResult } from \"derrick\";\nexport function handle(event: HandleEvent): HandleResult { return netFetch({ url: \"https://www.bbc.com\" }); }\n"
+    )
+    let hash = try draft.contentHash()
+    #expect(hash.rawValue.count == 64)
+    #expect(try draft.pluginJSON().contains("daily-news"))
+    let again = try draft.contentHash()
+    #expect(again == hash)
+    draft.handle += " "
+    #expect(try draft.contentHash() != hash)
+}
+
 @Test func envelopeSchemaRequiresArrayAndVerb() {
     #expect(PluginEnvelopeSchema.jsonSchema.contains("\"type\": \"array\""))
     #expect(PluginEnvelopeSchema.verbCases.contains("http.request"))
     #expect(PluginEnvelopeSchema.verbCases.contains("result.emit"))
     #expect(DerrickGuestTypeScript.derrickModule.contains("export type HandleResult = Envelope[]"))
     #expect(DerrickGuestTypeScript.derrickModule.contains("export function httpBody"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export function stripMarkup"))
+    #expect(PluginMarkup.strip("<![CDATA[Major incidents across UK]]>") == "Major incidents across UK")
+    #expect(PluginMarkup.strip("<title><![CDATA[Hello]]></title>") == "Hello")
+    #expect(PluginMarkup.naiveTagStripFinding("value.replace(/<[^>]*>/g, '')") != nil)
+    #expect(PluginMarkup.naiveTagStripFinding("stripMarkup(block)") == nil)
     #expect(DerrickGuestTypeScript.verbUnion.contains("\"http.request\""))
     #expect(PluginEnvelopeSchema.ragSection.contains("TypeScript"))
     #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))

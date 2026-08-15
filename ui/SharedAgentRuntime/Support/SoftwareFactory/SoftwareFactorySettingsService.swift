@@ -55,4 +55,32 @@ final class SoftwareFactorySettingsService: ObservableObject {
             debugLog("Failed to save software factory flag: \(error.localizedDescription)")
         }
     }
+
+    func hasPluginSecret(provider: String) async -> Bool {
+        let material = await pluginSecret(provider: provider)
+        return material?.isEmpty == false
+    }
+
+    func pluginSecret(provider: String) async -> String? {
+        guard let repository else { return nil }
+        let key = "plugin.secret.material.\(provider.lowercased())"
+        guard let raw = try? await repository.loadConfig(
+            key: key,
+            username: username,
+            password: password
+        ) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func savePluginSecret(provider: String, material: String) async {
+        guard let repository else { return }
+        let key = "plugin.secret.material.\(provider.lowercased())"
+        try? await repository.saveConfig(
+            key: key,
+            value: material.trimmingCharacters(in: .whitespacesAndNewlines),
+            username: username,
+            password: password
+        )
+    }
 }

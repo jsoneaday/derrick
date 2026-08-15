@@ -483,6 +483,17 @@ struct LLMModelSettingsView: View {
                     Task { await softwareFactory.setEnabled(newValue) }
                 }
             ))
+
+            Divider()
+
+            Text("Plugin secrets")
+                .font(.headline)
+            Text("Tokens stay on this Mac. Plugins never see them. Host HTTP attaches a secret only on that provider’s allowed hosts.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            PluginSecretsSettingsView()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

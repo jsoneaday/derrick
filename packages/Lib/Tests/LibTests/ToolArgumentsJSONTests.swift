@@ -3,6 +3,13 @@ import Testing
 @testable import Lib
 
 @Suite struct ToolArgumentsJSONTests {
+    @Test func emptyObjectIsValidArguments() throws {
+        let args = try parseToolArgumentsObject("{}")
+        #expect(args.isEmpty)
+        let blank = try parseToolArgumentsObject("   ")
+        #expect(blank.isEmpty)
+    }
+
     @Test func parsesValidArguments() throws {
         let json = #"{"mode":"readonly","allow_network":true,"script":"print(1)"}"#
         let args = try parseToolArgumentsObject(json)

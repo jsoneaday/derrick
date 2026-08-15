@@ -2,12 +2,20 @@ import Foundation
 import MCP
 import Plugin
 
+public protocol PluginHopHandler: Sendable {
+    func handleUIPresent(payload: [String: PluginJSON]) async -> PluginHopEvent?
+    func handleSecretRequest(payload: [String: PluginJSON]) async -> PluginHopEvent?
+}
+
 public enum ScriptExecutionRuntime {
     public static func run(
         arguments: [String: Value],
         stdinExecutor: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
         reviewer: (any ScriptReviewer)?,
-        logger: @escaping @Sendable (String) -> Void
+        logger: @escaping @Sendable (String) -> Void,
+        reviewRequired: Bool = true,
+        initialEvent: PluginHopEvent = PluginHopEvent(kind: .script),
+        hopHandler: (any PluginHopHandler)? = nil
     ) async throws -> String {
         let started = Date()
         let parsed = try parse(arguments)
@@ -18,6 +26,7 @@ public enum ScriptExecutionRuntime {
             return encode(blocked(findings: staticFindings, stage: .staticValidation, started: started, parsed: parsed))
         }
 
+        if reviewRequired {
         guard let reviewer else {
             return encode(blocked(
                 findings: ["script_exec requires configured reviewer"],
@@ -67,6 +76,9 @@ public enum ScriptExecutionRuntime {
                 parsed: parsed
             ))
         }
+        } else {
+            logger("[script_exec] skipping LLM reviewer: installed plugin invoke")
+        }
 
         let timeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: parsed.timeoutSeconds)
         do {
@@ -85,9 +97,11 @@ public enum ScriptExecutionRuntime {
                 return try await hopLoop(
                     containerName: containerName,
                     invokeID: UUID().uuidString,
+                    initialEvent: initialEvent,
                     timeoutSeconds: timeout,
                     exec: stdinExecutor,
-                    logger: logger
+                    logger: logger,
+                    hopHandler: hopHandler
                 )
             }
             return encode(result)
@@ -124,12 +138,15 @@ public enum ScriptExecutionRuntime {
     private static func hopLoop(
         containerName: String,
         invokeID: String,
+        initialEvent: PluginHopEvent,
         timeoutSeconds: Int,
         exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
-        logger: @escaping @Sendable (String) -> Void
+        logger: @escaping @Sendable (String) -> Void,
+        hopHandler: (any PluginHopHandler)?
     ) async throws -> ScriptExecutionResult {
-        var event = PluginHopEvent(kind: .script)
+        var event = initialEvent
         var posts: [String] = []
+        var lastTitle = ""
         var lastSummary = ""
         for hop in 0..<PluginContract.maxHops {
             let invokeData = try JSONWire.encode(PluginHostInvoke(seq: hop, event: event))
@@ -160,6 +177,9 @@ public enum ScriptExecutionRuntime {
                 if let text = env.payload["text"]?.stringValue { posts.append(text) }
             }
             for env in hopResult.envelopes where env.verb == .resultEmit {
+                if let title = env.payload["title"]?.stringValue, !title.isEmpty {
+                    lastTitle = title
+                }
                 lastSummary = env.payload["summary"]?.stringValue
                     ?? env.payload["content"]?.stringValue
                     ?? env.payload["text"]?.stringValue
@@ -180,17 +200,41 @@ public enum ScriptExecutionRuntime {
                     )
                     results.append(fetched.response(requestID: id))
                 }
-                event = PluginHopEvent(kind: .httpResults, httpResults: results)
+                event = PluginHopEvent(kind: .httpResults, httpResults: results, params: event.params)
                 continue
             }
 
             if !uiPresents.isEmpty {
+                if let next = await hopHandler?.handleUIPresent(payload: uiPresents[0].payload) {
+                    event = next
+                    continue
+                }
+                let cardText = uiPresentText(uiPresents[0].payload)
+                let stdout = terminalStdout(posts: posts, title: lastTitle, summary: lastSummary, extra: cardText)
+                return ScriptExecutionResult.runnerOutcome(
+                    timedOut: false,
+                    exitCode: 0,
+                    stdout: stdout.isEmpty ? hopResult.stdout : stdout,
+                    stderr: hopResult.stderr,
+                    durationMS: 0,
+                    phaseTiming: nil
+                )
+            }
+
+            let secretRequests = hopResult.envelopes.filter { $0.verb == .secretRequest }
+            if !secretRequests.isEmpty {
+                if let next = await hopHandler?.handleSecretRequest(payload: secretRequests[0].payload) {
+                    event = next
+                    continue
+                }
                 return ScriptExecutionResult(
                     status: .failed,
                     decision: .allow,
                     failureStage: .execution,
                     verifier: "script-v1",
-                    validationFindings: ["ui.present is not available until the card hop is wired."],
+                    validationFindings: [
+                        "Plugin asked for a secret. Add it in Settings → Plugins, then run again."
+                    ],
                     reviewerAssessment: nil,
                     stdout: hopResult.stdout,
                     stderr: hopResult.stderr,
@@ -202,7 +246,7 @@ public enum ScriptExecutionRuntime {
             }
 
             if !terminals.isEmpty {
-                let stdout = (posts + [lastSummary]).filter { !$0.isEmpty }.joined(separator: "\n")
+                let stdout = terminalStdout(posts: posts, title: lastTitle, summary: lastSummary)
                 return ScriptExecutionResult.runnerOutcome(
                     timedOut: false,
                     exitCode: 0,
@@ -251,6 +295,36 @@ public enum ScriptExecutionRuntime {
         var userPrompt: String?
         var dependencies: [String: String]
         var timeoutSeconds: Int
+    }
+
+    private static func terminalStdout(
+        posts: [String],
+        title: String,
+        summary: String,
+        extra: String = ""
+    ) -> String {
+        var parts: [String] = []
+        if !title.isEmpty, summary.localizedCaseInsensitiveContains(title) == false {
+            parts.append("**\(title)**")
+        }
+        parts.append(contentsOf: posts)
+        if !extra.isEmpty { parts.append(extra) }
+        if !summary.isEmpty { parts.append(summary) }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    private static func uiPresentText(_ payload: [String: PluginJSON]) -> String {
+        let title = payload["title"]?.stringValue ?? "Plugin"
+        if let markdown = payload["markdown"]?.stringValue, !markdown.isEmpty {
+            return "\(title)\n\(markdown)"
+        }
+        if let summary = payload["summary"]?.stringValue, !summary.isEmpty {
+            return "\(title)\n\(summary)"
+        }
+        if let text = payload["text"]?.stringValue, !text.isEmpty {
+            return "\(title)\n\(text)"
+        }
+        return title
     }
 
     /// `return netFetch(...)` is a single object; the runner wraps it.

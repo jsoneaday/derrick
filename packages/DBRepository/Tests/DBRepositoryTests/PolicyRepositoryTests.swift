@@ -7,16 +7,18 @@ final class PolicyRepositoryTests: XCTestCase {
     let testAppName = "TestApp"
 
     override func setUp() async throws {
-        let tempDir = NSTemporaryDirectory()
-        let tempDB = "\(tempDir)test_policy_\(UUID().uuidString).db"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("policy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let config = DBRepositoryConfiguration(
             applicationName: testAppName,
             databaseName: "test_policy",
-            databaseDirectoryURL: URL(fileURLWithPath: tempDir),
+            databaseDirectoryURL: directory,
             username: "test",
             password: "test"
         )
         repository = DBRepository(configuration: config)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "test", password: "test")
     }
 
     func test_savePolicyRule_and_loadPolicyRules() async throws {
@@ -115,6 +117,23 @@ final class PolicyRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded[0].decision, "confirmed")
         XCTAssertEqual(loaded[0].actor, "user@example.com")
         XCTAssertNotNil(loaded[0].editedPayloadJSON)
+    }
+
+    func test_savePolicyApproval_allowsSyntheticRuleIDWithoutMatchingRuleRow() async throws {
+        let sessionID = UUID().uuidString
+        let approval = PolicyApproval(
+            applicationName: testAppName,
+            sessionID: sessionID,
+            ruleID: "runtime-confirmation",
+            requestType: "tool_invocation",
+            requestPayloadJSON: #"{"tool_name":"factory.build"}"#,
+            decision: "denied",
+            actor: "policy-engine"
+        )
+        try await repository.saveApproval(approval)
+        let loaded = try await repository.loadApprovals(sessionID: sessionID, limit: 10)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].ruleID, "runtime-confirmation")
     }
 
     func test_logPolicyAuditEntry() async throws {

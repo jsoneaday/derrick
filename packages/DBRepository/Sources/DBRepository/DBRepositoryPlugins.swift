@@ -34,6 +34,7 @@ public struct PluginVersionRow: Sendable, Hashable {
     public var manifestJSON: String
     public var runtimeJSON: String?
     public var dependenciesJSON: String
+    public var entrypointSource: String
     public var createdAt: Date
 
     public init(
@@ -46,6 +47,7 @@ public struct PluginVersionRow: Sendable, Hashable {
         manifestJSON: String,
         runtimeJSON: String? = nil,
         dependenciesJSON: String = "{}",
+        entrypointSource: String = "",
         createdAt: Date = .now
     ) {
         self.id = id
@@ -57,6 +59,7 @@ public struct PluginVersionRow: Sendable, Hashable {
         self.manifestJSON = manifestJSON
         self.runtimeJSON = runtimeJSON
         self.dependenciesJSON = dependenciesJSON
+        self.entrypointSource = entrypointSource
         self.createdAt = createdAt
     }
 }
@@ -215,6 +218,25 @@ public extension DBRepository {
         }
     }
 
+    func plugin(id: String) throws -> PluginRow? {
+        try listPlugins(includeDisabled: true).first { $0.id == id }
+    }
+
+    func pluginVersion(id: String) throws -> PluginVersionRow? {
+        try withDatabaseHandle { handle in
+            try allPluginVersionRows(
+                from: """
+                SELECT id, plugin_id, version, content_hash, status, volume_name,
+                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source
+                FROM plugin_versions
+                WHERE id = \(quoted(id))
+                LIMIT 1;
+                """,
+                on: handle
+            ).first
+        }
+    }
+
     func listPlugins(includeDisabled: Bool = true) throws -> [PluginRow] {
         try withDatabaseHandle { handle in
             let filter = includeDisabled ? "" : "WHERE enabled = 1"
@@ -248,7 +270,7 @@ public extension DBRepository {
             try Self.execute("""
             INSERT INTO plugin_versions (
                 id, plugin_id, version, content_hash, status, volume_name,
-                manifest_json, runtime_json, dependencies_json, created_at
+                manifest_json, runtime_json, dependencies_json, entrypoint_source, created_at
             ) VALUES (
                 \(quoted(row.id)),
                 \(quoted(row.pluginID)),
@@ -259,6 +281,7 @@ public extension DBRepository {
                 \(quoted(row.manifestJSON)),
                 \(sqlValue(row.runtimeJSON)),
                 \(quoted(row.dependenciesJSON)),
+                \(quoted(row.entrypointSource)),
                 \(quoted(Self.iso8601Formatter().string(from: row.createdAt)))
             )
             ON CONFLICT(id) DO UPDATE SET
@@ -266,7 +289,8 @@ public extension DBRepository {
                 volume_name = excluded.volume_name,
                 manifest_json = excluded.manifest_json,
                 runtime_json = excluded.runtime_json,
-                dependencies_json = excluded.dependencies_json;
+                dependencies_json = excluded.dependencies_json,
+                entrypoint_source = excluded.entrypoint_source;
             """, on: handle)
         }
     }
@@ -276,7 +300,7 @@ public extension DBRepository {
             try allPluginVersionRows(
                 from: """
                 SELECT id, plugin_id, version, content_hash, status, volume_name,
-                       manifest_json, runtime_json, dependencies_json, created_at
+                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source
                 FROM plugin_versions
                 WHERE plugin_id = \(quoted(pluginID))
                 ORDER BY created_at DESC;
@@ -284,6 +308,32 @@ public extension DBRepository {
                 on: handle
             )
         }
+    }
+
+    /// First-time install: insert `plugins` (parent), then `plugin_versions`, then point
+    /// `current_version_id`, then grant. Reversing that order fails the version FK.
+    func installPromotedPluginVersion(
+        _ version: PluginVersionRow,
+        pluginID: String,
+        grant: PluginGrantRow
+    ) throws {
+        if try plugin(id: pluginID) == nil {
+            try upsertPlugin(PluginRow(id: pluginID, enabled: true, currentVersionID: nil))
+        }
+        if let existing = try plugin(id: pluginID),
+           let previousID = existing.currentVersionID,
+           previousID != version.id,
+           var previous = try pluginVersion(id: previousID) {
+            previous.status = "superseded"
+            try upsertPluginVersion(previous)
+        }
+        try upsertPluginVersion(version)
+        var plugin = try plugin(id: pluginID) ?? PluginRow(id: pluginID, enabled: true)
+        plugin.enabled = true
+        plugin.currentVersionID = version.id
+        plugin.updatedAt = .now
+        try upsertPlugin(plugin)
+        try upsertPluginGrant(grant)
     }
 
     func upsertPluginGrant(_ row: PluginGrantRow) throws {
@@ -480,6 +530,7 @@ public extension DBRepository {
                     manifestJSON: try columnString(statement, index: 6),
                     runtimeJSON: columnOptionalString(statement, index: 7),
                     dependenciesJSON: try columnString(statement, index: 8),
+                    entrypointSource: columnOptionalString(statement, index: 10) ?? "",
                     createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 9)) ?? .now
                 )
             )

@@ -16,6 +16,14 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case jobsCreate = "jobs_create"
     /// Recurring or one-shot schedule template. Local orchestration → JobService.
     case jobsScheduleCreate = "jobs_schedule_create"
+    case factoryBuild = "factory.build"
+    case factoryWritePackage = "factory.write_package"
+    case factoryReview = "factory.review"
+    case factoryHarnessRun = "factory.harness_run"
+    case factoryPromote = "factory.promote"
+    case factoryInstallSample = "factory.install_sample"
+    case pluginInvoke = "plugin.invoke"
+    case pluginList = "plugin.list"
 
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
@@ -44,6 +52,22 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "Create a one-shot background job (optional delay). Freezes a tool call; optional wake of this agent after the tool runs."
         case .jobsScheduleCreate:
             return "Create a recurring or one-shot schedule that spawns job runs (interval or once). Freezes a tool template; optional wake after each fire."
+        case .factoryBuild:
+            return "Start or resume this Software Factory session. Required: goal (the user's request, in their words)."
+        case .factoryWritePackage:
+            return "Write the plugin package (id, version, description, TypeScript handle, optional deps). Runs static checks."
+        case .factoryReview:
+            return "Security-review the current factory package against its spec. Required before promote."
+        case .factoryHarnessRun:
+            return "Run the current factory package against its harness fixtures. Required before promote."
+        case .factoryPromote:
+            return "Ask the user to install the reviewed plugin. Swift hashes, grants, and enables one version. Factory cannot install by itself."
+        case .factoryInstallSample:
+            return "Install the shipped daily-news sample after the user approves. No auth. One public news host."
+        case .pluginInvoke:
+            return "Run an installed plugin's frozen handle. Pass plugin_id. Same hop loop as script_exec (netFetch → host HTTP)."
+        case .pluginList:
+            return "List installed plugins (id, version, description, enabled)."
         }
     }
 }

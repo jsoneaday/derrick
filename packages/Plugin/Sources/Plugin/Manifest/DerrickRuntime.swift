@@ -66,7 +66,7 @@ public struct DerrickRuntime: Codable, Sendable, Hashable {
         if trimmed.hasPrefix("./") {
             return try PluginPath.validateJSEntrypoint(trimmed)
         }
-        guard trimmed.hasSuffix(".js"),
+        guard (trimmed.hasSuffix(".js") || trimmed.hasSuffix(".ts")),
               !trimmed.contains("/"),
               !trimmed.contains("\\") else {
             throw PluginManifestError.invalidEntrypoint(raw)

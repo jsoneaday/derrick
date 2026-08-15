@@ -7,11 +7,16 @@
 
 import SwiftUI
 import LLMAgentClient
+import Plugin
 
 private final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    var slashKeyHandler: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
+        if slashKeyHandler?(event) == true {
+            return
+        }
         if (event.keyCode == 36 || event.keyCode == 76),
            event.modifierFlags.intersection([.option, .shift]).isEmpty {
             onSubmit?()
@@ -26,6 +31,7 @@ struct PromptInputView: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     let focusToken: Int
+    var slashKeyHandler: ((NSEvent) -> Bool)?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator {
@@ -36,6 +42,7 @@ struct PromptInputView: NSViewRepresentable {
         let textView = PromptTextView()
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
+        textView.slashKeyHandler = slashKeyHandler
         textView.isRichText = false
         textView.importsGraphics = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -71,6 +78,7 @@ struct PromptInputView: NSViewRepresentable {
         }
 
         textView.onSubmit = onSubmit
+        textView.slashKeyHandler = slashKeyHandler
         textView.isEditable = isEnabled
         // Allow select/copy even when send is disabled; block typing via isEditable.
         textView.isSelectable = true
@@ -105,6 +113,84 @@ struct PromptInputView: NSViewRepresentable {
     }
 }
 
+struct PluginSlashMenu: View {
+    let matches: [PluginSidebarItem]
+    let highlightedIndex: Int
+    let onChoose: (PluginSidebarItem) -> Void
+
+    private let accent = Color(red: 0.176, green: 0.286, blue: 0.576)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if matches.isEmpty {
+                Text("No matching plugins")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            } else {
+                ForEach(Array(matches.enumerated()), id: \.element.id) { index, plugin in
+                    Button {
+                        onChoose(plugin)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("/\(plugin.id)")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(accent)
+                            if !plugin.description.isEmpty {
+                                Text(plugin.description)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(accent.opacity(0.65))
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            index == highlightedIndex
+                                ? accent.opacity(0.12)
+                                : Color.clear
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(accent.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: accent.opacity(0.12), radius: 8, x: 0, y: 2)
+    }
+}
+
+struct PluginProgrammaticOutputBox: View {
+    let text: String
+    private let accent = Color(red: 0.176, green: 0.286, blue: 0.576)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Output")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(accent)
+            Text(text)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: 720, alignment: .leading)
+        .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(accent.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
 
 struct PromptCompletionCard: View {
     @MainActor
@@ -167,14 +253,36 @@ struct PromptCompletionCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 10) {
                         if completionStatus == .streaming {
-                            Text("streaming")
                             CompletionStatusView(status: statusMessage ?? "Thinking...", toolName: toolName)
+                            if isActiveStreamingTurn {
+                                let thought = turn.thought.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !thought.isEmpty {
+                                    Text(thought)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: 720, alignment: .leading)
+                                }
+                            }
                         } else if let statusString = completionStatus.displayString {
                             CompletionStatusView(status: statusString, toolName: nil)
                         }
 
-                        MarkdownResponseView(text: turn.response, allowsCSVExport: true)
-                            .font(.system(size: 15))
+                        if let test = turn.pluginTest {
+                            Text(test.heading)
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: 720, alignment: .leading)
+                            if test.kind == .programmatic {
+                                PluginProgrammaticOutputBox(text: test.body)
+                            } else {
+                                MarkdownResponseView(text: test.body, allowsCSVExport: true)
+                                    .font(.system(size: 15))
+                            }
+                        } else {
+                            MarkdownResponseView(text: turn.response, allowsCSVExport: true)
+                                .font(.system(size: 15))
+                        }
 
                         if !isActiveStreamingTurn, !turn.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             HStack {
@@ -206,7 +314,7 @@ struct PromptCompletionCard: View {
         .transition(.opacity.combined(with: .move(edge: .top)))
         .animation(.easeInOut(duration: 0.45), value: isCompletionVisible)
         .onAppear {
-            isCompletionVisible = !turn.response.isEmpty
+            isCompletionVisible = !turn.response.isEmpty || turn.pluginTest != nil
         }
         .onChange(of: turn.response) { _, newValue in
             if newValue.isEmpty {

@@ -78,14 +78,14 @@ struct PolicyEventModalBody: View {
             if let detail = event.detail, !detail.isEmpty {
                 Text(detail)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.82))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let preview = event.payloadPreview, !preview.isEmpty {
                 Text(preview)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.82))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
@@ -103,7 +103,7 @@ struct PolicyEventModalBody: View {
                 .lineLimit(1)
             Text(value)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.primary.opacity(0.82))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }

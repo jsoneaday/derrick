@@ -33,6 +33,7 @@ actor MCPServiceToolHost {
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
+        await HostHTTPClient.shared.setSecretAttacher(PluginHostSecretAttacher(repository: repo))
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
                 stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
@@ -41,6 +42,18 @@ actor MCPServiceToolHost {
                     fputs("[MCPService] \(message)\n", stderr)
                     Task {
                         await MCPServiceStore.shared.log(level: .debug, message: message, code: "tool")
+                    }
+                }
+            )
+            await PluginFactoryHost.registerTools(
+                on: server,
+                repository: repo,
+                stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
+                reviewer: MCPServiceScriptReviewer(),
+                logger: { message in
+                    fputs("[MCPService] \(message)\n", stderr)
+                    Task {
+                        await MCPServiceStore.shared.log(level: .debug, message: message, code: "factory")
                     }
                 }
             )
@@ -62,7 +75,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec + session_memory; no agents_*)",
+            message: "MCP tool host ready (script_exec + factory + plugin.invoke)",
             code: "tool_host_ready"
         )
         return made
@@ -76,9 +89,21 @@ actor MCPServiceToolHost {
             code: "search_tools"
         )
         let tools = try await client.searchTools(matching: query)
-        return tools.map {
+        let mapped = tools.map {
             MCPToolDescriptorDTO(name: $0.name, description: $0.description ?? "")
         }
+        let repo = try await MCPServiceStore.shared.sharedRepository()
+        let sessionID: String?
+        if case .agent(let id, _) = principal {
+            sessionID = id
+        } else {
+            sessionID = nil
+        }
+        return await PluginFactoryHost.searchVisible(
+            tools: mapped,
+            repository: repo,
+            sessionID: sessionID
+        )
     }
 
     func callTool(request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
@@ -125,13 +150,32 @@ actor MCPServiceToolHost {
         }
 
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
-        let args = try parseToolArgumentsObject(request.argumentsJSON)
-        if args.isEmpty, !request.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw MCPServiceToolHostError.invalidArguments(
-                "argumentsJSON did not parse (len=\(request.argumentsJSON.count))"
+        // `{}` is a valid empty object for tools with no required args (factory.review,
+        // factory.promote, plugin.list). factory.build still requires `goal`.
+        let args: [String: Value]
+        do {
+            args = try parseToolArgumentsObject(request.argumentsJSON)
+        } catch {
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: error.localizedDescription
             )
         }
-        let result = try await client.callTool(named: toolName, arguments: args)
+        let result: MCPToolResult
+        do {
+            result = try await client.callTool(named: toolName, arguments: args)
+        } catch {
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: error.localizedDescription
+            )
+        }
         let isError = MCPToolOutcomeSemantics.isError(
             toolName: toolName,
             text: result.text,

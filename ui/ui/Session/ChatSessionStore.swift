@@ -47,7 +47,9 @@ final class ChatSessionStore: ObservableObject {
             selectedSessionID = nil
         }
         if tabs.isEmpty {
-            if let latest = recentSessions.first(where: { !JobSessionID.isJobSession($0.sessionID) }) {
+            if let latest = recentSessions.first(where: {
+                !JobSessionID.isJobSession($0.sessionID) && !FactorySessionID.isFactorySession($0.sessionID)
+            }) {
                 selectSession(id: latest.sessionID)
             } else {
                 openNewChat()
@@ -63,7 +65,9 @@ final class ChatSessionStore: ObservableObject {
             applicationName: applicationName,
             limit: 5
         )) ?? []
-        recentSessions = rows.filter { !JobSessionID.isJobSession($0.sessionID) }
+        recentSessions = rows.filter {
+            !JobSessionID.isJobSession($0.sessionID) && !FactorySessionID.isFactorySession($0.sessionID)
+        }
     }
 
     func openNewChat() {
@@ -72,6 +76,18 @@ final class ChatSessionStore: ObservableObject {
         tabs.append(tab)
         selectedSessionID = id
         persistSessionShell(sessionID: id, title: tab.title)
+    }
+
+    func openFactorySession() {
+        let id = FactorySessionID.make()
+        let tab = ChatTab(id: id, title: "Software Factory")
+        tabs.append(tab)
+        selectedSessionID = id
+        persistSessionShell(sessionID: id, title: tab.title)
+    }
+
+    var isFactorySessionSelected: Bool {
+        FactorySessionID.isFactorySession(selectedSessionID)
     }
 
     func selectSession(id: String) {
@@ -172,11 +188,7 @@ final class ChatSessionStore: ObservableObject {
         let turnIndex = tabs[tabIndex].turns.count - 1
         let status = AgentResponseStatus(rawValue: dto.status) ?? .thinking
         let chunkText = dto.chunk ?? ""
-        if tabs[tabIndex].turns[turnIndex].response.isEmpty {
-            tabs[tabIndex].turns[turnIndex].response = chunkText
-        } else {
-            tabs[tabIndex].turns[turnIndex].response += chunkText
-        }
+        tabs[tabIndex].turns[turnIndex].applyStreamChunk(status: status, chunk: chunkText)
         tabs[tabIndex].turns[turnIndex].status = status
         tabs[tabIndex].turns[turnIndex].toolName = dto.toolName
         if selectedSessionID == sessionID {

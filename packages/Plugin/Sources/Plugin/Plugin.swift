@@ -13,4 +13,6 @@ public enum PluginContract {
     public static let defaultHTTPJSONBytes = 1_048_576
     public static let defaultHTTPFileBytes = 10_485_760
     public static let defaultTimeoutSeconds = 60
+    /// Max encoded JSON size for `plugin.invoke` params.
+    public static let maxInvokeParamsBytes = 16_384
 }

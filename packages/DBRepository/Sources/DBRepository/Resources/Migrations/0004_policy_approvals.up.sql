@@ -9,8 +9,7 @@ CREATE TABLE IF NOT EXISTS policy_approvals (
     decision TEXT NOT NULL,
     actor TEXT,
     created_at TEXT NOT NULL,
-    acted_at TEXT,
-    FOREIGN KEY(application_name) REFERENCES policy_rules(application_name)
+    acted_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_policy_approvals_session

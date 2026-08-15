@@ -2,6 +2,8 @@ import Foundation
 import AgentRuntime
 import DBRepository
 import LLMAgentClient
+import MCP
+import MCPClient
 import MCPServer
 import MCPToolCatalog
 import MemorySystem
@@ -103,10 +105,20 @@ final class ConversationModel {
         }
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
-        let mcpToolInstructions = [
+        var mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
             PluginEnvelopeSchema.ragSection,
         ].joined(separator: "\n\n")
+        if await factoryEnabled(repository: repository),
+           FactorySessionID.isFactorySession(sessionID) {
+            mcpToolInstructions += "\n\n" + (try PromptResources.softwareFactoryInstructions())
+        } else if await factoryEnabled(repository: repository) {
+            mcpToolInstructions += """
+
+
+            Software Factory is on. To build a plugin, the user opens Software Factory from the sidebar. In this chat, use plugin.invoke / plugin.list for installed plugins, or the user can type /plugin-id to run one.
+            """
+        }
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
         let summarizer = ConfiguredMemorySummarizer(
@@ -197,6 +209,9 @@ final class ConversationModel {
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws {
+        if try await tryPrefixInvoke(prompt: prompt, onChunk: onChunk) {
+            return
+        }
         let sessionKey = self.sessionKey
         let memoryCoordinator = self.memoryCoordinator
         let policyStore = self.policyStore
@@ -327,7 +342,8 @@ final class ConversationModel {
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
                 interceptor: interceptor,
-                approvalPresenter: approvalPresenter
+                approvalPresenter: approvalPresenter,
+                responseSchema: responseSchema
             )
         }
     }
@@ -543,6 +559,89 @@ final class ConversationModel {
         """
     }
 
+    /// `/plugin-id rest` skips the LLM when exactly one installed plugin matches.
+    private func tryPrefixInvoke(
+        prompt: String,
+        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
+    ) async throws -> Bool {
+        guard let parsed = PluginPrefix.parse(prompt) else { return false }
+        let listed: MCPToolResult
+        do {
+            listed = try await toolClient.callTool(named: AllowedMCPTool.pluginList.rawValue, arguments: [:])
+        } catch {
+            return false
+        }
+        let ids = pluginIDs(from: listed.text)
+        guard let pluginID = PluginPrefix.uniqueMatch(handle: parsed.handle, pluginIDs: ids) else {
+            return false
+        }
+        var arguments: [String: Value] = [
+            "plugin_id": .string(pluginID),
+            "kind": .string(PluginEventKind.messageInRoom.rawValue),
+        ]
+        if !parsed.remainder.isEmpty {
+            arguments["params"] = .object(["text": .string(parsed.remainder)])
+        }
+        onChunk(
+            AgentResponseNextChunk(
+                status: .toolCall,
+                chunk: nil,
+                toolName: AllowedMCPTool.pluginInvoke.rawValue
+            )
+        )
+        let result = try await toolClient.callTool(
+            named: AllowedMCPTool.pluginInvoke.rawValue,
+            arguments: arguments
+        )
+        let body = PluginInvokePresentation.userFacingText(fromScriptResult: result.text)
+        let chunk: String
+        if PluginInvokePresentation.isProgrammatic(body) {
+            chunk = PluginInvokePresentation.encodeTestReport(
+                PluginInvokePresentation.TestReport(
+                    heading: "/\(pluginID)",
+                    body: body,
+                    kind: .programmatic
+                )
+            )
+        } else {
+            chunk = body
+        }
+        onChunk(
+            AgentResponseNextChunk(
+                status: .complete,
+                chunk: chunk,
+                toolName: AllowedMCPTool.pluginInvoke.rawValue
+            )
+        )
+        return true
+    }
+
+    private func pluginIDs(from listJSON: String) -> [String] {
+        guard let data = listJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = obj["plugins"] as? [[String: Any]] else {
+            return []
+        }
+        return rows.compactMap { row in
+            let enabled = row["enabled"] as? Bool ?? true
+            guard enabled else { return nil }
+            return (row["plugin_id"] as? String) ?? (row["id"] as? String)
+        }
+    }
+
+    private static func factoryEnabled(repository: DBRepository) async -> Bool {
+        guard let raw = try? await repository.loadConfig(
+            key: SoftwareFactorySettings.configKey,
+            username: "ui",
+            password: "ui"
+        ),
+              let data = raw.data(using: .utf8),
+              let settings = try? JSONDecoder().decode(SoftwareFactorySettings.self, from: data) else {
+            return false
+        }
+        return settings.enabled
+    }
+
     /// Opens the app DB and always seeds baseline policy rules when missing.
     /// Seeding is not debug-only: empty rule tables fail closed at evaluation time.
     static func makeMemoryStore(
@@ -631,6 +730,15 @@ final class ConversationModel {
                 name: "allow-\(tool.rawValue)",
                 scope: "tool_invocation",
                 matcherJSON: #"{"tool_name":"\#(tool.rawValue)"}"#,
+                outcomeJSON: #"{"action":"allow"}"#,
+                priority: 1
+            )
+        } + ["tool_search", "tool", "tool_batch"].map { name in
+            PolicyRule(
+                applicationName: applicationName,
+                name: "allow-\(name)",
+                scope: "tool_invocation",
+                matcherJSON: #"{"tool_name":"\#(name)"}"#,
                 outcomeJSON: #"{"action":"allow"}"#,
                 priority: 1
             )

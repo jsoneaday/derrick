@@ -51,7 +51,7 @@ enum ToolFollowUpFormatter {
     // MARK: - Request description
 
     static func slimRequestDescription(name: String, arguments: [String: String]) -> String {
-        if AllowedMCPTool.isScriptExec(name) || name.hasSuffix("script_exec") {
+        if AllowedMCPTool.isScriptExec(name) || name.hasSuffix("script_exec") || name == AllowedMCPTool.pluginInvoke.rawValue {
             return slimScriptRequestDescription(name: name, arguments: arguments)
         }
         return slimGenericRequestDescription(name: name, arguments: arguments)

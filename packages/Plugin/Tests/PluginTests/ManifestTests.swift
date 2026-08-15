@@ -144,15 +144,17 @@ import Testing
     }
 }
 
-@Test func pluginPathRejectsEscapeAndRequiresRelative() {
+@Test func pluginPathRejectsEscapeAndRequiresRelative() throws {
     #expect(throws: PluginManifestError.pathNotRelative("plugin.js")) {
         _ = try PluginPath.validateRelative("plugin.js")
     }
     #expect(throws: PluginManifestError.pathEscapesRoot("./foo/../../etc/passwd")) {
         _ = try PluginPath.validateRelative("./foo/../../etc/passwd")
     }
-    #expect(throws: PluginManifestError.invalidEntrypoint("./app.derrick/plugin.ts")) {
-        _ = try PluginPath.validateJSEntrypoint("./app.derrick/plugin.ts")
+    let ts = try PluginPath.validateJSEntrypoint("./app.derrick/plugin.ts")
+    #expect(ts == "./app.derrick/plugin.ts")
+    #expect(throws: PluginManifestError.invalidEntrypoint("./app.derrick/plugin.py")) {
+        _ = try PluginPath.validateJSEntrypoint("./app.derrick/plugin.py")
     }
 }
 

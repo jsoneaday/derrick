@@ -8,7 +8,16 @@ import ServiceContracts
 /// Model selection comes from UI `LLMModelSettings.scriptReviewerModel` via
 /// `HelperModelWire` on each `callTool` request.
 struct MCPServiceScriptReviewer: ScriptReviewer {
-    nonisolated let name: String = "mcp-service-script-reviewer"
+    nonisolated let name: String
+    let systemPrompt: String
+
+    init(
+        name: String = "mcp-service-script-reviewer",
+        systemPrompt: String = ReviewerSystemPrompt
+    ) {
+        self.name = name
+        self.systemPrompt = systemPrompt
+    }
 
     func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
         guard let apiKey = MCPServiceCallContext.shared.helperAPIKey,
@@ -83,9 +92,17 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
     ) async throws -> ScriptReviewOutcome {
         switch model {
         case .openai(let openAIModel):
-            return try await OpenAIScriptReviewer(apiKey: apiKey, model: openAIModel).review(args)
+            return try await OpenAIScriptReviewer(
+                apiKey: apiKey,
+                model: openAIModel,
+                systemPrompt: systemPrompt
+            ).review(args)
         case .gemini(let geminiModel):
-            return try await GeminiScriptReviewer(apiKey: apiKey, model: geminiModel).review(args)
+            return try await GeminiScriptReviewer(
+                apiKey: apiKey,
+                model: geminiModel,
+                systemPrompt: systemPrompt
+            ).review(args)
         }
     }
 
@@ -120,6 +137,7 @@ final class MCPServiceCallContext: @unchecked Sendable {
     private var _helperAPIKey: String?
     private var _helperReviewerModelJSON: String?
     private var _memorySessionKey: MemorySessionKey?
+    private var _pluginID: String?
 
     private init() {}
 
@@ -135,11 +153,18 @@ final class MCPServiceCallContext: @unchecked Sendable {
         lock.unlock()
     }
 
+    func setPluginID(_ pluginID: String?) {
+        lock.lock()
+        _pluginID = pluginID
+        lock.unlock()
+    }
+
     func clear() {
         lock.lock()
         _helperAPIKey = nil
         _helperReviewerModelJSON = nil
         _memorySessionKey = nil
+        _pluginID = nil
         lock.unlock()
     }
 
@@ -161,5 +186,11 @@ final class MCPServiceCallContext: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return _memorySessionKey
+    }
+
+    var pluginID: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _pluginID
     }
 }

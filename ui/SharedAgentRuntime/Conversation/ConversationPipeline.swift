@@ -3,6 +3,7 @@ import LLMAgentClient
 import MCP
 import MCPClient
 import Plugin
+import ServiceContracts
 
 protocol ConversationStreamingClient: Sendable {
     associatedtype Model: AgentModel
@@ -146,7 +147,9 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         await MainActor.run {
             debugLog("Loading tool catalog…")
         }
-        let tools = try await mcpClient.searchTools(matching: "")
+        let tools = try await mcpClient.searchTools(matching: "").filter {
+            FactoryTurnGate.isHostDiscoveryTool($0.name) == false
+        }
         guard !tools.isEmpty else {
             throw ConversationPipelineError.toolCatalogUnavailable("Tool catalog empty (MCP mesh or agents host).")
         }

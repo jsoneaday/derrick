@@ -9,6 +9,7 @@ import MCPToolCatalog
 import AppEvents
 import PolicyUserInteraction
 import LLMAgentClient
+import ServiceContracts
 
 extension ConversationPipeline {
     func callToolWithPolicyInterception(
@@ -228,6 +229,20 @@ extension ConversationPipeline {
                 decision: "denied",
                 actor: "policy-engine"
             )
+            if FactoryTurnGate.isHostDiscoveryTool(name) {
+                return MCPToolResult(
+                    content: [
+                        MCPToolContent.text(
+                            """
+                            \(name) is not needed. Call catalog tools by name \
+                            (factory.build, factory.write_package, factory.review, factory.harness_run, factory.promote). \
+                            Policy: \(reason)
+                            """
+                        ),
+                    ],
+                    isError: true
+                )
+            }
             let preview: String
             if event.argumentsJSON.count > 1200 {
                 preview = String(event.argumentsJSON.prefix(1200)) + "…"
@@ -252,7 +267,7 @@ extension ConversationPipeline {
     }
 
     private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {
-        guard AllowedMCPTool.isScriptExec(toolName) else { return }
+        guard AllowedMCPTool.isScriptExec(toolName) || toolName == AllowedMCPTool.pluginInvoke.rawValue else { return }
         guard let data = resultText.data(using: .utf8) else { return }
         guard let payload = try? JSONDecoder().decode(ScriptExecutionResult.self, from: data) else { return }
 
