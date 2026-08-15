@@ -238,7 +238,7 @@ enum DotEnvReader {
             urls.append(resourceURL.appendingPathComponent("Resources/.env"))
         }
         // Embedded bundles → host app Resources (.env, secrets). Walk every `.app` ancestor
-        // (LoginItems/JobKeepAlive.app is nested under ui.app — do not stop at the inner app).
+        // (LoginItems/JobKeepAlive.app is nested under Derrick.app — do not stop at the inner app).
         var dir = bundleURL.standardizedFileURL
         for _ in 0..<10 {
             if dir.pathExtension == "app" {

@@ -432,8 +432,30 @@ import Testing
         )
     }
 
+    @Test func derrickDaemonHygieneDetectsStaleLaunchAgentProgramAfterProductRename() {
+        let expected = "/Users/me/DerivedData/.../Debug/Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        #expect(
+            DerrickDaemonHygiene.isRegisteredDaemonProgramStale(
+                registeredProgramPath: "/Users/me/DerivedData/.../Debug/ui.app/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive",
+                expectedExecutablePath: expected
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.isRegisteredDaemonProgramStale(
+                registeredProgramPath: expected,
+                expectedExecutablePath: expected
+            )
+        )
+        #expect(
+            DerrickDaemonHygiene.isRegisteredDaemonProgramStale(
+                registeredProgramPath: nil,
+                expectedExecutablePath: expected
+            )
+        )
+    }
+
     @Test func derrickDaemonHygieneDetectsOrphanPath() {
-        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let orphan = "/Users/me/DerivedData/.../Debug/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let reason = DerrickDaemonHygiene.evictionReason(
             executablePath: orphan,
@@ -446,7 +468,7 @@ import Testing
     }
 
     @Test func derrickDaemonHygieneDetectsStaleBuild() {
-        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let started = Date(timeIntervalSince1970: 1_000)
         let rebuilt = Date(timeIntervalSince1970: 2_000)
@@ -461,7 +483,7 @@ import Testing
     }
 
     @Test func derrickDaemonHygieneStaleWhenAcceptedMtimeDiffers() {
-        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let reason = DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
             executablePath: embedded,
@@ -475,7 +497,7 @@ import Testing
     }
 
     @Test func derrickDaemonHygieneAcceptsFirstObserveWithoutStartDate() {
-        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let reason = DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
             executablePath: embedded,
@@ -547,7 +569,7 @@ import Testing
     }
 
     @Test func derrickDaemonHygieneKeepsFreshEmbeddedDaemon() {
-        let host = "/Users/me/DerivedData/.../Debug/ui.app"
+        let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let embedded = "\(host)/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let started = Date(timeIntervalSince1970: 2_000)
         let built = Date(timeIntervalSince1970: 1_000)

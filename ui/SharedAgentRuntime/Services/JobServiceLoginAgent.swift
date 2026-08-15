@@ -84,10 +84,23 @@ public enum JobServiceLoginAgent {
             fputs("[derrickd] unregistered legacy SM agent \(legacyPlistName)\n", stderr)
         }
 
+        let staleProgram = DerrickDaemonHygiene.isRegisteredDaemonProgramStale(
+            registeredProgramPath: registeredLaunchAgentProgramPath(),
+            expectedExecutablePath: paths.executable.path
+        )
         fputs(
-            "[derrickd] ensureRegistered bundle=\(Bundle.main.bundleURL.path) sm=\(describe(smAgent.status))\n",
+            "[derrickd] ensureRegistered bundle=\(Bundle.main.bundleURL.path) sm=\(describe(smAgent.status)) staleProgram=\(staleProgram)\n",
             stderr
         )
+
+        if staleProgram {
+            fputs(
+                "[derrickd] launchd still points at a previous app bundle — bootout and reinstall\n",
+                stderr
+            )
+            bootoutRegisteredDaemon()
+            try? smAgent.unregister()
+        }
 
         var smDetail = "SM skipped"
         var smEnabled = false
@@ -103,10 +116,11 @@ public enum JobServiceLoginAgent {
             fputs("[derrickd] \(smDetail)\n", stderr)
         }
 
-        // User LaunchAgent only when SM is not already owning the agent.
+        // User LaunchAgent when SM is not owning the job, or the loaded job is a leftover path
+        // (e.g. `ui.app` after PRODUCT_NAME became `Derrick.app`).
         var installDetail = "helper install skipped (SM enabled)"
-        if !smEnabled {
-            if isLaunchdJobLoaded() {
+        if staleProgram || !smEnabled {
+            if !staleProgram, isLaunchdJobLoaded() {
                 installDetail = "launchd job already loaded"
             } else {
                 do {
@@ -121,9 +135,10 @@ public enum JobServiceLoginAgent {
             }
         }
 
-        // SM "enabled" does not reload a job that we just `bootout`. Always try the user plist.
+        // SM "enabled" does not reload a job that we just `bootout`. Always try the user plist
+        // unless it still names a previous host app bundle.
         if !isLaunchdJobLoaded() {
-            bootstrapUserLaunchAgentIfNeeded()
+            bootstrapUserLaunchAgentIfNeeded(expectedExecutable: paths.executable)
         }
 
         let loaded = isLaunchdJobLoaded()
@@ -174,14 +189,14 @@ public enum JobServiceLoginAgent {
     /// Load the user LaunchAgent if `bootout` left the job missing, then demand-start it.
     /// `kickstart` does nothing unless the job is already loaded.
     public static func reloadRegisteredDaemon() {
-        bootstrapUserLaunchAgentIfNeeded()
+        bootstrapUserLaunchAgentIfNeeded(expectedExecutable: preflightPaths().executable)
         kickstartRegisteredDaemon()
     }
 
     public static func kickstartRegisteredDaemon() {
         let domain = "gui/\(getuid())/\(label)"
         if !isLaunchdJobLoaded() {
-            bootstrapUserLaunchAgentIfNeeded()
+            bootstrapUserLaunchAgentIfNeeded(expectedExecutable: preflightPaths().executable)
         }
         guard isLaunchdJobLoaded() else {
             fputs("[derrickd] kickstart skipped — launchd job not loaded\n", stderr)
@@ -195,16 +210,50 @@ public enum JobServiceLoginAgent {
         }
     }
 
-    private static func bootstrapUserLaunchAgentIfNeeded() {
+    private static func bootstrapUserLaunchAgentIfNeeded(expectedExecutable: URL? = nil) {
         if isLaunchdJobLoaded() { return }
         let plist = userLaunchAgentPlistURL()
         guard FileManager.default.fileExists(atPath: plist.path) else {
             fputs("[derrickd] bootstrap skipped — missing \(plist.path)\n", stderr)
             return
         }
+        if let expected = expectedExecutable,
+           DerrickDaemonHygiene.isRegisteredDaemonProgramStale(
+            registeredProgramPath: programPath(inLaunchAgentPlist: plist),
+            expectedExecutablePath: expected.path
+           ) {
+            fputs(
+                "[derrickd] bootstrap skipped — \(plist.path) still names a previous app bundle\n",
+                stderr
+            )
+            return
+        }
         let uid = getuid()
         let status = runLaunchctlAllowFail(["bootstrap", "gui/\(uid)", plist.path])
         fputs("[derrickd] bootstrap status=\(status) plist=\(plist.path)\n", stderr)
+    }
+
+    /// Program path launchd will exec for `derrick.ui.Daemon`, if we can read it.
+    private static func registeredLaunchAgentProgramPath() -> String? {
+        if let fromPlist = programPath(inLaunchAgentPlist: userLaunchAgentPlistURL()) {
+            return fromPlist
+        }
+        return nil
+    }
+
+    private static func programPath(inLaunchAgentPlist plist: URL) -> String? {
+        guard let data = try? Data(contentsOf: plist),
+              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else {
+            return nil
+        }
+        if let args = obj["ProgramArguments"] as? [String], let first = args.first, !first.isEmpty {
+            return first
+        }
+        if let program = obj["Program"] as? String, !program.isEmpty {
+            return program
+        }
+        return nil
     }
 
     private static func userLaunchAgentPlistURL() -> URL {

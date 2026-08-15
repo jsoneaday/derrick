@@ -100,7 +100,7 @@ struct AppSecretResolver: Sendable {
     }
 
     /// Search cwd ancestry, this process's Resources, and the **host app** Resources when
-    /// running as an embedded XPC service (`ui.app/.../XPCServices/AgentService.xpc`).
+    /// running as an embedded XPC service (`Derrick.app/.../XPCServices/AgentService.xpc`).
     static func dotEnvSearchURLs(currentDirectoryURL: URL, bundleURL: URL) -> [URL] {
         var urls: [URL] = []
         var candidate = currentDirectoryURL

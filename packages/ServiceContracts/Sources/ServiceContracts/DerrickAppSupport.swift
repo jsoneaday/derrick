@@ -6,7 +6,10 @@ import Foundation
 /// (JobService, JobKeepAlive LaunchAgent, etc.) can open the same database.
 /// Legacy host-container DB is migrated into the group on first use.
 public enum DerrickAppSupport {
+    /// Application Support subdirectory. Keep stable so existing SQLite is not split if PRODUCT_NAME changes.
     public static let defaultApplicationName = "ui"
+    /// Dock / bundle file name (`Derrick.app`). Bundle id stays `derrick.ui`.
+    public static let hostAppProductName = "Derrick"
     /// Host app bundle id (must match PRODUCT_BUNDLE_IDENTIFIER of the UI target).
     public static let hostAppBundleIdentifier = "derrick.ui"
     /// Shared group for multi-process SQLite (must match entitlements on all targets that touch the DB).
@@ -97,10 +100,10 @@ public enum DerrickAppSupport {
         )
     }
 
-    /// Path fragment for the embedded Login Item daemon (`…/ui.app/Contents/Library/LoginItems/JobKeepAlive.app`).
+    /// Path fragment for the embedded Login Item daemon (`…/Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app`).
     public static let loginItemDaemonPathMarker = "/Contents/Library/LoginItems/JobKeepAlive.app"
 
-    /// True when this process is the launchd/SMAppService daemon nested under `ui.app`.
+    /// True when this process is the launchd/SMAppService daemon nested under the host app.
     public static func isEmbeddedLoginItemDaemon(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
         bundleURL.standardizedFileURL.path.contains(loginItemDaemonPathMarker)
     }
@@ -117,8 +120,11 @@ public enum DerrickAppSupport {
             if parent.path == dir.path { break }
             dir = parent
         }
-        // Xcode Debug layout: `Products/Debug/JobKeepAlive.app` beside `Products/Debug/ui.app`.
-        let sibling = bundleURL.deletingLastPathComponent().appendingPathComponent("ui.app", isDirectory: true)
+        // Xcode Debug layout: `Products/Debug/JobKeepAlive.app` beside `Products/Debug/Derrick.app`.
+        let sibling = bundleURL.deletingLastPathComponent().appendingPathComponent(
+            "\(hostAppProductName).app",
+            isDirectory: true
+        )
         if Bundle(url: sibling)?.bundleIdentifier == hostAppBundleIdentifier {
             return sibling
         }

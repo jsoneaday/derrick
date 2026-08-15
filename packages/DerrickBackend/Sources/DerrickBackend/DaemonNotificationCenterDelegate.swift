@@ -165,7 +165,7 @@ public enum DaemonUILauncher: Sendable {
             .deletingLastPathComponent() // LoginItems
             .deletingLastPathComponent() // Library
             .deletingLastPathComponent() // Contents
-            .deletingLastPathComponent() // ui.app
+            .deletingLastPathComponent() // Derrick.app
         if loginItemHost.pathExtension == "app",
            Bundle(url: loginItemHost)?.bundleIdentifier == DerrickServiceID.ui.rawValue {
             return loginItemHost

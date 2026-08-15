@@ -35,14 +35,14 @@ if installOnly || installAndRun {
 }
 
 // Orphan `Products/Debug/JobKeepAlive.app` shares the DB and steals scheduled jobs but
-// cannot resolve ui.app Resources (.env) — refuse to run outside LoginItems.
+// cannot resolve Derrick.app Resources (.env) — refuse to run outside LoginItems.
 if !installAndRun && !testNotify && !DerrickAppSupport.isEmbeddedLoginItemDaemon() {
     fputs(
         "[derrickd] FATAL: refusing orphan JobKeepAlive at \(Bundle.main.bundleURL.path)\n",
         stderr
     )
     fputs(
-        "[derrickd] Only ui.app/Contents/Library/LoginItems/JobKeepAlive.app should run the daemon.\n",
+        "[derrickd] Only Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app should run the daemon.\n",
         stderr
     )
     fputs(

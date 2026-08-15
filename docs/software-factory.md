@@ -8,7 +8,7 @@
 | **Status** | Draft (core locks 2026-08-13) |
 | **Audience** | Senior engineers working in this repo |
 | **Supersedes** | Factory draft 2026-08-12 (split script vs plugin runtimes; in-container CONNECT allowlist) |
-| **ADR** | [adr-bun-script-runtime.md](adr-bun-script-runtime.md) |
+| **ADR** | [adr-bun-script-runtime.md](adr-bun-script-runtime.md), [adr-agent-plugins.md](adr-agent-plugins.md) |
 
 ---
 
@@ -149,7 +149,7 @@ flowchart TB
 
 ```
 packages/Plugin/Sources/Plugin/
-  Manifest/   PluginManifest, PluginSpec, PluginAuthProvider, PluginTrigger
+  Manifest/   Agent plugin.json + app.derrick runtime (triggers, auth, quotas)
   Envelope/   PluginVerb, invoke/result DTOs
   UI/         PluginUICard
   HTTP/       HostHTTPRequest/Response, PluginSSRFPolicy (hard blocks)
@@ -190,16 +190,17 @@ One `DockerScriptContainerPool` (replaces `DockerNetworkContainerPool` + the dra
 | `derrick-script-scratch-{invoke}` | `/workspace` | rw | One-shot script + its `node_modules` |
 | `derrick-script-helpers` | `/opt/derrick` | ro | `runner.js`, `derrick.js` |
 
-Plugin tree:
+Plugin tree (Agent Plugins 1.0 + Derrick extension). See [adr-agent-plugins.md](adr-agent-plugins.md).
 
 ```
 /plugin/
-  manifest.json
-  plugin.js                 # export function handle(event)
-  bun.lock                  # required if dependencies nonempty
-  lib/
-  fixtures/
-/data/state.sqlite
+  plugin.json                 # Agent Plugins 1.0 only (closed schema)
+  skills/<name>/SKILL.md      # Agent Skills — when to use this plugin
+  app.derrick/
+    runtime.json              # triggers, auth_refs, quotas, dependencies
+    plugin.js                 # export function handle(event)
+    bun.lock                  # required if dependencies nonempty
+/data/state.sqlite            # PLUGIN_DATA (client-managed, not a guest env path)
 ```
 
 **Host helper** (`derrick.js`) only **builds** envelopes. No sockets, no env secrets.
@@ -231,17 +232,31 @@ export function handle(event) {
 - Runner redirects stdout/stderr during `handle()`; serializes **only** the return value. `console.log` cannot inject envelopes.
 - `event.kind`: `manual` | `schedule` | `message_in_room` | `http_results` | `ui_action` | `grant_ready` | `harness` | `script`.
 
-### 4. `manifest.json` (plugins)
+### 4. Agent Plugin package (plugins)
 
-No per-plugin HTTP **allowlist**. Public HTTPS is default-allow; the host blacklist + hard SSRF apply. Manifest still declares **deps**, **auth_refs**, triggers, UI, quotas.
+No per-plugin HTTP **allowlist**. Public HTTPS is default-allow; the host blacklist + hard SSRF apply.
+
+Portable identity is standard [`plugin.json`](https://agent-plugins.org/specification) (`$schema`, `name`, `version`, `description`, …). Derrick-only fields are **not** top-level. They live in `app.derrick/runtime.json` (and `extensions["app.derrick"]` pointers).
 
 ```json
 {
-  "schema_version": 1,
-  "plugin_id": "daily-news",
-  "display_name": "Daily news",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "daily-news",
   "version": "1.0.0",
   "description": "Headlines from one news host.",
+  "extensions": {
+    "app.derrick": {
+      "entrypoint": "./app.derrick/plugin.js",
+      "runtime": "./app.derrick/runtime.json"
+    }
+  }
+}
+```
+
+`app.derrick/runtime.json` still declares **deps**, **auth_refs**, triggers, UI, quotas:
+
+```json
+{
   "entrypoint": "plugin.js",
   "dependencies": { "example": "^1.0.0" },
   "triggers": [
@@ -264,12 +279,13 @@ No per-plugin HTTP **allowlist**. Public HTTPS is default-allow; the host blackl
 
 | Field | Rule |
 | --- | --- |
-| `plugin_id` | `^[a-z][a-z0-9-]{1,47}$` |
-| `entrypoint` | Relative, no `..`, must be `*.js` |
+| `plugin.json` `name` | Agent Plugins: 1–64 chars, `a-z` `0-9` `-` `.`, no `--` / `..` |
+| `entrypoint` | Plugin-relative, starts with `./`, no escape, must be `*.js` |
 | `dependencies` | npm names the factory declared; installed at promote |
 | `triggers[].match.prefix` | Length ≥ 2; `^[A-Za-z/].+`; reject `""` / `"/"` |
 | `auth_refs[].provider` | Host registry only (`google`, `telegram`, …) |
 | `interval_seconds` | Minimum 60 |
+| Factory `mcp.json` | **Omit in v1.** Do not ship stdio MCP from generated code. |
 
 Permission growth (new `auth_ref`, trigger, higher quota, **new deps**) → new version, re-review, re-hash, re-ack.
 
@@ -393,7 +409,7 @@ Unchanged stages: spec → generate `/workspace` → static JS verify → LLM re
 - `PluginScriptReviewer` is a **new** JS/spec reviewer (do not wrap `ReviewerSystemPrompt`).
 - Usage buckets: `maxFactoryReviewerCallsPerBuild` / `maxHarnessRunsPerBuild` (defaults 6), `decodeIfPresent`, per `factory_sessions.session_id`.
 - First sample: **Daily news** (no auth), one news host via host HTTP.
-- Hash: SHA-256 of canonical source + `manifest.json` + `bun.lock` (not `node_modules`). Promote installs deps in setup, then stores the lockfile. Invoke rehash mismatch → disable.
+- Hash: SHA-256 of canonical source + `plugin.json` + `app.derrick/**` + `skills/**` + `bun.lock` (not `node_modules`). Promote installs deps in setup, then stores the lockfile. Invoke rehash mismatch → disable.
 
 ### 11. `script_exec` (hard replace)
 
@@ -497,6 +513,7 @@ Install / update / disable / delete: Swift-only promote; delete keeps `plugin_in
 | WKWebView login | Deferred. |
 | Host bind-mount plugin dir | Rejected. Named volumes. |
 | Playwright in the Bun image | Rejected. Separate browser-UI tool. |
+| Custom root `manifest.json` | Rejected. Agent Plugins 1.0 `plugin.json`; Derrick fields under `app.derrick`. |
 | Download-only `bun install --ignore-scripts` | Rejected. Product wants hooks during setup. |
 | Delete EgressProxy package | Rejected. Keep policy + modal/banner; invert to blacklist. |
 
@@ -561,6 +578,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS
 ## References
 
 - [adr-bun-script-runtime.md](adr-bun-script-runtime.md)
+- [adr-agent-plugins.md](adr-agent-plugins.md)
 - [adr-docker-script-runtime.md](adr-docker-script-runtime.md) (superseded)
 - [adr-headless-backend.md](adr-headless-backend.md), [services-plan.md](services-plan.md)
 - `packages/EgressProxy` — policy kept; CONNECT run-path retired
@@ -609,7 +627,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS
 - **Title:** Plugin/script schemas, verbs, blacklist matcher, hard SSRF types
 - **Files:** `packages/Plugin/**`
 - **Depends on:** nothing
-- **Description:** Manifest (JS entry, `dependencies`), `BlacklistMatcher` (exact / suffix), `PluginSSRFPolicy` hard blocks, envelopes, UI widgets, `PluginAuthProvider`. No app wiring.
+- **Description:** Agent Plugins `plugin.json` + `app.derrick` runtime (JS entry, `dependencies`), `BlacklistMatcher` (exact / suffix), `PluginSSRFPolicy` hard blocks, envelopes, UI widgets, `PluginAuthProvider`. No app wiring.
 
 ### PR 2 — DB + principal + flags
 

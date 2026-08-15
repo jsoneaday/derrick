@@ -1,7 +1,7 @@
 import Foundation
 
 public enum PromptResources {
-    /// Bundle resources for prompt `.md` files. LoginItem (`derrickd`) walks up to host `ui.app`.
+    /// Bundle resources for prompt `.md` files. LoginItem (`derrickd`) walks up to host `Derrick.app`.
     public static func resolvedResourceRoot() -> URL {
         let main = Bundle.main.resourceURL ?? Bundle.main.bundleURL
         if containsPrompts(in: main) {
@@ -39,7 +39,7 @@ public enum PromptResources {
         return FileManager.default.fileExists(atPath: nested.path)
     }
 
-    /// Walk ancestor `.app` bundles (LoginItems/JobKeepAlive → ui.app Resources).
+    /// Walk ancestor `.app` bundles (LoginItems/JobKeepAlive → Derrick.app Resources).
     private static func hostAppResourceRoots() -> [URL] {
         var urls: [URL] = []
         var dir = Bundle.main.bundleURL.standardizedFileURL

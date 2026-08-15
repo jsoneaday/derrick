@@ -80,6 +80,16 @@ public enum DerrickDaemonHygiene: Sendable {
         URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
+    /// True when a LaunchAgent `Program` / `ProgramArguments[0]` is not this host app's embedded daemon.
+    /// After `PRODUCT_NAME` changes (`ui.app` → `Derrick.app`) launchd can stay on the old path.
+    public static func isRegisteredDaemonProgramStale(
+        registeredProgramPath: String?,
+        expectedExecutablePath: String
+    ) -> Bool {
+        guard let registered = registeredProgramPath, !registered.isEmpty else { return true }
+        return canonicalPath(registered) != canonicalPath(expectedExecutablePath)
+    }
+
     /// True when a running process matches the current host build and should be kept.
     public static func isHealthyExpectedDaemon(
         executablePath: String,
