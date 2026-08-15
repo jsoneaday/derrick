@@ -58,6 +58,24 @@ public enum EgressHostExtractor: Sendable {
         return found.sorted()
     }
 
+    /// User chat text: URLs, quoted hosts, and bare `apple.com`-style names.
+    public static func extractHostsFromUserText(_ text: String) -> [String] {
+        var found = Set(extractHosts(from: text))
+        let barePattern = #"\b([A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z]{2,})\b"#
+        guard let regex = try? NSRegularExpression(pattern: barePattern, options: [.caseInsensitive]) else {
+            return found.sorted()
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            guard let match, match.numberOfRanges >= 2,
+                  let hostRange = Range(match.range(at: 1), in: text) else { return }
+            let host = String(text[hostRange]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard isPlausibleHostname(host) else { return }
+            found.insert(host)
+        }
+        return found.sorted()
+    }
+
     public static func isPlausibleHostname(_ host: String) -> Bool {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty,

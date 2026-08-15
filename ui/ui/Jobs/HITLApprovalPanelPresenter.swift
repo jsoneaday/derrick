@@ -32,11 +32,14 @@ final class HITLApprovalPanelPresenter {
         let isNetwork = HITLOfflineNetworkService.isNetworkToolName(row.toolName)
         let host = HITLOfflineNetworkService.host(fromNetworkToolName: row.toolName)
         let suffix = host.map { EgressHostExtractor.permanentSuffix(for: $0) }
+        let fields = HITLNetworkArguments.parse(row.argumentsJSON)
 
         let root = HITLApprovalStandaloneCard(
             isNetwork: isNetwork,
             host: host,
             suffix: suffix,
+            blacklistPattern: fields.blacklistPattern,
+            requestURL: fields.url,
             toolName: row.toolName,
             argumentsJSON: row.argumentsJSON,
             onAlways: { [weak self] in self?.finish((true, true)) },
@@ -106,6 +109,8 @@ private struct HITLApprovalStandaloneCard: View {
     let isNetwork: Bool
     let host: String?
     let suffix: String?
+    let blacklistPattern: String?
+    let requestURL: String?
     let toolName: String
     let argumentsJSON: String
     let onAlways: () -> Void
@@ -140,7 +145,7 @@ private struct HITLApprovalStandaloneCard: View {
                 .font(ModalChrome.symbolFont)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(ModalChrome.symbolColor(for: isNetwork ? .networkAccessRequest : .approvalRequired))
-            Text(isNetwork ? "Network access" : "Approval needed")
+            Text(isNetwork ? (blacklistPattern == nil ? "Network access" : "Network blacklist") : "Approval needed")
                 .font(.headline)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -188,7 +193,7 @@ private struct HITLApprovalStandaloneCard: View {
                 .buttonStyle(ModalSecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             if isNetwork {
-                Button("Allow once", action: onOnce)
+                Button(blacklistPattern == nil ? "Allow once" : "This run", action: onOnce)
                     .buttonStyle(ModalSecondaryButtonStyle())
                     .lineLimit(1)
                 Button("Always", action: onAlways)
@@ -207,6 +212,10 @@ private struct HITLApprovalStandaloneCard: View {
     }
 
     private var summary: String {
+        if isNetwork, let blacklistPattern {
+            let url = requestURL ?? host.map { "https://\($0)" } ?? "this host"
+            return "This script wants \(url) which matches blacklist \(blacklistPattern)."
+        }
         if isNetwork, let suffix {
             return "Allow *.\(suffix)?"
         }
@@ -214,9 +223,28 @@ private struct HITLApprovalStandaloneCard: View {
     }
 
     private var detail: String? {
+        if isNetwork, let blacklistPattern {
+            return "This run allows this invoke only. Always removes \(blacklistPattern) from Settings → Network blacklist. Deny stops this request."
+        }
         if isNetwork, let suffix, let host {
             return "Includes \(host) and every subdomain of \(suffix). Always saves “\(suffix)” for future runs."
         }
         return nil
+    }
+}
+
+private enum HITLNetworkArguments {
+    static func parse(_ json: String) -> (url: String?, blacklistPattern: String?) {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (nil, nil)
+        }
+        let url = object["url"] as? String
+        let kind = object["kind"] as? String
+        let pattern = object["pattern"] as? String
+        if kind == "blacklist" {
+            return (url, pattern)
+        }
+        return (url, nil)
     }
 }

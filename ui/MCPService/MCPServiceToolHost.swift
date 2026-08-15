@@ -32,6 +32,7 @@ actor MCPServiceToolHost {
         // UI prewarms containers and hands the helper peer endpoint at bootstrap.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
+        await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
                 stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
@@ -115,7 +116,13 @@ actor MCPServiceToolHost {
             helperReviewerModelJSON: request.helperReviewerModelJSON,
             memorySessionKey: sessionKey
         )
-        defer { MCPServiceCallContext.shared.clear() }
+        let jobID: String?
+        if case .job(let id) = request.principal { jobID = id } else { jobID = nil }
+        HostHTTPCallContext.shared.install(jobID: jobID)
+        defer {
+            MCPServiceCallContext.shared.clear()
+            HostHTTPCallContext.shared.clear()
+        }
 
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
         let args = try parseToolArgumentsObject(request.argumentsJSON)

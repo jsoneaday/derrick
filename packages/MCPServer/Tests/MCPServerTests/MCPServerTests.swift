@@ -66,6 +66,14 @@ import Plugin
         }
     }
 
+    private struct StubDenyGate: HostHTTPAccessGate {
+        func authorize(url: URL, invokeID: String) async -> HostHTTPAccessDecision {
+            _ = url
+            _ = invokeID
+            return .deny("blacklist:*.bank.com")
+        }
+    }
+
     @Test func registrySearchMatchesToolName() async throws {
         let registry = MCPToolRegistry()
         await registry.registerRaw(name: "tool_search", description: "Search tools") { _ in "ok" }
@@ -186,6 +194,19 @@ import Plugin
         #expect(summary.contains("reviewer_stream_ms=5"))
         #expect(summary.contains("reviewer_response_chars=200"))
         #expect(summary.contains("reviewer_model=gpt-5.6-luna"))
+    }
+
+    @Test func hostHTTPGateDenySkipsFetch() async {
+        let client = HostHTTPClient()
+        await client.setAccessGate(StubDenyGate())
+        let fetched = await client.perform(
+            method: "GET",
+            urlString: "https://login.bank.com/",
+            invokeID: "inv-1"
+        )
+        #expect(fetched.succeeded == false)
+        #expect(fetched.error == "blacklist:*.bank.com")
+        #expect(fetched.body.isEmpty)
     }
 
     @Test func httpNilErrorIsSuccessOnTheWire() throws {

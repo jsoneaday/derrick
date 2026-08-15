@@ -23,7 +23,26 @@ public struct HostHTTPFetch: Sendable {
 public actor HostHTTPClient {
     public static let shared = HostHTTPClient()
 
-    public func perform(method: String, urlString: String) async -> HostHTTPFetch {
+    private var accessGate: any HostHTTPAccessGate = AllowAllHostHTTPAccessGate()
+    private let session: URLSession
+
+    public init() {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        session = URLSession(
+            configuration: config,
+            delegate: HostHTTPRedirectDenyingDelegate(),
+            delegateQueue: nil
+        )
+    }
+
+    public func setAccessGate(_ gate: any HostHTTPAccessGate) {
+        accessGate = gate
+    }
+
+    public func perform(method: String, urlString: String, invokeID: String = "") async -> HostHTTPFetch {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")
@@ -42,9 +61,17 @@ public actor HostHTTPClient {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "dns:\(error.localizedDescription)")
         }
 
+        switch await accessGate.authorize(url: url, invokeID: invokeID) {
+        case .allow:
+            break
+        case .deny(let reason):
+            return HostHTTPFetch(status: 0, headers: [:], body: "", error: reason)
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 20
+        request.httpShouldHandleCookies = false
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
@@ -54,7 +81,7 @@ public actor HostHTTPClient {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             let http = response as? HTTPURLResponse
             let status = http?.statusCode ?? 0
             var headers: [String: String] = [:]
@@ -115,5 +142,22 @@ public actor HostHTTPClient {
                 continuation.resume(returning: addresses)
             }
         }
+    }
+}
+
+/// Rejects HTTP redirects. Host HTTP never follows Location (SSRF / hop pinning).
+private final class HostHTTPRedirectDenyingDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        _ = session
+        _ = task
+        _ = response
+        _ = request
+        completionHandler(nil)
     }
 }

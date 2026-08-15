@@ -84,6 +84,7 @@ public enum ScriptExecutionRuntime {
                 try await ScriptLease.isolateNetwork(containerName: containerName, exec: stdinExecutor)
                 return try await hopLoop(
                     containerName: containerName,
+                    invokeID: UUID().uuidString,
                     timeoutSeconds: timeout,
                     exec: stdinExecutor,
                     logger: logger
@@ -122,6 +123,7 @@ public enum ScriptExecutionRuntime {
 
     private static func hopLoop(
         containerName: String,
+        invokeID: String,
         timeoutSeconds: Int,
         exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
         logger: @escaping @Sendable (String) -> Void
@@ -171,7 +173,11 @@ public enum ScriptExecutionRuntime {
                     let url = req.payload["url"]?.stringValue ?? ""
                     let method = req.payload["method"]?.stringValue ?? "GET"
                     let id = req.payload["request_id"]?.stringValue ?? UUID().uuidString
-                    let fetched = await HostHTTPClient.shared.perform(method: method, urlString: url)
+                    let fetched = await HostHTTPClient.shared.perform(
+                        method: method,
+                        urlString: url,
+                        invokeID: invokeID
+                    )
                     results.append(fetched.response(requestID: id))
                 }
                 event = PluginHopEvent(kind: .httpResults, httpResults: results)

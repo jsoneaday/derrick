@@ -13,8 +13,10 @@ public enum HITLOfflineNetworkService {
         turnID: String,
         isJobContext: Bool,
         repository: DBRepository,
-        timeoutNanoseconds: UInt64
+        timeoutNanoseconds: UInt64,
+        argumentsJSON: String? = nil
     ) async -> PolicyUserDecision {
+        let argumentsJSON = argumentsJSON ?? #"{"host":"\#(host)","toolName":"\#(toolName)"}"#
         let networkTool = networkToolName(host: host)
         let approvalID: String
         if let existing = try? await repository.fetchOpenPendingNetworkApproval(host: host, isJobContext: isJobContext) {
@@ -24,7 +26,7 @@ public enum HITLOfflineNetworkService {
             let request = ApprovalConfirmationRequest(
                 sessionID: "network-\(host)",
                 toolName: networkTool,
-                argumentsJSON: #"{"host":"\#(host)","toolName":"\#(toolName)"}"#,
+                argumentsJSON: argumentsJSON,
                 requiredFields: []
             )
             approvalID = request.id

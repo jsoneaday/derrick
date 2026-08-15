@@ -175,6 +175,22 @@ import Foundation
     #expect(entry.displayPattern == "api.example.com")
 }
 
+@Test func blacklistPolicyAllowsUnlessListed() throws {
+    let listed = try BlacklistEntry.parse("*.bank.com")
+    #expect(BlacklistHTTPPolicy.evaluate(host: "www.apple.com", blacklist: [listed], exceptions: []) == .allow)
+    switch BlacklistHTTPPolicy.evaluate(host: "login.bank.com", blacklist: [listed], exceptions: []) {
+    case .prompt(let entry):
+        #expect(entry.displayPattern == "*.bank.com")
+    case .allow:
+        Issue.record("expected prompt")
+    }
+    #expect(BlacklistHTTPPolicy.evaluate(host: "bank.com", blacklist: [listed], exceptions: []) == .allow)
+    let exception = try BlacklistEntry.parse("*.bank.com")
+    #expect(
+        BlacklistHTTPPolicy.evaluate(host: "login.bank.com", blacklist: [listed], exceptions: [exception]) == .allow
+    )
+}
+
 @Test func ssrfDeniesLocalAndMetadata() {
     #expect(PluginSSRFPolicy.denyHostname("localhost") != nil)
     #expect(PluginSSRFPolicy.denyHostname("host.docker.internal") != nil)

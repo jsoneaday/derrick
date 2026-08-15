@@ -270,6 +270,28 @@ public enum PolicyUserEventFactory {
         )
     }
 
+    /// Soft-blacklist hit on host HTTP. This run / Always / Deny.
+    public static func blacklistHitRequest(
+        url: String,
+        displayPattern: String,
+        kind: String,
+        pattern: String,
+        toolName: String = "script_exec",
+        correlationId: String? = nil
+    ) -> PolicyUserEvent {
+        PolicyUserEvent(
+            priority: .userDecision,
+            correlationId: correlationId,
+            kind: .networkAccessRequest,
+            source: .egressProxy,
+            title: "Network blacklist",
+            summary: "This script wants \(url) which matches blacklist \(displayPattern).",
+            detail: "This run allows this invoke only. Always removes \(displayPattern) from Settings → Network blacklist. Deny stops this request.",
+            toolName: toolName,
+            rememberKey: "egress.blacklist.remove:\(kind):\(pattern)"
+        )
+    }
+
     public static func egressAccessRequest(
         host: String,
         toolName: String = "script_exec",

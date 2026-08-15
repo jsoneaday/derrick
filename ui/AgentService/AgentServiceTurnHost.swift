@@ -324,6 +324,40 @@ actor AgentServiceTurnHost {
                     try await TurnProcessContext.$networkAccessPrompt.withValue(networkPrompt) {
                         try await TurnProcessContext.$policyDecisionPrompt.withValue(policyDecision) {
                             try await TurnProcessContext.$policyNoticePublisher.withValue(policyNotice) {
+                                if !isJobWake, let repo = self.repository {
+                                    switch await BlacklistPromptPreflight.approveUserPrompt(prompt, repository: repo) {
+                                    case .allowed:
+                                        break
+                                    case .denied(let message):
+                                        let dto = AgentTurnChunkDTO(
+                                            turnID: turnID,
+                                            sessionID: jobSessionID,
+                                            status: "complete",
+                                            chunk: message,
+                                            toolName: nil
+                                        )
+                                        if let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) {
+                                            _ = Self.deliverChunk(
+                                                turnID: turnID,
+                                                data: data as NSData,
+                                                connectionContext: connectionContext
+                                            )
+                                        }
+                                        Self.deliverFinish(
+                                            turnID: turnID,
+                                            errorJSON: Data() as NSData,
+                                            connectionContext: connectionContext
+                                        )
+                                        await AgentServiceStore.shared.log(
+                                            level: .info,
+                                            message: "turn blocked by blacklist preflight id=\(turnID)",
+                                            code: "blacklist_preflight_denied"
+                                        )
+                                        tasks[turnID] = nil
+                                        turnSessionIDs[turnID] = nil
+                                        return
+                                    }
+                                }
                                 try await conversation.runTurn(
                                     prompt: prompt,
                                     apiKey: apiKey,

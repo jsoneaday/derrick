@@ -168,6 +168,13 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(hosts.contains("reactjs.org"))
     }
 
+    @Test func extractHostsFromUserTextFindsBareAppleDotCom() {
+        let prompt = "create a job that runs in 7s and tells me what's on apple.com"
+        let hosts = EgressHostExtractor.extractHostsFromUserText(prompt)
+        #expect(hosts.contains("apple.com"))
+        #expect(!EgressHostExtractor.extractHosts(from: prompt).contains("apple.com"))
+    }
+
     @Test func extractHostsIgnoresBeautifulSoupHtmlParser() {
         // Production false positive: BeautifulSoup(s.text, 'html.parser') was treated as a host.
         let script = """

@@ -59,6 +59,20 @@ import AppEvents
         #expect(event.detail?.contains("SyntaxError") == true)
     }
 
+    @Test func factoryBuildsBlacklistHitRequest() {
+        let event = PolicyUserEventFactory.blacklistHitRequest(
+            url: "https://login.bank.com/x",
+            displayPattern: "*.bank.com",
+            kind: "suffix",
+            pattern: "bank.com"
+        )
+        #expect(event.kind == .networkAccessRequest)
+        #expect(event.title == "Network blacklist")
+        #expect(event.summary.contains("login.bank.com"))
+        #expect(event.summary.contains("*.bank.com"))
+        #expect(event.rememberKey == "egress.blacklist.remove:suffix:bank.com")
+    }
+
     @Test func factoryBuildsEgressDenied() {
         let event = PolicyUserEventFactory.egressDenied(
             detail: "UNAUTHORIZED_EGRESS destination=reactjs.org"

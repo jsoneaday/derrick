@@ -138,7 +138,10 @@ struct PolicyEventModalFooter: View {
                 Button("Deny", action: onDeny)
                     .buttonStyle(ModalSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button("Allow once", action: onApproveOnce)
+                Button(
+                    event.rememberKey?.hasPrefix("egress.blacklist.") == true ? "This run" : "Allow once",
+                    action: onApproveOnce
+                )
                     .buttonStyle(ModalSecondaryButtonStyle())
                     .lineLimit(1)
                 Button("Always", action: onApproveAlways)
