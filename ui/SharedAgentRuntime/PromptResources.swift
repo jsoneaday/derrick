@@ -30,6 +30,10 @@ public enum PromptResources {
         try load(named: "mcp_tool_instructions", from: resourceRoot ?? resolvedResourceRoot())
     }
 
+    public static func softwareFactoryInstructions(from resourceRoot: URL? = nil) throws -> String {
+        try load(named: "software_factory_instructions", from: resourceRoot ?? resolvedResourceRoot())
+    }
+
     private static func containsPrompts(in resourceRoot: URL) -> Bool {
         let probe = resourceRoot.appendingPathComponent("conversation_rag_instructions.md")
         if FileManager.default.fileExists(atPath: probe.path) { return true }

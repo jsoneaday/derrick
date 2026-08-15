@@ -43,6 +43,18 @@ import Testing
         #expect(try PromptResources.mcpToolInstructions(from: root) == "Tool instructions from file")
     }
 
+    @Test func loadsSoftwareFactoryInstructionsFromResourcesDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try "Factory instructions from file\n".write(
+            to: resources.appendingPathComponent("software_factory_instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        #expect(try PromptResources.softwareFactoryInstructions(from: root) == "Factory instructions from file")
+    }
+
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

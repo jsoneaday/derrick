@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import MCPClient
 import ServiceContracts
+import Plugin
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
@@ -187,6 +188,19 @@ import ServiceContracts
         #expect(summary.contains("reviewer_model=gpt-5.6-luna"))
     }
 
+    @Test func httpNilErrorIsSuccessOnTheWire() throws {
+        let ok = HostHTTPFetch(status: 200, headers: [:], body: "<html>", error: nil)
+        #expect(ok.succeeded)
+        let response = ok.response(requestID: "r1")
+        #expect(response.succeeded)
+        #expect(response.error == nil)
+        let invoke = PluginHostInvoke(seq: 1, event: PluginHopEvent(kind: .httpResults, httpResults: [response]))
+        let data = try JSONWire.encode(invoke)
+        let decoded = try JSONDecoder().decode(PluginHostInvoke.self, from: data)
+        #expect(decoded.event.httpResults?.first?.succeeded == true)
+        #expect(decoded.event.httpResults?.first?.error == nil)
+    }
+
     @Test func bunPoolCreateUsesSleepHoldAndBunImage() {
         let name = DockerScriptPreparer.poolContainerName(slotIndex: 0)
         #expect(name == "derrick-runner-bun-1-0")
@@ -196,8 +210,33 @@ import ServiceContracts
         #expect(args.contains("/bin/sleep"))
         #expect(args.contains("infinity"))
         #expect(args.contains(DerrickGuestRuntime.dockerImage))
+        #expect(args.contains("-v"))
+        #expect(args.contains { $0.hasPrefix("derrick-script-scratch-") })
+        #expect(args.contains { $0.contains("derrick-script-helpers") })
         #expect(!args.contains("NET_ADMIN"))
         #expect(!args.contains { $0.contains("PLAYWRIGHT") })
+        #expect(!args.contains("HTTP_PROXY"))
+        #expect(!args.contains { $0.contains("host.docker.internal") })
+    }
+
+    @Test func handoffCreateIsNetworkNoneReadOnly() {
+        let args = DockerScriptPreparer.dockerCreateHandoffArguments(
+            containerName: "derrick-runner-bun-1-0",
+            scratchVolume: "derrick-script-scratch-slot-0"
+        )
+        #expect(args.contains("--network"))
+        #expect(args.contains("none"))
+        #expect(args.contains("--read-only"))
+        #expect(!args.contains("HTTP_PROXY"))
+        #expect(DockerScriptPreparer.poolSlotCount == 2)
+    }
+
+    @Test func volumeIORejectsEscapingPath() throws {
+        #expect(throws: VolumeIOPathError.self) {
+            _ = try DockerVolumeIO.validatedRelativePath("../etc/passwd")
+        }
+        let ok = try DockerVolumeIO.validatedRelativePath("runner.js")
+        #expect(ok == "runner.js")
     }
 
     @Test func bunPoolExecUsesRunner() {

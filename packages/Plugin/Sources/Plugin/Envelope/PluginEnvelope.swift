@@ -60,6 +60,7 @@ public enum PluginEnvelopeError: Error, Equatable, LocalizedError {
     case unknownVerb(String)
     case notAnObject
     case notAnArray
+    case invalidJSON(String)
 
     public var errorDescription: String? {
         switch self {
@@ -69,17 +70,33 @@ public enum PluginEnvelopeError: Error, Equatable, LocalizedError {
             return "Envelope must be a JSON object"
         case .notAnArray:
             return "handle() must return a JSON array of envelopes"
+        case .invalidJSON(let preview):
+            return "handle() stdout was not JSON: \(preview)"
         }
     }
 }
 
 public enum PluginEnvelopeList {
+    /// Guest stdout must be a JSON array of envelope objects. Strings and bare objects fail.
     public static func decode(_ data: Data) throws -> [PluginEnvelope] {
-        let json = try JSONDecoder().decode(PluginJSON.self, from: data)
+        let trimmed = data.drop(while: { $0 == 0x20 || $0 == 0x0a || $0 == 0x0d || $0 == 0x09 })
+        guard !trimmed.isEmpty else {
+            throw PluginEnvelopeError.notAnArray
+        }
+        let json: PluginJSON
+        do {
+            json = try JSONDecoder().decode(PluginJSON.self, from: data)
+        } catch {
+            let preview = String(decoding: data.prefix(180), as: UTF8.self)
+            throw PluginEnvelopeError.invalidJSON(preview)
+        }
         guard case .array(let items) = json else {
             throw PluginEnvelopeError.notAnArray
         }
         return try items.map { item in
+            guard case .object = item else {
+                throw PluginEnvelopeError.notAnObject
+            }
             let encoded = try JSONEncoder().encode(item)
             return try JSONDecoder().decode(PluginEnvelope.self, from: encoded)
         }

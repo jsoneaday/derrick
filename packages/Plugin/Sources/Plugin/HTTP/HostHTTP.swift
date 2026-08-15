@@ -60,6 +60,9 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
         self.error = error
     }
 
+    /// `error` nil / blank is success. HTTP status is separate.
+    public var succeeded: Bool { !PluginFailureSemantics.isFailure(error) }
+
     enum CodingKeys: String, CodingKey {
         case requestID = "request_id"
         case status, headers, json

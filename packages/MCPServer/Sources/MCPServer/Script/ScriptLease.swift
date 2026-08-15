@@ -25,24 +25,6 @@ public enum ScriptLease {
             throw ScriptLeaseError.execFailed("write script", scriptResult)
         }
 
-        let runnerResult = try await exec(
-            DockerScriptPreparer.dockerExecWriteRunnerArguments(containerName: containerName),
-            Data(DockerScriptPreparer.guestRunnerJS.utf8),
-            30
-        )
-        if runnerResult.exitCode != 0 {
-            throw ScriptLeaseError.execFailed("write runner", runnerResult)
-        }
-
-        let moduleResult = try await exec(
-            DockerScriptPreparer.dockerExecWriteDerrickModuleArguments(containerName: containerName),
-            Data(DockerScriptPreparer.guestDerrickJS.utf8),
-            30
-        )
-        if moduleResult.exitCode != 0 {
-            throw ScriptLeaseError.execFailed("write derrick.js", moduleResult)
-        }
-
         let packageJSON = DockerScriptPreparer.makePackageJSON(dependencies: dependencies)
         let pkgResult = try await exec(
             DockerScriptPreparer.dockerExecWritePackageJSONArguments(containerName: containerName),
@@ -69,17 +51,15 @@ public enum ScriptLease {
         containerName: String,
         exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult
     ) async throws {
-        let result = try await exec(
-            DockerScriptPreparer.dockerNetworkDisconnectArguments(containerName: containerName),
-            Data(),
-            15
-        )
-        if result.exitCode != 0 {
-            let stderr = String(decoding: result.stderr, as: UTF8.self)
-            // Already disconnected is fine.
-            if !stderr.lowercased().contains("is not connected") && !stderr.lowercased().contains("not found") {
-                throw ScriptLeaseError.execFailed("network disconnect", result)
+        do {
+            try await DockerNetworkContainerPool.shared.handoffToOffline(containerName: containerName) { args, timeout in
+                try await exec(args, Data(), timeout)
             }
+        } catch {
+            throw ScriptLeaseError.execFailed(
+                "handoff --network none",
+                DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data(error.localizedDescription.utf8))
+            )
         }
     }
 

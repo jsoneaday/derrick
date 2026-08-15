@@ -116,17 +116,11 @@ public enum ScriptExecutionRuntime {
         exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
         logger: @escaping @Sendable (String) -> Void
     ) async throws -> ScriptExecutionResult {
-        var event: [String: Any] = ["kind": "script"]
+        var event = PluginHopEvent(kind: .script)
         var posts: [String] = []
         var lastSummary = ""
         for hop in 0..<PluginContract.maxHops {
-            let invoke: [String: Any] = [
-                "schema_version": PluginContract.envelopeSchemaVersion,
-                "verb": "invoke",
-                "seq": hop,
-                "event": event,
-            ]
-            let invokeData = try JSONSerialization.data(withJSONObject: invoke)
+            let invokeData = try JSONWire.encode(PluginHostInvoke(seq: hop, event: event))
             let hopResult = try await ScriptLease.runHandle(
                 containerName: containerName,
                 invokeJSON: invokeData,
@@ -162,21 +156,15 @@ public enum ScriptExecutionRuntime {
             }
 
             if !httpRequests.isEmpty {
-                var results: [[String: Any]] = []
+                var results: [HostHTTPResponse] = []
                 for req in httpRequests {
                     let url = req.payload["url"]?.stringValue ?? ""
                     let method = req.payload["method"]?.stringValue ?? "GET"
                     let id = req.payload["request_id"]?.stringValue ?? UUID().uuidString
                     let fetched = await HostHTTPClient.shared.perform(method: method, urlString: url)
-                    results.append([
-                        "request_id": id,
-                        "status": fetched.status,
-                        "headers": fetched.headers,
-                        "body": fetched.body,
-                        "error": fetched.error as Any,
-                    ])
+                    results.append(fetched.response(requestID: id))
                 }
-                event = ["kind": "http_results", "http_results": results]
+                event = PluginHopEvent(kind: .httpResults, httpResults: results)
                 continue
             }
 

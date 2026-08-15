@@ -1,4 +1,5 @@
 import Foundation
+import DockerRunnerXPC
 
 public struct DockerCLIResult: Sendable {
     public let exitCode: Int32
@@ -20,6 +21,8 @@ public actor DockerNetworkContainerPool {
 
     private struct Slot {
         var warmName: String?
+        var scratchVolume: String?
+        var dataVolume: String?
         var inUse = false
         var replenishing = false
     }
@@ -33,7 +36,47 @@ public actor DockerNetworkContainerPool {
 
     public func prewarm(executor: @escaping DockerCLIExecutor) async throws {
         try await removeLegacyWarmContainers(executor: executor)
+        let stdinExec: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { args, _, timeout in
+            try await executor(args, timeout)
+        }
+        try await DockerVolumeIO.injectHelpers(exec: stdinExec)
         try await ensureWarmSlot(DockerScriptPreparer.warmStandbySlotIndex, executor: executor)
+    }
+
+    /// Recreate the leased container as `--network none` on the same volumes.
+    public func handoffToOffline(
+        containerName: String,
+        executor: @escaping DockerCLIExecutor
+    ) async throws {
+        guard let slotIndex = DockerScriptPreparer.poolSlotIndex(forContainerName: containerName),
+              slots.indices.contains(slotIndex) else {
+            let result = try await executor(
+                DockerScriptPreparer.dockerNetworkDisconnectArguments(containerName: containerName),
+                15
+            )
+            if result.exitCode != 0 {
+                let stderr = String(decoding: result.stderr, as: UTF8.self)
+                if !stderr.lowercased().contains("is not connected") && !stderr.lowercased().contains("not found") {
+                    throw DockerNetworkContainerPoolError.startFailed(containerName, stderr)
+                }
+            }
+            return
+        }
+        let scratch = slots[slotIndex].scratchVolume
+            ?? DockerScriptPreparer.scratchVolumeName(slotIndex: slotIndex)
+        let data = slots[slotIndex].dataVolume
+        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: containerName), 15)
+        try await createAndStartContainer(
+            name: containerName,
+            createArguments: DockerScriptPreparer.dockerCreateHandoffArguments(
+                containerName: containerName,
+                scratchVolume: scratch,
+                dataVolume: data
+            ),
+            executor: executor
+        )
+        slots[slotIndex].warmName = containerName
+        slots[slotIndex].scratchVolume = scratch
     }
 
     public func withContainer<T: Sendable>(
@@ -61,15 +104,16 @@ public actor DockerNetworkContainerPool {
     }
 
     private func acquire(executor: DockerCLIExecutor) async throws -> Int {
+        let preferred = DockerScriptPreparer.invokeSlotIndex
         while true {
-            if let index = firstAvailableWarmSlot() {
-                slots[index].inUse = true
-                return index
-            }
-            if let index = firstEmptySlot() {
-                try await ensureWarmSlot(index, executor: executor)
-                slots[index].inUse = true
-                return index
+            if slots.indices.contains(preferred),
+               !slots[preferred].inUse,
+               !slots[preferred].replenishing {
+                if slots[preferred].warmName == nil {
+                    try await ensureWarmSlot(preferred, executor: executor)
+                }
+                slots[preferred].inUse = true
+                return preferred
             }
             await withCheckedContinuation { continuation in
                 waiters.append(continuation)
@@ -88,6 +132,13 @@ public actor DockerNetworkContainerPool {
             resumeWaiters()
         }
 
+        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), 15)
+        if let scratch = slots[slotIndex].scratchVolume, DerrickNamedVolume.isRemovable(scratch) {
+            _ = try? await executor(DockerScriptPreparer.dockerVolumeRmArguments(name: scratch), 15)
+        }
+        slots[slotIndex].scratchVolume = nil
+        slots[slotIndex].dataVolume = nil
+
         if slotIndex == DockerScriptPreparer.warmStandbySlotIndex {
             do {
                 try await recreateSlot(slotIndex, executor: executor)
@@ -97,18 +148,7 @@ public actor DockerNetworkContainerPool {
                     stderr
                 )
             }
-            return
         }
-
-        _ = try? await executor(DockerScriptPreparer.dockerRmForceArguments(container: name), 15)
-    }
-
-    private func firstAvailableWarmSlot() -> Int? {
-        slots.firstIndex { $0.warmName != nil && !$0.inUse && !$0.replenishing }
-    }
-
-    private func firstEmptySlot() -> Int? {
-        slots.firstIndex { $0.warmName == nil && !$0.inUse && !$0.replenishing }
     }
 
     private func resumeWaiters() {
@@ -129,6 +169,10 @@ public actor DockerNetworkContainerPool {
 
     private func recreateSlot(_ slotIndex: Int, executor: DockerCLIExecutor) async throws {
         let name = DockerScriptPreparer.poolContainerName(slotIndex: slotIndex)
+        let scratch = DockerScriptPreparer.scratchVolumeName(slotIndex: slotIndex)
+        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: DerrickNamedVolume.helpers), 15)
+        _ = try? await executor(DockerScriptPreparer.dockerVolumeCreateArguments(name: scratch), 15)
+        slots[slotIndex].scratchVolume = scratch
         if try await isHealthyWarmContainer(name, executor: executor) {
             slots[slotIndex].warmName = name
             return

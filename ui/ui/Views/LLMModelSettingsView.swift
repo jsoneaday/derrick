@@ -546,7 +546,7 @@ struct LLMModelSettingsView: View {
             Text("Software Factory")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("When on, the agent can build and install complementary plugins. Off by default. Guest JavaScript still cannot open sockets or see secrets.")
+            Text("When on, the agent can build and install complementary plugins. Off by default. Guest JavaScript still cannot open sockets or see secrets. A plugin gets a private /data volume only if the factory asks and you approve (default off).")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

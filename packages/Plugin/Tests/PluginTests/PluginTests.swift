@@ -9,11 +9,47 @@ import Foundation
     }
 }
 
-@Test func handleMustReturnArray() throws {
-    let data = Data(#"{"verb":"log","message":"x"}"#.utf8)
-    #expect(throws: PluginEnvelopeError.notAnArray) {
-        _ = try PluginEnvelopeList.decode(data)
+@Test func nilErrorIsNotAFailure() {
+    #expect(!PluginFailureSemantics.isFailure(nil as String?))
+    #expect(!PluginFailureSemantics.isFailure(""))
+    #expect(!PluginFailureSemantics.isFailure("  "))
+    #expect(!PluginFailureSemantics.isFailure(PluginJSON.null))
+    #expect(!PluginFailureSemantics.isFailure(PluginJSON?.none))
+    #expect(PluginFailureSemantics.isFailure("timeout"))
+    #expect(HostHTTPResponse(requestID: "r", status: 200, error: nil).succeeded)
+    #expect(!HostHTTPResponse(requestID: "r", status: 0, error: "ssrf").succeeded)
+}
+
+@Test func jsonWireTurnsOptionalNoneIntoJSONNull() throws {
+    let raw: [String: Any] = ["status": 200, "error": Optional<String>.none as Any]
+    let data = try JSONWire.data(jsonObject: raw)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    #expect(object?["status"] as? Int == 200)
+    #expect(object?["error"] is NSNull)
+}
+
+@Test func invalidJSONHasReadableError() {
+    #expect(throws: PluginEnvelopeError.invalidJSON("not-json")) {
+        _ = try PluginEnvelopeList.decode(Data("not-json".utf8))
     }
+}
+
+@Test func handleMustReturnJSONArray() throws {
+    #expect(throws: PluginEnvelopeError.notAnArray) {
+        _ = try PluginEnvelopeList.decode(Data(#"{"verb":"log","message":"x"}"#.utf8))
+    }
+    #expect(throws: PluginEnvelopeError.notAnArray) {
+        _ = try PluginEnvelopeList.decode(Data(#""plain text""#.utf8))
+    }
+    let one = try PluginEnvelopeList.decode(Data(#"[{"verb":"result.emit","text":"ok"}]"#.utf8))
+    #expect(one.count == 1)
+    #expect(one[0].verb == .resultEmit)
+}
+
+@Test func envelopeSchemaRequiresArrayAndVerb() {
+    #expect(PluginEnvelopeSchema.jsonSchema.contains("\"type\": \"array\""))
+    #expect(PluginEnvelopeSchema.jsonSchema.contains("http.request"))
+    #expect(PluginEnvelopeSchema.ragSection.contains("Never a string"))
 }
 
 @Test func nestedResultObjectFlattensIntoPayload() throws {

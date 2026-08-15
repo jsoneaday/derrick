@@ -39,7 +39,8 @@ public enum DockerHostLaunch: Sendable {
     /// Second-level tokens for `docker volume …`.
     public static let allowedVolumeSubcommands: Set<String> = [
         "create",
-        "inspect"
+        "inspect",
+        "rm",
     ]
 
     /// Second-level tokens for `docker network …` (cut net after bun install).
@@ -71,7 +72,9 @@ public enum DockerHostLaunch: Sendable {
         "--userns=host",
         "--cgroupns=host",
         "--device=",
-        "--device-cgroup-rule="
+        "--device-cgroup-rule=",
+        "--add-host",
+        "--add-host=",
     ]
 
     /// Full process argv: `["docker"] + dockerArgs`.

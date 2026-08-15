@@ -7,6 +7,7 @@ import MCPToolCatalog
 import MemorySystem
 import PolicyRuntime
 import ServiceContracts
+import Plugin
 
 @MainActor
 final class ConversationModel {
@@ -102,7 +103,10 @@ final class ConversationModel {
         }
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
-        let mcpToolInstructions = try PromptResources.mcpToolInstructions()
+        let mcpToolInstructions = [
+            try PromptResources.mcpToolInstructions(),
+            PluginEnvelopeSchema.ragSection,
+        ].joined(separator: "\n\n")
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
         let summarizer = ConfiguredMemorySummarizer(

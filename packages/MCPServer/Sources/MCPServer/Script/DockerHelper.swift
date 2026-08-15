@@ -18,8 +18,10 @@ public enum DockerScriptPreparer {
     public static let warmContainerGeneration = "1"
     public static var warmContainerPrefix: String { "derrick-runner-bun-\(warmContainerGeneration)" }
 
-    public static let poolSlotCount = 3
-    public static let warmStandbySlotIndex = 0
+    public static let poolSlotCount = 2
+    public static let invokeSlotIndex = 0
+    public static let helperSlotIndex = 1
+    public static let warmStandbySlotIndex = invokeSlotIndex
 
     public static var containerRunMaxTTLSeconds: Int {
         ContainerLifecycleRuntime.containerRunMaxTTLSeconds
@@ -94,12 +96,8 @@ public enum DockerScriptPreparer {
           console.error = origErr;
         }
         if (!Array.isArray(result)) {
-          if (result && typeof result === "object") {
-            result = [result];
-          } else {
-            origErr("handle() must return an envelope object or array");
-            process.exit(1);
-          }
+          origErr("handle() must return a JSON array of envelope objects");
+          process.exit(1);
         }
         process.stdout.write(JSON.stringify(result));
         """#
@@ -125,7 +123,7 @@ public enum DockerScriptPreparer {
           if (Array.isArray(opts)) {
             return opts.map((item) => oneRequest(item));
           }
-          return oneRequest(opts);
+          return [oneRequest(opts)];
         }
         """#
     }
@@ -174,15 +172,72 @@ public enum DockerScriptPreparer {
         ["inspect", "-f", "{{.State.Running}}", containerName]
     }
 
+    public static func dockerVolumeCreateArguments(name: String) -> [String] {
+        ["volume", "create", name]
+    }
+
+    public static func dockerVolumeRmArguments(name: String) -> [String] {
+        ["volume", "rm", "-f", name]
+    }
+
+    public static func scratchVolumeName(slotIndex: Int) -> String {
+        DerrickNamedVolume.scriptScratch(suffix: "slot-\(slotIndex)")
+    }
+
+    /// Phase 1: bridge net, writable workspace (bun install).
+    public static func dockerCreateSetupArguments(
+        containerName: String,
+        scratchVolume: String,
+        dataVolume: String? = nil
+    ) -> [String] {
+        dockerCreateLeaseArguments(
+            containerName: containerName,
+            network: "bridge",
+            readOnly: false,
+            scratchVolume: scratchVolume,
+            dataVolume: dataVolume
+        )
+    }
+
+    /// Phase 2: `--network none`, read-only root, same volumes. No HTTP_PROXY, no add-host.
+    public static func dockerCreateHandoffArguments(
+        containerName: String,
+        scratchVolume: String,
+        dataVolume: String? = nil
+    ) -> [String] {
+        dockerCreateLeaseArguments(
+            containerName: containerName,
+            network: "none",
+            readOnly: true,
+            scratchVolume: scratchVolume,
+            dataVolume: dataVolume
+        )
+    }
+
     public static func dockerCreateWarmContainerArguments(containerName: String) -> [String] {
-        [
+        let slot = poolSlotIndex(forContainerName: containerName) ?? invokeSlotIndex
+        return dockerCreateSetupArguments(
+            containerName: containerName,
+            scratchVolume: scratchVolumeName(slotIndex: slot)
+        )
+    }
+
+    public static func dockerCreateLeaseArguments(
+        containerName: String,
+        network: String,
+        readOnly: Bool,
+        scratchVolume: String,
+        dataVolume: String? = nil
+    ) -> [String] {
+        var args = [
             "create",
-            "--network", "bridge",
+            "--network", network,
             "--name", containerName,
             "--init",
             "--tmpfs", "/tmp:rw,nosuid,size=\(warmContainerTmpfsSize)",
             "--tmpfs", "/var/tmp:rw,nosuid,size=128m",
-            "--tmpfs", "\(workspacePath):rw,nosuid,size=\(warmContainerTmpfsSize)",
+            "-v", "\(scratchVolume):\(workspacePath)",
+            "-v", "\(DerrickNamedVolume.helpers):\(helpersPath):ro",
             "--pids-limit", warmContainerPIDsLimit,
             "--cpus", warmContainerCPUs,
             "--memory", warmContainerMemory,
@@ -190,10 +245,24 @@ public enum DockerScriptPreparer {
             "--cap-drop", "ALL",
             "-e", "HOME=/tmp/home",
             "-e", "TMPDIR=/tmp",
+        ]
+        if readOnly {
+            args.insert("--read-only", at: 1)
+        }
+        if let dataVolume {
+            args.append(contentsOf: ["-v", "\(dataVolume):/data"])
+        }
+        args.append(contentsOf: [
             "--entrypoint", holdBinary,
             defaultImage,
             holdArg,
-        ]
+        ])
+        return args
+    }
+
+    public static func poolSlotIndex(forContainerName name: String) -> Int? {
+        guard name.hasPrefix(warmContainerPrefix + "-") else { return nil }
+        return Int(name.dropFirst(warmContainerPrefix.count + 1))
     }
 
     /// Compatibility alias used by older tests (always the Bun warm create).

@@ -185,7 +185,7 @@ One `DockerScriptContainerPool` (replaces `DockerNetworkContainerPool` + the dra
 | Name | Mount | Runtime | Purpose |
 | --- | --- | --- | --- |
 | `derrick-plugin-code-{id}-{hash8}` | `/plugin` | ro | Frozen plugin tree |
-| `derrick-plugin-data-{id}` | `/data` | rw | Plugin SQLite, HTTP blobs |
+| `derrick-plugin-data-{id}` | `/data` | rw | Opt-in only (`volume.enabled`). Plugin SQLite, archives, HTTP blobs |
 | `derrick-plugin-staging-{factory}` | `/workspace` | rw factory | Generate |
 | `derrick-script-scratch-{invoke}` | `/workspace` | rw | One-shot script + its `node_modules` |
 | `derrick-script-helpers` | `/opt/derrick` | ro | `runner.js`, `derrick.js` |
@@ -200,7 +200,7 @@ Plugin tree (Agent Plugins 1.0 + Derrick extension). See [adr-agent-plugins.md](
     runtime.json              # triggers, auth_refs, quotas, dependencies
     plugin.js                 # export function handle(event)
     bun.lock                  # required if dependencies nonempty
-/data/state.sqlite            # PLUGIN_DATA (client-managed, not a guest env path)
+/data/…                       # only if volume.enabled; not a host path in the guest env
 ```
 
 **Host helper** (`derrick.js`) only **builds** envelopes. No sockets, no env secrets.
@@ -267,7 +267,7 @@ Portable identity is standard [`plugin.json`](https://agent-plugins.org/specific
   "auth_refs": [],
   "ui": { "schema_version": 1, "surfaces": ["card"] },
   "jobs": { "schedule": true },
-  "volume": { "quota_bytes": 268435456 },
+  "volume": { "enabled": false, "quota_bytes": 268435456 },
   "quotas": {
     "timeout_seconds": 60,
     "http_calls_per_invoke": 20,
@@ -286,8 +286,9 @@ Portable identity is standard [`plugin.json`](https://agent-plugins.org/specific
 | `auth_refs[].provider` | Host registry only (`google`, `telegram`, …) |
 | `interval_seconds` | Minimum 60 |
 | Factory `mcp.json` | **Omit in v1.** Do not ship stdio MCP from generated code. |
+| `volume.enabled` | Default **false**. No `/data` mount. Factory sets `true` only if the plugin must remember state across invokes (archives, cursors, dedupe). Not chat memory; not secrets. |
 
-Permission growth (new `auth_ref`, trigger, higher quota, **new deps**) → new version, re-review, re-hash, re-ack.
+Permission growth (new `auth_ref`, trigger, higher quota, **new deps**, **`volume.enabled` false→true**) → new version, re-review, re-hash, re-ack.
 
 `script_exec` args:
 
@@ -597,7 +598,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS
 7. **Blacklist UX:** modal if interactive; banner if scheduled. This run / always (exception) / deny.
 8. **Secrets stay in Swift.** `auth_ref` + `attachHosts` / `tokenHosts`.
 9. **`packages/Plugin` is the contract.** Named volumes; `create`/`start`/`exec`/`rm` only.
-10. **One pool, max 3, 1 warm.** Shared by all agents.
+10. **One pool, max 2 slots** (invoke vs factory/VolumeIO), 1 warm invoke. 7m work TTL.
 11. **Hop loop max 8.** Same dispatcher. Harness fixtures only.
 12. **Separate JS reviewer** + factory usage buckets.
 13. **Daemon-owned OAuth** (PKCE, `derrick://oauth/google`).
@@ -615,6 +616,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + raw JS
 25. **Plugin list:** sidebar.
 26. **Playwright:** separate browser-UI tool, not this container.
 27. **Deps declared up front** by the LLM; not `bun add` from user JS after handoff.
+28. **`/data` is opt-in.** `volume.enabled` default false. Factory must request it; user acks. Not session memory.
 
 ---
 

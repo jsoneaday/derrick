@@ -131,6 +131,50 @@ struct DockerRunnerXPCTests {
         #expect(DockerRunRequestValidator.validate(r) == .relativeExecutablePath("env"))
     }
 
+    @Test func rejectsDockerRunAndCp() {
+        #expect(
+            DockerRunRequestValidator.validate(
+                request(arguments: DockerHostLaunch.dockerCLIArguments(["run", "--rm", "img"]))
+            ) == .disallowedDockerSubcommand("run")
+        )
+        #expect(
+            DockerRunRequestValidator.validate(
+                request(arguments: DockerHostLaunch.dockerCLIArguments(["cp", "a", "b"]))
+            ) == .disallowedDockerSubcommand("cp")
+        )
+    }
+
+    @Test func rejectsAddHost() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "--add-host", "host.docker.internal:host-gateway", "--name", "x", "image"
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("--add-host"))
+    }
+
+    @Test func volumeRmOnlyAllowsDerrickRemovableNames() {
+        let ok = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "volume", "rm", "-f", "derrick-script-scratch-abc"
+        ]))
+        #expect(DockerRunRequestValidator.validate(ok) == nil)
+
+        let helpers = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "volume", "rm", DerrickNamedVolume.helpers
+        ]))
+        #expect(DockerRunRequestValidator.validate(helpers) == .disallowedVolumeName(DerrickNamedVolume.helpers))
+
+        let other = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "volume", "rm", "postgres-data"
+        ]))
+        #expect(DockerRunRequestValidator.validate(other) == .disallowedVolumeName("postgres-data"))
+    }
+
+    @Test func namedVolumeHelpers() {
+        #expect(DerrickNamedVolume.isRemovable("derrick-script-scratch-inv1"))
+        #expect(DerrickNamedVolume.isRemovable("derrick-plugin-data-daily-news"))
+        #expect(!DerrickNamedVolume.isRemovable(DerrickNamedVolume.helpers))
+        #expect(!DerrickNamedVolume.isRemovable("derrick-script-helpers-extra"))
+    }
+
     @Test func rejectsDisallowedDockerSubcommand() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments(["system", "prune", "-af"]))
         #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerSubcommand("system"))

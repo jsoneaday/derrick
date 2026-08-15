@@ -6,6 +6,18 @@ public struct HostHTTPFetch: Sendable {
     public var headers: [String: String]
     public var body: String
     public var error: String?
+
+    public var succeeded: Bool { !PluginFailureSemantics.isFailure(error) }
+
+    public func response(requestID: String) -> HostHTTPResponse {
+        HostHTTPResponse(
+            requestID: requestID,
+            status: status,
+            headers: headers,
+            json: Data(body.utf8),
+            error: PluginFailureSemantics.isFailure(error) ? error : nil
+        )
+    }
 }
 
 public actor HostHTTPClient {

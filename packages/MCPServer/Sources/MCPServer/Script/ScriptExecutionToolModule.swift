@@ -20,7 +20,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "script": .object([
                     "type": .string("string"),
-                    "description": .string("Raw JavaScript. Export handle(event). Return netFetch(...) or an envelope object/array. Runtime wraps a single object.")
+                    "description": .string("Raw JavaScript. export function handle(event) must return a JSON array of envelope objects (see handle() return schema). Never a string. One result: [{ verb, ... }]. netFetch({url}) already returns that array.")
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),

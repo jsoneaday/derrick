@@ -2,6 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
+import Plugin
 
 protocol ConversationStreamingClient: Sendable {
     associatedtype Model: AgentModel
@@ -117,6 +118,9 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         let toolInstructions = mcpToolInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !toolInstructions.isEmpty {
             sections.append(toolInstructions)
+        }
+        if !toolInstructions.contains("handle() return") {
+            sections.append(PluginEnvelopeSchema.ragSection)
         }
         return sections.joined(separator: "\n\n")
     }

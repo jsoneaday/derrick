@@ -22,10 +22,9 @@ Checks (if any fail return failure JSON immediately):
    refer to that scheduler — not to sleep/setTimeout inside the script. Do not deny a script
    that performs the requested work (e.g. netFetch the URL) just because it has no delay.
 2) Script is raw JavaScript (no TypeScript) and exports handle(event).
-   Returning a single envelope object or netFetch(...) is allowed (runtime wraps it in an array).
-   Do not deny because a return is `netFetch(...)` instead of `[netFetch(...)]`.
-   `type` is an accepted alias for `verb`. A result object with title/summary/text
-   and no verb is treated as result.emit; an object with url is treated as http.request.
+   handle() must return a JSON array of envelope objects (never a string or bare object).
+   `return netFetch({ url })` is valid because netFetch returns an array.
+   Each element needs verb (or type alias).
 3) Guest must not call fetch, open sockets, or use child_process. HTTP is only via returning a netFetch / http.request envelope.
 4) No host.docker.internal, localhost, or link-local / metadata targets.
 5) Declared dependencies must match what the script imports. Install hooks run during setup only.

@@ -101,6 +101,24 @@ import Testing
     #expect(runtime.requiresLockfile)
     #expect(runtime.authRefs.first?.provider == "google")
     #expect(runtime.quotas.httpCallsPerInvoke == 20)
+    #expect(runtime.volume.enabled == false)
+    #expect(!runtime.wantsDataVolume)
+}
+
+@Test func dataVolumeDefaultsOffAndMustBeRequested() throws {
+    let omitted = Data(#"{"entrypoint":"plugin.js"}"#.utf8)
+    #expect(try PluginDecoding.decode(DerrickRuntime.self, from: omitted).volume.enabled == false)
+
+    let quotaOnly = Data(#"{"entrypoint":"plugin.js","volume":{"quota_bytes":1000}}"#.utf8)
+    let quotaRuntime = try PluginDecoding.decode(DerrickRuntime.self, from: quotaOnly)
+    #expect(quotaRuntime.volume.enabled == false)
+    #expect(quotaRuntime.volume.quotaBytes == 1000)
+
+    let on = Data(#"{"entrypoint":"plugin.js","volume":{"enabled":true}}"#.utf8)
+    let requested = try PluginDecoding.decode(DerrickRuntime.self, from: on)
+    #expect(requested.volume.enabled)
+    #expect(requested.wantsDataVolume)
+    #expect(requested.volume.quotaBytes == PluginContract.defaultVolumeQuotaBytes)
 }
 
 @Test func derrickRuntimeRejectsBadTriggersAndProviders() {

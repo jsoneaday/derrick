@@ -80,7 +80,7 @@ Derrick will:
 - Ignore other `extensions.*` namespaces.
 - Discover skills under `skills/` (skip invalid ones).
 - Reject paths that escape the plugin root.
-- Keep `PLUGIN_DATA` as our existing per-plugin data volume (maps to the spec’s client-managed data dir). We do **not** put that path in the guest environment as a host filesystem path.
+- `PLUGIN_DATA` (`/data`) is **opt-in** (`app.derrick/runtime.json` `volume.enabled`, default false). Maps to the spec’s client-managed data dir when enabled. We do **not** put that path in the guest environment as a host filesystem path.
 
 We are a **skills + Derrick-runtime** client first. MCP-in-plugin is optional later.
 

@@ -93,6 +93,8 @@ public struct DerrickRuntime: Codable, Sendable, Hashable {
     }
 
     public var requiresLockfile: Bool { !dependencies.isEmpty }
+
+    public var wantsDataVolume: Bool { volume.enabled }
 }
 
 public struct DerrickRuntimeUI: Codable, Sendable, Hashable {
@@ -119,14 +121,25 @@ public struct DerrickRuntimeJobs: Codable, Sendable, Hashable {
 }
 
 public struct DerrickRuntimeVolume: Codable, Sendable, Hashable {
+    /// Opt-in persistent `/data` mount. Default off; factory must request it.
+    public var enabled: Bool
     public var quotaBytes: Int
 
-    public init(quotaBytes: Int = PluginContract.defaultVolumeQuotaBytes) {
+    public init(enabled: Bool = false, quotaBytes: Int = PluginContract.defaultVolumeQuotaBytes) {
+        self.enabled = enabled
         self.quotaBytes = quotaBytes
     }
 
     enum CodingKeys: String, CodingKey {
+        case enabled
         case quotaBytes = "quota_bytes"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        quotaBytes = try container.decodeIfPresent(Int.self, forKey: .quotaBytes)
+            ?? PluginContract.defaultVolumeQuotaBytes
     }
 }
 

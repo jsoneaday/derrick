@@ -10,6 +10,7 @@ public enum DockerRunRequestValidationError: Error, Sendable, Equatable, CustomS
     case disallowedDockerSubcommand(String)
     case disallowedDockerFlag(String)
     case disallowedVolumeMount(String)
+    case disallowedVolumeName(String)
     case timeoutOutOfRange(Int)
     case stdinTooLarge(Int)
 
@@ -34,6 +35,8 @@ public enum DockerRunRequestValidationError: Error, Sendable, Equatable, CustomS
             return "\(Self.launchErrorPrefix) docker flag is not allowed: \(flag)"
         case .disallowedVolumeMount(let value):
             return "\(Self.launchErrorPrefix) host bind mount is not allowed: \(value)"
+        case .disallowedVolumeName(let name):
+            return "\(Self.launchErrorPrefix) docker volume name is not removable: \(name)"
         case .timeoutOutOfRange(let value):
             return "\(Self.launchErrorPrefix) timeoutSeconds out of range: \(value) (allowed \(DockerHostLaunch.minTimeoutSeconds)…\(DockerHostLaunch.maxTimeoutSeconds))"
         case .stdinTooLarge(let bytes):
@@ -141,6 +144,9 @@ public enum DockerRunRequestValidator: Sendable {
                   DockerHostLaunch.allowedVolumeSubcommands.contains(second) else {
                 return .disallowedDockerSubcommand("volume \(dockerArgs.dropFirst().first ?? "<missing>")")
             }
+            if second == "rm", let error = validateVolumeRmNames(dockerArgs) {
+                return error
+            }
         }
         if subcommand == "image" {
             guard let second = dockerArgs.dropFirst().first,
@@ -213,6 +219,18 @@ public enum DockerRunRequestValidator: Sendable {
             if arg == prefix || arg.hasPrefix(prefix) {
                 return .disallowedDockerFlag(arg)
             }
+        }
+        return nil
+    }
+
+    /// `docker volume rm [-f] name…` — only Derrick scratch/plugin volumes.
+    private static func validateVolumeRmNames(_ dockerArgs: [String]) -> DockerRunRequestValidationError? {
+        let names = dockerArgs.dropFirst(2).filter { !$0.hasPrefix("-") }
+        guard !names.isEmpty else {
+            return .disallowedVolumeName("<missing>")
+        }
+        for name in names where !DerrickNamedVolume.isRemovable(name) {
+            return .disallowedVolumeName(name)
         }
         return nil
     }
