@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import Plugin
 
 /// One permanently stored domain suffix allowed by the egress proxy.
 public struct EgressAllowedDomainSuffix: Identifiable, Hashable, Codable, Sendable {
@@ -95,6 +96,80 @@ public extension DBRepository {
             inserted += 1
         }
         return inserted
+    }
+
+    func listEgressBlacklist() throws -> [BlacklistEntry] {
+        try loadBlacklistTable("egress_blacklist")
+    }
+
+    func listEgressBlacklistExceptions() throws -> [BlacklistEntry] {
+        try loadBlacklistTable("egress_blacklist_exceptions")
+    }
+
+    func addEgressBlacklistEntry(_ entry: BlacklistEntry) throws {
+        try insertBlacklistRow(table: "egress_blacklist", entry: entry)
+    }
+
+    func addEgressBlacklistException(_ entry: BlacklistEntry) throws {
+        try insertBlacklistRow(table: "egress_blacklist_exceptions", entry: entry)
+    }
+
+    func deleteEgressBlacklistEntry(id: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("DELETE FROM egress_blacklist WHERE id = \(quoted(id));", on: handle)
+        }
+    }
+
+    func deleteEgressBlacklistException(id: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute(
+                "DELETE FROM egress_blacklist_exceptions WHERE id = \(quoted(id));",
+                on: handle
+            )
+        }
+    }
+
+    private func insertBlacklistRow(table: String, entry: BlacklistEntry) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            INSERT INTO \(table) (id, pattern, kind, created_at)
+            VALUES (
+                \(quoted(entry.id)),
+                \(quoted(entry.pattern)),
+                \(quoted(entry.kind.rawValue)),
+                \(quoted(Self.iso8601Formatter().string(from: .now)))
+            )
+            ON CONFLICT(kind, pattern) DO NOTHING;
+            """, on: handle)
+        }
+    }
+
+    private func loadBlacklistTable(_ table: String) throws -> [BlacklistEntry] {
+        try withDatabaseHandle { handle in
+            let sql = "SELECT id, pattern, kind FROM \(table) ORDER BY pattern ASC;"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                throw DBRepositoryError.sqliteOperationFailed("prepare \(table) failed")
+            }
+            defer { sqlite3_finalize(statement) }
+            var rows: [BlacklistEntry] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard
+                    let idC = sqlite3_column_text(statement, 0),
+                    let patternC = sqlite3_column_text(statement, 1),
+                    let kindC = sqlite3_column_text(statement, 2),
+                    let kind = BlacklistEntryKind(rawValue: String(cString: kindC))
+                else { continue }
+                rows.append(
+                    BlacklistEntry(
+                        id: String(cString: idC),
+                        kind: kind,
+                        pattern: String(cString: patternC)
+                    )
+                )
+            }
+            return rows
+        }
     }
 
     private func allEgressSuffixes(from sql: String, on handle: OpaquePointer) throws -> [EgressAllowedDomainSuffix] {

@@ -10,6 +10,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
     case networkAccess
     case sensitiveContent
     case usageLimits
+    case softwareFactory
 
     var id: String { rawValue }
 
@@ -27,6 +28,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Sensitive content"
         case .usageLimits:
             return "Usage limits"
+        case .softwareFactory:
+            return "Software Factory"
         }
     }
 
@@ -44,6 +47,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "eye.slash"
         case .usageLimits:
             return "gauge.with.dots.needle.67percent"
+        case .softwareFactory:
+            return "building.2"
         }
     }
 }
@@ -55,6 +60,7 @@ struct LLMModelSettingsView: View {
     @ObservedObject private var usageLimits = UsageLimitsService.shared
     @ObservedObject private var containerLifecycle = ContainerLifecycleSettingsService.shared
     @ObservedObject private var orchestrationLimits = OrchestrationLimitsSettingsService.shared
+    @ObservedObject private var softwareFactory = SoftwareFactorySettingsService.shared
     @State private var selectedItem: LLMModelSettingsSidebarItem = .helperModels
     @State private var newSuffixDraft = ""
     @State private var networkError: String?
@@ -96,6 +102,8 @@ struct LLMModelSettingsView: View {
                         sensitiveContentDetail
                     case .usageLimits:
                         usageLimitsDetail
+                    case .softwareFactory:
+                        softwareFactoryDetail
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -466,6 +474,18 @@ struct LLMModelSettingsView: View {
                     range: 0...UsageLimits.absoluteMax.maxReviewerCallsPerMessage,
                     step: 1
                 )
+                limitControlRow(
+                    title: "Max factory reviewer calls per build",
+                    value: $draftLimits.maxFactoryReviewerCallsPerBuild,
+                    range: 0...UsageLimits.absoluteMax.maxFactoryReviewerCallsPerBuild,
+                    step: 1
+                )
+                limitControlRow(
+                    title: "Max harness runs per build",
+                    value: $draftLimits.maxHarnessRunsPerBuild,
+                    range: 0...UsageLimits.absoluteMax.maxHarnessRunsPerBuild,
+                    step: 1
+                )
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -516,6 +536,27 @@ struct LLMModelSettingsView: View {
                 .keyboardShortcut(.defaultAction)
             }
             .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var softwareFactoryDetail: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Software Factory")
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+
+            Text("When on, the agent can build and install complementary plugins. Off by default. Guest JavaScript still cannot open sockets or see secrets.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Enable Software Factory", isOn: Binding(
+                get: { softwareFactory.isEnabled },
+                set: { newValue in
+                    Task { await softwareFactory.setEnabled(newValue) }
+                }
+            ))
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

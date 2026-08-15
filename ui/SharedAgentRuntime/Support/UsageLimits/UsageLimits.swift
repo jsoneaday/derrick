@@ -9,13 +9,17 @@ struct UsageLimits: Codable, Equatable, Sendable {
     var dailyTokenBudget: Int
     /// Provider-reported (or estimated) tokens per week. `0` = disabled.
     var weeklyTokenBudget: Int
+    var maxFactoryReviewerCallsPerBuild: Int
+    var maxHarnessRunsPerBuild: Int
 
     static let `default` = UsageLimits(
         maxToolRoundsPerMessage: 3,
         maxScriptRunsPerMessage: 3,
         maxReviewerCallsPerMessage: 3,
         dailyTokenBudget: 200_000,
-        weeklyTokenBudget: 1_000_000
+        weeklyTokenBudget: 1_000_000,
+        maxFactoryReviewerCallsPerBuild: 6,
+        maxHarnessRunsPerBuild: 6
     )
 
     /// Hard ceilings for permanent Settings and session raises.
@@ -24,8 +28,51 @@ struct UsageLimits: Codable, Equatable, Sendable {
         maxScriptRunsPerMessage: 10,
         maxReviewerCallsPerMessage: 10,
         dailyTokenBudget: 2_000_000,
-        weeklyTokenBudget: 10_000_000
+        weeklyTokenBudget: 10_000_000,
+        maxFactoryReviewerCallsPerBuild: 20,
+        maxHarnessRunsPerBuild: 20
     )
+
+    enum CodingKeys: String, CodingKey {
+        case maxToolRoundsPerMessage
+        case maxScriptRunsPerMessage
+        case maxReviewerCallsPerMessage
+        case dailyTokenBudget
+        case weeklyTokenBudget
+        case maxFactoryReviewerCallsPerBuild
+        case maxHarnessRunsPerBuild
+    }
+
+    init(
+        maxToolRoundsPerMessage: Int,
+        maxScriptRunsPerMessage: Int,
+        maxReviewerCallsPerMessage: Int,
+        dailyTokenBudget: Int,
+        weeklyTokenBudget: Int,
+        maxFactoryReviewerCallsPerBuild: Int = 6,
+        maxHarnessRunsPerBuild: Int = 6
+    ) {
+        self.maxToolRoundsPerMessage = maxToolRoundsPerMessage
+        self.maxScriptRunsPerMessage = maxScriptRunsPerMessage
+        self.maxReviewerCallsPerMessage = maxReviewerCallsPerMessage
+        self.dailyTokenBudget = dailyTokenBudget
+        self.weeklyTokenBudget = weeklyTokenBudget
+        self.maxFactoryReviewerCallsPerBuild = maxFactoryReviewerCallsPerBuild
+        self.maxHarnessRunsPerBuild = maxHarnessRunsPerBuild
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maxToolRoundsPerMessage = try container.decode(Int.self, forKey: .maxToolRoundsPerMessage)
+        maxScriptRunsPerMessage = try container.decode(Int.self, forKey: .maxScriptRunsPerMessage)
+        maxReviewerCallsPerMessage = try container.decode(Int.self, forKey: .maxReviewerCallsPerMessage)
+        dailyTokenBudget = try container.decode(Int.self, forKey: .dailyTokenBudget)
+        weeklyTokenBudget = try container.decode(Int.self, forKey: .weeklyTokenBudget)
+        maxFactoryReviewerCallsPerBuild =
+            try container.decodeIfPresent(Int.self, forKey: .maxFactoryReviewerCallsPerBuild) ?? 6
+        maxHarnessRunsPerBuild =
+            try container.decodeIfPresent(Int.self, forKey: .maxHarnessRunsPerBuild) ?? 6
+    }
 
     static let toolRoundPresets = [3, 5, 8, 10]
     static let scriptRunPresets = [3, 5, 8, 10]
@@ -39,7 +86,17 @@ struct UsageLimits: Codable, Equatable, Sendable {
             maxScriptRunsPerMessage: Self.clamp(maxScriptRunsPerMessage, min: 0, max: Self.absoluteMax.maxScriptRunsPerMessage),
             maxReviewerCallsPerMessage: Self.clamp(maxReviewerCallsPerMessage, min: 0, max: Self.absoluteMax.maxReviewerCallsPerMessage),
             dailyTokenBudget: Self.clamp(dailyTokenBudget, min: 0, max: Self.absoluteMax.dailyTokenBudget),
-            weeklyTokenBudget: Self.clamp(weeklyTokenBudget, min: 0, max: Self.absoluteMax.weeklyTokenBudget)
+            weeklyTokenBudget: Self.clamp(weeklyTokenBudget, min: 0, max: Self.absoluteMax.weeklyTokenBudget),
+            maxFactoryReviewerCallsPerBuild: Self.clamp(
+                maxFactoryReviewerCallsPerBuild,
+                min: 0,
+                max: Self.absoluteMax.maxFactoryReviewerCallsPerBuild
+            ),
+            maxHarnessRunsPerBuild: Self.clamp(
+                maxHarnessRunsPerBuild,
+                min: 0,
+                max: Self.absoluteMax.maxHarnessRunsPerBuild
+            )
         )
     }
 

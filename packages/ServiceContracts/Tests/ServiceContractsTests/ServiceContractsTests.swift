@@ -43,6 +43,29 @@ import Testing
     @Test func principalLabels() {
         #expect(ServicePrincipal.ui.logLabel == "ui")
         #expect(ServicePrincipal.job(jobID: "j1").logLabel == "job:j1")
+        #expect(ServicePrincipal.plugin(pluginID: "daily-news", version: "1.0.0").logLabel == "plugin:daily-news@1.0.0")
+    }
+
+    @Test func pluginPrincipalRoundTripAndHMAC() throws {
+        let principal = ServicePrincipal.plugin(pluginID: "daily-news", version: "1.0.0")
+        let data = try JSONEncoder.service.encode(principal)
+        let decoded = try JSONDecoder.service.decode(ServicePrincipal.self, from: data)
+        #expect(decoded == principal)
+        #expect(JobSource.plugin.rawValue == "plugin")
+        #expect(FactorySessionID.isFactorySession("factory-abc"))
+        #expect(!FactorySessionID.isFactorySession("chat-1"))
+        #expect(SoftwareFactorySettings.default.enabled == false)
+
+        let key = ServiceMessageSigning.developmentKey(seed: "test-plugin-principal")
+        var message = ServiceMessage(
+            from: .mcp,
+            to: .daemon,
+            type: .ping,
+            principal: principal,
+            payloadJSON: Data(#"{}"#.utf8)
+        )
+        ServiceMessageSigning.sign(&message, key: key)
+        #expect(ServiceMessageSigning.verify(message, key: key))
     }
 
     @Test func messageCodable() throws {

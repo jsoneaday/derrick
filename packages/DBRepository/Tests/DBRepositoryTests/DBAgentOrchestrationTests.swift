@@ -52,6 +52,18 @@ final class DBAgentOrchestrationTests: XCTestCase {
         XCTAssertEqual(sessions.map(\.sessionID), ["newer", "older"])
     }
 
+    func testListRecentChatSessionsHidesJobAndFactory() async throws {
+        let repository = try makeTestRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        try await repository.upsertChatSession(ChatSessionDTO(applicationName: "ui", sessionID: "visible", updatedAt: .now))
+        try await repository.upsertChatSession(ChatSessionDTO(applicationName: "ui", sessionID: "job-abc", updatedAt: .now))
+        try await repository.upsertChatSession(ChatSessionDTO(applicationName: "ui", sessionID: "factory-xyz", updatedAt: .now))
+
+        let sessions = try await repository.listRecentChatSessions(applicationName: "ui", limit: 10)
+        XCTAssertEqual(sessions.map(\.sessionID), ["visible"])
+    }
+
     func testWorkerAgentPersistsToDatabase() async throws {
         let repository = try makeTestRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")

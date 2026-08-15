@@ -9,7 +9,9 @@ import Testing
             maxScriptRunsPerMessage: -1,
             maxReviewerCallsPerMessage: 50,
             dailyTokenBudget: 9_999_999,
-            weeklyTokenBudget: -5
+            weeklyTokenBudget: -5,
+            maxFactoryReviewerCallsPerBuild: 99,
+            maxHarnessRunsPerBuild: -1
         )
         limits = limits.clamped()
         #expect(limits.maxToolRoundsPerMessage == UsageLimits.absoluteMax.maxToolRoundsPerMessage)
@@ -17,6 +19,17 @@ import Testing
         #expect(limits.maxReviewerCallsPerMessage == UsageLimits.absoluteMax.maxReviewerCallsPerMessage)
         #expect(limits.dailyTokenBudget == UsageLimits.absoluteMax.dailyTokenBudget)
         #expect(limits.weeklyTokenBudget == 0)
+        #expect(limits.maxFactoryReviewerCallsPerBuild == UsageLimits.absoluteMax.maxFactoryReviewerCallsPerBuild)
+        #expect(limits.maxHarnessRunsPerBuild == 0)
+    }
+
+    @Test func factoryLimitsDecodeIfPresent() throws {
+        let legacy = """
+        {"maxToolRoundsPerMessage":3,"maxScriptRunsPerMessage":3,"maxReviewerCallsPerMessage":3,"dailyTokenBudget":200000,"weeklyTokenBudget":1000000}
+        """
+        let decoded = try JSONDecoder().decode(UsageLimits.self, from: Data(legacy.utf8))
+        #expect(decoded.maxFactoryReviewerCallsPerBuild == 6)
+        #expect(decoded.maxHarnessRunsPerBuild == 6)
     }
 
     @Test func defaultTokenBudgetsMatchProduct() {

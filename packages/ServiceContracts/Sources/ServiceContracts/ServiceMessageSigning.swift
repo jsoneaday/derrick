@@ -16,6 +16,7 @@ public enum ServiceMessageSigning: Sendable {
         case .agent(let s, let a): principal = "agent:\(s):\(a)"
         case .job(let j): principal = "job:\(j)"
         case .webhook(let s): principal = "webhook:\(s)"
+        case .plugin(let id, let version): principal = "plugin:\(id):\(version)"
         }
         let line = [
             message.id.uuidString,

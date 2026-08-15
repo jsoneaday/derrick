@@ -51,3 +51,29 @@ public enum PluginJSON: Codable, Sendable, Hashable {
         return nil
     }
 }
+
+enum PluginDecoding {
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw unwrap(error)
+        }
+    }
+
+    static func unwrap(_ error: Error) -> Error {
+        if let manifest = error as? PluginManifestError { return manifest }
+        switch error as? DecodingError {
+        case .dataCorrupted(let ctx),
+             .keyNotFound(_, let ctx),
+             .typeMismatch(_, let ctx),
+             .valueNotFound(_, let ctx):
+            if let underlying = ctx.underlyingError {
+                return unwrap(underlying)
+            }
+        default:
+            break
+        }
+        return error
+    }
+}

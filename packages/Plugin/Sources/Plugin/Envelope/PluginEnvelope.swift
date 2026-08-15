@@ -12,27 +12,19 @@ public struct PluginEnvelope: Codable, Sendable, Hashable {
         self.payload = payload
     }
 
-    enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
-        case verb
-        case type
-    }
-
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? PluginContract.envelopeSchemaVersion
-        let verbRaw = try container.decodeIfPresent(String.self, forKey: .verb)
-            ?? container.decodeIfPresent(String.self, forKey: .type)
-        guard let verbRaw, let parsed = PluginVerb.parse(verbRaw) else {
-            throw PluginEnvelopeError.unknownVerb(verbRaw ?? "(missing)")
-        }
-        verb = parsed
         let raw = try PluginJSON(from: decoder)
         guard case .object(let object) = raw else {
             throw PluginEnvelopeError.notAnObject
         }
+        if case .number(let value) = object["schema_version"] {
+            schemaVersion = Int(value)
+        } else {
+            schemaVersion = PluginContract.envelopeSchemaVersion
+        }
         var rest = object
         rest.removeValue(forKey: "schema_version")
+        let verbRaw = rest["verb"]?.stringValue ?? rest["type"]?.stringValue
         rest.removeValue(forKey: "verb")
         rest.removeValue(forKey: "type")
         for nestKey in ["data", "result", "payload"] {
@@ -43,6 +35,16 @@ public struct PluginEnvelope: Codable, Sendable, Hashable {
                 }
             }
         }
+        if let verbRaw {
+            guard let parsed = PluginVerb.parse(verbRaw) else {
+                throw PluginEnvelopeError.unknownVerb(verbRaw)
+            }
+            verb = parsed
+        } else if let inferred = PluginVerb.infer(from: rest) {
+            verb = inferred
+        } else {
+            throw PluginEnvelopeError.unknownVerb("(missing)")
+        }
         payload = rest
     }
 
@@ -52,10 +54,6 @@ public struct PluginEnvelope: Codable, Sendable, Hashable {
         object["verb"] = .string(verb.rawValue)
         try PluginJSON.object(object).encode(to: encoder)
     }
-}
-
-private enum RawVerbKey: String, CodingKey {
-    case verb
 }
 
 public enum PluginEnvelopeError: Error, Equatable, LocalizedError {

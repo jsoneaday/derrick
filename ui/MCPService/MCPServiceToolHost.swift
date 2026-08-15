@@ -105,6 +105,8 @@ actor MCPServiceToolHost {
         switch request.principal {
         case .agent(let sessionID, let agentID):
             sessionKey = MemorySessionKey(sessionID: sessionID, agentID: agentID)
+        case .plugin(let pluginID, let version):
+            sessionKey = MemorySessionKey(sessionID: "plugin-\(pluginID)", agentID: version)
         default:
             sessionKey = MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
         }

@@ -42,6 +42,7 @@ public enum JobSource: String, Codable, Sendable, Hashable {
     case agent
     case webhook
     case system
+    case plugin
 }
 
 // MARK: - Payloads (JSON inside step.payloadJSON)
@@ -125,6 +126,20 @@ public enum JobSessionID {
     }
 
     public static func isJobSession(_ sessionID: String?) -> Bool {
+        guard let sessionID else { return false }
+        return sessionID.hasPrefix(prefix)
+    }
+}
+
+/// Factory-orchestrator chat sessions. Hidden from interactive recents.
+public enum FactorySessionID {
+    public static let prefix = "factory-"
+
+    public static func make() -> String {
+        prefix + UUID().uuidString
+    }
+
+    public static func isFactorySession(_ sessionID: String?) -> Bool {
         guard let sessionID else { return false }
         return sessionID.hasPrefix(prefix)
     }

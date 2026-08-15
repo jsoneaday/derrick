@@ -24,7 +24,8 @@ Checks (if any fail return failure JSON immediately):
 2) Script is raw JavaScript (no TypeScript) and exports handle(event).
    Returning a single envelope object or netFetch(...) is allowed (runtime wraps it in an array).
    Do not deny because a return is `netFetch(...)` instead of `[netFetch(...)]`.
-   `type` is an accepted alias for `verb`.
+   `type` is an accepted alias for `verb`. A result object with title/summary/text
+   and no verb is treated as result.emit; an object with url is treated as http.request.
 3) Guest must not call fetch, open sockets, or use child_process. HTTP is only via returning a netFetch / http.request envelope.
 4) No host.docker.internal, localhost, or link-local / metadata targets.
 5) Declared dependencies must match what the script imports. Install hooks run during setup only.

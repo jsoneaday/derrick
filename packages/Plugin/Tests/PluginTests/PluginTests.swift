@@ -24,6 +24,35 @@ import Foundation
     #expect(list[0].payload["summary"]?.stringValue == "iPhone")
 }
 
+@Test func missingVerbInfersResultFromSummary() throws {
+    let data = Data(#"[{"title":"Apple","summary":"iPhone on apple.com"}]"#.utf8)
+    let list = try PluginEnvelopeList.decode(data)
+    #expect(list[0].verb == .resultEmit)
+    #expect(list[0].payload["title"]?.stringValue == "Apple")
+    #expect(list[0].payload["summary"]?.stringValue == "iPhone on apple.com")
+}
+
+@Test func missingVerbInfersHTTPFromURL() throws {
+    let data = Data(#"[{"url":"https://www.apple.com","method":"GET"}]"#.utf8)
+    let list = try PluginEnvelopeList.decode(data)
+    #expect(list[0].verb == .httpRequest)
+    #expect(list[0].payload["url"]?.stringValue == "https://www.apple.com")
+}
+
+@Test func nestedResultWithoutTypeInfersResultEmit() throws {
+    let data = Data(#"[{"result":{"title":"Apple","summary":"Storefront"}}]"#.utf8)
+    let list = try PluginEnvelopeList.decode(data)
+    #expect(list[0].verb == .resultEmit)
+    #expect(list[0].payload["summary"]?.stringValue == "Storefront")
+}
+
+@Test func emptyObjectStillFailsClosed() throws {
+    let data = Data(#"[{}]"#.utf8)
+    #expect(throws: PluginEnvelopeError.unknownVerb("(missing)")) {
+        _ = try PluginEnvelopeList.decode(data)
+    }
+}
+
 @Test func informalTypeResultDecodesAsResultEmit() throws {
     let data = Data(#"[{"type":"result","title":"Apple","text":"iPhone"}]"#.utf8)
     let list = try PluginEnvelopeList.decode(data)

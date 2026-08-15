@@ -511,6 +511,7 @@ struct ContentView: View {
                 await UsageLimitsService.shared.configure(repository: repo)
                 await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
+                await SoftwareFactorySettingsService.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)

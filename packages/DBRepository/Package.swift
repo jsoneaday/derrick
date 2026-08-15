@@ -14,12 +14,13 @@ let package = Package(
     dependencies: [
         .package(path: "../MemorySystem"),
         .package(path: "../AgentRuntime"),
-        .package(path: "../ServiceContracts")
+        .package(path: "../ServiceContracts"),
+        .package(path: "../Plugin")
     ],
     targets: [
         .target(
             name: "DBRepository",
-            dependencies: ["MemorySystem", "AgentRuntime", "ServiceContracts"],
+            dependencies: ["MemorySystem", "AgentRuntime", "ServiceContracts", "Plugin"],
             resources: [
                 .process("Resources")
             ],
@@ -27,7 +28,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DBRepositoryTests",
-            dependencies: ["DBRepository"]
+            dependencies: ["DBRepository", "Plugin", "ServiceContracts"]
         )
     ]
 )
