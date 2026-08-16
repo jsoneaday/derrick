@@ -40,12 +40,13 @@ final class DBPluginTests: XCTestCase {
         )
 
         let plugins = try await repository.listPlugins()
-        XCTAssertEqual(plugins.map(\.id), ["daily-news"])
+        XCTAssertEqual(plugins.filter { !$0.isSystem }.map(\.id), ["daily-news"])
         let grants = try await repository.listPluginGrants(pluginID: "daily-news")
         XCTAssertEqual(grants.count, 1)
         try await repository.deletePlugin(id: "daily-news")
         let remaining = try await repository.listPlugins()
-        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertEqual(remaining.map(\.id), [CreatePluginSample.pluginID])
+        XCTAssertTrue(remaining.allSatisfy(\.isSystem))
         let versions = try await repository.listPluginVersions(pluginID: "daily-news")
         XCTAssertTrue(versions.isEmpty)
         let leftoverGrants = try await repository.listPluginGrants(pluginID: "daily-news")
@@ -258,8 +259,8 @@ final class DBPluginTests: XCTestCase {
         )
 
         let plugins = try await repository.listPlugins()
-        XCTAssertEqual(plugins.map(\.id), ["daily-news"])
-        XCTAssertEqual(plugins.first?.currentVersionID, second.id)
+        XCTAssertEqual(plugins.filter { !$0.isSystem }.map(\.id), ["daily-news"])
+        XCTAssertEqual(plugins.first(where: { $0.id == "daily-news" })?.currentVersionID, second.id)
         let versions = try await repository.listPluginVersions(pluginID: "daily-news")
         XCTAssertEqual(Set(versions.map(\.version)), ["1.0.0", "1.0.1"])
         let previous = try await repository.pluginVersion(id: first.id)
@@ -277,6 +278,54 @@ final class DBPluginTests: XCTestCase {
         _ = try await repository.deletePluginVersion(id: first.id)
         let gone = try await repository.plugin(id: "daily-news")
         XCTAssertNil(gone)
+    }
+
+    func testSystemPluginSeedAndLock() async throws {
+        let repository = try makeTestRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let seeded = try await repository.plugin(id: CreatePluginSample.pluginID)
+        XCTAssertEqual(seeded?.isSystem, true)
+        XCTAssertEqual(seeded?.enabled, true)
+        XCTAssertFalse(seeded?.hookGrants.isEmpty ?? true)
+        let versionID = try XCTUnwrap(seeded?.currentVersionID)
+        let version = try await repository.pluginVersion(id: versionID)
+        XCTAssertEqual(version?.contentHash, CreatePluginSample.contentHash().rawValue)
+        XCTAssertFalse(version?.hasHandle ?? true)
+        XCTAssertFalse(version?.skills.isEmpty ?? true)
+
+        do {
+            try await repository.setPluginEnabled(id: CreatePluginSample.pluginID, enabled: false)
+            XCTFail("expected system lock")
+        } catch {
+            XCTAssertEqual(error as? PluginManifestError, .systemPluginLocked(CreatePluginSample.pluginID))
+        }
+        do {
+            _ = try await repository.uninstallPlugin(id: CreatePluginSample.pluginID)
+            XCTFail("expected system lock")
+        } catch {
+            XCTAssertEqual(error as? PluginManifestError, .systemPluginLocked(CreatePluginSample.pluginID))
+        }
+        do {
+            _ = try await repository.deletePluginVersion(id: versionID)
+            XCTFail("expected system lock")
+        } catch {
+            XCTAssertEqual(error as? PluginManifestError, .systemPluginLocked(CreatePluginSample.pluginID))
+        }
+
+        try await repository.upsertFactorySession(
+            FactorySessionRow(
+                sessionID: FactorySessionID.make(),
+                stage: "spec",
+                instructionPluginID: CreatePluginSample.pluginID
+            )
+        )
+        let sessions = try await repository.listFactorySessions()
+        XCTAssertEqual(sessions.first?.instructionPluginID, CreatePluginSample.pluginID)
+
+        try await repository.seedSystemPlugins()
+        let again = try await repository.plugin(id: CreatePluginSample.pluginID)
+        XCTAssertEqual(again?.currentVersionID, versionID)
     }
 
     func testFactorySessionUsageBuckets() async throws {

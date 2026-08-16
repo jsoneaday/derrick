@@ -7,6 +7,8 @@ public struct PluginRow: Sendable, Hashable {
     public var id: String
     public var enabled: Bool
     public var currentVersionID: String?
+    public var isSystem: Bool
+    public var hooksJSON: String
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -14,14 +16,22 @@ public struct PluginRow: Sendable, Hashable {
         id: String,
         enabled: Bool = true,
         currentVersionID: String? = nil,
+        isSystem: Bool = false,
+        hooksJSON: String = "[]",
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
         self.id = id
         self.enabled = enabled
         self.currentVersionID = currentVersionID
+        self.isSystem = isSystem
+        self.hooksJSON = hooksJSON
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public var hookGrants: [PluginHookGrant] {
+        PluginHookGrant.decodeList(hooksJSON)
     }
 }
 
@@ -36,6 +46,7 @@ public struct PluginVersionRow: Sendable, Hashable {
     public var runtimeJSON: String?
     public var dependenciesJSON: String
     public var entrypointSource: String
+    public var skillsJSON: String
     public var createdAt: Date
 
     public init(
@@ -49,6 +60,7 @@ public struct PluginVersionRow: Sendable, Hashable {
         runtimeJSON: String? = nil,
         dependenciesJSON: String = "{}",
         entrypointSource: String = "",
+        skillsJSON: String = "{}",
         createdAt: Date = .now
     ) {
         self.id = id
@@ -61,7 +73,20 @@ public struct PluginVersionRow: Sendable, Hashable {
         self.runtimeJSON = runtimeJSON
         self.dependenciesJSON = dependenciesJSON
         self.entrypointSource = entrypointSource
+        self.skillsJSON = skillsJSON
         self.createdAt = createdAt
+    }
+
+    public var skills: [String: String] {
+        guard let data = skillsJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return object
+    }
+
+    public var hasHandle: Bool {
+        !entrypointSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -172,6 +197,7 @@ public struct FactorySessionRow: Sendable, Hashable {
     public var specJSON: String?
     public var stage: String
     public var pluginID: String?
+    public var instructionPluginID: String?
     public var reviewerCalls: Int
     public var harnessRuns: Int
     public var createdAt: Date
@@ -182,6 +208,7 @@ public struct FactorySessionRow: Sendable, Hashable {
         specJSON: String? = nil,
         stage: String,
         pluginID: String? = nil,
+        instructionPluginID: String? = nil,
         reviewerCalls: Int = 0,
         harnessRuns: Int = 0,
         createdAt: Date = .now,
@@ -191,6 +218,7 @@ public struct FactorySessionRow: Sendable, Hashable {
         self.specJSON = specJSON
         self.stage = stage
         self.pluginID = pluginID
+        self.instructionPluginID = instructionPluginID
         self.reviewerCalls = reviewerCalls
         self.harnessRuns = harnessRuns
         self.createdAt = createdAt
@@ -222,17 +250,21 @@ public extension DBRepository {
         _ = try PluginID(row.id)
         try withDatabaseHandle { handle in
             try Self.execute("""
-            INSERT INTO plugins (id, enabled, current_version_id, created_at, updated_at)
+            INSERT INTO plugins (id, enabled, current_version_id, is_system, hooks_json, created_at, updated_at)
             VALUES (
                 \(quoted(row.id)),
                 \(row.enabled ? 1 : 0),
                 \(sqlValue(row.currentVersionID)),
+                \(row.isSystem ? 1 : 0),
+                \(quoted(row.hooksJSON)),
                 \(quoted(Self.iso8601Formatter().string(from: row.createdAt))),
                 \(quoted(Self.iso8601Formatter().string(from: row.updatedAt)))
             )
             ON CONFLICT(id) DO UPDATE SET
                 enabled = excluded.enabled,
                 current_version_id = excluded.current_version_id,
+                is_system = excluded.is_system,
+                hooks_json = excluded.hooks_json,
                 updated_at = excluded.updated_at;
             """, on: handle)
         }
@@ -247,7 +279,7 @@ public extension DBRepository {
             try allPluginVersionRows(
                 from: """
                 SELECT id, plugin_id, version, content_hash, status, volume_name,
-                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source
+                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source, skills_json
                 FROM plugin_versions
                 WHERE id = \(quoted(id))
                 LIMIT 1;
@@ -261,13 +293,61 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let filter = includeDisabled ? "" : "WHERE enabled = 1"
             return try allPluginRows(
-                from: "SELECT id, enabled, current_version_id, created_at, updated_at FROM plugins \(filter) ORDER BY id ASC;",
+                from: "SELECT id, enabled, current_version_id, created_at, updated_at, is_system, hooks_json FROM plugins \(filter) ORDER BY id ASC;",
                 on: handle
             )
         }
     }
 
+    /// Host-defined plugins that every database must have.
+    func seedSystemPlugins() throws {
+        try seedCreatePlugin()
+    }
+
+    private func requireUserPlugin(id: String) throws {
+        if let existing = try plugin(id: id), existing.isSystem {
+            throw PluginManifestError.systemPluginLocked(id)
+        }
+    }
+
+    private func seedCreatePlugin() throws {
+        let desiredHash = CreatePluginSample.contentHash().rawValue
+        if let existing = try plugin(id: CreatePluginSample.pluginID),
+           existing.isSystem,
+           existing.enabled,
+           let versionID = existing.currentVersionID,
+           let version = try pluginVersion(id: versionID),
+           version.contentHash == desiredHash {
+            return
+        }
+        let version = PluginVersionRow(
+            pluginID: CreatePluginSample.pluginID,
+            version: CreatePluginSample.version,
+            contentHash: desiredHash,
+            status: "promoted",
+            manifestJSON: CreatePluginSample.manifestJSON,
+            runtimeJSON: CreatePluginSample.runtimeJSON,
+            entrypointSource: "",
+            skillsJSON: CreatePluginSample.skillsJSON
+        )
+        try upsertPlugin(
+            PluginRow(
+                id: CreatePluginSample.pluginID,
+                enabled: true,
+                currentVersionID: try plugin(id: CreatePluginSample.pluginID)?.currentVersionID,
+                isSystem: true,
+                hooksJSON: CreatePluginSample.hooksJSON
+            )
+        )
+        try installPromotedPluginVersion(
+            version,
+            pluginID: CreatePluginSample.pluginID,
+            grant: PluginGrantRow(pluginID: CreatePluginSample.pluginID, versionID: version.id)
+        )
+    }
+
     func setPluginEnabled(id: String, enabled: Bool, updatedAt: Date = .now) throws {
+        try requireUserPlugin(id: id)
         try withDatabaseHandle { handle in
             try Self.execute("""
             UPDATE plugins
@@ -292,6 +372,7 @@ public extension DBRepository {
         guard !pluginID.isEmpty else {
             return PluginUninstallResult(pluginID: id)
         }
+        try requireUserPlugin(id: pluginID)
         let versions = try listPluginVersions(pluginID: pluginID)
         let volumeNames = versions.compactMap(\.volumeName).filter { !$0.isEmpty }
         let disabledSchedules = try disableSchedules(invokingPlugin: pluginID)
@@ -343,6 +424,7 @@ public extension DBRepository {
         guard let version = try pluginVersion(id: versionID) else {
             return PluginUninstallResult(pluginID: "")
         }
+        try requireUserPlugin(id: version.pluginID)
         let siblings = try listPluginVersions(pluginID: version.pluginID)
         if siblings.count <= 1 {
             return try uninstallPlugin(id: version.pluginID)
@@ -458,7 +540,7 @@ public extension DBRepository {
             try Self.execute("""
             INSERT INTO plugin_versions (
                 id, plugin_id, version, content_hash, status, volume_name,
-                manifest_json, runtime_json, dependencies_json, entrypoint_source, created_at
+                manifest_json, runtime_json, dependencies_json, entrypoint_source, skills_json, created_at
             ) VALUES (
                 \(quoted(row.id)),
                 \(quoted(row.pluginID)),
@@ -470,6 +552,7 @@ public extension DBRepository {
                 \(sqlValue(row.runtimeJSON)),
                 \(quoted(row.dependenciesJSON)),
                 \(quoted(row.entrypointSource)),
+                \(quoted(row.skillsJSON)),
                 \(quoted(Self.iso8601Formatter().string(from: row.createdAt)))
             )
             ON CONFLICT(id) DO UPDATE SET
@@ -478,7 +561,8 @@ public extension DBRepository {
                 manifest_json = excluded.manifest_json,
                 runtime_json = excluded.runtime_json,
                 dependencies_json = excluded.dependencies_json,
-                entrypoint_source = excluded.entrypoint_source;
+                entrypoint_source = excluded.entrypoint_source,
+                skills_json = excluded.skills_json;
             """, on: handle)
         }
     }
@@ -488,7 +572,7 @@ public extension DBRepository {
             try allPluginVersionRows(
                 from: """
                 SELECT id, plugin_id, version, content_hash, status, volume_name,
-                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source
+                       manifest_json, runtime_json, dependencies_json, created_at, entrypoint_source, skills_json
                 FROM plugin_versions
                 WHERE plugin_id = \(quoted(pluginID))
                 ORDER BY created_at DESC;
@@ -642,12 +726,14 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             try Self.execute("""
             INSERT INTO factory_sessions (
-                session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                session_id, spec_json, stage, plugin_id, instruction_plugin_id,
+                reviewer_calls, harness_runs, created_at, updated_at
             ) VALUES (
                 \(quoted(row.sessionID)),
                 \(sqlValue(row.specJSON)),
                 \(quoted(row.stage)),
                 \(sqlValue(row.pluginID)),
+                \(sqlValue(row.instructionPluginID)),
                 \(row.reviewerCalls),
                 \(row.harnessRuns),
                 \(quoted(Self.iso8601Formatter().string(from: row.createdAt))),
@@ -657,6 +743,7 @@ public extension DBRepository {
                 spec_json = excluded.spec_json,
                 stage = excluded.stage,
                 plugin_id = excluded.plugin_id,
+                instruction_plugin_id = excluded.instruction_plugin_id,
                 reviewer_calls = excluded.reviewer_calls,
                 harness_runs = excluded.harness_runs,
                 updated_at = excluded.updated_at;
@@ -670,7 +757,7 @@ public extension DBRepository {
         return try withDatabaseHandle { handle in
             try allFactorySessionRows(
                 from: """
-                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at, instruction_plugin_id
                 FROM factory_sessions
                 WHERE plugin_id = \(quoted(pluginID));
                 """,
@@ -683,7 +770,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             try allFactorySessionRows(
                 from: """
-                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at, instruction_plugin_id
                 FROM factory_sessions
                 ORDER BY updated_at DESC;
                 """,
@@ -696,7 +783,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             try allFactorySessionRows(
                 from: """
-                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at, instruction_plugin_id
                 FROM factory_sessions
                 WHERE session_id = \(quoted(sessionID))
                 LIMIT 1;
@@ -719,6 +806,8 @@ public extension DBRepository {
                     id: try columnString(statement, index: 0),
                     enabled: sqlite3_column_int(statement, 1) != 0,
                     currentVersionID: columnOptionalString(statement, index: 2),
+                    isSystem: sqlite3_column_int(statement, 5) != 0,
+                    hooksJSON: columnOptionalString(statement, index: 6) ?? "[]",
                     createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 3)) ?? .now,
                     updatedAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 4)) ?? .now
                 )
@@ -747,6 +836,7 @@ public extension DBRepository {
                     runtimeJSON: columnOptionalString(statement, index: 7),
                     dependenciesJSON: try columnString(statement, index: 8),
                     entrypointSource: columnOptionalString(statement, index: 10) ?? "",
+                    skillsJSON: columnOptionalString(statement, index: 11) ?? "{}",
                     createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 9)) ?? .now
                 )
             )
@@ -820,6 +910,7 @@ public extension DBRepository {
                     specJSON: columnOptionalString(statement, index: 1),
                     stage: try columnString(statement, index: 2),
                     pluginID: columnOptionalString(statement, index: 3),
+                    instructionPluginID: columnOptionalString(statement, index: 8),
                     reviewerCalls: Int(sqlite3_column_int(statement, 4)),
                     harnessRuns: Int(sqlite3_column_int(statement, 5)),
                     createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 6)) ?? .now,

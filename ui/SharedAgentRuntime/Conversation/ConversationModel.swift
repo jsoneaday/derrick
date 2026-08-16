@@ -107,18 +107,12 @@ final class ConversationModel {
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         var mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
-            try PromptResources.pluginHandleInstructions(),
             try PromptResources.guestSDKForModel(),
         ].joined(separator: "\n\n")
-        if await factoryEnabled(repository: repository),
-           FactorySessionID.isFactorySession(sessionID) {
-            mcpToolInstructions += "\n\n" + (try PromptResources.softwareFactoryInstructions())
-        } else if await factoryEnabled(repository: repository) {
-            mcpToolInstructions += """
-
-
-            Software Factory is on. To build a plugin, the user opens Software Factory from the sidebar. In this chat, use plugin.invoke / plugin.list for installed plugins, or the user can type /plugin-id to run one.
-            """
+        if FactorySessionID.isFactorySession(sessionID) {
+            if let skill = await factorySkillInstructions(repository: repository, sessionID: sessionID) {
+                mcpToolInstructions += "\n\n" + skill
+            }
         }
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
@@ -595,6 +589,16 @@ final class ConversationModel {
             named: AllowedMCPTool.pluginInvoke.rawValue,
             arguments: arguments
         )
+        if PluginHookPresentation.decodeOpenFactory(result.text) != nil {
+            onChunk(
+                AgentResponseNextChunk(
+                    status: .complete,
+                    chunk: result.text,
+                    toolName: AllowedMCPTool.pluginInvoke.rawValue
+                )
+            )
+            return true
+        }
         let body = PluginInvokePresentation.userFacingText(fromScriptResult: result.text)
         let chunk: String
         if PluginInvokePresentation.isProgrammatic(body) {
@@ -653,17 +657,19 @@ final class ConversationModel {
         }
     }
 
-    private static func factoryEnabled(repository: DBRepository) async -> Bool {
-        guard let raw = try? await repository.loadConfig(
-            key: SoftwareFactorySettings.configKey,
-            username: "ui",
-            password: "ui"
-        ),
-              let data = raw.data(using: .utf8),
-              let settings = try? JSONDecoder().decode(SoftwareFactorySettings.self, from: data) else {
-            return false
+    private static func factorySkillInstructions(repository: DBRepository, sessionID: String) async -> String? {
+        let session = try? await repository.factorySession(sessionID: sessionID)
+        let pluginID = session?.instructionPluginID ?? CreatePluginSample.pluginID
+        guard let plugin = try? await repository.plugin(id: pluginID),
+              let versionID = plugin.currentVersionID,
+              let version = try? await repository.pluginVersion(id: versionID) else {
+            return try? DerrickBundledText.load("create_plugin_skill.md")
         }
-        return settings.enabled
+        let bodies = version.skills.values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if bodies.isEmpty {
+            return try? DerrickBundledText.load("create_plugin_skill.md")
+        }
+        return bodies.joined(separator: "\n\n")
     }
 
     /// Opens the app DB and always seeds baseline policy rules when missing.

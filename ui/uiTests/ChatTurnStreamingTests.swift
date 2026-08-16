@@ -41,4 +41,18 @@ import Testing
         #expect(turn.pluginTest?.kind == .programmatic)
         #expect(turn.response == "successful")
     }
+
+    @Test func hookChunkShowsTitle() {
+        let encoded = PluginHookPresentation.encodeOpenFactory(
+            PluginHookPresentation.OpenFactory(
+                sessionID: "factory-1",
+                title: "Create plugin",
+                instructionPluginID: "create-plugin"
+            )
+        )
+        var turn = ChatTurn(prompt: "/create-plugin")
+        turn.applyStreamChunk(status: .complete, chunk: encoded)
+        #expect(turn.response == "Create plugin")
+        #expect(turn.pluginTest == nil)
+    }
 }

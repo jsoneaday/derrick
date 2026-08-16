@@ -80,7 +80,9 @@ public actor DBRepository {
     }
 
     public func createEmptyDatabaseIfNeeded(username: String, password: String) throws -> URL {
-        try migrateSessionMemory(username: username, password: password)
+        let url = try migrateSessionMemory(username: username, password: password)
+        try seedSystemPlugins()
+        return url
     }
 
     public func authenticate(username: String, password: String) throws {

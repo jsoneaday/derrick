@@ -264,6 +264,13 @@ enum PluginFactoryHost {
         guard !resolvedID.isEmpty, !description.isEmpty, !handle.isEmpty else {
             return encode(["ok": false, "error": "plugin_id, description, and handle are required."])
         }
+        if let existing = try await repository.plugin(id: resolvedID), existing.isSystem {
+            return encode([
+                "ok": false,
+                "error": PluginManifestError.systemPluginLocked(resolvedID).errorDescription
+                    ?? "\(resolvedID) is a system plugin and cannot be changed or removed.",
+            ])
+        }
         _ = try PluginID(resolvedID)
         var deps: [String: String] = [:]
         if let obj = args["dependencies"]?.objectValue {
@@ -491,6 +498,13 @@ enum PluginFactoryHost {
         }
 
         let existingPlugin = try await repository.plugin(id: draft.pluginID)
+        if existingPlugin?.isSystem == true {
+            return encode([
+                "ok": false,
+                "error": PluginManifestError.systemPluginLocked(draft.pluginID).errorDescription
+                    ?? "\(draft.pluginID) is a system plugin and cannot be changed or removed.",
+            ])
+        }
         let existingVersions = try await repository.listPluginVersions(pluginID: draft.pluginID)
         let isUpdate = existingPlugin != nil
         if isUpdate {
@@ -754,7 +768,7 @@ enum PluginFactoryHost {
     private static func installedPluginSummaries(_ repository: DBRepository) async throws -> [[String: String]] {
         let plugins = try await repository.listPlugins(includeDisabled: true)
         var rows: [[String: String]] = []
-        for plugin in plugins {
+        for plugin in plugins where !plugin.isSystem {
             var version = ""
             if let id = plugin.currentVersionID, let ver = try await repository.pluginVersion(id: id) {
                 version = ver.version
@@ -781,7 +795,26 @@ enum PluginFactoryHost {
               let version = try await repository.pluginVersion(id: versionID) else {
             return encode(["ok": false, "error": "Plugin \(pluginID) has no promoted version."])
         }
-        guard !version.entrypointSource.isEmpty else {
+        let kind = PluginEventKind(rawValue: args["kind"]?.stringValue ?? "") ?? .manual
+        let params: [String: PluginJSON]
+        do {
+            params = try invokeParams(from: args["params"])
+        } catch {
+            return encode(["ok": false, "error": error.localizedDescription])
+        }
+
+        let before = try await PluginHookDispatcher.runBeforeInvoke(
+            plugin: plugin,
+            version: version,
+            params: params,
+            repository: repository,
+            logger: logger
+        )
+        if case .handled(let resultJSON) = before {
+            return resultJSON
+        }
+
+        guard version.hasHandle else {
             return encode(["ok": false, "error": "Plugin \(pluginID) has no stored handle."])
         }
         MCPServiceCallContext.shared.setPluginID(pluginID)
@@ -793,17 +826,28 @@ enum PluginFactoryHost {
             deps = obj
         }
 
-        let files: [String: Data] = [
+        var files: [String: Data] = [
             "plugin.json": Data(version.manifestJSON.utf8),
-            "app.derrick/runtime.json": Data((version.runtimeJSON ?? "{}").utf8),
-            "app.derrick/plugin.ts": Data(version.entrypointSource.utf8),
         ]
+        if let runtime = version.runtimeJSON, !runtime.isEmpty {
+            files["app.derrick/runtime.json"] = Data(runtime.utf8)
+        }
+        if version.hasHandle {
+            files["app.derrick/plugin.ts"] = Data(version.entrypointSource.utf8)
+        }
+        for (name, body) in version.skills {
+            files["skills/\(name)/SKILL.md"] = Data(body.utf8)
+        }
         let recomputed = PluginContentHash.hash(files: files)
         if recomputed.rawValue != version.contentHash {
-            try await repository.setPluginEnabled(id: pluginID, enabled: false)
+            if !plugin.isSystem {
+                try await repository.setPluginEnabled(id: pluginID, enabled: false)
+            }
             return encode([
                 "ok": false,
-                "error": "content_hash mismatch; plugin disabled.",
+                "error": plugin.isSystem
+                    ? "content_hash mismatch."
+                    : "content_hash mismatch; plugin disabled.",
                 "expected": version.contentHash,
                 "actual": recomputed.rawValue,
             ])
@@ -816,13 +860,6 @@ enum PluginFactoryHost {
         ]
         if !deps.isEmpty {
             scriptArgs["dependencies"] = .object(deps.mapValues { .string($0) })
-        }
-        let kind = PluginEventKind(rawValue: args["kind"]?.stringValue ?? "") ?? .manual
-        let params: [String: PluginJSON]
-        do {
-            params = try invokeParams(from: args["params"])
-        } catch {
-            return encode(["ok": false, "error": error.localizedDescription])
         }
         let result = try await ScriptExecutionRuntime.run(
             arguments: scriptArgs,
@@ -861,7 +898,7 @@ enum PluginFactoryHost {
                 code: 403,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Factory tools only run in a Software Factory session. Open one from the sidebar.",
+                        "Factory tools only run in a factory session. Start one with /create-plugin.",
                 ]
             )
         }

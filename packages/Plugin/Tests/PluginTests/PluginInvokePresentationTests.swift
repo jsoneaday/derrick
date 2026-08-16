@@ -32,6 +32,22 @@ import Testing
         #expect(PluginInvokePresentation.decodeTestReport(encoded)?.body == report.body)
     }
 
+    @Test func hookWirePassesThrough() {
+        let encoded = PluginHookPresentation.encodeOpenFactory(
+            PluginHookPresentation.OpenFactory(
+                sessionID: "factory-abc",
+                title: "Create plugin",
+                instructionPluginID: "create-plugin",
+                goal: "headlines"
+            )
+        )
+        #expect(encoded.hasPrefix(PluginHookPresentation.wirePrefix))
+        let decoded = PluginHookPresentation.decodeOpenFactory(encoded)
+        #expect(decoded?.sessionID == "factory-abc")
+        #expect(decoded?.instructionPluginID == "create-plugin")
+        #expect(PluginInvokePresentation.userFacingText(fromScriptResult: encoded) == encoded)
+    }
+
     @Test func failureUsesFindings() {
         let raw = """
         {"status":"failed","failureStage":"execution","validationFindings":["handle() returned no terminal verb."],"stdout":"","exitCode":-1}

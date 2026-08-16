@@ -15,9 +15,7 @@ struct SidebarView: View {
     var onInsertPluginPrefix: ((String) -> Void)?
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
-    @ObservedObject private var softwareFactory = SoftwareFactorySettingsService.shared
     @ObservedObject private var pluginList = PluginListStore.shared
-    @State private var sampleInstallMessage: String?
     @State private var expandedPluginIDs: Set<String> = []
     @State private var contentMode: SidebarContentMode = .recents
 
@@ -69,19 +67,6 @@ struct SidebarView: View {
                 ) {
                     contentMode = .plugins
                     Task { await pluginList.reload() }
-                }
-                if softwareFactory.isEnabled {
-                    SidebarActionRow(
-                        row: SidebarRow(
-                            id: "software-factory",
-                            icon: "hammer.fill",
-                            title: "Software Factory",
-                            isProminent: chatSessions.isFactorySessionSelected
-                        )
-                    ) {
-                        contentMode = .recents
-                        chatSessions.openFactorySession()
-                    }
                 }
             }
 
@@ -181,16 +166,6 @@ struct SidebarView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if softwareFactory.isEnabled {
-                    Button("Install daily news") {
-                        Task {
-                            sampleInstallMessage = await pluginList.installDailyNewsSample()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
             }
             .padding(.top, 4)
 
@@ -205,7 +180,7 @@ struct SidebarView: View {
                             pluginRow(plugin)
                         }
                     }
-                    if let message = sampleInstallMessage ?? pluginList.lastActionMessage, !message.isEmpty {
+                    if let message = pluginList.lastActionMessage, !message.isEmpty {
                         Text(message)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -243,6 +218,11 @@ struct SidebarView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
+                                if plugin.isSystem {
+                                    Text("system")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             if !plugin.description.isEmpty {
                                 Text(plugin.description)
@@ -255,16 +235,18 @@ struct SidebarView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                Button {
-                    contentMode = .recents
-                    chatSessions.openFactorySession(editing: plugin.id)
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                if !plugin.isSystem {
+                    Button {
+                        contentMode = .recents
+                        chatSessions.openFactorySession(editing: plugin.id)
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Change \(plugin.id)")
                 }
-                .buttonStyle(.plain)
-                .help("Change \(plugin.id)")
                 Button {
                     onInsertPluginPrefix?("/\(plugin.id)")
                 } label: {
@@ -275,18 +257,20 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .help("Insert /\(plugin.id) into the prompt")
                 .disabled(!plugin.enabled)
-                Toggle(
-                    "",
-                    isOn: Binding(
-                        get: { plugin.enabled },
-                        set: { newValue in
-                            Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
-                        }
+                if !plugin.isSystem {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { plugin.enabled },
+                            set: { newValue in
+                                Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
+                            }
+                        )
                     )
-                )
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                }
             }
             if expanded {
                 ForEach(plugin.versions) { version in
@@ -308,18 +292,20 @@ struct SidebarView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 16)
-                        Button {
-                            pluginList.pendingVersionDelete = PendingPluginVersionDelete(
-                                version: version,
-                                pluginID: plugin.id
-                            )
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                        if !plugin.isSystem {
+                            Button {
+                                pluginList.pendingVersionDelete = PendingPluginVersionDelete(
+                                    version: version,
+                                    pluginID: plugin.id
+                                )
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Delete version \(version.version)")
                         }
-                        .buttonStyle(.plain)
-                        .help("Delete version \(version.version)")
                     }
                 }
             }

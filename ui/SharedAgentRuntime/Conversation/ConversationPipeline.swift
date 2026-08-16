@@ -120,13 +120,6 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         if !toolInstructions.isEmpty {
             sections.append(toolInstructions)
         }
-        if !toolInstructions.contains("handle() return") {
-            if let handleRAG = try? PromptResources.pluginHandleInstructions() {
-                sections.append(handleRAG)
-            } else {
-                sections.append(PluginEnvelopeSchema.ragSection)
-            }
-        }
         if !toolInstructions.contains("export interface HandleEvent") {
             if let sdk = try? PromptResources.guestSDKForModel() {
                 sections.append(sdk)

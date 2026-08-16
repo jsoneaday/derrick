@@ -127,6 +127,9 @@ public enum PluginInvokePresentation {
         guard !trimmed.isEmpty else {
             return Extracted(text: "The plugin ran, but it did not return any text.", failed: false)
         }
+        if PluginHookPresentation.decodeOpenFactory(trimmed) != nil {
+            return Extracted(text: trimmed, failed: false)
+        }
         if let decoded = decode(trimmed) {
             if decoded.failed {
                 return Extracted(text: decoded.errorText, failed: true)

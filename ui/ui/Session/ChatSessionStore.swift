@@ -26,6 +26,7 @@ final class ChatSessionStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published private(set) var recentSessions: [ChatSessionDTO] = []
     @Published var scrollToBottomToken = 0
+    @Published var factoryKickoffPrompt: String?
 
     private var repository: DBRepository?
     private var activeTasks: [String: Task<Void, Never>] = [:]
@@ -83,24 +84,46 @@ final class ChatSessionStore: ObservableObject {
     func openFactorySession(editing pluginID: String? = nil) {
         let id = FactorySessionID.make()
         let locked = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = locked.isEmpty ? "Software Factory" : "Change \(locked)"
-        let tab = ChatTab(id: id, title: title)
-        tabs.append(tab)
+        let title = locked.isEmpty ? "Create plugin" : "Change \(locked)"
+        adoptFactorySession(
+            id: id,
+            title: title,
+            instructionPluginID: CreatePluginSample.pluginID,
+            reusePluginID: locked.isEmpty ? nil : locked,
+            goal: locked.isEmpty ? "" : "Change \(locked)"
+        )
+    }
+
+    func adoptFactorySession(
+        id: String,
+        title: String,
+        instructionPluginID: String,
+        reusePluginID: String?,
+        goal: String
+    ) {
+        if !tabs.contains(where: { $0.id == id }) {
+            tabs.append(ChatTab(id: id, title: title))
+        }
         selectedSessionID = id
         persistSessionShell(sessionID: id, title: title)
+        let kickoff = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        factoryKickoffPrompt = kickoff.isEmpty ? "Create a complementary plugin." : kickoff
         Task {
             await pruneFactoryStagingVolumes(keeping: id)
-            guard !locked.isEmpty, let repository else { return }
-            var draft = FactoryPackageDraft(goal: "Change \(locked)")
-            draft.pluginID = locked
-            draft.reusePluginID = locked
+            guard let repository else { return }
+            var draft = FactoryPackageDraft(goal: factoryKickoffPrompt ?? "")
+            if let reuse = reusePluginID, !reuse.isEmpty {
+                draft.pluginID = reuse
+                draft.reusePluginID = reuse
+            }
             let spec = (try? JSONEncoder().encode(draft)).flatMap { String(data: $0, encoding: .utf8) }
             try? await repository.upsertFactorySession(
                 FactorySessionRow(
                     sessionID: id,
                     specJSON: spec,
                     stage: "spec",
-                    pluginID: locked
+                    pluginID: reusePluginID,
+                    instructionPluginID: instructionPluginID
                 )
             )
         }
@@ -229,6 +252,15 @@ final class ChatSessionStore: ObservableObject {
         tabs[tabIndex].turns[turnIndex].toolName = dto.toolName
         if selectedSessionID == sessionID {
             scrollToBottomToken += 1
+        }
+        if status == .complete, let hook = PluginHookPresentation.decodeOpenFactory(chunkText) {
+            adoptFactorySession(
+                id: hook.sessionID,
+                title: hook.title,
+                instructionPluginID: hook.instructionPluginID,
+                reusePluginID: hook.reusePluginID,
+                goal: hook.goal
+            )
         }
     }
 

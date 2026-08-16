@@ -48,6 +48,10 @@ struct ChatTurn: Identifiable, Hashable {
                 response = report.body
                 return
             }
+            if let hook = PluginHookPresentation.decodeOpenFactory(chunk) {
+                response = hook.title
+                return
+            }
             response += chunk
         case .toolCall, .toolBatch:
             break
@@ -726,6 +730,7 @@ struct ContentView: View {
         do {
             let repo = try await ensureSessionStoreLoaded()
             sessionReady = true
+            await PluginListStore.shared.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
             if isDebugEnabled {
@@ -1027,10 +1032,10 @@ struct ContentView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
         }
-        .onChange(of: slashHandle) { _, handle in
+        .onChange(of: slashHandle) { oldHandle, handle in
             slashHighlight = 0
             slashMenuDismissed = false
-            if handle != nil {
+            if oldHandle == nil, handle != nil {
                 Task { await pluginList.reload() }
             }
         }
@@ -1038,6 +1043,13 @@ struct ContentView: View {
             if slashHighlight >= slashMatches.count {
                 slashHighlight = max(slashMatches.count - 1, 0)
             }
+        }
+        .onChange(of: chatSessions.factoryKickoffPrompt) { _, _ in
+            sendFactoryKickoffIfNeeded()
+        }
+        .onChange(of: sessionReady) { _, ready in
+            guard ready else { return }
+            sendFactoryKickoffIfNeeded()
         }
     }
 
@@ -1150,6 +1162,13 @@ struct ContentView: View {
         default:
             return .streaming
         }
+    }
+
+    private func sendFactoryKickoffIfNeeded() {
+        guard sessionReady, let value = chatSessions.factoryKickoffPrompt, !value.isEmpty else { return }
+        chatSessions.factoryKickoffPrompt = nil
+        prompt = value
+        startStreaming()
     }
 
     private func startStreaming() {

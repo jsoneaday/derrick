@@ -68,6 +68,9 @@ import Foundation
     #expect(PluginPrefix.uniqueMatch(handle: "daily-news", pluginIDs: ["daily-news"]) == "daily-news")
     #expect(PluginPrefix.typingHandle("/") == "")
     #expect(PluginPrefix.typingHandle("/daily") == "daily")
+    #expect(PluginPrefix.typingHandle("/create-plugin") == "create-plugin")
+    #expect(PluginPrefix.typingHandle("/create") == "create")
+    #expect(PluginPrefix.matches(handle: "create", pluginIDs: ["create-plugin", "daily-news"]) == ["create-plugin"])
     #expect(PluginPrefix.typingHandle("/daily-news more") == nil)
     #expect(PluginPrefix.typingHandle("hello") == nil)
     #expect(PluginPrefix.typingHandle("//nope") == nil)
@@ -286,10 +289,39 @@ import Foundation
             installedIDs: ["daily-news-summary", "weather"]
         ) == .reuse("weather")
     )
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "Create a complementary plugin.",
+            installedIDs: ["create-plugin"]
+        ) == .create
+    )
     #expect(PluginReleaseVersion.next(after: "1.0.0") == "1.0.1")
     #expect(PluginReleaseVersion.assign(requested: "1.0.0", existing: ["1.0.0"]) == "1.0.1")
     #expect(PluginReleaseVersion.assign(requested: "2.0.0", existing: ["1.0.0"]) == "2.0.0")
     #expect(PluginReleaseVersion.assign(requested: "1.0.0", existing: []) == "1.0.0")
+}
+
+@Test func hookGrantsDecodeNamesAndObjects() {
+    let fromNames = PluginHookGrant.decodeList(#"["open_factory_session"]"#)
+    #expect(fromNames.map(\.hook) == [.openFactorySession])
+    #expect(fromNames.first?.event == PluginHookGrant.pluginInvokeEvent)
+    #expect(fromNames.first?.phase == .before)
+    let encoded = PluginHookGrant.encodeList([PluginHookGrant(hook: .openFactorySession)])
+    let fromObjects = PluginHookGrant.decodeList(encoded)
+    #expect(fromObjects == [PluginHookGrant(hook: .openFactorySession)])
+    #expect(PluginHookGrant.decodeList("[]").isEmpty)
+    #expect(PluginHookGrant.decodeList("not-json").isEmpty)
+}
+
+@Test func createPluginSampleIsSkillOnly() {
+    #expect(CreatePluginSample.pluginID == "create-plugin")
+    #expect(CreatePluginSample.skillMarkdown.contains("factory.build"))
+    #expect(CreatePluginSample.skillMarkdown.contains("derrick.ts"))
+    #expect(!CreatePluginSample.manifestJSON.contains("entrypoint"))
+    let grants = PluginHookGrant.decodeList(CreatePluginSample.hooksJSON)
+    #expect(grants.map(\.hook) == [.openFactorySession])
+    let hash = CreatePluginSample.contentHash()
+    #expect(hash.rawValue.count == 64)
 }
 
 @Test func dailyNewsSampleIsAValidDraft() throws {

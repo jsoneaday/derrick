@@ -533,6 +533,21 @@ extension ConversationPipeline {
                                 "\(roundLabel) tool wall_ms=\(toolWallMS) parse_ms=\(parseToolMS) limit_ms=\(toolLimitMS) usage_ms=\(usageMS) records=\(toolExecution.records.count) summary_chars=\(toolExecution.summary.utf8.count) slim_followup_chars=\(slimFollowUpBody.utf8.count) names=\(toolExecution.records.map(\.name).joined(separator: ","))"
                             )
 
+                            if let hookResult = toolExecution.records.reversed().compactMap({ record -> String? in
+                                guard record.name == "plugin.invoke" else { return nil }
+                                let raw = record.result ?? ""
+                                return PluginHookPresentation.decodeOpenFactory(raw) == nil ? nil : raw
+                            }).first {
+                                continuation.yield(
+                                    AgentResponseNextChunk(
+                                        status: .complete,
+                                        chunk: hookResult
+                                    )
+                                )
+                                PipelineTiming.log("\(roundLabel) plugin_hook_complete")
+                                break
+                            }
+
                             if let promoteTest = toolExecution.records.reversed().compactMap({ record -> PluginInvokePresentation.TestReport? in
                                 guard record.name == FactoryTurnGate.factoryPromote
                                     || record.name == FactoryTurnGate.factoryInstallSample else {

@@ -22,6 +22,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
     case invalidDependency(String)
     case invalidContentHash(String)
     case invalidSkill(String)
+    case systemPluginLocked(String)
 
     public var errorDescription: String? {
         switch self {
@@ -67,6 +68,8 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
             return "Invalid content hash: \(h)"
         case .invalidSkill(let s):
             return "Invalid skill: \(s)"
+        case .systemPluginLocked(let id):
+            return "\(id) is a system plugin and cannot be changed or removed."
         }
     }
 }

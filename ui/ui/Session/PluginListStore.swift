@@ -16,6 +16,7 @@ struct PluginVersionItem: Identifiable, Hashable, Sendable {
 struct PluginSidebarItem: Identifiable, Hashable, Sendable {
     var id: String
     var enabled: Bool
+    var isSystem: Bool
     var version: String
     var description: String
     var versions: [PluginVersionItem]
@@ -42,6 +43,7 @@ final class PluginListStore: ObservableObject {
     func configure(repository: DBRepository) async {
         self.repository = repository
         startCatalogObserver()
+        try? await repository.seedSystemPlugins()
         await reload()
     }
 
@@ -61,7 +63,9 @@ final class PluginListStore: ObservableObject {
 
     func reload() async {
         guard let repository else { return }
-        let rows = (try? await repository.listPlugins(includeDisabled: true)) ?? []
+        guard let rows = try? await repository.listPlugins(includeDisabled: true) else {
+            return
+        }
         var items: [PluginSidebarItem] = []
         for row in rows {
             var version = ""
@@ -93,6 +97,7 @@ final class PluginListStore: ObservableObject {
                 PluginSidebarItem(
                     id: row.id,
                     enabled: row.enabled,
+                    isSystem: row.isSystem,
                     version: version,
                     description: description,
                     versions: versionItems
@@ -103,13 +108,28 @@ final class PluginListStore: ObservableObject {
     }
 
     func slashMatches(handle: String) -> [PluginSidebarItem] {
-        let enabled = plugins.filter(\.enabled)
-        let ids = PluginPrefix.matches(handle: handle, pluginIDs: enabled.map(\.id))
-        return ids.compactMap { id in enabled.first { $0.id.lowercased() == id } }
+        var catalog = plugins.filter(\.enabled)
+        if !catalog.contains(where: { $0.id == CreatePluginSample.pluginID }) {
+            catalog.append(Self.createPluginCatalogItem)
+        }
+        let ids = PluginPrefix.matches(handle: handle, pluginIDs: catalog.map(\.id))
+        return ids.compactMap { id in catalog.first { $0.id.lowercased() == id } }
+    }
+
+    private static var createPluginCatalogItem: PluginSidebarItem {
+        PluginSidebarItem(
+            id: CreatePluginSample.pluginID,
+            enabled: true,
+            isSystem: true,
+            version: CreatePluginSample.version,
+            description: CreatePluginSample.description,
+            versions: []
+        )
     }
 
     func setEnabled(id: String, enabled: Bool) async {
         guard let repository else { return }
+        if plugins.first(where: { $0.id == id })?.isSystem == true { return }
         try? await repository.setPluginEnabled(id: id, enabled: enabled)
         await reload()
     }
