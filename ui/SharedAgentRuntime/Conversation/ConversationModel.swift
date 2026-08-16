@@ -112,6 +112,8 @@ final class ConversationModel {
         if FactorySessionID.isFactorySession(sessionID) {
             if let skill = await factorySkillInstructions(repository: repository, sessionID: sessionID) {
                 mcpToolInstructions += "\n\n" + skill
+                let skillPlugin = await skillPluginID(repository: repository, sessionID: sessionID)
+                debugLog("[skill] attached session=\(sessionID) plugin=\(skillPlugin) chars=\(skill.count)")
             }
         }
 
@@ -657,9 +659,13 @@ final class ConversationModel {
         }
     }
 
-    private static func factorySkillInstructions(repository: DBRepository, sessionID: String) async -> String? {
+    private static func skillPluginID(repository: DBRepository, sessionID: String) async -> String {
         let session = try? await repository.factorySession(sessionID: sessionID)
-        let pluginID = session?.instructionPluginID ?? CreatePluginSample.pluginID
+        return session?.instructionPluginID ?? CreatePluginSample.pluginID
+    }
+
+    private static func factorySkillInstructions(repository: DBRepository, sessionID: String) async -> String? {
+        let pluginID = await skillPluginID(repository: repository, sessionID: sessionID)
         guard let plugin = try? await repository.plugin(id: pluginID),
               let versionID = plugin.currentVersionID,
               let version = try? await repository.pluginVersion(id: versionID) else {

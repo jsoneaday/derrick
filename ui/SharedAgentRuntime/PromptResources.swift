@@ -24,14 +24,6 @@ public enum PromptResources {
         try load(named: "mcp_tool_instructions", from: resourceRoot)
     }
 
-    public static func softwareFactoryInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try load(named: "software_factory_instructions", from: resourceRoot)
-    }
-
-    public static func pluginHandleInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try DerrickBundledText.load("plugin_handle_instructions.md", from: resourceRoot)
-    }
-
     public static func scriptReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
         try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
     }

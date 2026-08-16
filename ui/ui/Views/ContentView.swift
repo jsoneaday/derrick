@@ -48,8 +48,8 @@ struct ChatTurn: Identifiable, Hashable {
                 response = report.body
                 return
             }
-            if let hook = PluginHookPresentation.decodeOpenFactory(chunk) {
-                response = hook.title
+            if PluginHookPresentation.decodeOpenFactory(chunk) != nil {
+                response = "Started a factory session."
                 return
             }
             response += chunk
@@ -388,6 +388,16 @@ struct ContentView: View {
                 ChatTabBarView(store: chatSessions)
                 mainPanel
             }
+        }
+        .onChange(of: chatSessions.factoryKickoffPrompt) { _, _ in
+            sendFactoryKickoffIfNeeded()
+        }
+        .onChange(of: chatSessions.selectedSessionID) { _, _ in
+            sendFactoryKickoffIfNeeded()
+        }
+        .onChange(of: sessionReady) { _, ready in
+            guard ready else { return }
+            sendFactoryKickoffIfNeeded()
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -1044,13 +1054,6 @@ struct ContentView: View {
                 slashHighlight = max(slashMatches.count - 1, 0)
             }
         }
-        .onChange(of: chatSessions.factoryKickoffPrompt) { _, _ in
-            sendFactoryKickoffIfNeeded()
-        }
-        .onChange(of: sessionReady) { _, ready in
-            guard ready else { return }
-            sendFactoryKickoffIfNeeded()
-        }
     }
 
     private func handleSlashKey(_ event: NSEvent) -> Bool {
@@ -1165,7 +1168,11 @@ struct ContentView: View {
     }
 
     private func sendFactoryKickoffIfNeeded() {
-        guard sessionReady, let value = chatSessions.factoryKickoffPrompt, !value.isEmpty else { return }
+        guard sessionReady,
+              FactorySessionID.isFactorySession(chatSessions.selectedSessionID),
+              let value = chatSessions.factoryKickoffPrompt,
+              !value.isEmpty
+        else { return }
         chatSessions.factoryKickoffPrompt = nil
         prompt = value
         startStreaming()

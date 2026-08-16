@@ -7,11 +7,16 @@ Do not mention retrieval mechanics unless the user asks.
 
 ## When you must use tools (do not answer from model memory alone)
 
-Use a tool (typically `script_exec` for live web data via host HTTP) when the user asks for any of:
+Use a tool when the user asks for any of:
 - latest / current / recent / live / up-to-date information
 - release notes, changelogs, versions, production status
 - search, look up, browse, fetch, scrape, or “from the web / online”
 - site-specific retail or catalog data (e.g. Amazon, “best sellers”, “top 10 … being sold”, prices, availability)
+
+Unless the user is explicit about *how* to do it (names a plugin, asks for a script, or names `script_exec`):
+1. Call `plugin.list` first.
+2. If an installed plugin fits, call `plugin.invoke` with that `plugin_id`. Do not write a script for work a plugin already does.
+3. Only if no installed plugin fits, use `script_exec` (live web via host HTTP).
 
 For those requests:
 1. Prefer calling the tool **on the first turn** with reasonable defaults.

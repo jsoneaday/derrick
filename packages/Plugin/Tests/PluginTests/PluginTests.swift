@@ -397,12 +397,9 @@ import Foundation
             #"<rss><item><title><![CDATA[Major incidents across UK]]></title></item></rss>"#
         ) == ["Major incidents across UK"]
     )
-    #expect(PluginEnvelopeSchema.ragSection.contains("TypeScript"))
-    #expect(PluginEnvelopeSchema.ragSection.contains("handle() return"))
-    #expect(PluginEnvelopeSchema.ragSection.contains("interface PluginParams"))
-    #expect(!PluginEnvelopeSchema.ragSection.contains("[key: string]: unknown"))
-    #expect(!PluginEnvelopeSchema.ragSection.contains("export function stripMarkup"))
-    #expect(!PluginEnvelopeSchema.ragSection.contains("\"$schema\""))
+    #expect(CreatePluginSample.skillMarkdown.contains("factory.build"))
+    #expect(CreatePluginSample.skillMarkdown.contains("interface PluginParams"))
+    #expect(!CreatePluginSample.skillMarkdown.contains("[key: string]: unknown"))
     #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
     #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"noImplicitAny\": true"))
     #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"useUnknownInCatchVariables\": true"))

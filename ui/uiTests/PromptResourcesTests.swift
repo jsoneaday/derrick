@@ -43,34 +43,16 @@ import Testing
         #expect(try PromptResources.mcpToolInstructions(from: root) == "Tool instructions from file")
     }
 
-    @Test func loadsSoftwareFactoryInstructionsFromResourcesDirectory() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let resources = root.appendingPathComponent("Resources", isDirectory: true)
-        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
-        try "Factory instructions from file\n".write(
-            to: resources.appendingPathComponent("software_factory_instructions.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        #expect(try PromptResources.softwareFactoryInstructions(from: root) == "Factory instructions from file")
-    }
-
-    @Test func loadsPluginHandleAndGuestSDKFromResourcesDirectory() throws {
+    @Test func loadsGuestSDKFromResourcesDirectory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let resources = root.appendingPathComponent("Resources", isDirectory: true)
         let guest = resources.appendingPathComponent("guest", isDirectory: true)
         try FileManager.default.createDirectory(at: guest, withIntermediateDirectories: true)
-        try "handle() return from file\n".write(
-            to: resources.appendingPathComponent("plugin_handle_instructions.md"),
-            atomically: true,
-            encoding: .utf8
-        )
         try "export interface HandleEvent {}\n".write(
             to: guest.appendingPathComponent("derrick.ts"),
             atomically: true,
             encoding: .utf8
         )
-        #expect(try PromptResources.pluginHandleInstructions(from: root) == "handle() return from file")
         #expect(try PromptResources.guestSDKSource(from: root) == "export interface HandleEvent {}")
         let wrapped = try PromptResources.guestSDKForModel(from: root)
         #expect(wrapped.contains("```typescript"))

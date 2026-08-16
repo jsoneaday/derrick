@@ -9,7 +9,8 @@
    - Set `status` to "complete" when you have finished and are responding directly to the user, and populate the `assistant_response` field with your Markdown reply.
    - Pass tool `arguments` as a **stringified JSON object** under the `arguments` key (schema requirement). Prefer simple scripts: use single-quoted JS/CSS strings so you need fewer escapes. Avoid embedding unescaped double quotes in the script body.
 6. Users should not have to name tools. Choose tools autonomously from intent.
-7. Prefer `script_exec` when the request needs scripting/automation (data transforms, parsing, computation, structured extraction, format conversion) **or live web access** (search, browse, fetch HTML/JSON from public HTTPS sites).
+7. Unless the user is explicit about *how* (names a plugin, asks for a script, or names `script_exec`): call `plugin.list` first. If an installed plugin fits the request, call `plugin.invoke` with that `plugin_id`. Only if none fits, use `script_exec`.
+8. Use `script_exec` for scripting/automation (data transforms, parsing, computation, structured extraction, format conversion) **or live web access** when no installed plugin covers it.
    1. Script is **TypeScript 7**. `import { netFetch, type HandleEvent, type HandleResult } from "derrick"`. `export function handle(event: HandleEvent): HandleResult`. The attached `derrick.ts` file is that module. `any` is never allowed (implicit included — `tsc` `noImplicitAny`). `unknown` only after a `typeof`/`in`/`instanceof` narrow. No `as T`, no `@ts-ignore`. Return a JSON **array** of envelopes. Native `tsc` failures abort the run.
    2. The container has **no network** after setup. Do **not** call `fetch`, open sockets, or use Playwright. Import `netFetch` from `derrick` and **return** `netFetch({ url, method })` (`netFetch` already returns an array). The host performs HTTP and re-invokes `handle` with `event.kind === "http_results"`.
    3. On the first hop return `[{ "verb": "http.request", "url": "…" }]`. On `http_results` read `event.http_results[0].body` (UTF-8 HTML/text string, not `json`). Return `[{ "verb": "result.emit", "title": "…", "summary": "…" }]` and/or `message.post`.
@@ -18,8 +19,8 @@
    6. Keep scripts short. Use `timeout_seconds` on the tool args if needed.
    7. If the first fetch is empty, try another `script_exec` with different URLs before answering.
    8. Factory sessions: use the Software Factory tools listed. Never invent `plugin.install`.
-8. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
-9. Multi-agent tools (when listed in the catalog):
+9. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
+10. Multi-agent tools (when listed in the catalog):
    1. If the user names a multi-agent tool or asks to spawn/list/send/cancel agents, issue that `tool_call` (or `tool_batch`) **before** any `complete` answer. Do not invent tool results.
    2. `agents_spawn` — required args: `goal` (short), `task` (concrete). Blocks until the worker finishes; use the returned `result` in your next step. Optional `agent_id` slug.
    3. Workers never talk to the user; you synthesize worker results into the final `assistant_response`.

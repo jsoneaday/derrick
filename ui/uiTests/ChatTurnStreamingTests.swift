@@ -52,7 +52,7 @@ import Testing
         )
         var turn = ChatTurn(prompt: "/create-plugin")
         turn.applyStreamChunk(status: .complete, chunk: encoded)
-        #expect(turn.response == "Create plugin")
+        #expect(turn.response == "Started a factory session.")
         #expect(turn.pluginTest == nil)
     }
 }

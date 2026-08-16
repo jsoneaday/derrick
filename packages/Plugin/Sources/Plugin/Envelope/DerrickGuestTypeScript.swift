@@ -48,9 +48,4 @@ extension PluginEnvelopeSchema {
         }
     }
 
-    /// Model-facing handle contract. Full SDK is `DerrickGuestTypeScript.derrickModule`.
-    public static var ragSection: String {
-        DerrickGuestTypeScript.registerPluginResourceBundle()
-        return DerrickBundledText.mustLoad("plugin_handle_instructions.md")
-    }
 }

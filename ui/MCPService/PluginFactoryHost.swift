@@ -811,6 +811,9 @@ enum PluginFactoryHost {
             logger: logger
         )
         if case .handled(let resultJSON) = before {
+            if !version.skills.isEmpty {
+                logger("[skill] invoke plugin=\(pluginID) version=\(version.version) skills=\(version.skills.keys.sorted().joined(separator: ","))")
+            }
             return resultJSON
         }
 
