@@ -591,7 +591,7 @@ final class ConversationModel {
             named: AllowedMCPTool.pluginInvoke.rawValue,
             arguments: arguments
         )
-        if PluginHookPresentation.decodeOpenFactory(result.text) != nil {
+        if PluginHookPresentation.isHookWire(result.text) {
             onChunk(
                 AgentResponseNextChunk(
                     status: .complete,

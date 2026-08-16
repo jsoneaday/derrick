@@ -48,6 +48,10 @@ struct ChatTurn: Identifiable, Hashable {
                 response = report.body
                 return
             }
+            if PluginHookPresentation.decodeOpenCreateWizard(chunk) != nil {
+                response = "Opened the create-plugin form."
+                return
+            }
             if PluginHookPresentation.decodeOpenFactory(chunk) != nil {
                 response = "Started a factory session."
                 return
@@ -313,6 +317,7 @@ struct ContentView: View {
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
     @ObservedObject private var pluginList = PluginListStore.shared
+    @ObservedObject private var createPluginWizard = CreatePluginWizardStore.shared
     @State private var slashHighlight = 0
     @State private var slashMenuDismissed = false
 
@@ -566,6 +571,38 @@ struct ContentView: View {
                         Task { await pluginList.confirmPendingVersionDelete() }
                     }
                 )
+            }
+        )
+        .modalPopup(
+            isPresented: createPluginWizard.isPresented && !bootstrapStatus.isModalPresented,
+            minWidth: 460,
+            minHeight: 0,
+            maxWidth: 560,
+            maxHeight: 640,
+            onBackdropDismiss: createPluginWizard.phase == .reviewing
+                ? nil
+                : { createPluginWizard.dismiss() },
+            onEscape: createPluginWizard.phase == .reviewing
+                ? nil
+                : { createPluginWizard.dismiss() },
+            header: {
+                Text("Create a plugin")
+                    .font(.headline)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+            },
+            body: {
+                CreatePluginWizardView(store: createPluginWizard)
+            },
+            footer: {
+                if let settings = helperModelSettings {
+                    CreatePluginWizardFooter(
+                        store: createPluginWizard,
+                        settings: settings,
+                        onCreate: startFactoryFromWizard
+                    )
+                }
             }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1165,6 +1202,18 @@ struct ContentView: View {
         default:
             return .streaming
         }
+    }
+
+    private func startFactoryFromWizard() {
+        let kickoff = createPluginWizard.factoryKickoff
+        createPluginWizard.dismiss()
+        chatSessions.adoptFactorySession(
+            id: FactorySessionID.make(),
+            title: "Create plugin",
+            instructionPluginID: CreatePluginSample.pluginID,
+            reusePluginID: nil,
+            goal: kickoff
+        )
     }
 
     private func sendFactoryKickoffIfNeeded() {

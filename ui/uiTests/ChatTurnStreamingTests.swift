@@ -55,4 +55,16 @@ import Testing
         #expect(turn.response == "Started a factory session.")
         #expect(turn.pluginTest == nil)
     }
+
+    @Test func wizardHookOpensFormCopy() {
+        let encoded = PluginHookPresentation.encodeOpenCreateWizard(
+            PluginHookPresentation.OpenCreateWizard(
+                instructionPluginID: "create-plugin",
+                goal: "news links"
+            )
+        )
+        var turn = ChatTurn(prompt: "/create-plugin news links")
+        turn.applyStreamChunk(status: .complete, chunk: encoded)
+        #expect(turn.response == "Opened the create-plugin form.")
+    }
 }

@@ -32,6 +32,20 @@ import Testing
         #expect(PluginInvokePresentation.decodeTestReport(encoded)?.body == report.body)
     }
 
+    @Test func createWizardWireRoundTrips() {
+        let encoded = PluginHookPresentation.encodeOpenCreateWizard(
+            PluginHookPresentation.OpenCreateWizard(
+                instructionPluginID: "create-plugin",
+                goal: "news links"
+            )
+        )
+        #expect(PluginHookPresentation.isHookWire(encoded))
+        #expect(PluginHookPresentation.decodeOpenFactory(encoded) == nil)
+        let decoded = PluginHookPresentation.decodeOpenCreateWizard(encoded)
+        #expect(decoded?.goal == "news links")
+        #expect(decoded?.instructionPluginID == "create-plugin")
+    }
+
     @Test func hookWirePassesThrough() {
         let encoded = PluginHookPresentation.encodeOpenFactory(
             PluginHookPresentation.OpenFactory(

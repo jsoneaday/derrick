@@ -312,12 +312,19 @@ public extension DBRepository {
 
     private func seedCreatePlugin() throws {
         let desiredHash = CreatePluginSample.contentHash().rawValue
+        let desiredHooks = CreatePluginSample.hooksJSON
         if let existing = try plugin(id: CreatePluginSample.pluginID),
            existing.isSystem,
            existing.enabled,
            let versionID = existing.currentVersionID,
            let version = try pluginVersion(id: versionID),
            version.contentHash == desiredHash {
+            if existing.hooksJSON != desiredHooks {
+                var updated = existing
+                updated.hooksJSON = desiredHooks
+                updated.updatedAt = .now
+                try upsertPlugin(updated)
+            }
             return
         }
         let version = PluginVersionRow(

@@ -302,13 +302,13 @@ import Foundation
 }
 
 @Test func hookGrantsDecodeNamesAndObjects() {
-    let fromNames = PluginHookGrant.decodeList(#"["open_factory_session"]"#)
-    #expect(fromNames.map(\.hook) == [.openFactorySession])
+    let fromNames = PluginHookGrant.decodeList(#"["open_create_wizard"]"#)
+    #expect(fromNames.map(\.hook) == [.openCreateWizard])
     #expect(fromNames.first?.event == PluginHookGrant.pluginInvokeEvent)
     #expect(fromNames.first?.phase == .before)
-    let encoded = PluginHookGrant.encodeList([PluginHookGrant(hook: .openFactorySession)])
+    let encoded = PluginHookGrant.encodeList([PluginHookGrant(hook: .openCreateWizard)])
     let fromObjects = PluginHookGrant.decodeList(encoded)
-    #expect(fromObjects == [PluginHookGrant(hook: .openFactorySession)])
+    #expect(fromObjects == [PluginHookGrant(hook: .openCreateWizard)])
     #expect(PluginHookGrant.decodeList("[]").isEmpty)
     #expect(PluginHookGrant.decodeList("not-json").isEmpty)
 }
@@ -319,7 +319,7 @@ import Foundation
     #expect(CreatePluginSample.skillMarkdown.contains("derrick.ts"))
     #expect(!CreatePluginSample.manifestJSON.contains("entrypoint"))
     let grants = PluginHookGrant.decodeList(CreatePluginSample.hooksJSON)
-    #expect(grants.map(\.hook) == [.openFactorySession])
+    #expect(grants.map(\.hook) == [.openCreateWizard])
     let hash = CreatePluginSample.contentHash()
     #expect(hash.rawValue.count == 64)
 }

@@ -37,9 +37,43 @@ public enum PluginHookPresentation: Sendable {
     }
 
     public static func decodeOpenFactory(_ raw: String) -> OpenFactory? {
+        guard let data = jsonData(in: raw) else { return nil }
+        guard let payload = try? JSONDecoder().decode(OpenFactory.self, from: data) else { return nil }
+        return payload.kind == DerrickPluginHook.openFactorySession.rawValue ? payload : nil
+    }
+
+    public struct OpenCreateWizard: Codable, Sendable, Hashable {
+        public var kind: String
+        public var instructionPluginID: String
+        public var goal: String
+
+        public init(instructionPluginID: String, goal: String = "") {
+            self.kind = DerrickPluginHook.openCreateWizard.rawValue
+            self.instructionPluginID = instructionPluginID
+            self.goal = goal
+        }
+    }
+
+    public static func encodeOpenCreateWizard(_ payload: OpenCreateWizard) -> String {
+        guard let data = try? JSONEncoder().encode(payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return wirePrefix + "{}"
+        }
+        return wirePrefix + json
+    }
+
+    public static func decodeOpenCreateWizard(_ raw: String) -> OpenCreateWizard? {
+        guard let data = jsonData(in: raw) else { return nil }
+        guard let payload = try? JSONDecoder().decode(OpenCreateWizard.self, from: data) else { return nil }
+        return payload.kind == DerrickPluginHook.openCreateWizard.rawValue ? payload : nil
+    }
+
+    public static func isHookWire(_ raw: String) -> Bool {
+        raw.hasPrefix(wirePrefix)
+    }
+
+    private static func jsonData(in raw: String) -> Data? {
         guard raw.hasPrefix(wirePrefix) else { return nil }
-        let json = String(raw.dropFirst(wirePrefix.count))
-        guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(OpenFactory.self, from: data)
+        return String(raw.dropFirst(wirePrefix.count)).data(using: .utf8)
     }
 }

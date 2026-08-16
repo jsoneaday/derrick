@@ -253,6 +253,10 @@ final class ChatSessionStore: ObservableObject {
         if selectedSessionID == sessionID {
             scrollToBottomToken += 1
         }
+        if status == .complete, let wizard = PluginHookPresentation.decodeOpenCreateWizard(chunkText) {
+            CreatePluginWizardStore.shared.present(goal: wizard.goal)
+            return
+        }
         if status == .complete, let hook = PluginHookPresentation.decodeOpenFactory(chunkText) {
             adoptFactorySession(
                 id: hook.sessionID,

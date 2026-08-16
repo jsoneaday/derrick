@@ -16,6 +16,8 @@ enum PluginHookDispatcher {
         }
         for grant in grants {
             switch grant.hook {
+            case .openCreateWizard:
+                return openCreateWizard(plugin: plugin, params: params, logger: logger)
             case .openFactorySession:
                 return try await openFactorySession(
                     plugin: plugin,
@@ -27,6 +29,24 @@ enum PluginHookDispatcher {
             }
         }
         return .proceed
+    }
+
+    private static func openCreateWizard(
+        plugin: PluginRow,
+        params: [String: PluginJSON],
+        logger: @escaping @Sendable (String) -> Void
+    ) -> PluginHookOutcome {
+        let goal = params["goal"]?.stringValue
+            ?? params["text"]?.stringValue
+            ?? ""
+        logger("[skill] invoke plugin=\(plugin.id) hook=open_create_wizard")
+        let encoded = PluginHookPresentation.encodeOpenCreateWizard(
+            PluginHookPresentation.OpenCreateWizard(
+                instructionPluginID: plugin.id,
+                goal: goal
+            )
+        )
+        return .handled(resultJSON: encoded)
     }
 
     private static func openFactorySession(

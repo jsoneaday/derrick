@@ -1,7 +1,7 @@
 import Foundation
 import ServiceContracts
 
-/// System plugin: skill-only. Opens a factory session via a granted before-hook.
+/// System plugin: skill-only. Opens the create-plugin wizard via a granted before-hook.
 public enum CreatePluginSample: Sendable {
     public static let pluginID = "create-plugin"
     public static let version = "1.0.0"
@@ -12,7 +12,7 @@ public enum CreatePluginSample: Sendable {
     }
 
     public static var hooksJSON: String {
-        PluginHookGrant.encodeList([PluginHookGrant(hook: .openFactorySession)])
+        PluginHookGrant.encodeList([PluginHookGrant(hook: .openCreateWizard)])
     }
 
     public static var skillsJSON: String {
@@ -33,7 +33,7 @@ public enum CreatePluginSample: Sendable {
     }
 
     public static var runtimeJSON: String {
-        #"{"hooks":["open_factory_session"]}"#
+        #"{"hooks":["open_create_wizard"]}"#
     }
 
     public static func contentHash() -> PluginContentHash {

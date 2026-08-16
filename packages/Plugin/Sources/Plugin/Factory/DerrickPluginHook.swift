@@ -3,6 +3,7 @@ import Foundation
 /// Host-owned hook kinds. Plugins do not invent new kinds.
 public enum DerrickPluginHook: String, Codable, Sendable, Hashable, CaseIterable {
     case openFactorySession = "open_factory_session"
+    case openCreateWizard = "open_create_wizard"
 }
 
 public enum PluginHookPhase: String, Codable, Sendable, Hashable {
