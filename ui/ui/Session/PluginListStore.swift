@@ -21,11 +21,18 @@ struct PluginSidebarItem: Identifiable, Hashable, Sendable {
     var versions: [PluginVersionItem]
 }
 
+struct PendingPluginVersionDelete: Equatable {
+    var version: PluginVersionItem
+    var pluginID: String
+}
+
 @MainActor
 final class PluginListStore: ObservableObject {
     static let shared = PluginListStore()
 
     @Published private(set) var plugins: [PluginSidebarItem] = []
+    @Published var pendingVersionDelete: PendingPluginVersionDelete?
+    @Published var lastActionMessage: String?
 
     private var repository: DBRepository?
     private var catalogObserver: DerrickDarwinNotifyObserver?
@@ -117,16 +124,25 @@ final class PluginListStore: ObservableObject {
                 let hash8 = String(version.contentHash.prefix(8))
                 volumes.insert(DerrickNamedVolume.pluginCode(id: id, hash8: hash8))
             }
+            volumes.formUnion(try await factoryStagingVolumes(pluginID: id, repository: repository))
             let result = try await repository.uninstallPlugin(id: id)
             volumes.formUnion(result.volumeNames)
             await XPCDockerRunner.shared.removeRemovableVolumes(Array(volumes))
             DerrickPluginCatalogSignal.post()
             await reload()
+            lastActionMessage = nil
             return nil
         } catch {
             await reload()
+            lastActionMessage = error.localizedDescription
             return error.localizedDescription
         }
+    }
+
+    func confirmPendingVersionDelete() async {
+        guard let pending = pendingVersionDelete else { return }
+        pendingVersionDelete = nil
+        lastActionMessage = await deleteVersion(id: pending.version.id, pluginID: pending.pluginID)
     }
 
     func deleteVersion(id versionID: String, pluginID: String) async -> String? {
@@ -137,6 +153,10 @@ final class PluginListStore: ObservableObject {
             if let version {
                 let hash8 = String(version.contentHash.prefix(8))
                 volumes.insert(DerrickNamedVolume.pluginCode(id: pluginID, hash8: hash8))
+            }
+            let siblings = try await repository.listPluginVersions(pluginID: pluginID)
+            if siblings.count <= 1 {
+                volumes.formUnion(try await factoryStagingVolumes(pluginID: pluginID, repository: repository))
             }
             let result = try await repository.deletePluginVersion(id: versionID)
             volumes.formUnion(result.volumeNames)
@@ -223,6 +243,20 @@ final class PluginListStore: ObservableObject {
                 dependenciesJSON: depsJSON
             )
         )
+    }
+
+    private func factoryStagingVolumes(pluginID: String, repository: DBRepository) async throws -> Set<String> {
+        var volumes = Set<String>()
+        for session in try await repository.factorySessions(pluginID: pluginID) {
+            volumes.insert(DerrickNamedVolume.pluginStaging(factoryID: session.sessionID))
+            if let spec = session.specJSON,
+               let data = spec.data(using: .utf8),
+               let draft = try? JSONDecoder().decode(FactoryPackageDraft.self, from: data),
+               let workspace = draft.workspaceVolume, !workspace.isEmpty {
+                volumes.insert(workspace)
+            }
+        }
+        return volumes
     }
 }
 

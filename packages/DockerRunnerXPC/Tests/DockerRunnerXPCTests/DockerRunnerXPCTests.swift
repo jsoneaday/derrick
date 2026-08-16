@@ -171,6 +171,8 @@ struct DockerRunnerXPCTests {
     @Test func namedVolumeHelpers() {
         #expect(DerrickNamedVolume.isRemovable("derrick-script-scratch-inv1"))
         #expect(DerrickNamedVolume.isRemovable("derrick-plugin-data-daily-news"))
+        #expect(DerrickNamedVolume.isRemovable("derrick-plugin-staging-factory-abc"))
+        #expect(DerrickNamedVolume.pluginStaging(factoryID: "factory-abc") == "derrick-plugin-staging-factory-abc")
         #expect(!DerrickNamedVolume.isRemovable(DerrickNamedVolume.helpers))
         #expect(!DerrickNamedVolume.isRemovable("derrick-script-helpers-extra"))
     }

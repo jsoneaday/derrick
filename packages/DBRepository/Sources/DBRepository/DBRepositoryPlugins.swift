@@ -664,6 +664,34 @@ public extension DBRepository {
         }
     }
 
+    func factorySessions(pluginID: String) throws -> [FactorySessionRow] {
+        let pluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pluginID.isEmpty else { return [] }
+        return try withDatabaseHandle { handle in
+            try allFactorySessionRows(
+                from: """
+                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                FROM factory_sessions
+                WHERE plugin_id = \(quoted(pluginID));
+                """,
+                on: handle
+            )
+        }
+    }
+
+    func listFactorySessions() throws -> [FactorySessionRow] {
+        try withDatabaseHandle { handle in
+            try allFactorySessionRows(
+                from: """
+                SELECT session_id, spec_json, stage, plugin_id, reviewer_calls, harness_runs, created_at, updated_at
+                FROM factory_sessions
+                ORDER BY updated_at DESC;
+                """,
+                on: handle
+            )
+        }
+    }
+
     func factorySession(sessionID: String) throws -> FactorySessionRow? {
         try withDatabaseHandle { handle in
             try allFactorySessionRows(

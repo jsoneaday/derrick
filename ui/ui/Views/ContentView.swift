@@ -318,6 +318,22 @@ struct ContentView: View {
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var pluginDeleteTitle: String {
+        guard let pending = pluginList.pendingVersionDelete else { return "Delete version?" }
+        return "Delete \(pending.pluginID) \(pending.version.version)?"
+    }
+
+    private var pluginDeleteMessage: String {
+        guard let pending = pluginList.pendingVersionDelete,
+              let plugin = pluginList.plugins.first(where: { $0.id == pending.pluginID }) else {
+            return "Removes this version. If it is the last one, the plugin is removed."
+        }
+        if plugin.versions.count <= 1 {
+            return "This is the only version. The plugin, its grants, and private data will be removed."
+        }
+        return "Removes this version only. The latest remaining version stays current."
+    }
+
     private var visibleModels: [LLMModelChoice] {
         selectedProvider.models
     }
@@ -504,6 +520,38 @@ struct ContentView: View {
                     .padding(.bottom, 16)
                     .padding(.top, 4)
                 }
+            }
+        )
+        .modalPopup(
+            isPresented: pluginList.pendingVersionDelete != nil,
+            minWidth: 380,
+            minHeight: 0,
+            maxWidth: 440,
+            maxHeight: 240,
+            onBackdropDismiss: { pluginList.pendingVersionDelete = nil },
+            onEscape: { pluginList.pendingVersionDelete = nil },
+            header: {
+                Text(pluginDeleteTitle)
+                    .font(.headline)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+            },
+            body: {
+                Text(pluginDeleteMessage)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+            },
+            footer: {
+                PluginDeleteConfirmFooter(
+                    onCancel: { pluginList.pendingVersionDelete = nil },
+                    onDelete: {
+                        Task { await pluginList.confirmPendingVersionDelete() }
+                    }
+                )
             }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)

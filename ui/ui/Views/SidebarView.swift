@@ -14,8 +14,6 @@ struct SidebarView: View {
     @ObservedObject private var pluginList = PluginListStore.shared
     @State private var sampleInstallMessage: String?
     @State private var expandedPluginIDs: Set<String> = []
-    @State private var versionPendingDelete: PluginVersionItem?
-    @State private var versionPendingDeletePluginID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -131,35 +129,11 @@ struct SidebarView: View {
                             pluginRow(plugin)
                         }
                     }
-                    if let sampleInstallMessage, !sampleInstallMessage.isEmpty {
-                        Text(sampleInstallMessage)
+                    if let message = sampleInstallMessage ?? pluginList.lastActionMessage, !message.isEmpty {
+                        Text(message)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                }
-                .confirmationDialog(
-                    deleteVersionTitle,
-                    isPresented: Binding(
-                        get: { versionPendingDelete != nil },
-                        set: { if !$0 { clearVersionDelete() } }
-                    ),
-                    titleVisibility: .visible
-                ) {
-                    Button("Delete", role: .destructive) {
-                        guard let version = versionPendingDelete,
-                              let pluginID = versionPendingDeletePluginID else { return }
-                        clearVersionDelete()
-                        Task {
-                            if let message = await pluginList.deleteVersion(id: version.id, pluginID: pluginID) {
-                                sampleInstallMessage = message
-                            }
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {
-                        clearVersionDelete()
-                    }
-                } message: {
-                    Text(deleteVersionMessage)
                 }
             }
 
@@ -292,8 +266,10 @@ struct SidebarView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 16)
                         Button {
-                            versionPendingDelete = version
-                            versionPendingDeletePluginID = plugin.id
+                            pluginList.pendingVersionDelete = PendingPluginVersionDelete(
+                                version: version,
+                                pluginID: plugin.id
+                            )
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 11))
@@ -307,26 +283,6 @@ struct SidebarView: View {
         }
     }
 
-    private var deleteVersionTitle: String {
-        guard let version = versionPendingDelete else { return "Delete version?" }
-        return "Delete \(versionPendingDeletePluginID ?? "plugin") \(version.version)?"
-    }
-
-    private var deleteVersionMessage: String {
-        guard let pluginID = versionPendingDeletePluginID,
-              let plugin = pluginList.plugins.first(where: { $0.id == pluginID }) else {
-            return "Removes this version. If it is the last one, the plugin is removed."
-        }
-        if plugin.versions.count <= 1 {
-            return "This is the only version. The plugin, its grants, and private data will be removed."
-        }
-        return "Removes this version only. The latest remaining version stays current."
-    }
-
-    private func clearVersionDelete() {
-        versionPendingDelete = nil
-        versionPendingDeletePluginID = nil
-    }
 }
 
 #Preview {
@@ -342,6 +298,53 @@ struct SidebarView: View {
         helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
         chatSessions: store
     )
+}
+
+private enum PluginDeleteConfirmFocus: Hashable {
+    case delete
+    case cancel
+}
+
+struct PluginDeleteConfirmFooter: View {
+    var onCancel: () -> Void
+    var onDelete: () -> Void
+    @FocusState private var focused: PluginDeleteConfirmFocus?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Spacer(minLength: 0)
+            Button("Cancel", action: onCancel)
+                .buttonStyle(ModalSecondaryButtonStyle())
+                .focusable()
+                .focused($focused, equals: .cancel)
+                .keyboardShortcut(.cancelAction)
+            Button("Delete", action: onDelete)
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .focusable()
+                .focused($focused, equals: .delete)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
+        .padding(.top, 4)
+        .defaultFocus($focused, .delete)
+        .onAppear { focused = .delete }
+        .onKeyPress(.return) {
+            if focused == .cancel {
+                onCancel()
+            } else {
+                onDelete()
+            }
+            return .handled
+        }
+        .onKeyPress(.space) {
+            if focused == .cancel {
+                onCancel()
+            } else {
+                onDelete()
+            }
+            return .handled
+        }
+    }
 }
 
 struct SidebarRow: Identifiable, Hashable, Sendable {

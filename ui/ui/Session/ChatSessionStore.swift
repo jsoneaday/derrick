@@ -1,5 +1,6 @@
 import Combine
 import DBRepository
+import DockerRunnerXPC
 import Foundation
 import LLMAgentClient
 import Plugin
@@ -87,8 +88,9 @@ final class ChatSessionStore: ObservableObject {
         tabs.append(tab)
         selectedSessionID = id
         persistSessionShell(sessionID: id, title: title)
-        guard !locked.isEmpty, let repository else { return }
         Task {
+            await pruneFactoryStagingVolumes(keeping: id)
+            guard !locked.isEmpty, let repository else { return }
             var draft = FactoryPackageDraft(goal: "Change \(locked)")
             draft.pluginID = locked
             draft.reusePluginID = locked
@@ -102,6 +104,22 @@ final class ChatSessionStore: ObservableObject {
                 )
             )
         }
+    }
+
+    private func pruneFactoryStagingVolumes(keeping sessionID: String) async {
+        guard let repository else { return }
+        let sessions = (try? await repository.listFactorySessions()) ?? []
+        var names = Set<String>()
+        for session in sessions where session.sessionID != sessionID {
+            names.insert(DerrickNamedVolume.pluginStaging(factoryID: session.sessionID))
+            if let spec = session.specJSON,
+               let data = spec.data(using: .utf8),
+               let draft = try? JSONDecoder().decode(FactoryPackageDraft.self, from: data),
+               let workspace = draft.workspaceVolume, !workspace.isEmpty {
+                names.insert(workspace)
+            }
+        }
+        await XPCDockerRunner.shared.removeRemovableVolumes(Array(names))
     }
 
     var isFactorySessionSelected: Bool {

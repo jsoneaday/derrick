@@ -76,6 +76,8 @@ final class DBPluginTests: XCTestCase {
         try await repository.upsertFactorySession(
             FactorySessionRow(sessionID: "factory-1", specJSON: #"{"pluginID":"daily-news"}"#, stage: "promoted", pluginID: "daily-news", reviewerCalls: 2, harnessRuns: 1)
         )
+        let factoryRows = try await repository.factorySessions(pluginID: "daily-news")
+        XCTAssertEqual(factoryRows.map(\.sessionID), ["factory-1"])
         let tool = JobRunToolPayload(
             toolName: "plugin.invoke",
             argumentsJSON: #"{"plugin_id":"daily-news"}"#

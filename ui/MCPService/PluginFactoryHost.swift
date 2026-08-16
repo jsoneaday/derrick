@@ -540,6 +540,7 @@ enum PluginFactoryHost {
            current.runtimeJSON == runtime,
            current.dependenciesJSON == depsJSON {
             try await saveDraft(draft, stage: "promoted", pluginID: draft.pluginID, repository: repository)
+            await removeFactoryStagingVolume(draft: draft, exec: stdinExecutor, logger: logger)
             let test = await runPromoteTest(
                 draft: draft,
                 repository: repository,
@@ -579,6 +580,7 @@ enum PluginFactoryHost {
             )
         )
         try await saveDraft(draft, stage: "promoted", pluginID: draft.pluginID, repository: repository)
+        await removeFactoryStagingVolume(draft: draft, exec: stdinExecutor, logger: logger)
         let test = await runPromoteTest(
             draft: draft,
             repository: repository,
@@ -591,6 +593,33 @@ enum PluginFactoryHost {
             contentHash: hash.rawValue,
             test: test
         )
+    }
+
+    private static func removeFactoryStagingVolume(
+        draft: FactoryPackageDraft,
+        exec: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
+        logger: @escaping @Sendable (String) -> Void
+    ) async {
+        var names = Set<String>()
+        if let workspace = draft.workspaceVolume, !workspace.isEmpty {
+            names.insert(workspace)
+        }
+        if let sessionID = try? factorySessionID() {
+            names.insert(DerrickNamedVolume.pluginStaging(factoryID: sessionID))
+        }
+        for name in names where DerrickNamedVolume.isRemovable(name) {
+            do {
+                let result = try await exec(DockerScriptPreparer.dockerVolumeRmArguments(name: name), Data(), 15)
+                if result.exitCode == 0 {
+                    logger("[factory] removed staging volume \(name)")
+                } else {
+                    let err = String(decoding: result.stderr, as: UTF8.self)
+                    logger("[factory] staging volume rm \(name) exit=\(result.exitCode) \(err)")
+                }
+            } catch {
+                logger("[factory] staging volume rm \(name) failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private static func encodePromoted(
