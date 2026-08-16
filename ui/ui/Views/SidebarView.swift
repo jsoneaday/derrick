@@ -4,6 +4,11 @@ import ServiceContracts
 
 private let sideMenuRecentsFontSize = CGFloat(12)
 
+private enum SidebarContentMode: Equatable {
+    case recents
+    case plugins
+}
+
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject var chatSessions: ChatSessionStore
@@ -14,6 +19,7 @@ struct SidebarView: View {
     @ObservedObject private var pluginList = PluginListStore.shared
     @State private var sampleInstallMessage: String?
     @State private var expandedPluginIDs: Set<String> = []
+    @State private var contentMode: SidebarContentMode = .recents
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -38,13 +44,32 @@ struct SidebarView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 SidebarActionRow(
-                    row: SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat", isProminent: true)
+                    row: SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
                 ) {
+                    contentMode = .recents
                     chatSessions.openNewChat()
                 }
                 SidebarActionRow(
-                    row: SidebarRow(id: "chats", icon: "message.fill", title: "Chats")
-                )
+                    row: SidebarRow(
+                        id: "chats",
+                        icon: "message.fill",
+                        title: "Chats",
+                        isProminent: contentMode == .recents
+                    )
+                ) {
+                    contentMode = .recents
+                }
+                SidebarActionRow(
+                    row: SidebarRow(
+                        id: "plugins",
+                        icon: "puzzlepiece.extension.fill",
+                        title: "Plugins",
+                        isProminent: contentMode == .plugins
+                    )
+                ) {
+                    contentMode = .plugins
+                    Task { await pluginList.reload() }
+                }
                 if softwareFactory.isEnabled {
                     SidebarActionRow(
                         row: SidebarRow(
@@ -54,87 +79,16 @@ struct SidebarView: View {
                             isProminent: chatSessions.isFactorySessionSelected
                         )
                     ) {
+                        contentMode = .recents
                         chatSessions.openFactorySession()
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Recents")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 4)
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if chatSessions.recentSessions.isEmpty {
-                            Text("No recent chats")
-                                .font(.system(size: sideMenuRecentsFontSize))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(chatSessions.recentSessions) { session in
-                                Button {
-                                    chatSessions.selectSession(id: session.sessionID)
-                                } label: {
-                                    Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                                         ? session.title!
-                                         : "Chat")
-                                        .font(.system(size: sideMenuRecentsFontSize))
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .foregroundStyle(
-                                            chatSessions.selectedSessionID == session.sessionID
-                                                ? Color.primary
-                                                : Color.primary.opacity(0.9)
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-
-            if softwareFactory.isEnabled || !pluginList.plugins.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Plugins")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if softwareFactory.isEnabled {
-                            Button("Install daily news") {
-                                Task {
-                                    sampleInstallMessage = await pluginList.installDailyNewsSample()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    if pluginList.plugins.isEmpty {
-                        Text("No installed plugins")
-                            .font(.system(size: sideMenuRecentsFontSize))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(pluginList.plugins) { plugin in
-                            pluginRow(plugin)
-                        }
-                    }
-                    if let message = sampleInstallMessage ?? pluginList.lastActionMessage, !message.isEmpty {
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            if contentMode == .plugins {
+                pluginsList
+            } else {
+                recentsList
             }
 
             Spacer()
@@ -171,6 +125,94 @@ struct SidebarView: View {
         }
         .task {
             await pluginList.reload()
+        }
+    }
+
+    private var recentsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Recents")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 4)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if chatSessions.recentSessions.isEmpty {
+                        Text("No recent chats")
+                            .font(.system(size: sideMenuRecentsFontSize))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(chatSessions.recentSessions) { session in
+                            Button {
+                                contentMode = .recents
+                                chatSessions.selectSession(id: session.sessionID)
+                            } label: {
+                                Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                     ? session.title!
+                                     : "Chat")
+                                    .font(.system(size: sideMenuRecentsFontSize))
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .foregroundStyle(
+                                        chatSessions.selectedSessionID == session.sessionID
+                                            ? Color.primary
+                                            : Color.primary.opacity(0.9)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var pluginsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Installed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if softwareFactory.isEnabled {
+                    Button("Install daily news") {
+                        Task {
+                            sampleInstallMessage = await pluginList.installDailyNewsSample()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 4)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if pluginList.plugins.isEmpty {
+                        Text("No installed plugins")
+                            .font(.system(size: sideMenuRecentsFontSize))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pluginList.plugins) { plugin in
+                            pluginRow(plugin)
+                        }
+                    }
+                    if let message = sampleInstallMessage ?? pluginList.lastActionMessage, !message.isEmpty {
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -214,6 +256,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 Button {
+                    contentMode = .recents
                     chatSessions.openFactorySession(editing: plugin.id)
                 } label: {
                     Image(systemName: "pencil")
