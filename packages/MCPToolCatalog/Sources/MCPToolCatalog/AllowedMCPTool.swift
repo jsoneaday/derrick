@@ -19,7 +19,7 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case factoryBuild = "factory.build"
     case factoryWritePackage = "factory.write_package"
     case factoryReview = "factory.review"
-    case factoryHarnessRun = "factory.harness_run"
+    case factoryTest = "factory.test"
     case factoryPromote = "factory.promote"
     case factoryInstallSample = "factory.install_sample"
     case pluginInvoke = "plugin.invoke"
@@ -55,17 +55,17 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
         case .factoryBuild:
             return "Start or resume this Software Factory session. Required: goal (the user's request, in their words)."
         case .factoryWritePackage:
-            return "Write the plugin package (id, version, description, TypeScript handle, optional deps). Runs static checks."
+            return "Write the plugin package (id, version, description, TypeScript handle, optional deps and fixtures). Runs static checks."
         case .factoryReview:
             return "Security-review the current factory package against its spec. Required before promote."
-        case .factoryHarnessRun:
-            return "Run the current factory package against its harness fixtures. Required before promote."
+        case .factoryTest:
+            return "Run a test of the current plugin with sample parameters. Required before install."
         case .factoryPromote:
             return "Ask the user to install the reviewed plugin. Swift hashes, grants, and enables one version. Factory cannot install by itself."
         case .factoryInstallSample:
             return "Install the shipped daily-news sample after the user approves. No auth. One public news host."
         case .pluginInvoke:
-            return "Run an installed plugin's frozen handle. Pass plugin_id. Same hop loop as script_exec (netFetch → host HTTP)."
+            return "Run an installed plugin's frozen handle. Pass plugin_id and optional params (JSON object → event.params). Same hop loop as script_exec (netFetch → host HTTP)."
         case .pluginList:
             return "List installed plugins (id, version, description, enabled)."
         }

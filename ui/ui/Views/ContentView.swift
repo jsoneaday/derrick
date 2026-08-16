@@ -293,7 +293,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "create a job that runs in 7s and tells me what's on apple.com"
+    @State private var prompt = "create a plugin that summarizes today's news"
     @State private var errorMessage: String?
     @State private var isPresentingAPIKeyPrompt = false
     @State private var isPresentingDockerRequiredAlert = false
@@ -305,6 +305,7 @@ struct ContentView: View {
     @State private var helperModelSettings: LLMModelSettings?
     @State private var promptFocusToken = 0
     @State private var shouldAutoScroll = true
+    @State private var isDebugPanelVisible = false
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
     @ObservedObject private var pluginList = PluginListStore.shared
@@ -352,9 +353,8 @@ struct ContentView: View {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
                     chatSessions: chatSessions,
-                    onSendPluginPrefix: { prefix in
-                        prompt = prefix
-                        startStreaming()
+                    onInsertPluginPrefix: { prefix in
+                        applyPluginPrefix(prefix)
                     }
                 )
                     .frame(width: 296)
@@ -560,6 +560,9 @@ struct ContentView: View {
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
                 await SoftwareFactorySettingsService.shared.configure(repository: repo)
                 await PluginListStore.shared.configure(repository: repo)
+                if isDebugEnabled {
+                    await FactoryLogMirror.shared.start(repository: repo)
+                }
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
@@ -778,12 +781,37 @@ struct ContentView: View {
                     .padding(.bottom, 16)
             }
 
-            if isDebugEnabled {
+            if isDebugEnabled, isDebugPanelVisible {
                 debugLogPanel
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if isDebugEnabled {
+                debugPanelToggle
+                    .padding(.trailing, 20)
+                    .padding(.bottom, isDebugPanelVisible ? 28 : 16)
+            }
+        }
+    }
+
+    private var debugPanelToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isDebugPanelVisible.toggle()
+            }
+        } label: {
+            Image(systemName: isDebugPanelVisible ? "ladybug.fill" : "ladybug")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .frame(width: 28, height: 28)
+                .background(.white.opacity(0.9), in: Circle())
+                .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
+        }
+        .buttonStyle(.plain)
+        .help(isDebugPanelVisible ? "Hide debug log" : "Show debug log")
+        .accessibilityLabel(isDebugPanelVisible ? "Hide debug log" : "Show debug log")
     }
 
     private var emptyState: some View {
@@ -834,7 +862,7 @@ struct ContentView: View {
                 PluginSlashMenu(
                     matches: slashMatches,
                     highlightedIndex: slashHighlight,
-                    onChoose: { applySlashCompletion($0, submit: false) }
+                    onChoose: { applySlashCompletion($0) }
                 )
                 .padding(.bottom, 8)
             }
@@ -979,29 +1007,31 @@ struct ContentView: View {
             return true
         case 48: // tab
             guard flags.isEmpty, slashMatches.indices.contains(slashHighlight) else { return false }
-            applySlashCompletion(slashMatches[slashHighlight], submit: false)
+            applySlashCompletion(slashMatches[slashHighlight])
             return true
         case 53: // escape
             slashMenuDismissed = true
             return true
         case 36, 76: // return
-            guard flags.isEmpty else { return false }
-            if slashMatches.indices.contains(slashHighlight) {
-                applySlashCompletion(slashMatches[slashHighlight], submit: true)
-                return true
-            }
-            return false
+            guard flags.isEmpty, slashMatches.indices.contains(slashHighlight) else { return false }
+            applySlashCompletion(slashMatches[slashHighlight])
+            return true
         default:
             return false
         }
     }
 
-    private func applySlashCompletion(_ plugin: PluginSidebarItem, submit: Bool) {
-        prompt = "/\(plugin.id)"
+    private func applySlashCompletion(_ plugin: PluginSidebarItem) {
+        applyPluginPrefix("/\(plugin.id)")
+    }
+
+    /// Insert `/plugin-id ` so the operator can add params before sending.
+    private func applyPluginPrefix(_ prefix: String) {
+        let id = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        prompt = id.hasSuffix(" ") ? id : "\(id) "
         slashHighlight = 0
-        if submit {
-            startStreaming()
-        }
+        slashMenuDismissed = true
+        promptFocusToken += 1
     }
 
     private func promptInputHeight(for availableHeight: CGFloat) -> CGFloat {

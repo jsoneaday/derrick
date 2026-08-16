@@ -88,14 +88,8 @@ public enum DockerVolumeIO {
         try await ensureVolume(name: DerrickNamedVolume.helpers, exec: exec)
         try await writeFile(
             volume: DerrickNamedVolume.helpers,
-            relativePath: "runner.js",
-            data: Data(DockerScriptPreparer.guestRunnerJS.utf8),
-            exec: exec
-        )
-        try await writeFile(
-            volume: DerrickNamedVolume.helpers,
-            relativePath: "derrick.js",
-            data: Data(DockerScriptPreparer.guestDerrickJS.utf8),
+            relativePath: "runner.ts",
+            data: Data(DockerScriptPreparer.guestRunner.utf8),
             exec: exec
         )
         try await writeFile(

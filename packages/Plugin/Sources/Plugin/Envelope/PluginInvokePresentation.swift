@@ -85,6 +85,27 @@ public enum PluginInvokePresentation {
         return false
     }
 
+    /// Host tests fail when the plugin ran but produced no useful reading matter.
+    public static func isEmptyResult(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || isVacuous(trimmed) { return true }
+        let lower = trimmed.lowercased()
+        if trimmed.count < 180, lower.hasPrefix("no ") {
+            return true
+        }
+        let emptyPhrases = [
+            "no matching",
+            "no articles found",
+            "no headlines",
+            "no display content",
+            "did not return any text",
+            "no news",
+            "were available",
+            "items were available",
+        ]
+        return emptyPhrases.contains { lower.contains($0) }
+    }
+
     public static func isVacuous(_ text: String) -> Bool {
         let lines = text
             .split(separator: "\n", omittingEmptySubsequences: false)

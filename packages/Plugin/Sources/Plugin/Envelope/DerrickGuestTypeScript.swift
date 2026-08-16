@@ -1,132 +1,34 @@
 import Foundation
+import ServiceContracts
 
-/// TypeScript guest SDK generated from `PluginEnvelopeSchema.jsonSchema`.
+/// Guest TypeScript SDK and check files loaded from SharedAgentRuntime Resources.
 public enum DerrickGuestTypeScript {
     public static var verbUnion: String {
         PluginEnvelopeSchema.verbCases.map { "\"\($0)\"" }.joined(separator: " | ")
     }
 
     public static var derrickModule: String {
-        """
-        /**
-         * Generated from PluginEnvelopeSchema.jsonSchema. Do not edit by hand.
-         * `handle` must return HandleResult (JSON array of Envelope).
-         */
-        export type PluginVerb = \(verbUnion);
+        registerPluginResourceBundle()
+        return DerrickBundledText.mustLoad("guest/derrick.ts")
+    }
 
-        export interface Envelope {
-          verb: PluginVerb;
-          type?: string;
-          request_id?: string;
-          method?: string;
-          url?: string;
-          title?: string;
-          summary?: string;
-          text?: string;
-          content?: string;
-          message?: string;
-          [key: string]: unknown;
-        }
-
-        export type HandleResult = Envelope[];
-
-        export interface HttpResult {
-          request_id?: string;
-          status?: number;
-          headers?: Record<string, string>;
-          body?: string;
-          error?: string | null;
-        }
-
-        export interface HandleEvent {
-          kind?: string;
-          http_results?: HttpResult[];
-          params?: Record<string, unknown>;
-          [key: string]: unknown;
-        }
-
-        export function httpBody(event: HandleEvent): string {
-          const row = Array.isArray(event.http_results) ? event.http_results[0] : undefined;
-          return typeof row?.body === "string" ? row.body : "";
-        }
-
-        /** Unwrap CDATA, then drop tags. Do not use /<[^>]*>/ on RSS — it deletes CDATA titles. */
-        export function stripMarkup(value: string): string {
-          return String(value ?? "")
-            .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/gi, "$1")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&amp;/g, "&")
-            .replace(/&quot;/g, "\\"")
-            .replace(/&#39;/g, "'")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/\\s+/g, " ")
-            .trim();
-        }
-
-        export type Handle = (event: HandleEvent) => HandleResult | Promise<HandleResult>;
-
-        export interface NetFetchOptions {
-          method?: string;
-          url: string;
-          authRef?: string | null;
-          json?: unknown;
-          headers?: Record<string, string>;
-        }
-
-        function oneRequest(opts: NetFetchOptions): Envelope {
-          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-          return {
-            verb: "http.request",
-            request_id: id,
-            method: (opts.method || "GET").toUpperCase(),
-            url: opts.url || "",
-            auth_ref: opts.authRef ?? null,
-            json: opts.json ?? null,
-            headers: opts.headers ?? {},
-          };
-        }
-
-        export function netFetch(
-          opts: NetFetchOptions | NetFetchOptions[] | { requests: NetFetchOptions[] }
-        ): HandleResult {
-          if (Array.isArray(opts)) {
-            return opts.map(oneRequest);
-          }
-          if ("requests" in opts && Array.isArray(opts.requests)) {
-            return opts.requests.map(oneRequest);
-          }
-          return [oneRequest(opts as NetFetchOptions)];
-        }
-        """
+    public static var runnerSource: String {
+        registerPluginResourceBundle()
+        return DerrickBundledText.mustLoad("guest/runner.ts")
     }
 
     public static var tsconfigJSON: String {
-        """
-        {
-          "compilerOptions": {
-            "strict": true,
-            "noEmit": true,
-            "noImplicitAny": true,
-            "target": "ES2022",
-            "module": "ESNext",
-            "moduleResolution": "bundler",
-            "skipLibCheck": true,
-            "moduleDetection": "force",
-            "types": [],
-            "paths": { "derrick": ["/opt/derrick/derrick.ts"] }
-          },
-          "files": ["script.ts", "handle-check.ts"]
-        }
-        """
+        registerPluginResourceBundle()
+        return DerrickBundledText.mustLoad("guest/tsconfig.json")
     }
 
     public static var handleCheckTS: String {
-        """
-        import { handle } from "./script";
-        import type { HandleEvent, HandleResult } from "derrick";
-        export const __derrickHandleCheck: (event: HandleEvent) => HandleResult | Promise<HandleResult> = handle;
-        """
+        registerPluginResourceBundle()
+        return DerrickBundledText.mustLoad("guest/handle-check.ts")
+    }
+
+    static func registerPluginResourceBundle() {
+        DerrickBundledText.registerSearchRoot(Bundle.module.resourceURL ?? Bundle.module.bundleURL)
     }
 }
 
@@ -146,25 +48,9 @@ extension PluginEnvelopeSchema {
         }
     }
 
+    /// Model-facing handle contract. Full SDK is `DerrickGuestTypeScript.derrickModule`.
     public static var ragSection: String {
-        """
-        # handle() return (TypeScript + JSON)
-
-        Guest is TypeScript on Bun. `export function handle(event: HandleEvent): HandleResult`.
-        Stdout MUST be a JSON **array** of envelopes (never a string or bare object).
-        Import helpers from `derrick` (`netFetch` already returns `HandleResult`).
-
-        ## Generated types (from the same JSON Schema Swift decodes)
-
-        ```typescript
-        \(DerrickGuestTypeScript.derrickModule)
-        ```
-
-        ## JSON Schema
-
-        ```json
-        \(jsonSchema)
-        ```
-        """
+        DerrickGuestTypeScript.registerPluginResourceBundle()
+        return DerrickBundledText.mustLoad("plugin_handle_instructions.md")
     }
 }

@@ -1,18 +1,19 @@
 import Foundation
-import ServiceContracts
 import DockerRunnerXPC
+import Plugin
+import ServiceContracts
 
 /// Docker image, create/exec argv, and guest helpers for the Bun script runtime.
 public enum DockerScriptPreparer {
     public static let parentImage = "oven/bun:1-debian"
-    public static let baselineImageVersion = "3"
+    public static let baselineImageVersion = "4"
     public static var defaultImage: String {
         DerrickGuestRuntime.dockerImage
     }
 
     public static let helpersPath = "/opt/derrick"
-    public static let runnerPath = "\(helpersPath)/runner.js"
-    public static let derrickModulePath = "\(helpersPath)/derrick.js"
+    public static let runnerPath = "\(helpersPath)/runner.ts"
+    public static let derrickModulePath = "\(helpersPath)/derrick.ts"
     public static let workspacePath = "/workspace"
 
     public static let warmContainerGeneration = "1"
@@ -63,74 +64,13 @@ public enum DockerScriptPreparer {
     public static let holdBinary = "/bin/sleep"
     public static let holdArg = "infinity"
 
-    public static var guestRunnerJS: String {
-        #"""
-        const chunks = [];
-        for await (const chunk of Bun.stdin.stream()) {
-          chunks.push(chunk);
-        }
-        const raw = Buffer.concat(chunks).toString("utf8");
-        let invoke = {};
-        try { invoke = raw ? JSON.parse(raw) : {}; } catch (e) {
-          console.error("invalid invoke JSON");
-          process.exit(1);
-        }
-        const { pathToFileURL } = await import("url");
-        const mod = await import(pathToFileURL("/workspace/script.ts").href);
-        if (typeof mod.handle !== "function") {
-          console.error("script must export function handle");
-          process.exit(1);
-        }
-        const origLog = console.log;
-        const origErr = console.error;
-        console.log = () => {};
-        console.error = (...a) => { origErr(...a); };
-        let result;
-        try {
-          result = await mod.handle(invoke.event ?? invoke);
-        } catch (e) {
-          origErr(String(e && e.stack ? e.stack : e));
-          process.exit(1);
-        } finally {
-          console.log = origLog;
-          console.error = origErr;
-        }
-        if (!Array.isArray(result)) {
-          origErr("handle() must return a JSON array of envelope objects");
-          process.exit(1);
-        }
-        process.stdout.write(JSON.stringify(result));
-        """#
-    }
-
-    public static var guestDerrickJS: String {
-        #"""
-        function oneRequest({ method, url, authRef, json, headers } = {}) {
-          return {
-            verb: "http.request",
-            request_id: crypto.randomUUID(),
-            method: method || "GET",
-            url: url || "",
-            auth_ref: authRef ?? null,
-            json: json ?? null,
-            headers: headers ?? {},
-          };
-        }
-        export function netFetch(opts = {}) {
-          if (Array.isArray(opts.requests)) {
-            return opts.requests.map((item) => oneRequest(item));
-          }
-          if (Array.isArray(opts)) {
-            return opts.map((item) => oneRequest(item));
-          }
-          return [oneRequest(opts)];
-        }
-        """#
+    public static var guestRunner: String {
+        DerrickGuestTypeScript.runnerSource
     }
 
     public static var baselineDockerfile: String {
-        let runnerB64 = Data(guestRunnerJS.utf8).base64EncodedString()
-        let derrickB64 = Data(guestDerrickJS.utf8).base64EncodedString()
+        let runnerB64 = Data(guestRunner.utf8).base64EncodedString()
+        let derrickB64 = Data(DerrickGuestTypeScript.derrickModule.utf8).base64EncodedString()
         return """
         FROM \(parentImage)
         ENV BUN_INSTALL=/usr/local

@@ -53,7 +53,7 @@ actor MCPServiceToolHost {
                 logger: { message in
                     fputs("[MCPService] \(message)\n", stderr)
                     Task {
-                        await MCPServiceStore.shared.log(level: .debug, message: message, code: "factory")
+                        await MCPServiceStore.shared.log(level: .info, message: message, code: "factory")
                     }
                 }
             )

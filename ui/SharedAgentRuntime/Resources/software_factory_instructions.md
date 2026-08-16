@@ -1,33 +1,21 @@
 # Software Factory
 
-Software Factory is on. You can build a complementary plugin and invoke it. You do not edit Swift or the host disk.
+Tools, in order: `factory.build` → `factory.write_package` → `factory.review` → `factory.test` → `factory.promote`.
+Do not `complete` before `factory.promote`. Do not call `tool_search`. There is no `plugin.install`.
 
-Guest is TypeScript 7: `export function handle(event: HandleEvent): HandleResult`. Import `netFetch`, `httpBody`, and `stripMarkup` from `derrick`. HTTP is host-side only. For RSS/HTML text use `stripMarkup` — never `/<[^>]*>/` on a string that still has `<![CDATA[…]]>` (that deletes the title).
+- `factory.build` — required `goal` (the user's request). If the result has `ask_user`, ask which plugin, then `factory.build` again. If it has `reuse_plugin_id`, that is `plugin_id`.
+- `factory.write_package` — `plugin_id`, `description`, `handle`. Optional `version`, `dependencies`, `volume_enabled`, `fixtures`.
+- `factory.review`, `factory.test` — no arguments.
+- `factory.promote` — user approves install. Host hashes and stores one version.
 
-## Flow
+The attached `derrick.ts` file is the guest SDK (`import { … } from "derrick"`). `HandleEvent`, `HandleResult`, helpers, and param value types are defined there.
 
-Do not set status to `complete` until `factory.promote` (or `factory.install_sample`) has run. Do not call `tool_search`.
+```typescript
+interface PluginParams {} // named fields only: string, number, boolean, string[], number[]
+export function handle(event: HandleEvent<PluginParams>): HandleResult
+```
 
-1. `factory.build` with required `goal` set to the user's request (this Software Factory session only). Do not call it with empty arguments.
-2. `factory.write_package` with `plugin_id`, `description`, and `handle` (the full TypeScript source). Optional `version`, `dependencies`, `volume_enabled`. Files are written to a staging volume.
-3. `factory.review` — dedicated factory reviewer vs the spec. Required.
-4. `factory.harness_run` — run fixtures. Required before promote.
-5. `factory.promote` — the user must approve install on an install card. Swift hashes and enables one version. You cannot install yourself.
-6. `factory.install_sample` installs the shipped daily-news plugin (no auth) after the same install card.
-7. `plugin.invoke` with `plugin_id` and optional `params` (JSON object on `event.params`). Same hop loop as `script_exec`.
-
-`plugin.list` shows installed plugins. Users can type `/plugin-id` in chat to run a unique match without the LLM.
-
-## `/data`
-
-Default off. Set `volume_enabled` true only if the plugin must remember its own state across invokes. Not for chat memory or secrets.
-
-## First sample
-
-Daily news from one public news host via `netFetch` is a good first plugin. No auth.
-
-## Do not
-
-- Call `plugin.install` (it does not exist).
-- Put tokens in the handle.
-- Use `fetch` or sockets in the guest.
+Empty `PluginParams` is valid. `handle` must work when `event.params` is omitted. The host builds `event` (`kind`, `http_results`, `params`) and calls `handle`. You do not instantiate `event`.
+`result.emit` `title` / `summary` (and `message.post` `text`) are the user’s reading matter: Markdown or plain sentences. Do not put `JSON.stringify(...)` in `summary`.
+Guest is TypeScript 7. No `fetch`, no sockets. `any` is never allowed. `unknown` only after `typeof` / `in` / `instanceof`. No `as T` (write `let x: unknown = JSON.parse(body)`, then narrow). No `@ts-ignore`.
+`volume_enabled` only if the plugin needs `/data`.

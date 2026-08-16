@@ -18,8 +18,8 @@ struct UsageLimits: Codable, Equatable, Sendable {
         maxReviewerCallsPerMessage: 3,
         dailyTokenBudget: 200_000,
         weeklyTokenBudget: 1_000_000,
-        maxFactoryReviewerCallsPerBuild: 6,
-        maxHarnessRunsPerBuild: 6
+        maxFactoryReviewerCallsPerBuild: 12,
+        maxHarnessRunsPerBuild: 12
     )
 
     /// Hard ceilings for permanent Settings and session raises.
@@ -29,8 +29,8 @@ struct UsageLimits: Codable, Equatable, Sendable {
         maxReviewerCallsPerMessage: 10,
         dailyTokenBudget: 2_000_000,
         weeklyTokenBudget: 10_000_000,
-        maxFactoryReviewerCallsPerBuild: 20,
-        maxHarnessRunsPerBuild: 20
+        maxFactoryReviewerCallsPerBuild: 32,
+        maxHarnessRunsPerBuild: 32
     )
 
     enum CodingKeys: String, CodingKey {
@@ -49,8 +49,8 @@ struct UsageLimits: Codable, Equatable, Sendable {
         maxReviewerCallsPerMessage: Int,
         dailyTokenBudget: Int,
         weeklyTokenBudget: Int,
-        maxFactoryReviewerCallsPerBuild: Int = 6,
-        maxHarnessRunsPerBuild: Int = 6
+        maxFactoryReviewerCallsPerBuild: Int = 12,
+        maxHarnessRunsPerBuild: Int = 12
     ) {
         self.maxToolRoundsPerMessage = maxToolRoundsPerMessage
         self.maxScriptRunsPerMessage = maxScriptRunsPerMessage
@@ -69,9 +69,9 @@ struct UsageLimits: Codable, Equatable, Sendable {
         dailyTokenBudget = try container.decode(Int.self, forKey: .dailyTokenBudget)
         weeklyTokenBudget = try container.decode(Int.self, forKey: .weeklyTokenBudget)
         maxFactoryReviewerCallsPerBuild =
-            try container.decodeIfPresent(Int.self, forKey: .maxFactoryReviewerCallsPerBuild) ?? 6
+            try container.decodeIfPresent(Int.self, forKey: .maxFactoryReviewerCallsPerBuild) ?? 12
         maxHarnessRunsPerBuild =
-            try container.decodeIfPresent(Int.self, forKey: .maxHarnessRunsPerBuild) ?? 6
+            try container.decodeIfPresent(Int.self, forKey: .maxHarnessRunsPerBuild) ?? 12
     }
 
     static let toolRoundPresets = [3, 5, 8, 10]

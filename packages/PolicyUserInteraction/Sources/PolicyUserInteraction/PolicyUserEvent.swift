@@ -466,11 +466,12 @@ public enum PolicyUserEventFactory {
         detail: String,
         payloadPreview: String?,
         toolName: String = "factory.promote",
+        isUpdate: Bool = false,
         correlationId: String? = nil
     ) -> PolicyUserEvent {
         approvalRequired(
             source: .toolGovernance,
-            title: "Install plugin",
+            title: isUpdate ? "Update plugin" : "Install plugin",
             summary: summary,
             detail: detail,
             toolName: toolName,

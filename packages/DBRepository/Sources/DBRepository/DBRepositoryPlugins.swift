@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import Plugin
+import ServiceContracts
 
 public struct PluginRow: Sendable, Hashable {
     public var id: String
@@ -197,6 +198,25 @@ public struct FactorySessionRow: Sendable, Hashable {
     }
 }
 
+public struct PluginUninstallResult: Sendable, Hashable {
+    public var pluginID: String
+    public var volumeNames: [String]
+    public var disabledScheduleIDs: [String]
+    public var cancelledJobIDs: [String]
+
+    public init(
+        pluginID: String,
+        volumeNames: [String] = [],
+        disabledScheduleIDs: [String] = [],
+        cancelledJobIDs: [String] = []
+    ) {
+        self.pluginID = pluginID
+        self.volumeNames = volumeNames
+        self.disabledScheduleIDs = disabledScheduleIDs
+        self.cancelledJobIDs = cancelledJobIDs
+    }
+}
+
 public extension DBRepository {
     func upsertPlugin(_ row: PluginRow) throws {
         _ = try PluginID(row.id)
@@ -258,11 +278,179 @@ public extension DBRepository {
         }
     }
 
-    /// Deletes the plugin row. Invoke history is kept (`plugin_id` SET NULL).
-    func deletePlugin(id: String) throws {
-        try withDatabaseHandle { handle in
-            try Self.execute("DELETE FROM plugins WHERE id = \(quoted(id));", on: handle)
+    /// Removes the install so the same id can be promoted again.
+    /// Versions and grants cascade. Invoke history is kept (`plugin_id` SET NULL).
+    /// Pending waits, factory pointers, schedules, and queued jobs for this plugin are cleared.
+    @discardableResult
+    func deletePlugin(id: String) throws -> PluginUninstallResult {
+        try uninstallPlugin(id: id)
+    }
+
+    @discardableResult
+    func uninstallPlugin(id: String) throws -> PluginUninstallResult {
+        let pluginID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pluginID.isEmpty else {
+            return PluginUninstallResult(pluginID: id)
         }
+        let versions = try listPluginVersions(pluginID: pluginID)
+        let volumeNames = versions.compactMap(\.volumeName).filter { !$0.isEmpty }
+        let disabledSchedules = try disableSchedules(invokingPlugin: pluginID)
+        let cancelledJobs = try cancelJobs(invokingPlugin: pluginID)
+
+        try withDatabaseHandle { handle in
+            try Self.execute("BEGIN IMMEDIATE;", on: handle)
+            do {
+                try Self.execute(
+                    "UPDATE plugins SET current_version_id = NULL WHERE id = \(quoted(pluginID));",
+                    on: handle
+                )
+                try Self.execute(
+                    "DELETE FROM pending_plugin_waits WHERE plugin_id = \(quoted(pluginID));",
+                    on: handle
+                )
+                try Self.execute("DELETE FROM plugins WHERE id = \(quoted(pluginID));", on: handle)
+                try Self.execute(
+                    """
+                    UPDATE factory_sessions
+                    SET plugin_id = NULL,
+                        spec_json = NULL,
+                        stage = 'spec',
+                        reviewer_calls = 0,
+                        harness_runs = 0,
+                        updated_at = \(quoted(Self.iso8601Formatter().string(from: Date())))
+                    WHERE plugin_id = \(quoted(pluginID));
+                    """,
+                    on: handle
+                )
+                try Self.execute("COMMIT;", on: handle)
+            } catch {
+                _ = try? Self.execute("ROLLBACK;", on: handle)
+                throw error
+            }
+        }
+
+        return PluginUninstallResult(
+            pluginID: pluginID,
+            volumeNames: volumeNames,
+            disabledScheduleIDs: disabledSchedules,
+            cancelledJobIDs: cancelledJobs
+        )
+    }
+
+    /// Removes one version. Last version uninstalls the plugin.
+    @discardableResult
+    func deletePluginVersion(id versionID: String) throws -> PluginUninstallResult {
+        guard let version = try pluginVersion(id: versionID) else {
+            return PluginUninstallResult(pluginID: "")
+        }
+        let siblings = try listPluginVersions(pluginID: version.pluginID)
+        if siblings.count <= 1 {
+            return try uninstallPlugin(id: version.pluginID)
+        }
+        let remaining = siblings.filter { $0.id != versionID }
+        let nextCurrent = remaining.first
+        try withDatabaseHandle { handle in
+            try Self.execute("BEGIN IMMEDIATE;", on: handle)
+            do {
+                if let next = nextCurrent {
+                    try Self.execute(
+                        """
+                        UPDATE plugins
+                        SET current_version_id = \(quoted(next.id)),
+                            updated_at = \(quoted(Self.iso8601Formatter().string(from: Date())))
+                        WHERE id = \(quoted(version.pluginID));
+                        """,
+                        on: handle
+                    )
+                    try Self.execute(
+                        "UPDATE plugin_versions SET status = 'promoted' WHERE id = \(quoted(next.id));",
+                        on: handle
+                    )
+                } else {
+                    try Self.execute(
+                        "UPDATE plugins SET current_version_id = NULL WHERE id = \(quoted(version.pluginID));",
+                        on: handle
+                    )
+                }
+                try Self.execute(
+                    "DELETE FROM plugin_versions WHERE id = \(quoted(versionID));",
+                    on: handle
+                )
+                try Self.execute("COMMIT;", on: handle)
+            } catch {
+                _ = try? Self.execute("ROLLBACK;", on: handle)
+                throw error
+            }
+        }
+        return PluginUninstallResult(
+            pluginID: version.pluginID,
+            volumeNames: [version.volumeName].compactMap { $0 }.filter { !$0.isEmpty }
+        )
+    }
+
+    private func disableSchedules(invokingPlugin pluginID: String) throws -> [String] {
+        let schedules = try listSchedules(enabledOnly: false, limit: 500)
+        var disabled: [String] = []
+        for schedule in schedules where schedule.enabled {
+            guard Self.jobStepsInvoke(pluginID: pluginID, stepsJSON: schedule.stepsJSON) else { continue }
+            var updated = schedule
+            updated.enabled = false
+            updated.updatedAt = .now
+            try updateSchedule(updated)
+            disabled.append(schedule.id)
+        }
+        return disabled
+    }
+
+    private func cancelJobs(invokingPlugin pluginID: String) throws -> [String] {
+        var cancelled: [String] = []
+        for status in [JobStatus.pending.rawValue, JobStatus.scheduled.rawValue] {
+            let jobs = try listJobs(status: status, limit: 500)
+            for (job, steps) in jobs {
+                let hits = steps.contains { Self.jobPayloadInvokes(pluginID: pluginID, payloadJSON: $0.payloadJSON) }
+                guard hits else { continue }
+                try updateJobStatus(
+                    id: job.id,
+                    status: JobStatus.cancelled.rawValue,
+                    errorMessage: "Plugin \(pluginID) was deleted.",
+                    errorCode: "plugin_deleted"
+                )
+                cancelled.append(job.id)
+            }
+        }
+        return cancelled
+    }
+
+    private static func jobStepsInvoke(pluginID: String, stepsJSON: String) -> Bool {
+        guard let data = stepsJSON.data(using: .utf8),
+              let steps = try? JSONDecoder.service.decode([CreateJobStepSpec].self, from: data) else {
+            return false
+        }
+        return steps.contains { jobPayloadInvokes(pluginID: pluginID, payloadJSON: $0.payloadJSON) }
+    }
+
+    private static func jobPayloadInvokes(pluginID: String, payloadJSON: String) -> Bool {
+        let data = Data(payloadJSON.utf8)
+        if let tool = try? JSONDecoder.service.decode(JobRunToolPayload.self, from: data) {
+            return toolInvokes(pluginID: pluginID, tool: tool)
+        }
+        if let batch = try? JSONDecoder.service.decode(JobRunToolBatchPayload.self, from: data) {
+            return batch.invocations.contains { toolInvokes(pluginID: pluginID, tool: $0) }
+        }
+        if let paired = try? JSONDecoder.service.decode(JobRunToolThenWakePayload.self, from: data) {
+            return toolInvokes(pluginID: pluginID, tool: paired.tool)
+        }
+        return false
+    }
+
+    private static func toolInvokes(pluginID: String, tool: JobRunToolPayload) -> Bool {
+        guard tool.toolName == "plugin.invoke",
+              let data = tool.argumentsJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = object["plugin_id"] as? String else {
+            return false
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines) == pluginID
     }
 
     func upsertPluginVersion(_ row: PluginVersionRow) throws {

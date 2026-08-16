@@ -28,8 +28,8 @@ import Testing
         {"maxToolRoundsPerMessage":3,"maxScriptRunsPerMessage":3,"maxReviewerCallsPerMessage":3,"dailyTokenBudget":200000,"weeklyTokenBudget":1000000}
         """
         let decoded = try JSONDecoder().decode(UsageLimits.self, from: Data(legacy.utf8))
-        #expect(decoded.maxFactoryReviewerCallsPerBuild == 6)
-        #expect(decoded.maxHarnessRunsPerBuild == 6)
+        #expect(decoded.maxFactoryReviewerCallsPerBuild == 12)
+        #expect(decoded.maxHarnessRunsPerBuild == 12)
     }
 
     @Test func defaultTokenBudgetsMatchProduct() {

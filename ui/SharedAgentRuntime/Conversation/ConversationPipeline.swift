@@ -121,7 +121,16 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
             sections.append(toolInstructions)
         }
         if !toolInstructions.contains("handle() return") {
-            sections.append(PluginEnvelopeSchema.ragSection)
+            if let handleRAG = try? PromptResources.pluginHandleInstructions() {
+                sections.append(handleRAG)
+            } else {
+                sections.append(PluginEnvelopeSchema.ragSection)
+            }
+        }
+        if !toolInstructions.contains("export interface HandleEvent") {
+            if let sdk = try? PromptResources.guestSDKForModel() {
+                sections.append(sdk)
+            }
         }
         return sections.joined(separator: "\n\n")
     }

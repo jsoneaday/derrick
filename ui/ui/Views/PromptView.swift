@@ -85,6 +85,8 @@ struct PromptInputView: NSViewRepresentable {
 
         if textView.string != text {
             textView.string = text
+            let end = (text as NSString).length
+            textView.setSelectedRange(NSRange(location: end, length: 0))
         }
 
         if isEnabled, context.coordinator.lastFocusedToken != focusToken {

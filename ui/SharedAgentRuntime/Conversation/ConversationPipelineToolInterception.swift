@@ -235,7 +235,7 @@ extension ConversationPipeline {
                         MCPToolContent.text(
                             """
                             \(name) is not needed. Call catalog tools by name \
-                            (factory.build, factory.write_package, factory.review, factory.harness_run, factory.promote). \
+                            (factory.build, factory.write_package, factory.review, factory.test, factory.promote). \
                             Policy: \(reason)
                             """
                         ),

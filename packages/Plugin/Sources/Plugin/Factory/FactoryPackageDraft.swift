@@ -13,10 +13,16 @@ public struct FactoryPackageDraft: Codable, Sendable, Equatable {
     public var reviewSummary: String?
     /// Named Docker volume holding the package files (`derrick-plugin-staging-…`).
     public var workspaceVolume: String?
-    /// JSON array of harness fixtures: `[{ "kind": "harness", "params": {…} }]`.
+    /// JSON array of sample test runs: `[{ "kind": "test", "params": {…} }]`.
     public var fixturesJSON: String
     public var harnessPassed: Bool
     public var lastHarnessSummary: String?
+    /// When set, write/promote must keep this installed id and add a version.
+    public var reusePluginID: String?
+    /// Optional `{"max":"number","topics":"string[]"}` used for factory.test and the install check.
+    public var paramsSchemaJSON: String
+    /// Host-recorded write/review/test/promote attempts for this session.
+    public var attemptLog: [String]
 
     public init(
         goal: String = "",
@@ -31,7 +37,10 @@ public struct FactoryPackageDraft: Codable, Sendable, Equatable {
         workspaceVolume: String? = nil,
         fixturesJSON: String = FactoryPackageDraft.defaultFixturesJSON,
         harnessPassed: Bool = false,
-        lastHarnessSummary: String? = nil
+        lastHarnessSummary: String? = nil,
+        reusePluginID: String? = nil,
+        paramsSchemaJSON: String = "",
+        attemptLog: [String] = []
     ) {
         self.goal = goal
         self.pluginID = pluginID
@@ -46,14 +55,18 @@ public struct FactoryPackageDraft: Codable, Sendable, Equatable {
         self.fixturesJSON = fixturesJSON.isEmpty ? Self.defaultFixturesJSON : fixturesJSON
         self.harnessPassed = harnessPassed
         self.lastHarnessSummary = lastHarnessSummary
+        self.reusePluginID = reusePluginID
+        self.paramsSchemaJSON = paramsSchemaJSON
+        self.attemptLog = attemptLog
     }
 
-    public static let defaultFixturesJSON = #"[{"kind":"harness","params":{"sample":true}}]"#
+    public static let defaultFixturesJSON = #"[{"kind":"test","params":{"sample":true}}]"#
 
     enum CodingKeys: String, CodingKey {
         case goal, pluginID, version, description, handle, dependencies
         case volumeEnabled, reviewPassed, reviewSummary
-        case workspaceVolume, fixturesJSON, harnessPassed, lastHarnessSummary
+        case workspaceVolume, fixturesJSON, harnessPassed, lastHarnessSummary, reusePluginID
+        case paramsSchemaJSON, attemptLog
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +85,18 @@ public struct FactoryPackageDraft: Codable, Sendable, Equatable {
         fixturesJSON = fixtures.isEmpty ? Self.defaultFixturesJSON : fixtures
         harnessPassed = try container.decodeIfPresent(Bool.self, forKey: .harnessPassed) ?? false
         lastHarnessSummary = try container.decodeIfPresent(String.self, forKey: .lastHarnessSummary)
+        reusePluginID = try container.decodeIfPresent(String.self, forKey: .reusePluginID)
+        paramsSchemaJSON = try container.decodeIfPresent(String.self, forKey: .paramsSchemaJSON) ?? ""
+        attemptLog = try container.decodeIfPresent([String].self, forKey: .attemptLog) ?? []
+    }
+
+    public mutating func recordAttempt(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        attemptLog.append(trimmed)
+        if attemptLog.count > 40 {
+            attemptLog.removeFirst(attemptLog.count - 40)
+        }
     }
 
     public func pluginJSON() throws -> String {
@@ -147,7 +172,7 @@ public struct FactoryPackageDraft: Codable, Sendable, Equatable {
             lines.append("Review: \(reviewSummary)")
         }
         if let lastHarnessSummary, !lastHarnessSummary.isEmpty {
-            lines.append("Harness: \(lastHarnessSummary)")
+            lines.append("Test: \(lastHarnessSummary)")
         }
         return lines.joined(separator: "\n")
     }

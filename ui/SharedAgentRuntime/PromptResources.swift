@@ -1,77 +1,74 @@
 import Foundation
+import ServiceContracts
 
 public enum PromptResources {
     /// Bundle resources for prompt `.md` files. LoginItem (`derrickd`) walks up to host `Derrick.app`.
     public static func resolvedResourceRoot() -> URL {
-        let main = Bundle.main.resourceURL ?? Bundle.main.bundleURL
-        if containsPrompts(in: main) {
-            return main
-        }
-        for candidate in hostAppResourceRoots() {
-            if containsPrompts(in: candidate) {
-                return candidate
-            }
-        }
-        return main
+        DerrickBundledText.resolvedResourceRoot()
+            ?? Bundle.main.resourceURL
+            ?? Bundle.main.bundleURL
     }
 
     public static func conversationRAGInstructions(
         from resourceRoot: URL? = nil,
         prefixTxt: String? = nil
     ) throws -> String {
-        try load(named: "conversation_rag_instructions", from: resourceRoot ?? resolvedResourceRoot(), prefixTxt)
+        try load(named: "conversation_rag_instructions", from: resourceRoot, prefixTxt: prefixTxt)
     }
 
     public static func memorySummarizerInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try load(named: "memory_summarizer_instructions", from: resourceRoot ?? resolvedResourceRoot())
+        try load(named: "memory_summarizer_instructions", from: resourceRoot)
     }
 
     public static func mcpToolInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try load(named: "mcp_tool_instructions", from: resourceRoot ?? resolvedResourceRoot())
+        try load(named: "mcp_tool_instructions", from: resourceRoot)
     }
 
     public static func softwareFactoryInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try load(named: "software_factory_instructions", from: resourceRoot ?? resolvedResourceRoot())
+        try load(named: "software_factory_instructions", from: resourceRoot)
     }
 
-    private static func containsPrompts(in resourceRoot: URL) -> Bool {
-        let probe = resourceRoot.appendingPathComponent("conversation_rag_instructions.md")
-        if FileManager.default.fileExists(atPath: probe.path) { return true }
-        let nested = resourceRoot
-            .appendingPathComponent("Resources", isDirectory: true)
-            .appendingPathComponent("conversation_rag_instructions.md")
-        return FileManager.default.fileExists(atPath: nested.path)
+    public static func pluginHandleInstructions(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("plugin_handle_instructions.md", from: resourceRoot)
     }
 
-    /// Walk ancestor `.app` bundles (LoginItems/JobKeepAlive → Derrick.app Resources).
-    private static func hostAppResourceRoots() -> [URL] {
-        var urls: [URL] = []
-        var dir = Bundle.main.bundleURL.standardizedFileURL
-        for _ in 0..<12 {
-            if dir.pathExtension == "app" {
-                urls.append(dir.appendingPathComponent("Contents/Resources", isDirectory: true))
-            }
-            let parent = dir.deletingLastPathComponent()
-            if parent.path == dir.path { break }
-            dir = parent
+    public static func scriptReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
+    }
+
+    public static func factoryReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("factory_reviewer_instructions.md", from: resourceRoot)
+    }
+
+    public static func workerOverlay(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("worker_overlay.md", from: resourceRoot)
+    }
+
+    public static func userFacingSpawnOverlay(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("user_facing_spawn_overlay.md", from: resourceRoot)
+    }
+
+    /// Full guest SDK (`derrick.ts`) wrapped for a model prompt.
+    public static func guestSDKForModel(from resourceRoot: URL? = nil) throws -> String {
+        let source = try DerrickBundledText.load("guest/derrick.ts", from: resourceRoot)
+        return DerrickBundledText.formatTypeScriptForModel(
+            source,
+            heading: "derrick module (`import { … } from \"derrick\"`)"
+        )
+    }
+
+    public static func guestSDKSource(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("guest/derrick.ts", from: resourceRoot)
+    }
+
+    private static func load(named name: String, from resourceRoot: URL?, prefixTxt: String? = nil) throws -> String {
+        let root = resourceRoot ?? resolvedResourceRoot()
+        do {
+            let contents = try DerrickBundledText.load("\(name).md", from: resourceRoot)
+            return prefixTxt.map { "\($0)\n\n\(contents)" } ?? contents
+        } catch {
+            throw PromptResourcesError.missingResource(name: name, resourceRoot: root)
         }
-        return urls
-    }
-
-    private static func load(named name: String, from resourceRoot: URL, _ prefixTxt: String? = nil) throws -> String {
-        let candidates = [
-            resourceRoot.appendingPathComponent("\(name).md"),
-            resourceRoot.appendingPathComponent("Resources", isDirectory: true).appendingPathComponent("\(name).md")
-        ]
-
-        for url in candidates where FileManager.default.fileExists(atPath: url.path) {
-            let contents = try String(contentsOf: url, encoding: .utf8)
-            
-            let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
-            return prefixTxt.map { "\($0)\n\n\(trimmed)" } ?? trimmed
-        }
-
-        throw PromptResourcesError.missingResource(name: name, resourceRoot: resourceRoot)
     }
 
     public static func currentDatePrefix(date: Date = .now) -> String {

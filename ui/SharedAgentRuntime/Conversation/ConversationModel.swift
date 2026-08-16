@@ -107,7 +107,8 @@ final class ConversationModel {
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         var mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
-            PluginEnvelopeSchema.ragSection,
+            try PromptResources.pluginHandleInstructions(),
+            try PromptResources.guestSDKForModel(),
         ].joined(separator: "\n\n")
         if await factoryEnabled(repository: repository),
            FactorySessionID.isFactorySession(sessionID) {
@@ -580,7 +581,8 @@ final class ConversationModel {
             "kind": .string(PluginEventKind.messageInRoom.rawValue),
         ]
         if !parsed.remainder.isEmpty {
-            arguments["params"] = .object(["text": .string(parsed.remainder)])
+            let mapped = FactoryInvokeParams.chatParams(remainder: parsed.remainder)
+            arguments["params"] = .object(mapped.mapValues { mcpValue(from: $0) })
         }
         onChunk(
             AgentResponseNextChunk(
@@ -626,6 +628,28 @@ final class ConversationModel {
             let enabled = row["enabled"] as? Bool ?? true
             guard enabled else { return nil }
             return (row["plugin_id"] as? String) ?? (row["id"] as? String)
+        }
+    }
+
+    private func mcpValue(from json: PluginJSON) -> Value {
+        switch json {
+        case .null:
+            return .null
+        case .bool(let flag):
+            return .bool(flag)
+        case .number(let number):
+            if number.rounded() == number,
+               number >= Double(Int.min),
+               number <= Double(Int.max) {
+                return .int(Int(number))
+            }
+            return .double(number)
+        case .string(let text):
+            return .string(text)
+        case .array(let items):
+            return .array(items.map(mcpValue(from:)))
+        case .object(let object):
+            return .object(object.mapValues { mcpValue(from: $0) })
         }
     }
 

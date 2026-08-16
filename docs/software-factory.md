@@ -177,7 +177,7 @@ One `DockerScriptContainerPool` (replaces `DockerNetworkContainerPool` + the dra
 #### Phase 2 — handoff
 
 - `--network none`, `--read-only` root, tmpfs `/tmp`, cap-drop ALL, no-new-privileges, **no** `--add-host host.docker.internal`, **no** `HTTP_PROXY`.
-- Exec: `bun /opt/derrick/runner.js` (host-owned).
+- Exec: `bun /opt/derrick/runner.ts` (host-owned).
 - `fetch`, `node:net`, `Bun.connect` fail. Verifier also bans them.
 
 #### Volumes
@@ -188,7 +188,7 @@ One `DockerScriptContainerPool` (replaces `DockerNetworkContainerPool` + the dra
 | `derrick-plugin-data-{id}` | `/data` | rw | Opt-in only (`volume.enabled`). Plugin SQLite, archives, HTTP blobs |
 | `derrick-plugin-staging-{factory}` | `/workspace` | rw factory | Generate |
 | `derrick-script-scratch-{invoke}` | `/workspace` | rw | One-shot script + its `node_modules` |
-| `derrick-script-helpers` | `/opt/derrick` | ro | `runner.js`, `derrick.js` |
+| `derrick-script-helpers` | `/opt/derrick` | ro | `runner.ts`, `derrick.ts` |
 
 Plugin tree (Agent Plugins 1.0 + Derrick extension). See [adr-agent-plugins.md](adr-agent-plugins.md).
 
@@ -203,29 +203,14 @@ Plugin tree (Agent Plugins 1.0 + Derrick extension). See [adr-agent-plugins.md](
 /data/…                       # only if volume.enabled; not a host path in the guest env
 ```
 
-**Host helper** (`derrick.js`) only **builds** envelopes. No sockets, no env secrets.
+**Host helper** (`derrick.ts`) is the guest SDK (types + `netFetch` / `httpBody` / `headlines` / …). No sockets, no env secrets. Source of truth: `ui/SharedAgentRuntime/Resources/guest/derrick.ts`. Guest scripts `import { netFetch, type HandleEvent, type HandleResult } from "derrick"`.
 
-```js
-// Host-owned. import { netFetch } from "/opt/derrick/derrick.js"
-export function netFetch({ method, url, authRef, json, headers }) {
-  return {
-    verb: "http.request",
-    request_id: crypto.randomUUID(),
-    method,
-    url,
-    auth_ref: authRef ?? null,
-    json: json ?? null,
-    headers: headers ?? {},
-  };
-}
+**TS contract:**
+
+```ts
+interface PluginParams {}
+export function handle(event: HandleEvent<PluginParams>): HandleResult
 ```
-
-**JS contract:**
-
-```js
-export function handle(event) {
-  // return Array of envelope objects
-}
 ```
 
 - Return must be an array of objects. Anything else → invoke fail.
@@ -418,8 +403,8 @@ Unchanged stages: spec → generate `/workspace` → static JS verify → LLM re
 
 New tool `script_exec` (MCPService):
 
-1. Static JS verify (ban `fetch`, `node:http`, `Bun.connect`, `child_process`, `host.docker.internal`, secret literals).
-2. LLM reviewer vs description + script + **declared deps** (fail closed like today’s 689–700).
+1. Static JS verify (ban `fetch`, `node:http`, `Bun.connect`, `child_process`). Destination URLs are not scanned here — host SSRF denies them at fetch time.
+2. LLM reviewer vs goal/description + script (secrets, missing-params). Types, `fetch`/sockets, destinations, and `plugin_id` are host/`tsc` — not reviewer.
 3. Two-phase lease; hop loop.
 4. Blacklist prompts as in §7.
 
@@ -432,9 +417,9 @@ New tool `script_exec` (MCPService):
 In-process scanners (no Bun required for the cheap pass). Ban:
 
 - `fetch(`, `node:net`, `node:http`, `node:https`, `undici`, `Bun.connect`, `Bun.serve`, `child_process`, `node:child_process`
-- `host.docker.internal`, `169.254.169.254`, `metadata.google.internal`
-- Secret-shaped literals
-- Guest TypeScript 7 `tsc --noEmit` (Go compiler; types from `PluginEnvelopeSchema`) — fail with compiler output
+- Guest TypeScript 7 `tsc --noEmit` (Go compiler; types from `derrick.ts`) — fail with compiler output
+
+Do not scan source for destination hostnames or private IPs. The guest has no network. Host HTTP applies `PluginSSRFPolicy` on each `netFetch` URL.
 
 Best-effort only. `--network none` is the real net fence.
 
@@ -538,7 +523,12 @@ Install / update / disable / delete: Swift-only promote; delete keeps `plugin_in
 
 ## Observability
 
-`service_logs`: `script_exec_*`, `plugin_invoke_*`, `plugin_http`, `egress_blacklist_hit`, `plugin_hash_mismatch`, `factory_stage`. Never log `Authorization` or `secretMaterial`.
+Log destination is exclusive:
+
+- **Debug** (`IS_DEBUG=true`): all operator logs (including factory/tool traces) go to the **debug panel only**. Do not write `service_logs`.
+- **Non-debug**: all operator logs go to **`service_logs` only** (`script_exec_*`, `plugin_invoke_*`, `plugin_http`, `egress_blacklist_hit`, `plugin_hash_mismatch`, `factory_stage`). Do not write the debug panel.
+
+Never log `Authorization` or `secretMaterial`.
 
 ---
 
@@ -647,7 +637,7 @@ None. Product owner locked: daily news sample; sidebar plugin list; Bun + TypeSc
 
 ### PR 4 — Bun image + two-phase pool + VolumeIO
 
-- **Title:** `derrick-bun` image, one pool, helper inject `runner.js` / `derrick.js`
+- **Title:** `derrick-bun` image, one pool, helper inject `runner.ts` / `derrick.ts`
 - **Files:** `DockerScriptPreparer` Bun image, `DockerNetworkContainerPool`, `DockerHostLaunch` `volume rm` prefix, VolumeIO
 - **Depends on:** PR 1
 - **Description:** Setup install + `--network none` handoff. Tests reject `run`/`cp`.

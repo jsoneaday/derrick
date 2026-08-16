@@ -76,12 +76,234 @@ import Foundation
     #expect(PluginPrefix.matches(handle: "news", pluginIDs: ["daily-news-summary", "weather"]) == ["daily-news-summary"])
 }
 
+@Test func factoryInvokeParamsPreferFixturesThenHandleKeys() {
+    let fixtures = #"[{"kind":"test","params":{"topic":"science","max":3}}]"#
+    let handle = """
+    interface PluginParams {
+      topic?: string;
+      max?: number;
+      query?: string;
+    }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    let fromFixtures = FactoryInvokeParams.resolve(
+        fixturesJSON: fixtures,
+        handle: handle,
+        goal: "topic and max articles"
+    )
+    #expect(fromFixtures["topic"]?.stringValue == "science")
+    if case .number(let max) = fromFixtures["max"] {
+        #expect(max == 3)
+    } else {
+        Issue.record("expected max from fixtures")
+    }
+
+    let inferred = FactoryInvokeParams.resolve(
+        fixturesJSON: FactoryPackageDraft.defaultFixturesJSON,
+        handle: handle,
+        goal: #"edit daily news for topic "climate" and max"#
+    )
+    #expect(inferred.isEmpty)
+    #expect(Set(FactoryInvokeParams.referencedKeys(in: handle)) == ["topic", "max", "query"])
+    #expect(FactoryInvokeParams.isPlaceholder(["sample": .bool(true)]))
+    #expect(FactoryInvokeParams.testHeading(pluginID: "daily-news", params: fromFixtures)
+        == "Testing new plugin daily-news (max=3, topic=science)…")
+
+    let chat = FactoryInvokeParams.chatParams(remainder: "technology 4")
+    #expect(chat["text"]?.stringValue == "technology 4")
+    #expect(chat["topic"]?.stringValue == "technology")
+    if case .number(let max) = chat["max"] {
+        #expect(max == 4)
+    } else {
+        Issue.record("expected chat max")
+    }
+    #expect(FactoryInvokeParams.chatParams(remainder: "").isEmpty)
+}
+
+@Test func factoryInvokeParamsTypesCountsAndLists() {
+    let handle = """
+    interface PluginParams {
+      topics?: string[];
+      sources?: string[];
+      maxResultCount?: number;
+      maxResults?: number;
+    }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    let inferred = FactoryInvokeParams.inferred(handle: handle, goal: "news sources topics and max result count")
+    if case .number(let max) = inferred["maxResultCount"] {
+        #expect(max == 5)
+    } else {
+        Issue.record("maxResultCount should be a number")
+    }
+    if case .number(let max) = inferred["maxResults"] {
+        #expect(max == 5)
+    } else {
+        Issue.record("maxResults should be a number")
+    }
+    if case .array(let topics) = inferred["topics"], case .string(let first) = topics.first {
+        #expect(first == "technology")
+    } else {
+        Issue.record("topics should be a string list")
+    }
+    if case .array(let sources) = inferred["sources"], case .string(let first) = sources.first {
+        #expect(first == "technology")
+    } else {
+        Issue.record("sources should be a string list")
+    }
+
+    let garbage = FactoryInvokeParams.normalize(
+        [
+            "maxResultCount": .string("technology"),
+            "maxResults": .string("technology"),
+            "sources": .string("technology"),
+            "topics": .string("technology"),
+        ],
+        handle: handle,
+        goal: "news"
+    )
+    if case .number = garbage["maxResultCount"] { } else {
+        Issue.record("garbage maxResultCount must be coerced to a number")
+    }
+    if case .array = garbage["topics"] { } else {
+        Issue.record("garbage topics must become a list")
+    }
+
+    let schema = FactoryInvokeParams.parseSchema(#"{"maxResultCount":"number","topics":"string[]"}"#)
+    #expect(schema["maxResultCount"] == .number)
+    #expect(schema["topics"] == .stringList)
+}
+
+@Test func pluginTypeSafetyBansAnyAndAssertions() {
+    #expect(PluginTypeSafety.findings(in: "const x: any = 1;").isEmpty == false)
+    #expect(PluginTypeSafety.findings(in: "const x = value as string;").isEmpty == false)
+    #expect(PluginTypeSafety.findings(in: "const x = value as unknown as number;").isEmpty == false)
+    #expect(PluginTypeSafety.findings(in: "// @ts-ignore\nconst x = 1;").isEmpty == false)
+    #expect(PluginTypeSafety.findings(in: "const x: unknown = body;\nif (typeof x === \"string\") { return x; }").isEmpty)
+    #expect(PluginTypeSafety.findings(in: "export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }").isEmpty)
+}
+
+@Test func pluginParamsContractRejectsUnknownAndAny() {
+    #expect(!PluginParamsContract.validate("export function handle(event: HandleEvent): HandleResult { return []; }").isEmpty)
+    let unknown = """
+    interface PluginParams { topic?: unknown; }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(PluginParamsContract.validate(unknown).contains { $0.contains("unknown") || $0.contains("base type") })
+    let anyBag = """
+    interface PluginParams { extra?: Record<string, any>; }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(!PluginParamsContract.validate(anyBag).isEmpty)
+    let empty = """
+    interface PluginParams {}
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(PluginParamsContract.validate(empty).isEmpty)
+    let index = """
+    interface PluginParams { [key: string]: string; }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(PluginParamsContract.validate(index).contains { $0.contains("index signature") })
+    let recordAlias = """
+    type PluginParams = Record<string, string>;
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(!PluginParamsContract.validate(recordAlias).isEmpty)
+    let ok = """
+    interface PluginParams { topic?: string; max?: number; sources?: string[]; }
+    export function handle(event: HandleEvent<PluginParams>): HandleResult { return []; }
+    """
+    #expect(PluginParamsContract.validate(ok).isEmpty)
+    #expect(PluginParamsContract.declaredKinds(ok)["max"] == .number)
+    #expect(PluginParamsContract.declaredKinds(ok)["sources"] == .stringList)
+}
+
+@Test func factoryAttemptLogIncludesHandleAndFindings() {
+    let text = FactoryAttemptLog.describe(
+        tool: "factory.write_package",
+        arguments: [
+            "plugin_id": "daily-news-summary",
+            "handle": "export function handle() { return []; }",
+        ],
+        result: #"{"ok":false,"stage":"written","static_findings":["Guest fetch() is banned"],"next":"factory.write_package"}"#
+    )
+    #expect(text.contains("[factory] factory.write_package ok=false"))
+    #expect(text.contains("Guest fetch() is banned"))
+    #expect(text.contains("handle begin"))
+    #expect(text.contains("export function handle()"))
+}
+
+@Test func factoryExistingPluginMatchPrefersInstalledIdOnEdit() {
+    let installed = ["daily-news", "daily-news-summary"]
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "can we edit the existing daily news plugin so that it can receive a topic?",
+            installedIDs: installed
+        ) == .ambiguous(["daily-news", "daily-news-summary"])
+    )
+    #expect(
+        FactoryExistingPlugin.match(
+            goal: "edit daily-news-summary to add a limit",
+            installedIDs: installed
+        ) == "daily-news-summary"
+    )
+    #expect(
+        FactoryExistingPlugin.match(
+            goal: "edit the summary plugin",
+            installedIDs: installed
+        ) == "daily-news-summary"
+    )
+    #expect(
+        FactoryExistingPlugin.match(
+            goal: "build a daily news plugin",
+            installedIDs: installed
+        ) == nil
+    )
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "update the daily news plugin so that it accepts parameters",
+            installedIDs: ["daily-news-summary"]
+        ) == .reuse("daily-news-summary")
+    )
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "update the plugin with organizations, topics, and a max count",
+            installedIDs: ["daily-news", "daily-news-summary"]
+        ) == .ambiguous(["daily-news", "daily-news-summary"])
+    )
+    #expect(FactoryExistingPlugin.nameFits(pluginID: "daily-news-summary", goal: "daily news"))
+    #expect(FactoryExistingPlugin.nameFits(pluginID: "daily-news", goal: "daily news"))
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "create a weather plugin",
+            installedIDs: ["daily-news-summary"]
+        ) == .create
+    )
+    #expect(
+        FactoryExistingPlugin.decide(
+            goal: "edit the weather plugin to add a zip code",
+            installedIDs: ["daily-news-summary", "weather"]
+        ) == .reuse("weather")
+    )
+    #expect(PluginReleaseVersion.next(after: "1.0.0") == "1.0.1")
+    #expect(PluginReleaseVersion.assign(requested: "1.0.0", existing: ["1.0.0"]) == "1.0.1")
+    #expect(PluginReleaseVersion.assign(requested: "2.0.0", existing: ["1.0.0"]) == "2.0.0")
+    #expect(PluginReleaseVersion.assign(requested: "1.0.0", existing: []) == "1.0.0")
+}
+
 @Test func dailyNewsSampleIsAValidDraft() throws {
     let draft = DailyNewsSample.draft()
     #expect(draft.pluginID == "daily-news")
     #expect(try draft.pluginJSON().contains("daily-news"))
     #expect(draft.handle.contains("export function handle"))
     #expect(draft.handle.contains("netFetch"))
+    #expect(draft.handle.contains("headlines"))
+    #expect(draft.handle.contains("foxnews.com"))
+    #expect(draft.handle.contains("interface PluginParams"))
+    #expect(draft.handle.contains("HandleEvent<PluginParams>"))
+    #expect(PluginParamsContract.validate(draft.handle).isEmpty)
+    #expect(draft.fixturesJSON.contains("technology"))
     #expect(!draft.volumeEnabled)
     let hash = try draft.contentHash()
     #expect(hash.rawValue.count == 64)
@@ -111,13 +333,47 @@ import Foundation
     #expect(DerrickGuestTypeScript.derrickModule.contains("export type HandleResult = Envelope[]"))
     #expect(DerrickGuestTypeScript.derrickModule.contains("export function httpBody"))
     #expect(DerrickGuestTypeScript.derrickModule.contains("export function stripMarkup"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export type PluginParamValue"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export interface HandleEvent<P extends ParamFields<P> = Record<string, never>>"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("auth_ref?: string | null"))
+    #expect(!DerrickGuestTypeScript.derrickModule.contains("[key: string]"))
+    #expect(!DerrickGuestTypeScript.derrickModule.contains("params?: Record<string, unknown>"))
+    #expect(DerrickGuestTypeScript.handleCheckTS.contains("FieldValues"))
+    #expect(DerrickGuestTypeScript.handleCheckTS.contains("_NoIndex"))
     #expect(PluginMarkup.strip("<![CDATA[Major incidents across UK]]>") == "Major incidents across UK")
     #expect(PluginMarkup.strip("<title><![CDATA[Hello]]></title>") == "Hello")
     #expect(PluginMarkup.naiveTagStripFinding("value.replace(/<[^>]*>/g, '')") != nil)
     #expect(PluginMarkup.naiveTagStripFinding("stripMarkup(block)") == nil)
     #expect(DerrickGuestTypeScript.verbUnion.contains("\"http.request\""))
+    #expect(PluginInvokePresentation.isEmptyResult("No matching daily news items were found."))
+    #expect(PluginInvokePresentation.isEmptyResult("No Reuters news items were available today."))
+    #expect(!PluginInvokePresentation.isEmptyResult("1. A real headline from the BBC"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export function headlines"))
+    #expect(DerrickGuestTypeScript.derrickModule.contains("export function httpFailed"))
+    #expect(DerrickGuestTypeScript.runnerSource.contains("script.ts"))
+    #expect(DerrickGuestTypeScript.runnerSource.contains("invoke.event"))
+    for verb in PluginEnvelopeSchema.verbCases {
+        #expect(DerrickGuestTypeScript.derrickModule.contains("\"\(verb)\""))
+    }
+    #expect(
+        PluginMarkup.headlines(
+            #"<h2 data-testid="card-headline">Rescuers search for survivors of quake</h2><h2>Morocco detains dozens of migrants</h2>"#
+        ).first == "Rescuers search for survivors of quake"
+    )
+    #expect(
+        PluginMarkup.headlines(
+            #"<rss><item><title><![CDATA[Major incidents across UK]]></title></item></rss>"#
+        ) == ["Major incidents across UK"]
+    )
     #expect(PluginEnvelopeSchema.ragSection.contains("TypeScript"))
+    #expect(PluginEnvelopeSchema.ragSection.contains("handle() return"))
+    #expect(PluginEnvelopeSchema.ragSection.contains("interface PluginParams"))
+    #expect(!PluginEnvelopeSchema.ragSection.contains("[key: string]: unknown"))
+    #expect(!PluginEnvelopeSchema.ragSection.contains("export function stripMarkup"))
+    #expect(!PluginEnvelopeSchema.ragSection.contains("\"$schema\""))
     #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
+    #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"noImplicitAny\": true"))
+    #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"useUnknownInCatchVariables\": true"))
     #expect(DerrickGuestTypeScript.tsconfigJSON.contains("\"types\": []"))
     #expect(!DerrickGuestTypeScript.handleCheckTS.contains("./script.ts"))
 }

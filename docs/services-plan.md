@@ -68,7 +68,10 @@ WebhookService (future) ──► derrickd
 ## Logging + DB (locked)
 - **One shared SQLite** in host app container / app support (`derrick.sqlite3`).
 - Multi-process access: **WAL** + **`busy_timeout=5000`** + **`synchronous=NORMAL`** on every open (`DBRepository`).
-- Table ownership by domain; all services append **`service_logs`**.
+- Table ownership by domain.
+- **Log destination is exclusive (debug vs release):**
+  - **Debug** (`IS_DEBUG=true`): all operator logs go to the **debug panel only**. Do **not** write `service_logs`.
+  - **Non-debug**: all operator logs go to **`service_logs` only**. Do **not** write the debug panel.
 - Domain: jobs tables (JobService), agents later (AgentService), existing memory/policy (today UI/Agent).
 
 ## Webhook liveness

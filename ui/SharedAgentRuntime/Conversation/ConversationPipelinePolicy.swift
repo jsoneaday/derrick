@@ -31,7 +31,9 @@ extension ConversationPipeline {
                         UsageLimitsService.shared.resetMessageCounters()
                     }
                     // Upper bound is absolute max; per-message cap + session raises gate tool rounds.
-                    let maxToolRoundIterations = UsageLimits.absoluteMax.maxToolRoundsPerMessage
+                    let maxToolRoundIterations = FactorySessionID.isFactorySession(sessionID)
+                        ? FactoryTurnGate.pipelineToolRounds
+                        : UsageLimits.absoluteMax.maxToolRoundsPerMessage
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
                     PipelineTiming.log(
@@ -446,10 +448,14 @@ extension ConversationPipeline {
                                 PipelineTiming.log(
                                     "\(roundLabel) stopped_tool_round_limit tool_limit_ms=\(toolLimitMS) usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted))"
                                 )
+                                let stopMessage = FactoryTurnGate.userFacingStopMessage(
+                                    sessionID: sessionID,
+                                    records: aggregatedToolCalls
+                                )
                                 continuation.yield(
                                     AgentResponseNextChunk(
                                         status: .complete,
-                                        chunk: "Stopped: max tool rounds reached. Raise the session limit when prompted, or change Settings → Usage limits."
+                                        chunk: stopMessage
                                     )
                                 )
                                 break
@@ -506,6 +512,15 @@ extension ConversationPipeline {
                             }
                             let toolWallMS = PipelineTiming.elapsedMS(from: toolStarted)
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
+                            for record in toolExecution.records where FactoryTurnGate.isPipelineTool(record.name) {
+                                debugLog(
+                                    FactoryAttemptLog.describe(
+                                        tool: record.name,
+                                        arguments: record.arguments,
+                                        result: record.result
+                                    )
+                                )
+                            }
                             let slimFollowUpBody = ToolFollowUpFormatter.slimToolResults(records: toolExecution.records)
                             let slimRequestLine = ToolFollowUpFormatter.slimToolRequestLine(records: toolExecution.records)
                             await MainActor.run {

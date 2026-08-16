@@ -5,6 +5,7 @@ struct MCPToolCatalogTests {
     @Test func allCasesHaveStableRawValues() {
         #expect(AllowedMCPTool.scriptExec.rawValue == "script_exec")
         #expect(AllowedMCPTool.sessionMemorySearch.rawValue == "session_memory_search")
+        #expect(AllowedMCPTool.factoryTest.rawValue == "factory.test")
         #expect(Set(AllowedMCPTool.allCases.map(\.rawValue)).count == AllowedMCPTool.allCases.count)
     }
 

@@ -7,12 +7,15 @@ private let sideMenuRecentsFontSize = CGFloat(12)
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject var chatSessions: ChatSessionStore
-    var onSendPluginPrefix: ((String) -> Void)?
+    var onInsertPluginPrefix: ((String) -> Void)?
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
     @ObservedObject private var softwareFactory = SoftwareFactorySettingsService.shared
     @ObservedObject private var pluginList = PluginListStore.shared
     @State private var sampleInstallMessage: String?
+    @State private var expandedPluginIDs: Set<String> = []
+    @State private var versionPendingDelete: PluginVersionItem?
+    @State private var versionPendingDeletePluginID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -43,18 +46,6 @@ struct SidebarView: View {
                 }
                 SidebarActionRow(
                     row: SidebarRow(id: "chats", icon: "message.fill", title: "Chats")
-                )
-                SidebarActionRow(
-                    row: SidebarRow(id: "projects", icon: "folder.fill", title: "Projects")
-                )
-                SidebarActionRow(
-                    row: SidebarRow(id: "artifacts", icon: "square.grid.2x2.fill", title: "Artifacts")
-                )
-                SidebarActionRow(
-                    row: SidebarRow(id: "code", icon: "chevron.left.forwardslash.chevron.right", title: "Code", isDisabled: true)
-                )
-                SidebarActionRow(
-                    row: SidebarRow(id: "customize", icon: "briefcase.fill", title: "Customize")
                 )
                 if softwareFactory.isEnabled {
                     SidebarActionRow(
@@ -137,38 +128,7 @@ struct SidebarView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(pluginList.plugins) { plugin in
-                            HStack(spacing: 8) {
-                                Button {
-                                    onSendPluginPrefix?("/\(plugin.id)")
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(plugin.id)
-                                            .font(.system(size: sideMenuRecentsFontSize))
-                                            .lineLimit(1)
-                                        if !plugin.description.isEmpty {
-                                            Text(plugin.description)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(!plugin.enabled)
-                                Toggle(
-                                    "",
-                                    isOn: Binding(
-                                        get: { plugin.enabled },
-                                        set: { newValue in
-                                            Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
-                                        }
-                                    )
-                                )
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.mini)
-                            }
+                            pluginRow(plugin)
                         }
                     }
                     if let sampleInstallMessage, !sampleInstallMessage.isEmpty {
@@ -176,6 +136,30 @@ struct SidebarView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                }
+                .confirmationDialog(
+                    deleteVersionTitle,
+                    isPresented: Binding(
+                        get: { versionPendingDelete != nil },
+                        set: { if !$0 { clearVersionDelete() } }
+                    ),
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) {
+                        guard let version = versionPendingDelete,
+                              let pluginID = versionPendingDeletePluginID else { return }
+                        clearVersionDelete()
+                        Task {
+                            if let message = await pluginList.deleteVersion(id: version.id, pluginID: pluginID) {
+                                sampleInstallMessage = message
+                            }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {
+                        clearVersionDelete()
+                    }
+                } message: {
+                    Text(deleteVersionMessage)
                 }
             }
 
@@ -214,6 +198,134 @@ struct SidebarView: View {
         .task {
             await pluginList.reload()
         }
+    }
+
+    @ViewBuilder
+    private func pluginRow(_ plugin: PluginSidebarItem) -> some View {
+        let expanded = expandedPluginIDs.contains(plugin.id)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button {
+                    if expanded {
+                        expandedPluginIDs.remove(plugin.id)
+                    } else {
+                        expandedPluginIDs.insert(plugin.id)
+                    }
+                } label: {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10, height: 16)
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Text(plugin.id)
+                                    .font(.system(size: sideMenuRecentsFontSize))
+                                    .lineLimit(1)
+                                if !plugin.version.isEmpty {
+                                    Text(plugin.version)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if !plugin.description.isEmpty {
+                                Text(plugin.description)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .buttonStyle(.plain)
+                Button {
+                    chatSessions.openFactorySession(editing: plugin.id)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Change \(plugin.id)")
+                Button {
+                    onInsertPluginPrefix?("/\(plugin.id)")
+                } label: {
+                    Text("/")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Insert /\(plugin.id) into the prompt")
+                .disabled(!plugin.enabled)
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { plugin.enabled },
+                        set: { newValue in
+                            Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
+                        }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
+            if expanded {
+                ForEach(plugin.versions) { version in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Text(version.version)
+                                    .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
+                                if version.isCurrent {
+                                    Text("current")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                } else if !version.status.isEmpty {
+                                    Text(version.status)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 16)
+                        Button {
+                            versionPendingDelete = version
+                            versionPendingDeletePluginID = plugin.id
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Delete version \(version.version)")
+                    }
+                }
+            }
+        }
+    }
+
+    private var deleteVersionTitle: String {
+        guard let version = versionPendingDelete else { return "Delete version?" }
+        return "Delete \(versionPendingDeletePluginID ?? "plugin") \(version.version)?"
+    }
+
+    private var deleteVersionMessage: String {
+        guard let pluginID = versionPendingDeletePluginID,
+              let plugin = pluginList.plugins.first(where: { $0.id == pluginID }) else {
+            return "Removes this version. If it is the last one, the plugin is removed."
+        }
+        if plugin.versions.count <= 1 {
+            return "This is the only version. The plugin, its grants, and private data will be removed."
+        }
+        return "Removes this version only. The latest remaining version stays current."
+    }
+
+    private func clearVersionDelete() {
+        versionPendingDelete = nil
+        versionPendingDeletePluginID = nil
     }
 }
 

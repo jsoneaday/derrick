@@ -231,10 +231,10 @@ import Plugin
         let dockerfile = DockerScriptPreparer.baselineDockerfile
         #expect(dockerfile.contains("bun add -g typescript@7"))
         #expect(dockerfile.contains("tsc --version"))
-        #expect(DerrickGuestRuntime.dockerImage == "derrick-bun:baseline-3")
+        #expect(DerrickGuestRuntime.dockerImage == "derrick-bun:baseline-4")
         #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
         #expect(!DerrickGuestTypeScript.handleCheckTS.contains("./script.ts"))
-        #expect(DockerScriptPreparer.guestRunnerJS.contains("script.ts"))
+        #expect(DockerScriptPreparer.guestRunner.contains("script.ts"))
         #expect(DerrickGuestTypeScript.handleCheckTS.contains("HandleResult"))
     }
 
@@ -251,7 +251,7 @@ import Plugin
             }
             return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
-        #expect(stdinBytes.count == 4)
+        #expect(stdinBytes.count == 3)
         #expect(stdinBytes.allSatisfy { $0 > 0 })
 
         await #expect(throws: VolumeIOPathError.self) {

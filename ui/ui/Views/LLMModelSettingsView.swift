@@ -407,7 +407,7 @@ struct LLMModelSettingsView: View {
                     step: 1
                 )
                 limitControlRow(
-                    title: "Max harness runs per build",
+                    title: "Max tests per plugin build",
                     value: $draftLimits.maxHarnessRunsPerBuild,
                     range: 0...UsageLimits.absoluteMax.maxHarnessRunsPerBuild,
                     step: 1

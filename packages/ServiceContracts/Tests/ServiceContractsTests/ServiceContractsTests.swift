@@ -37,7 +37,29 @@ import Testing
         #expect(decoded.status == .ok)
         #expect(decoded.detail == "up")
         #expect(decoded.guestRuntimeImage == DerrickGuestRuntime.dockerImage)
+        #expect(decoded.guestRuntimeImage == "derrick-bun:baseline-4")
         #expect(decoded.executableFingerprint == nil)
+    }
+
+    @Test func bundledGuestSDKLoadsFromSourceTree() throws {
+        let sdk = try DerrickBundledText.load("guest/derrick.ts")
+        #expect(sdk.contains("export interface HandleEvent"))
+        #expect(sdk.contains("export function netFetch"))
+        let runner = try DerrickBundledText.load("guest/runner.ts")
+        #expect(runner.contains("script.ts"))
+        let handleRAG = try DerrickBundledText.load("plugin_handle_instructions.md")
+        #expect(handleRAG.contains("handle() return"))
+        let reviewer = try DerrickBundledText.load("factory_reviewer_instructions.md")
+        #expect(reviewer.contains("Software Factory reviewer"))
+        #expect(reviewer.contains("stated goal"))
+        #expect(reviewer.contains("secret literals"))
+        #expect(reviewer.contains("event.params"))
+        #expect(!reviewer.contains("plugin_id must"))
+        #expect(!reviewer.contains("No fetch"))
+        let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
+        #expect(scriptReviewer.contains("intent alignment"))
+        #expect(scriptReviewer.contains("secret literals"))
+        #expect(!scriptReviewer.contains("TypeScript 7"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {

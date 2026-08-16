@@ -502,7 +502,6 @@ public enum ScriptExecutionVerifier {
         if args.mode == .readonly {
             findings.append(contentsOf: readonlyViolations(in: args.script))
         }
-        findings.append(contentsOf: hostOrPrivateTargetViolations(in: args.script))
 
         return findings
     }
@@ -511,16 +510,6 @@ public enum ScriptExecutionVerifier {
         let patterns: [(String, String)] = [
             (#"(?m)\b(writeFile|appendFile|mkdir|rm|unlink|rename)\s*\("#, "Readonly mode cannot mutate filesystem."),
             (#"(?m)\b(child_process|Bun\.spawn|Bun\.connect)\b"#, "Readonly mode cannot execute nested commands.")
-        ]
-        return patterns.compactMap { pattern, message in
-            script.range(of: pattern, options: .regularExpression) != nil ? message : nil
-        }
-    }
-
-    private static func hostOrPrivateTargetViolations(in script: String) -> [String] {
-        let patterns: [(String, String)] = [
-            (#"(?mi)host\.docker\.internal"#, "Scripts must not target host.docker.internal (blocked by egress policy)."),
-            (#"(?m)\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})\b"#, "Scripts must not hardcode private network addresses.")
         ]
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil

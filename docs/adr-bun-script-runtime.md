@@ -6,7 +6,7 @@
 
 ## Context
 
-Product lock (2026-08-13, guest TS 2026-08-15): **one container style** for one-off scripts and complementary plugins. Runtime is **Bun + TypeScript 7** (native Go `tsc` from `typescript@7`). Types are generated from `PluginEnvelopeSchema` (same JSON Schema Swift decodes). `tsc --noEmit` runs in the guest before handoff; failures abort with compiler output. User code never has a network stack. HTTP and UI are JSON messages handled by Swift. Playwright is a **separate** browser-UI tool (not in this image).
+Product lock (2026-08-13, guest TS 2026-08-15): **one container style** for one-off scripts and complementary plugins. Runtime is **Bun + TypeScript 7** (native Go `tsc` from `typescript@7`). The guest SDK is `ui/SharedAgentRuntime/Resources/guest/derrick.ts` (same verbs as `handle-return.schema.json`). `tsc --noEmit` runs in the guest before handoff; failures abort with compiler output. User code never has a network stack. HTTP and UI are JSON messages handled by Swift. Playwright is a **separate** browser-UI tool (not in this image).
 
 The superseded ADR records the earlier guest language and CONNECT-allowlist path.
 
@@ -15,7 +15,7 @@ The superseded ADR records the earlier guest language and CONNECT-allowlist path
 | Item | Lock |
 | --- | --- |
 | Runtime | Bun + TypeScript 7 (Go `tsc`). Types generated from host JSON Schema. |
-| Image | Single baseline (`derrick-bun:baseline-3`). |
+| Image | Single baseline (`derrick-bun:baseline-4`). |
 | Pool | **One** Docker pool. Per-lease create; destroy after user code. Same TTL class (`ContainerLifecyclePolicy`). |
 | Run network | `--network none`. No `HTTP_PROXY`. No `host.docker.internal` add-host. |
 | Setup network | Allowed **only** for `bun install` of LLM-declared packages (install hooks **may** run). Then disconnect / recreate none. Then handoff. |

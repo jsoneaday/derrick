@@ -24,7 +24,7 @@ enum PluginFactoryHost {
                 required: ["goal"]
             )
         ) { args in
-            try await build(args: args, repository: repository)
+            try await build(args: args, repository: repository, logger: logger)
         }
         await server.register(
             tool: .factoryWritePackage,
@@ -42,12 +42,19 @@ enum PluginFactoryHost {
                     "type": .string("boolean"),
                     "description": .string("Opt-in /data volume. Default false."),
                 ]),
+                "fixtures": stringProp(
+                    "Optional JSON array of sample test runs, e.g. [{\"kind\":\"test\",\"params\":{\"topic\":\"technology\",\"max\":5}}]. Used for factory.test and the live check after install."
+                ),
+                "params_schema": stringProp(
+                    "Optional JSON object of param name → type (string, number, boolean, string[]). Host uses this for the post-promote test."
+                ),
             ], required: ["plugin_id", "description", "handle"])
         ) { args in
             try await writePackage(
                 args: args,
                 repository: repository,
-                stdinExecutor: stdinExecutor
+                stdinExecutor: stdinExecutor,
+                logger: logger
             )
         }
         await server.register(
@@ -65,12 +72,12 @@ enum PluginFactoryHost {
             )
         }
         await server.register(
-            tool: .factoryHarnessRun,
-            description: AllowedMCPTool.factoryHarnessRun.defaultDescription,
+            tool: .factoryTest,
+            description: AllowedMCPTool.factoryTest.defaultDescription,
             inputSchema: objectSchema([
                 "fixtures": .object([
                     "type": .string("string"),
-                    "description": .string("Optional JSON array of harness fixtures. Default uses the package fixtures."),
+                    "description": .string("Optional JSON array of sample test runs. Default uses the package samples."),
                 ]),
             ])
         ) { args in
@@ -162,7 +169,7 @@ enum PluginFactoryHost {
             case AllowedMCPTool.factoryBuild.rawValue,
                  AllowedMCPTool.factoryWritePackage.rawValue,
                  AllowedMCPTool.factoryReview.rawValue,
-                 AllowedMCPTool.factoryHarnessRun.rawValue,
+                 AllowedMCPTool.factoryTest.rawValue,
                  AllowedMCPTool.factoryPromote.rawValue,
                  AllowedMCPTool.factoryInstallSample.rawValue:
                 return factoryOn && isFactorySession
@@ -176,7 +183,11 @@ enum PluginFactoryHost {
 
     // MARK: - Tools
 
-    private static func build(args: [String: Value], repository: DBRepository) async throws -> String {
+    private static func build(
+        args: [String: Value],
+        repository: DBRepository,
+        logger: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
         try await requireFactorySession(repository)
         let goal = args["goal"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !goal.isEmpty else {
@@ -187,42 +198,103 @@ enum PluginFactoryHost {
         }
         var draft = try await loadDraft(repository)
         draft.goal = goal
-        try await saveDraft(draft, stage: "spec", repository: repository)
-        return encode([
+        let installed = try await installedPluginSummaries(repository)
+        let installedIDs = installed.compactMap { $0["id"] }
+        let locked = draft.reusePluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !locked.isEmpty, installedIDs.contains(locked) {
+            draft.pluginID = locked
+            draft.reusePluginID = locked
+        } else {
+            switch FactoryExistingPlugin.decide(goal: goal, installedIDs: installedIDs) {
+            case .reuse(let id):
+                draft.pluginID = id
+                draft.reusePluginID = id
+            case .create:
+                draft.reusePluginID = nil
+            case .ambiguous(let ids):
+                let listed = ids.joined(separator: ", ")
+                let encoded = encode([
+                    "ok": false,
+                    "ask_user": true,
+                    "candidates": ids,
+                    "installed_plugins": installed,
+                    "error": "More than one plugin matches. Ask the user which they mean: \(listed). Then call factory.build again with that plugin named in the goal.",
+                ])
+                record(logger, draft: &draft, tool: "factory.build", arguments: ["goal": goal], result: encoded)
+                try await saveDraft(draft, stage: "spec", repository: repository)
+                return encoded
+            }
+        }
+        var payload: [String: Any] = [
             "ok": true,
             "factory_session_id": try factorySessionID(),
             "stage": "spec",
             "goal": draft.goal,
-            "next": "Write the package with factory.write_package (plugin_id, description, TypeScript handle). Then factory.review, factory.harness_run, factory.promote. Guest is TypeScript 7: export function handle(event: HandleEvent): HandleResult. HTTP only via netFetch.",
-        ])
+            "installed_plugins": installed,
+            "next": "factory.write_package",
+        ]
+        if let reuse = draft.reusePluginID {
+            payload["reuse_plugin_id"] = reuse
+            payload["next"] = "factory.write_package plugin_id=\(reuse)"
+        }
+        let encoded = encode(payload)
+        record(logger, draft: &draft, tool: "factory.build", arguments: ["plugin_id": draft.pluginID], result: encoded)
+        try await saveDraft(draft, stage: "spec", repository: repository)
+        var session = try await loadSession(repository)
+        session.reviewerCalls = 0
+        session.harnessRuns = 0
+        session.updatedAt = .now
+        try await repository.upsertFactorySession(session)
+        return encoded
     }
 
     private static func writePackage(
         args: [String: Value],
         repository: DBRepository,
-        stdinExecutor: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult
+        stdinExecutor: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
+        logger: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         try await requireFactorySession(repository)
         var draft = try await loadDraft(repository)
         let pluginID = args["plugin_id"]?.stringValue ?? ""
         let description = args["description"]?.stringValue ?? ""
         let handle = args["handle"]?.stringValue ?? ""
-        guard !pluginID.isEmpty, !description.isEmpty, !handle.isEmpty else {
+        let resolvedFromReuse = draft.reusePluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedID = resolvedFromReuse.isEmpty ? pluginID : resolvedFromReuse
+        guard !resolvedID.isEmpty, !description.isEmpty, !handle.isEmpty else {
             return encode(["ok": false, "error": "plugin_id, description, and handle are required."])
         }
-        _ = try PluginID(pluginID)
+        _ = try PluginID(resolvedID)
         var deps: [String: String] = [:]
         if let obj = args["dependencies"]?.objectValue {
             for (key, value) in obj {
                 if let spec = value.stringValue { deps[key] = spec }
             }
         }
-        draft.pluginID = pluginID
-        draft.version = args["version"]?.stringValue?.isEmpty == false ? (args["version"]?.stringValue ?? "1.0.0") : "1.0.0"
+        draft.pluginID = resolvedID
+        let requestedVersion = args["version"]?.stringValue?.isEmpty == false
+            ? (args["version"]?.stringValue ?? "1.0.0")
+            : "1.0.0"
+        let existingVersions = try await repository.listPluginVersions(pluginID: resolvedID)
+        draft.version = PluginReleaseVersion.assign(
+            requested: requestedVersion,
+            existing: existingVersions.map(\.version)
+        )
         draft.description = description
         draft.handle = handle
         draft.dependencies = deps
         draft.volumeEnabled = args["volume_enabled"]?.boolValue ?? false
+        if let schema = args["params_schema"]?.stringValue,
+           !schema.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.paramsSchemaJSON = schema
+        }
+        if let fixtures = args["fixtures"]?.stringValue,
+           !fixtures.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !FactoryInvokeParams.isPlaceholder(FactoryInvokeParams.parseFixtureParams(fixtures).first ?? [:]) {
+            draft.fixturesJSON = fixtures
+        } else {
+            draft.fixturesJSON = FactoryPackageDraft.defaultFixturesJSON
+        }
         draft.reviewPassed = false
         draft.reviewSummary = nil
         draft.harnessPassed = false
@@ -230,23 +302,45 @@ enum PluginFactoryHost {
 
         _ = try draft.pluginJSON()
         _ = try draft.runtimeJSON()
-        let findings = ScriptJSVerifier.validate(script: handle, dependencies: deps)
+        var findings = ScriptJSVerifier.validate(script: handle, dependencies: deps)
+        findings.append(contentsOf: PluginParamsContract.validate(handle))
         if !findings.isEmpty {
+            let encoded = encode([
+                "ok": false,
+                "stage": "written",
+                "static_findings": findings,
+                "next": "Fix static_findings and call factory.write_package again.",
+            ])
+            record(
+                logger,
+                draft: &draft,
+                tool: "factory.write_package",
+                arguments: ["plugin_id": resolvedID, "handle": handle],
+                result: encoded
+            )
             try await saveDraft(draft, stage: "written", repository: repository)
-            return encode(["ok": false, "stage": "written", "static_findings": findings])
+            return encoded
         }
         let volume = try await writeStagingVolume(draft: draft, exec: stdinExecutor)
         draft.workspaceVolume = volume
-        try await saveDraft(draft, stage: "written", pluginID: pluginID, repository: repository)
-        return encode([
+        let encoded = encode([
             "ok": true,
             "stage": "written",
-            "plugin_id": pluginID,
+            "plugin_id": resolvedID,
             "version": draft.version,
             "workspace_volume": volume,
             "hash": try draft.contentHash().rawValue,
-            "next": "Call factory.review, then factory.harness_run, then factory.promote.",
+            "next": "factory.review",
         ])
+        record(
+            logger,
+            draft: &draft,
+            tool: "factory.write_package",
+            arguments: ["plugin_id": resolvedID, "handle": handle],
+            result: encoded
+        )
+        try await saveDraft(draft, stage: "written", pluginID: resolvedID, repository: repository)
+        return encoded
     }
 
     private static func review(
@@ -289,14 +383,22 @@ enum PluginFactoryHost {
         let passed = outcome.assessment.alignedWithRequest != false && action != "deny" && action != "confirm"
         draft.reviewPassed = passed
         draft.reviewSummary = outcome.assessment.summary
-        try await saveDraft(draft, stage: passed ? "reviewed" : "written", repository: repository)
-        return encode([
+        let encoded = encode([
             "ok": passed,
             "stage": passed ? "reviewed" : "written",
             "summary": outcome.assessment.summary,
             "concerns": outcome.assessment.concerns,
-            "next": passed ? "Call factory.harness_run, then factory.promote." : "Fix the package and write again.",
+            "next": passed ? "factory.test" : "factory.write_package",
         ])
+        record(
+            logger,
+            draft: &draft,
+            tool: "factory.review",
+            arguments: ["plugin_id": draft.pluginID, "handle": draft.handle],
+            result: encoded
+        )
+        try await saveDraft(draft, stage: passed ? "reviewed" : "written", repository: repository)
+        return encoded
     }
 
     private static func harnessRun(
@@ -315,7 +417,7 @@ enum PluginFactoryHost {
         if caps.maxHarness > 0, session.harnessRuns >= caps.maxHarness {
             return encode([
                 "ok": false,
-                "error": "Factory harness cap reached (\(caps.maxHarness) per build). Raise it in Settings → Usage limits.",
+                "error": "Factory test limit reached (\(caps.maxHarness) per build). Raise it in Settings → Usage limits.",
             ])
         }
         session.harnessRuns += 1
@@ -325,12 +427,21 @@ enum PluginFactoryHost {
         if let fixtures = args["fixtures"]?.stringValue, !fixtures.isEmpty {
             draft.fixturesJSON = fixtures
         }
-        let findings = ScriptJSVerifier.validate(script: draft.handle, dependencies: draft.dependencies)
+        var findings = ScriptJSVerifier.validate(script: draft.handle, dependencies: draft.dependencies)
+        findings.append(contentsOf: PluginParamsContract.validate(draft.handle))
         if !findings.isEmpty {
             draft.harnessPassed = false
             draft.lastHarnessSummary = findings.joined(separator: "; ")
+            let encoded = encode(["ok": false, "stage": "written", "static_findings": findings])
+            record(
+                logger,
+                draft: &draft,
+                tool: "factory.test",
+                arguments: ["plugin_id": draft.pluginID, "handle": draft.handle],
+                result: encoded
+            )
             try await saveDraft(draft, stage: "written", repository: repository)
-            return encode(["ok": false, "stage": "written", "static_findings": findings])
+            return encoded
         }
 
         let result = try await ScriptExecutionRuntime.run(
@@ -339,18 +450,27 @@ enum PluginFactoryHost {
             reviewer: nil,
             logger: logger,
             reviewRequired: false,
-            initialEvent: PluginHopEvent(kind: .harness, params: ["sample": .bool(true)])
+            initialEvent: PluginHopEvent(kind: .harness, params: harnessParams(for: draft))
         )
-        let ok = harnessSucceeded(result)
+        let ok = pluginTestPassed(result)
         draft.harnessPassed = ok
-        draft.lastHarnessSummary = ok ? "fixtures passed" : harnessError(result)
-        try await saveDraft(draft, stage: ok ? "harnessed" : "written", repository: repository)
-        return encode([
+        draft.lastHarnessSummary = ok ? "Tests passed." : pluginTestError(result)
+        let encoded = encode([
             "ok": ok,
-            "stage": ok ? "harnessed" : "written",
+            "stage": ok ? "tested" : "written",
             "summary": draft.lastHarnessSummary ?? "",
-            "next": ok ? "Call factory.promote (user must approve install)." : "Fix the package and write again.",
+            "stdout": testStdout(result),
+            "next": ok ? "factory.promote" : "factory.write_package",
         ])
+        record(
+            logger,
+            draft: &draft,
+            tool: "factory.test",
+            arguments: ["plugin_id": draft.pluginID, "handle": draft.handle],
+            result: encoded
+        )
+        try await saveDraft(draft, stage: ok ? "tested" : "written", repository: repository)
+        return encoded
     }
 
     private static func promote(
@@ -359,69 +479,86 @@ enum PluginFactoryHost {
         logger: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         try await requireFactorySession(repository)
-        let draft = try await loadDraft(repository)
+        var draft = try await loadDraft(repository)
         guard draft.reviewPassed else {
             return encode(["ok": false, "error": "factory.review must pass before promote."])
         }
         guard draft.harnessPassed else {
-            return encode(["ok": false, "error": "factory.harness_run must pass before promote."])
+            return encode(["ok": false, "error": "factory.test must pass before install."])
         }
         guard !draft.pluginID.isEmpty, !draft.handle.isEmpty else {
             return encode(["ok": false, "error": "No package to promote."])
         }
 
+        let existingPlugin = try await repository.plugin(id: draft.pluginID)
+        let existingVersions = try await repository.listPluginVersions(pluginID: draft.pluginID)
+        let isUpdate = existingPlugin != nil
+        if isUpdate {
+            draft.version = PluginReleaseVersion.assign(
+                requested: draft.version,
+                existing: existingVersions.map(\.version)
+            )
+        }
+
         let event = PolicyUserEventFactory.pluginInstall(
             pluginID: draft.pluginID,
             version: draft.version,
-            summary: "Install \(draft.pluginID) \(draft.version)? \(draft.description)",
+            summary: isUpdate
+                ? "Update \(draft.pluginID) to \(draft.version)? \(draft.description)"
+                : "Install \(draft.pluginID) \(draft.version)? \(draft.description)",
             detail: draft.installSummary(),
             payloadPreview: draft.handle,
-            toolName: AllowedMCPTool.factoryPromote.rawValue
+            toolName: AllowedMCPTool.factoryPromote.rawValue,
+            isUpdate: isUpdate
         )
         let decision = await PolicyDecisionRouting.requestDecision(event)
         switch decision {
         case .approved, .approvedOnce, .approvedPermanently:
             break
-        case .denied, .dismissed, .timedOut:
-            return encode(["ok": false, "error": "User did not approve install."])
+        case .timedOut:
+            let encoded = encode([
+                "ok": false,
+                "error": "Install approval timed out. Call factory.promote again.",
+            ])
+            record(logger, draft: &draft, tool: "factory.promote", arguments: ["plugin_id": draft.pluginID], result: encoded)
+            try await saveDraft(draft, stage: "written", repository: repository)
+            return encoded
+        case .denied, .dismissed:
+            let encoded = encode(["ok": false, "error": "User declined the install."])
+            record(logger, draft: &draft, tool: "factory.promote", arguments: ["plugin_id": draft.pluginID], result: encoded)
+            try await saveDraft(draft, stage: "written", repository: repository)
+            return encoded
         }
 
-        let hash = try draft.contentHash()
-        let manifest = try draft.pluginJSON()
         let runtime = try draft.runtimeJSON()
         let depsData = try JSONSerialization.data(withJSONObject: draft.dependencies)
         let depsJSON = String(decoding: depsData, as: UTF8.self)
 
-        if let existing = try await repository.plugin(id: draft.pluginID),
-           let currentID = existing.currentVersionID,
+        if let currentID = try await repository.plugin(id: draft.pluginID)?.currentVersionID,
            let current = try await repository.pluginVersion(id: currentID),
-           current.contentHash == hash.rawValue {
+           current.entrypointSource == draft.handle,
+           current.runtimeJSON == runtime,
+           current.dependenciesJSON == depsJSON {
             try await saveDraft(draft, stage: "promoted", pluginID: draft.pluginID, repository: repository)
             let test = await runPromoteTest(
-                pluginID: draft.pluginID,
+                draft: draft,
                 repository: repository,
                 stdinExecutor: stdinExecutor,
                 logger: logger
             )
-            return encode([
-                "ok": true,
-                "stage": "promoted",
-                "plugin_id": draft.pluginID,
-                "version": current.version,
-                "content_hash": hash.rawValue,
-                "note": "Same content already installed.",
-                "test": [
-                    "heading": test.heading,
-                    "body": test.body,
-                    "kind": test.kind.rawValue,
-                ],
-            ])
+            return encodePromoted(
+                pluginID: draft.pluginID,
+                version: current.version,
+                contentHash: current.contentHash,
+                test: test,
+                note: "Same content already installed."
+            )
         }
 
-        let existingVersions = try await repository.listPluginVersions(pluginID: draft.pluginID)
-        let reusedID = existingVersions.first(where: { $0.version == draft.version })?.id
+        let hash = try draft.contentHash()
+        let manifest = try draft.pluginJSON()
         let version = PluginVersionRow(
-            id: reusedID ?? UUID().uuidString,
+            id: UUID().uuidString,
             pluginID: draft.pluginID,
             version: draft.version,
             contentHash: hash.rawValue,
@@ -443,45 +580,76 @@ enum PluginFactoryHost {
         )
         try await saveDraft(draft, stage: "promoted", pluginID: draft.pluginID, repository: repository)
         let test = await runPromoteTest(
-            pluginID: draft.pluginID,
+            draft: draft,
             repository: repository,
             stdinExecutor: stdinExecutor,
             logger: logger
         )
-        return encode([
+        return encodePromoted(
+            pluginID: draft.pluginID,
+            version: draft.version,
+            contentHash: hash.rawValue,
+            test: test
+        )
+    }
+
+    private static func encodePromoted(
+        pluginID: String,
+        version: String,
+        contentHash: String,
+        test: PluginInvokePresentation.TestReport,
+        note: String? = nil
+    ) -> String {
+        DerrickPluginCatalogSignal.post()
+        var payload: [String: Any] = [
             "ok": true,
             "stage": "promoted",
-            "plugin_id": draft.pluginID,
-            "version": draft.version,
-            "content_hash": hash.rawValue,
+            "plugin_id": pluginID,
+            "version": version,
+            "content_hash": contentHash,
             "test": [
                 "heading": test.heading,
                 "body": test.body,
                 "kind": test.kind.rawValue,
             ],
-        ])
+        ]
+        if let note { payload["note"] = note }
+        return encode(payload)
     }
 
     private static func runPromoteTest(
-        pluginID: String,
+        draft: FactoryPackageDraft,
         repository: DBRepository,
         stdinExecutor: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
         logger: @escaping @Sendable (String) -> Void
     ) async -> PluginInvokePresentation.TestReport {
+        let params = FactoryInvokeParams.resolve(
+            fixturesJSON: draft.fixturesJSON,
+            handle: draft.handle,
+            goal: draft.goal,
+            schemaJSON: draft.paramsSchemaJSON
+        )
+        let heading = FactoryInvokeParams.testHeading(pluginID: draft.pluginID, params: params)
         do {
+            var args: [String: Value] = [
+                "plugin_id": .string(draft.pluginID),
+                "kind": .string(PluginEventKind.manual.rawValue),
+            ]
+            if !params.isEmpty {
+                args["params"] = mcpValue(from: .object(params))
+            }
             let raw = try await invoke(
-                args: [
-                    "plugin_id": .string(pluginID),
-                    "kind": .string(PluginEventKind.manual.rawValue),
-                ],
+                args: args,
                 repository: repository,
                 stdinExecutor: stdinExecutor,
                 logger: logger
             )
-            return PluginInvokePresentation.testReport(pluginID: pluginID, scriptResult: raw)
+            var report = PluginInvokePresentation.testReport(pluginID: draft.pluginID, scriptResult: raw)
+            report.heading = heading
+            return report
         } catch {
             return PluginInvokePresentation.TestReport(
-                heading: "Testing new plugin \(pluginID)…",
+                heading: heading,
                 body: error.localizedDescription,
                 kind: .programmatic
             )
@@ -495,7 +663,8 @@ enum PluginFactoryHost {
     ) async throws -> String {
         try await requireFactorySession(repository)
         var draft = DailyNewsSample.draft()
-        let findings = ScriptJSVerifier.validate(script: draft.handle, dependencies: draft.dependencies)
+        var findings = ScriptJSVerifier.validate(script: draft.handle, dependencies: draft.dependencies)
+        findings.append(contentsOf: PluginParamsContract.validate(draft.handle))
         if !findings.isEmpty {
             return encode(["ok": false, "static_findings": findings])
         }
@@ -509,15 +678,15 @@ enum PluginFactoryHost {
             reviewer: nil,
             logger: logger,
             reviewRequired: false,
-            initialEvent: PluginHopEvent(kind: .harness, params: ["sample": .bool(true)])
+            initialEvent: PluginHopEvent(kind: .harness, params: harnessParams(for: draft))
         )
-        draft.harnessPassed = harnessSucceeded(result)
-        draft.lastHarnessSummary = draft.harnessPassed ? "sample fixtures passed" : harnessError(result)
-        try await saveDraft(draft, stage: draft.harnessPassed ? "harnessed" : "written", pluginID: draft.pluginID, repository: repository)
+        draft.harnessPassed = pluginTestPassed(result)
+        draft.lastHarnessSummary = draft.harnessPassed ? "Sample tests passed." : pluginTestError(result)
+        try await saveDraft(draft, stage: draft.harnessPassed ? "tested" : "written", pluginID: draft.pluginID, repository: repository)
         guard draft.harnessPassed else {
             return encode([
                 "ok": false,
-                "error": draft.lastHarnessSummary ?? "Sample harness failed.",
+                "error": draft.lastHarnessSummary ?? "Sample test failed.",
             ])
         }
         return try await promote(
@@ -551,6 +720,19 @@ enum PluginFactoryHost {
             ])
         }
         return encode(["ok": true, "plugins": rows])
+    }
+
+    private static func installedPluginSummaries(_ repository: DBRepository) async throws -> [[String: String]] {
+        let plugins = try await repository.listPlugins(includeDisabled: true)
+        var rows: [[String: String]] = []
+        for plugin in plugins {
+            var version = ""
+            if let id = plugin.currentVersionID, let ver = try await repository.pluginVersion(id: id) {
+                version = ver.version
+            }
+            rows.append(["id": plugin.id, "version": version])
+        }
+        return rows
     }
 
     private static func invoke(
@@ -669,9 +851,21 @@ enum PluginFactoryHost {
 
     private static func loadDraft(_ repository: DBRepository) async throws -> FactoryPackageDraft {
         let session = try await loadSession(repository)
-        guard let raw = session.specJSON, let data = raw.data(using: .utf8),
-              let draft = try? JSONDecoder().decode(FactoryPackageDraft.self, from: data) else {
-            return FactoryPackageDraft(goal: "")
+        var draft: FactoryPackageDraft
+        if let raw = session.specJSON, let data = raw.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(FactoryPackageDraft.self, from: data) {
+            draft = decoded
+        } else {
+            draft = FactoryPackageDraft(goal: "")
+        }
+        let locked = session.pluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !locked.isEmpty {
+            if draft.reusePluginID?.isEmpty != false {
+                draft.reusePluginID = locked
+            }
+            if draft.pluginID.isEmpty {
+                draft.pluginID = locked
+            }
         }
         return draft
     }
@@ -686,7 +880,13 @@ enum PluginFactoryHost {
         let data = try JSONEncoder().encode(draft)
         session.specJSON = String(decoding: data, as: UTF8.self)
         session.stage = stage
-        if let pluginID { session.pluginID = pluginID }
+        if let pluginID {
+            session.pluginID = pluginID
+        } else if let reuse = draft.reusePluginID, !reuse.isEmpty {
+            session.pluginID = reuse
+        } else if !draft.pluginID.isEmpty {
+            session.pluginID = draft.pluginID
+        }
         session.updatedAt = .now
         try await repository.upsertFactorySession(session)
     }
@@ -730,6 +930,38 @@ enum PluginFactoryHost {
         }
     }
 
+    private static func mcpValue(from json: PluginJSON) -> Value {
+        switch json {
+        case .null:
+            return .null
+        case .bool(let flag):
+            return .bool(flag)
+        case .number(let number):
+            if number.rounded() == number,
+               number >= Double(Int.min),
+               number <= Double(Int.max) {
+                return .int(Int(number))
+            }
+            return .double(number)
+        case .string(let text):
+            return .string(text)
+        case .array(let items):
+            return .array(items.map(mcpValue(from:)))
+        case .object(let object):
+            return .object(object.mapValues { mcpValue(from: $0) })
+        }
+    }
+
+    private static func harnessParams(for draft: FactoryPackageDraft) -> [String: PluginJSON] {
+        let resolved = FactoryInvokeParams.resolve(
+            fixturesJSON: draft.fixturesJSON,
+            handle: draft.handle,
+            goal: draft.goal,
+            schemaJSON: draft.paramsSchemaJSON
+        )
+        return resolved.isEmpty ? [FactoryInvokeParams.placeholderKey: .bool(true)] : resolved
+    }
+
     private static func requireFactorySession(_ repository: DBRepository) async throws {
         guard await isFactoryEnabled(repository) else {
             throw NSError(
@@ -767,18 +999,18 @@ enum PluginFactoryHost {
         ),
               let data = raw.data(using: .utf8),
               let decoded = try? JSONDecoder().decode(FactoryUsageCapsDTO.self, from: data) else {
-            return (6, 6)
+            return (12, 12)
         }
         return (
-            decoded.maxFactoryReviewerCallsPerBuild ?? 6,
-            decoded.maxHarnessRunsPerBuild ?? 6
+            decoded.maxFactoryReviewerCallsPerBuild ?? 12,
+            decoded.maxHarnessRunsPerBuild ?? 12
         )
     }
 
     private static func harnessArguments(draft: FactoryPackageDraft) -> [String: Value] {
         var args: [String: Value] = [
             "description": .string(draft.description),
-            "reason": .string("Factory harness for \(draft.pluginID)"),
+            "reason": .string("Factory test for \(draft.pluginID)"),
             "script": .string(draft.handle),
         ]
         if !draft.dependencies.isEmpty {
@@ -802,7 +1034,19 @@ enum PluginFactoryHost {
         return !resultJSON.lowercased().contains("\"status\":\"failed\"")
     }
 
-    private static func harnessError(_ resultJSON: String) -> String {
+    private static func pluginTestPassed(_ resultJSON: String) -> Bool {
+        guard harnessSucceeded(resultJSON) else { return false }
+        let report = PluginInvokePresentation.testReport(pluginID: "plugin", scriptResult: resultJSON)
+        return !PluginInvokePresentation.isEmptyResult(report.body)
+    }
+
+    private static func pluginTestError(_ resultJSON: String) -> String {
+        let report = PluginInvokePresentation.testReport(pluginID: "plugin", scriptResult: resultJSON)
+        if PluginInvokePresentation.isEmptyResult(report.body) {
+            return report.body.isEmpty
+                ? "The plugin test returned no usable output. handle() must still produce useful output when params are omitted."
+                : report.body
+        }
         guard let data = resultJSON.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return String(resultJSON.prefix(240))
@@ -812,7 +1056,25 @@ enum PluginFactoryHost {
         }
         if let error = obj["error"] as? String { return error }
         if let stderr = obj["stderr"] as? String, !stderr.isEmpty { return String(stderr.prefix(240)) }
-        return "Harness failed."
+        return "Test failed."
+    }
+
+    private static func testStdout(_ resultJSON: String) -> String {
+        let report = PluginInvokePresentation.testReport(pluginID: "plugin", scriptResult: resultJSON)
+        if !report.body.isEmpty { return report.body }
+        return String(resultJSON.prefix(400))
+    }
+
+    private static func record(
+        _ logger: @escaping @Sendable (String) -> Void,
+        draft: inout FactoryPackageDraft,
+        tool: String,
+        arguments: [String: String],
+        result: String
+    ) {
+        let line = FactoryAttemptLog.describe(tool: tool, arguments: arguments, result: result)
+        draft.recordAttempt(line)
+        logger(line)
     }
 
     private static func objectSchema(_ properties: [String: Value], required: [String] = []) -> Value {

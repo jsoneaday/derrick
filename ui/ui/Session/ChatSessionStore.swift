@@ -2,6 +2,7 @@ import Combine
 import DBRepository
 import Foundation
 import LLMAgentClient
+import Plugin
 import ServiceContracts
 
 struct ChatTab: Identifiable, Hashable {
@@ -78,12 +79,29 @@ final class ChatSessionStore: ObservableObject {
         persistSessionShell(sessionID: id, title: tab.title)
     }
 
-    func openFactorySession() {
+    func openFactorySession(editing pluginID: String? = nil) {
         let id = FactorySessionID.make()
-        let tab = ChatTab(id: id, title: "Software Factory")
+        let locked = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = locked.isEmpty ? "Software Factory" : "Change \(locked)"
+        let tab = ChatTab(id: id, title: title)
         tabs.append(tab)
         selectedSessionID = id
-        persistSessionShell(sessionID: id, title: tab.title)
+        persistSessionShell(sessionID: id, title: title)
+        guard !locked.isEmpty, let repository else { return }
+        Task {
+            var draft = FactoryPackageDraft(goal: "Change \(locked)")
+            draft.pluginID = locked
+            draft.reusePluginID = locked
+            let spec = (try? JSONEncoder().encode(draft)).flatMap { String(data: $0, encoding: .utf8) }
+            try? await repository.upsertFactorySession(
+                FactorySessionRow(
+                    sessionID: id,
+                    specJSON: spec,
+                    stage: "spec",
+                    pluginID: locked
+                )
+            )
+        }
     }
 
     var isFactorySessionSelected: Bool {

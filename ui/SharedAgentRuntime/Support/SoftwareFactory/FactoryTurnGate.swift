@@ -22,6 +22,10 @@ extension FactoryTurnGate {
             records: records.map(Record.init(toolCall:))
         )
     }
+
+    static func userFacingStopMessage(sessionID: String, records: [ToolCallRecord]) -> String {
+        userFacingStopMessage(sessionID: sessionID, records: records.map(Record.init(toolCall:)))
+    }
 }
 
 private extension FactoryTurnGate.Record {

@@ -4,6 +4,7 @@ import DBRepository
 import AppEvents
 import PolicyUserInteraction
 import LLMAgentClient
+import ServiceContracts
 
 /// Permanent usage limits (Settings) + session raises + daily/weekly token counters.
 @MainActor
@@ -113,10 +114,10 @@ final class UsageLimitsService: ObservableObject {
 
     /// Call at the start of each agent tool round (0-based round index about to run tools after model).
     func allowToolRound(roundIndex: Int, factoryPipeline: Bool = false) async -> Bool {
-        // Factory is a host pipeline (build → write → review → harness → promote).
+        // Factory is a host pipeline (build → write → review → test → promote).
         // Chat's per-message cap of 3 would stop it mid-install.
         let limit = factoryPipeline
-            ? UsageLimits.absoluteMax.maxToolRoundsPerMessage
+            ? FactoryTurnGate.pipelineToolRounds
             : effectiveMaxToolRounds
         // rounds used so far; allowing roundIndex means we need roundIndex < limit for 0..<limit
         if roundIndex < limit {

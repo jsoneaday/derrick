@@ -461,6 +461,26 @@ public final class XPCDockerRunner: ScriptRunner, @unchecked Sendable {
         debugLog("Pushed egress session hosts to helper (ok=\(ok), hosts=\(hosts.joined(separator: ",")))")
     }
 
+    /// Best-effort `docker volume rm` for plugin-data / plugin-code / staging names.
+    public func removeRemovableVolumes(_ names: [String]) async {
+        let unique = Array(Set(names.filter { DerrickNamedVolume.isRemovable($0) })).sorted()
+        guard !unique.isEmpty else { return }
+        let exec = makeCLIExecutor()
+        for name in unique {
+            do {
+                let result = try await exec(DockerScriptPreparer.dockerVolumeRmArguments(name: name), Data(), 15)
+                if result.exitCode == 0 {
+                    debugLog("Removed Docker volume \(name)")
+                } else {
+                    let err = String(decoding: result.stderr, as: UTF8.self)
+                    debugLog("Docker volume rm \(name) exit=\(result.exitCode) \(err)")
+                }
+            } catch {
+                debugLog("Docker volume rm \(name) failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func serviceCallWithTimeout(
         label: String,
         timeoutNanoseconds: UInt64 = 15_000_000_000,
