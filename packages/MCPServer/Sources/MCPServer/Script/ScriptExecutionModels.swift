@@ -1,7 +1,6 @@
 import Foundation
 import LLMAgentClient
 import MCP
-import MCPToolCatalog
 
 public struct ScriptExecutionArguments: Sendable {
     public enum Mode: String, Sendable {
@@ -15,8 +14,7 @@ public struct ScriptExecutionArguments: Sendable {
     public let script: String
     public let userPrompt: String?
     public let expectedEffects: [String]
-    public let packages: [String]
-    public let allowDependencyInstall: Bool
+    public let dependencies: [String: String]
     public let timeoutSeconds: Int
     public let allowNetwork: Bool
 
@@ -27,8 +25,7 @@ public struct ScriptExecutionArguments: Sendable {
         script: String,
         userPrompt: String?,
         expectedEffects: [String],
-        packages: [String],
-        allowDependencyInstall: Bool,
+        dependencies: [String: String] = [:],
         timeoutSeconds: Int,
         allowNetwork: Bool
     ) {
@@ -38,8 +35,7 @@ public struct ScriptExecutionArguments: Sendable {
         self.script = script
         self.userPrompt = userPrompt
         self.expectedEffects = expectedEffects
-        self.packages = packages
-        self.allowDependencyInstall = allowDependencyInstall
+        self.dependencies = dependencies
         self.timeoutSeconds = timeoutSeconds
         self.allowNetwork = allowNetwork
     }
@@ -65,7 +61,7 @@ public enum ScriptFailureStage: String, Codable, Sendable, Equatable {
     case none
     /// Static verifier rejected the request before run.
     case staticValidation
-    /// Guest TypeScript (`tsc --noEmit`) rejected the script.
+    /// The Swift compiler rejected the script.
     case typecheck
     /// LLM security reviewer rejected (or could not complete when required).
     case llmReview
@@ -258,7 +254,7 @@ public struct ScriptExecutionResult: Codable, Sendable {
         stderr: String,
         durationMS: Int,
         phaseTiming: ScriptPhaseTiming?,
-        verifier: String = "static-check-v1"
+        verifier: String = "swift-check-v1"
     ) -> ScriptExecutionResult {
         let combined = stdout + "\n" + stderr
         let looksLikeEgress = combined.localizedCaseInsensitiveContains("UNAUTHORIZED_EGRESS")
@@ -300,11 +296,11 @@ public struct ScriptExecutionResult: Codable, Sendable {
     /// Container lease TTL hit — run stopped to free the slot for other agents.
     public static func containerLeaseExceeded(
         durationMS: Int,
-        maxSeconds: Int = DockerScriptPreparer.containerRunMaxTTLSeconds,
+        maxSeconds: Int = SwiftScriptPreparer.containerRunMaxTTLSeconds,
         phaseTiming: ScriptPhaseTiming? = nil,
-        verifier: String = "static-check-v1"
+        verifier: String = "swift-check-v1"
     ) -> ScriptExecutionResult {
-        let explanation = DockerScriptPreparer.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
+        let explanation = SwiftScriptPreparer.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
         return ScriptExecutionResult(
             status: .timeout,
             decision: .allow,
@@ -344,16 +340,6 @@ public struct ScriptReviewAssessment: Codable, Sendable {
     }
 }
 
-public protocol ScriptRunner: Sendable {
-    func run(
-        script: String,
-        timeoutSeconds: Int,
-        allowNetwork: Bool,
-        packages: [String],
-        allowDependencyInstall: Bool
-    ) async throws -> ScriptExecutionResult
-}
-
 public protocol ScriptReviewer: Sendable {
     var name: String { get }
     func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome
@@ -368,8 +354,7 @@ enum ScriptReviewerRuntime {
             "script": args.script,
             "user_prompt": args.userPrompt ?? "",
             "expected_effects": args.expectedEffects,
-            "packages": args.packages,
-            "allow_dependency_install": args.allowDependencyInstall,
+            "dependencies": args.dependencies,
             "allow_network": args.allowNetwork,
             "timeout_seconds": args.timeoutSeconds,
             "scheduler": [
@@ -413,14 +398,13 @@ enum ScriptReviewerRuntime {
     ) async throws -> ScriptReviewOutcome {
         let userContent = reviewInput(from: args)
         let requestChars = ReviewerSystemPrompt.utf8.count + userContent.utf8.count
-        print("[ScriptExecutionTool] Reviewer request started: model=\(modelLabel), mode=\(args.mode.rawValue), packages=\(args.packages.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds), request_chars=\(requestChars)")
+        print("[ScriptExecutionTool] Reviewer request started: model=\(modelLabel), mode=\(args.mode.rawValue), dependencies=\(args.dependencies.count), allowNetwork=\(args.allowNetwork), timeoutSeconds=\(args.timeoutSeconds), request_chars=\(requestChars)")
 
         let requestStarted = Date()
         var firstChunkAt: Date?
         var lastChunkAt: Date?
         var chunkCount = 0
         var completion = ""
-        var apiUsage: AgentTokenUsage?
 
         for try await event in stream {
             switch event {
@@ -432,8 +416,8 @@ enum ScriptReviewerRuntime {
                 lastChunkAt = now
                 chunkCount += 1
                 completion += chunk
-            case .usage(let usage):
-                apiUsage = usage
+            case .usage:
+                break
             }
         }
 
@@ -490,13 +474,8 @@ public enum ScriptExecutionVerifier {
         if args.mode == .write && args.expectedEffects.isEmpty {
             findings.append("Write mode requires expected_effects.")
         }
-        let normalizedPackages = normalizePackages(args.packages)
-        let invalidPackageNames = normalizedPackages.filter { !isValidPackageName($0) }
-        if !invalidPackageNames.isEmpty {
-            findings.append("Invalid packages values: \(invalidPackageNames.joined(separator: ", ")).")
-        }
-        if !args.packages.isEmpty && !args.allowDependencyInstall {
-            findings.append("Requested packages require allow_dependency_install=true: \(args.packages.joined(separator: ", ")).")
+        if !args.dependencies.isEmpty {
+            findings.append("Swift script dependencies are not supported.")
         }
 
         if args.mode == .readonly {
@@ -508,36 +487,21 @@ public enum ScriptExecutionVerifier {
 
     private static func readonlyViolations(in script: String) -> [String] {
         let patterns: [(String, String)] = [
-            (#"(?m)\b(writeFile|appendFile|mkdir|rm|unlink|rename)\s*\("#, "Readonly mode cannot mutate filesystem."),
-            (#"(?m)\b(child_process|Bun\.spawn|Bun\.connect)\b"#, "Readonly mode cannot execute nested commands.")
+            (#"(?m)\b(FileManager|writeData|write\(to:|removeItem|moveItem|createDirectory)\b"#, "Readonly mode cannot mutate filesystem."),
+            (#"(?m)\b(Process|URLSession|NWConnection|Socket)\b"#, "Readonly mode cannot execute nested commands or access the network.")
         ]
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil
         }
     }
 
-    private static func normalizePackages(_ packages: [String]) -> [String] {
-        var seen = Set<String>()
-        var output: [String] = []
-        for package in packages {
-            let normalized = package.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
-            seen.insert(normalized)
-            output.append(normalized)
-        }
-        return output
-    }
-
-    private static func isValidPackageName(_ package: String) -> Bool {
-        package.range(of: #"^[a-z0-9][a-z0-9._-]{0,63}$"#, options: .regularExpression) != nil
-    }
 }
 
 /// Optional pre-run network gate (app-owned). Returns encoded blocked tool JSON, or nil to proceed.
 public typealias ScriptNetworkPreflight = @Sendable (_ script: String, _ allowNetwork: Bool) async -> String?
 
 public extension MCPServerHost {
-    /// Register `script_exec` (Bun, host HTTP).
+    /// Register the Swift `script_exec` tool.
     func registerScriptExecutionTool(
         description: String? = nil,
         stdinExecutor: @escaping @Sendable ([String], Data, Int) async throws -> DockerCLIResult,
@@ -551,233 +515,6 @@ public extension MCPServerHost {
                 reviewer: reviewer,
                 logger: logger
             )
-        )
-    }
-
-    /// Shared execution body used by the retired script tool path (keeps parse/verify helpers on host).
-    static func runLegacyScriptToolBody(
-        arguments: [String: Value],
-        runner: any ScriptRunner,
-        reviewer: (any ScriptReviewer)?,
-        networkPreflight: ScriptNetworkPreflight? = nil,
-        logger: @escaping @Sendable (String) -> Void,
-        toolStarted: Date
-    ) async throws -> String {
-            let parsed = try Self.parseScriptExecutionArguments(arguments)
-            let scriptMetrics = ScriptPhaseTiming.scriptMetrics(parsed.script)
-            logger(
-                "[script_exec] script size: chars=\(scriptMetrics.chars) lines=\(scriptMetrics.lines)"
-            )
-
-            let staticStarted = Date()
-            let staticFindings = ScriptExecutionVerifier.validate(parsed)
-            let staticValidateMS = ScriptPhaseTiming.elapsedMS(from: staticStarted)
-            logger("staticFindings \(staticFindings.map(\.debugDescription).joined(separator: "\n"))")
-            logger("[TIME_METRIC] script_exec static_ms=\(staticValidateMS)")
-            var findings = staticFindings
-            var verifierName = "static-check-v1"
-            var assessment: ScriptReviewAssessment?
-            var reviewerTiming = ScriptReviewerTiming()
-
-            // Short-circuit: static failure or offline container — no LLM reviewer.
-            // DestinationPolicy / egress proxy still apply at runtime when network is used.
-            var needsLLMReview = false
-            if !staticFindings.isEmpty {
-                logger("[script_exec] skipping LLM reviewer: static validation failed")
-                verifierName += "+llm-skipped-static"
-            } else if !parsed.allowNetwork {
-                logger("[script_exec] skipping LLM reviewer: allow_network=false (container-isolated)")
-                verifierName += "+llm-skipped-offline"
-            } else if let reviewer {
-                needsLLMReview = true
-                do {
-                    logger("[ScriptExecutionTool] Reviewer request started: \(reviewer.name)")
-                    let outcome = try await reviewer.review(parsed)
-                    assessment = outcome.assessment
-                    logger("[ScriptExecutionTool] Reviewer assessment: \(outcome.assessment.summary)")
-                    reviewerTiming = outcome.timing
-                    verifierName += "+\(reviewer.name)"
-                    logger(reviewerTiming.summaryLine)
-                } catch {
-                    // Fail closed: any reviewer exception blocks execution.
-                    logger("[ScriptExecutionTool] Reviewer failed: \(error.localizedDescription)")
-                    print("[ScriptExecutionTool] reviewer failed: \(error)")
-                    let message = "Reviewer failed: \(error.localizedDescription)"
-                    findings.append(message)
-                    assessment = nil
-                }
-            } else if parsed.mode == .write {
-                let message = "Write mode with allow_network=true requires configured reviewer."
-                findings.append(message)
-            }
-
-            // Fail closed only when an LLM review was required.
-            if needsLLMReview {
-                if assessment == nil {
-                    findings.append("Reviewer did not return an assessment; execution denied.")
-                } else if assessment?.alignedWithRequest == false {
-                    findings.append("Reviewer marked script as not aligned with request; execution denied.")
-                } else {
-                    let action = (assessment?.suggestedAction ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    if action == "deny" || action == "confirm" {
-                        findings.append("Reviewer suggested \(action); execution denied.")
-                    }
-                }
-            }
-
-            if !findings.isEmpty {
-                // Fail-fast stage: static findings always win; otherwise this gate is LLM review.
-                let failureStage: ScriptFailureStage =
-                    !staticFindings.isEmpty ? .staticValidation : .llmReview
-                let totalMS = ScriptPhaseTiming.elapsedMS(from: toolStarted)
-                var phaseTiming = ScriptPhaseTiming(
-                    staticValidateMS: staticValidateMS,
-                    ensureMS: 0,
-                    execMS: 0,
-                    totalMS: totalMS,
-                    scriptCharCount: scriptMetrics.chars,
-                    scriptLineCount: scriptMetrics.lines,
-                    wrapperCharCount: 0
-                )
-                phaseTiming.applyReviewerTiming(reviewerTiming)
-                logger("\(phaseTiming.summaryLine) blocked stage=\(failureStage.rawValue)")
-                let denied = ScriptExecutionResult(
-                    status: .blocked,
-                    decision: .deny,
-                    failureStage: failureStage,
-                    verifier: verifierName,
-                    validationFindings: findings,
-                    reviewerAssessment: assessment,
-                    stdout: "",
-                    stderr: "",
-                    exitCode: -1,
-                    timedOut: false,
-                    durationMS: totalMS,
-                    phaseTiming: phaseTiming
-                )
-                return Self.encodeJSON(denied)
-            }
-
-            // Egress preflight (app-provided): unknown hosts prompt; any Deny aborts before Docker run.
-            if let networkPreflight,
-               let blockedJSON = await networkPreflight(parsed.script, parsed.allowNetwork) {
-                logger("[script_exec] blocked by egress preflight")
-                return blockedJSON
-            }
-
-            var result: ScriptExecutionResult
-            let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(
-                requested: parsed.timeoutSeconds
-            )
-            do {
-                result = try await runner.run(
-                    script: parsed.script,
-                    timeoutSeconds: effectiveTimeout,
-                    allowNetwork: parsed.allowNetwork,
-                    packages: parsed.packages,
-                    allowDependencyInstall: parsed.allowDependencyInstall
-                )
-            } catch let error as DockerNetworkContainerPoolError {
-                if case .leaseTTLExceeded(let maxSeconds) = error {
-                    let totalMS = ScriptPhaseTiming.elapsedMS(from: toolStarted)
-                    result = ScriptExecutionResult.containerLeaseExceeded(
-                        durationMS: totalMS,
-                        maxSeconds: maxSeconds
-                    )
-                } else {
-                    throw error
-                }
-            }
-            let totalMS = ScriptPhaseTiming.elapsedMS(from: toolStarted)
-            var phaseTiming = result.phaseTiming ?? ScriptPhaseTiming()
-            phaseTiming.staticValidateMS = staticValidateMS
-            phaseTiming.totalMS = totalMS
-            phaseTiming.scriptCharCount = scriptMetrics.chars
-            phaseTiming.scriptLineCount = scriptMetrics.lines
-            phaseTiming.applyReviewerTiming(reviewerTiming)
-            logger("\(phaseTiming.summaryLine) stage=\(result.failureStage.rawValue)")
-            // Preserve runner failureStage/decision; attach pre-run verifier + optional allow assessment.
-            result = ScriptExecutionResult(
-                status: result.status,
-                decision: result.decision,
-                failureStage: result.failureStage,
-                verifier: verifierName,
-                validationFindings: findings,
-                reviewerAssessment: assessment,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                exitCode: result.exitCode,
-                timedOut: result.timedOut,
-                durationMS: totalMS,
-                phaseTiming: phaseTiming
-            )
-            return Self.encodeJSON(result)
-    }
-
-    private static func parseScriptExecutionArguments(_ arguments: [String: Value]) throws -> ScriptExecutionArguments {
-        // Hard requirements: mode + script. Models often omit description/reason; fill defaults
-        // so a valid script is not rejected at the service boundary.
-        let modeRaw = arguments["mode"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let script = arguments["script"]?.stringValue
-        let missing: [String] = [
-            modeRaw == nil || modeRaw?.isEmpty == true ? "mode" : nil,
-            script == nil || script?.isEmpty == true ? "script" : nil
-        ].compactMap { $0 }
-        guard missing.isEmpty,
-              let modeRaw,
-              let mode = ScriptExecutionArguments.Mode(rawValue: modeRaw.lowercased()),
-              let script
-        else {
-            let keys = arguments.keys.sorted().joined(separator: ",")
-            throw NSError(
-                domain: "MCPServer",
-                code: 400,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Missing required fields: \(missing.isEmpty ? "mode (invalid), script" : missing.joined(separator: ", ")). Present keys: [\(keys)]"
-                ]
-            )
-        }
-
-        let userPrompt = arguments["user_prompt"]?.stringValue
-        let promptSnippet = userPrompt?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let description: String = {
-            let raw = arguments["description"]?.stringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !raw.isEmpty { return raw }
-            if !promptSnippet.isEmpty {
-                return "Carry out user request: \(promptSnippet)"
-            }
-            return "Execute script for the user request."
-        }()
-        let reason: String = {
-            let raw = arguments["reason"]?.stringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !raw.isEmpty { return raw }
-            if !promptSnippet.isEmpty {
-                return "User asked: \(promptSnippet)"
-            }
-            return "User-requested automation or live data access."
-        }()
-
-        let expectedEffects = (arguments["expected_effects"]?.arrayValue ?? []).compactMap { $0.stringValue }
-        let packages = (arguments["packages"]?.arrayValue ?? []).compactMap { $0.stringValue }
-        let allowDependencyInstall = arguments["allow_dependency_install"]?.boolValue ?? false
-        let timeoutSeconds = arguments["timeout_seconds"]?.intValue ?? 30
-        let allowNetwork = arguments["allow_network"]?.boolValue ?? false
-
-        return ScriptExecutionArguments(
-            mode: mode,
-            description: description,
-            reason: reason,
-            script: script,
-            userPrompt: userPrompt,
-            expectedEffects: expectedEffects,
-            packages: packages,
-            allowDependencyInstall: allowDependencyInstall,
-            timeoutSeconds: timeoutSeconds,
-            allowNetwork: allowNetwork
         )
     }
 }

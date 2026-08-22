@@ -1,6 +1,6 @@
 import Foundation
 
-/// Derrick-only runtime (`app.derrick/runtime.json`). Not part of Agent Plugins.
+/// Derrick runtime metadata (`app.derrick/runtime.json`) for a standalone Swift entrypoint.
 public struct DerrickRuntime: Codable, Sendable, Hashable {
     public var entrypoint: String
     public var dependencies: [String: String]
@@ -59,40 +59,28 @@ public struct DerrickRuntime: Codable, Sendable, Hashable {
         )
     }
 
-    /// Runtime `entrypoint` is either plugin-relative (`./app.derrick/plugin.js`)
-    /// or a bare `*.js` name resolved under `app.derrick/`.
+    /// Runtime `entrypoint` is plugin-relative or a bare supported source name
+    /// resolved under `app.derrick/`.
     public static func normalizeEntrypoint(_ raw: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("./") {
-            return try PluginPath.validateJSEntrypoint(trimmed)
+            return try PluginPath.validateRuntimeEntrypoint(trimmed)
         }
-        guard (trimmed.hasSuffix(".js") || trimmed.hasSuffix(".ts")),
+        guard trimmed.hasSuffix(".swift"),
               !trimmed.contains("/"),
               !trimmed.contains("\\") else {
             throw PluginManifestError.invalidEntrypoint(raw)
         }
-        return try PluginPath.validateJSEntrypoint("./\(PluginContract.derrickExtensionNamespace)/\(trimmed)")
+        return try PluginPath.validateRuntimeEntrypoint("./\(PluginContract.derrickExtensionNamespace)/\(trimmed)")
     }
 
     public static func validateDependencies(_ deps: [String: String]) throws -> [String: String] {
-        for (name, spec) in deps {
-                let scoped = #"^@[A-Za-z0-9._~-]+/[A-Za-z0-9._~-]+$"#
-            let bare = #"^[A-Za-z0-9][A-Za-z0-9._/~-]*$"#
-            guard !name.isEmpty,
-                  !name.contains(".."),
-                  !name.hasPrefix("/"),
-                  name.range(of: scoped, options: .regularExpression) != nil
-                    || name.range(of: bare, options: .regularExpression) != nil else {
-                throw PluginManifestError.invalidDependency(name)
-            }
-            guard !spec.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw PluginManifestError.invalidDependency(name)
-            }
+        guard deps.isEmpty else {
+            let name = deps.keys.sorted().joined(separator: ", ")
+            throw PluginManifestError.invalidDependency(name)
         }
-        return deps
+        return [:]
     }
-
-    public var requiresLockfile: Bool { !dependencies.isEmpty }
 
     public var wantsDataVolume: Bool { volume.enabled }
 }
@@ -121,7 +109,7 @@ public struct DerrickRuntimeJobs: Codable, Sendable, Hashable {
 }
 
 public struct DerrickRuntimeVolume: Codable, Sendable, Hashable {
-    /// Opt-in persistent `/data` mount. Default off; factory must request it.
+    /// Opt-in persistent `/data` mount. Default off.
     public var enabled: Bool
     public var quotaBytes: Int
 

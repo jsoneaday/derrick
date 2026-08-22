@@ -20,7 +20,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "script": .object([
                     "type": .string("string"),
-                    "description": .string("TypeScript 7. import { netFetch, type HandleEvent, type HandleResult } from \"derrick\". export function handle(event: HandleEvent): HandleResult. Must return Envelope[] JSON. Native tsc runs in the guest; failures abort with the compiler output.")
+                    "description": .string("Standalone Swift source. It reads one JSON event from standard input and writes a JSON array of Derrick envelopes to standard output. Use http.request envelopes for host HTTP and result.emit/message.post for terminal output.")
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),
@@ -28,7 +28,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "dependencies": .object([
                     "type": .string("object"),
-                    "description": .string("npm package name → version range. Installed during setup before network is cut. Install hooks may run.")
+                    "description": .string("Must be empty. Swift script dependencies are not supported.")
                 ]),
                 "timeout_seconds": .object([
                     "type": .string("number"),

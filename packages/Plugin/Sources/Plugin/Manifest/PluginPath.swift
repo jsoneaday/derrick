@@ -19,12 +19,18 @@ public enum PluginPath {
         return trimmed
     }
 
-    public static func validateJSEntrypoint(_ raw: String) throws -> String {
+    /// Swift factory entrypoints are standalone files run by `swift` or compiled by `swiftc`.
+    public static func validateSwiftEntrypoint(_ raw: String) throws -> String {
         let path = try validateRelative(raw)
-        guard path.hasSuffix(".js") || path.hasSuffix(".ts") else {
+        guard path.hasSuffix(".swift") else {
             throw PluginManifestError.invalidEntrypoint(raw)
         }
         return path
+    }
+
+    /// Accepts the supported Derrick Swift runtime source file.
+    public static func validateRuntimeEntrypoint(_ raw: String) throws -> String {
+        try validateSwiftEntrypoint(raw)
     }
 
     public static func resolve(root: URL, relative: String) throws -> URL {

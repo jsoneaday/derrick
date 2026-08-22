@@ -117,7 +117,7 @@ struct DockerRunnerXPCTests {
     }
 
     @Test func processAllowlistRejectsEnvWithoutDocker() {
-        let r = request(arguments: ["bun", "-e", "print(1)"])
+        let r = request(arguments: ["swift", "-version"])
         #expect(DockerRunRequestValidator.validate(r) == .missingDockerInvocation)
     }
 
@@ -151,32 +151,6 @@ struct DockerRunnerXPCTests {
         #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("--add-host"))
     }
 
-    @Test func volumeRmOnlyAllowsDerrickRemovableNames() {
-        let ok = request(arguments: DockerHostLaunch.dockerCLIArguments([
-            "volume", "rm", "-f", "derrick-script-scratch-abc"
-        ]))
-        #expect(DockerRunRequestValidator.validate(ok) == nil)
-
-        let helpers = request(arguments: DockerHostLaunch.dockerCLIArguments([
-            "volume", "rm", DerrickNamedVolume.helpers
-        ]))
-        #expect(DockerRunRequestValidator.validate(helpers) == .disallowedVolumeName(DerrickNamedVolume.helpers))
-
-        let other = request(arguments: DockerHostLaunch.dockerCLIArguments([
-            "volume", "rm", "postgres-data"
-        ]))
-        #expect(DockerRunRequestValidator.validate(other) == .disallowedVolumeName("postgres-data"))
-    }
-
-    @Test func namedVolumeHelpers() {
-        #expect(DerrickNamedVolume.isRemovable("derrick-script-scratch-inv1"))
-        #expect(DerrickNamedVolume.isRemovable("derrick-plugin-data-daily-news"))
-        #expect(DerrickNamedVolume.isRemovable("derrick-plugin-staging-factory-abc"))
-        #expect(DerrickNamedVolume.pluginStaging(factoryID: "factory-abc") == "derrick-plugin-staging-factory-abc")
-        #expect(!DerrickNamedVolume.isRemovable(DerrickNamedVolume.helpers))
-        #expect(!DerrickNamedVolume.isRemovable("derrick-script-helpers-extra"))
-    }
-
     @Test func rejectsDisallowedDockerSubcommand() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments(["system", "prune", "-af"]))
         #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerSubcommand("system"))
@@ -203,21 +177,20 @@ struct DockerRunnerXPCTests {
         #expect(DockerRunRequestValidator.validate(r) == .disallowedVolumeMount("/:/host"))
     }
 
-    @Test func acceptsNamedVolumeMount() {
+    @Test func rejectsVolumeMount() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
-            "create", "-v", "derrick-pip-cache:/root/.cache", "--name", "x", "image"
+            "create", "-v", "derrick-cache:/tmp/cache", "--name", "x", "image"
         ]))
-        #expect(DockerRunRequestValidator.validate(r) == nil)
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedVolumeMount("derrick-cache:/tmp/cache"))
     }
 
     @Test func acceptsProductSubcommands() {
         for args in [
             ["version"],
-            ["volume", "inspect", "derrick-pip-cache"],
             ["image", "inspect", "img"],
-            ["build", "-t", "img", "-"],
             ["pull", "img"],
-            ["exec", "-i", "c", "bun", "-"],
+            ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
+            ["exec", "-i", "c", "/tmp/plugin"],
             ["start", "c"],
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"]

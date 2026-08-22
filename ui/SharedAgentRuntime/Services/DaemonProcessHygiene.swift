@@ -58,7 +58,7 @@ public enum DaemonProcessHygiene {
             reportedFingerprint: health.executableFingerprint,
             expectedFingerprint: expectedFingerprint(),
             reportedGuestRuntime: health.guestRuntimeImage,
-            expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+            expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
         )
     }
 

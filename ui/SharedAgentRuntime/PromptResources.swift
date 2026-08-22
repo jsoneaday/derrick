@@ -1,4 +1,5 @@
 import Foundation
+import Plugin
 import ServiceContracts
 
 public enum PromptResources {
@@ -28,10 +29,6 @@ public enum PromptResources {
         try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
     }
 
-    public static func factoryReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try DerrickBundledText.load("factory_reviewer_instructions.md", from: resourceRoot)
-    }
-
     public static func workerOverlay(from resourceRoot: URL? = nil) throws -> String {
         try DerrickBundledText.load("worker_overlay.md", from: resourceRoot)
     }
@@ -40,17 +37,21 @@ public enum PromptResources {
         try DerrickBundledText.load("user_facing_spawn_overlay.md", from: resourceRoot)
     }
 
-    /// Full guest SDK (`derrick.ts`) wrapped for a model prompt.
-    public static func guestSDKForModel(from resourceRoot: URL? = nil) throws -> String {
-        let source = try DerrickBundledText.load("guest/derrick.ts", from: resourceRoot)
-        return DerrickBundledText.formatTypeScriptForModel(
-            source,
-            heading: "derrick module (`import { … } from \"derrick\"`)"
+    /// Swift guest contract wrapped for a model prompt.
+    public static func guestSDKForModel(
+        from resourceRoot: URL? = nil,
+        spec: PluginSpec? = nil
+    ) throws -> String {
+        _ = resourceRoot
+        return DerrickBundledText.formatCodeForModel(
+            try DerrickGuestSwift.source(for: spec),
+            heading: "standalone Swift plugin contract"
         )
     }
 
     public static func guestSDKSource(from resourceRoot: URL? = nil) throws -> String {
-        try DerrickBundledText.load("guest/derrick.ts", from: resourceRoot)
+        _ = resourceRoot
+        return try DerrickGuestSwift.source()
     }
 
     private static func load(named name: String, from resourceRoot: URL?, prefixTxt: String? = nil) throws -> String {

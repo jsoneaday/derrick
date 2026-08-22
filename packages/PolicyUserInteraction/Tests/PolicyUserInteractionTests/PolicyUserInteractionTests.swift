@@ -26,37 +26,36 @@ import AppEvents
 
     @Test func factoryBuildsTypecheckFailed() {
         let event = PolicyUserEventFactory.typecheckFailed(
-            message: "script.ts(1,1): error TS2322: Type 'string' is not assignable to type 'HandleResult'."
+            message: "plugin.swift:1:1: error: expected expression"
         )
         #expect(event.kind == .failure)
         #expect(event.source == .system)
-        #expect(event.title == "TypeScript check failed")
-        #expect(event.summary.contains("TS2322"))
-        #expect(event.detail?.contains("HandleResult") == true)
+        #expect(event.title == "Swift check failed")
+        #expect(event.summary.contains("expected expression"))
+        #expect(event.detail?.contains("plugin.swift") == true)
     }
 
     @Test func factoryBuildsScriptExecutionFailed() {
         let event = PolicyUserEventFactory.scriptExecutionFailed(
             exitCode: 1,
-            stderr: "Traceback (most recent call last):\nValueError: boom"
+            stderr: "Swift runtime error: invalid envelope output"
         )
         #expect(event.kind == .failure)
         #expect(event.source == .system)
         #expect(event.title == "Script execution failed")
-        #expect(event.summary.contains("ValueError"))
-        #expect(event.detail?.contains("Traceback") == true)
+        #expect(event.summary.contains("Swift runtime error"))
+        #expect(event.detail?.contains("invalid envelope") == true)
     }
 
     @Test func factoryBuildsReadableSummaryForJSONDecodeError() {
         let stderr = """
-        SyntaxError: Unexpected token '<', "<html>" is not valid JSON
-            at JSON.parse (<anonymous>)
-            at handle (file:///workspace/script.js:4:18)
+        Swift.DecodingError.dataCorrupted
+            at JSONDecoder.decode(_:from:)
         """
         let event = PolicyUserEventFactory.scriptExecutionFailed(exitCode: 1, stderr: stderr)
         #expect(event.summary.localizedCaseInsensitiveContains("JSON"))
         #expect(event.summary.localizedCaseInsensitiveContains("non-JSON") || event.summary.localizedCaseInsensitiveContains("HTML"))
-        #expect(event.detail?.contains("SyntaxError") == true)
+        #expect(event.detail?.contains("DecodingError") == true)
     }
 
     @Test func factoryBuildsBlacklistHitRequest() {
@@ -87,7 +86,7 @@ import AppEvents
         let event = PolicyUserEventFactory.egressAccessRequest(host: "api.reactjs.org")
         #expect(event.kind == .networkAccessRequest)
         #expect(event.source == .egressProxy)
-        #expect(event.summary.contains("api.reactjs.org"))
+        #expect(event.summary == "Allow *.reactjs.org?")
         #expect(event.detail?.contains("reactjs.org") == true)
     }
 
@@ -96,10 +95,10 @@ import AppEvents
             hosts: ["m.media-amazon.com", "images-na.ssl-images-amazon.com", "c.amazon-adsystem.com"]
         )
         #expect(event.kind == .networkAccessRequest)
-        #expect(event.summary.contains("3 hosts"))
+        #expect(event.summary == "Allow these domains and their subdomains?")
         #expect(event.payloadPreview?.contains("m.media-amazon.com") == true)
         #expect(event.payloadPreview?.contains("amazon-adsystem.com") == true)
-        #expect(event.detail?.localizedCaseInsensitiveContains("suffixes") == true)
+        #expect(event.detail?.localizedCaseInsensitiveContains("always saves") == true)
     }
 
     @Test func approvalRequiredIsDecisionRequesting() async {

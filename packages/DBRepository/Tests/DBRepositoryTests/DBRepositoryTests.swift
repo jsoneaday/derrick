@@ -1,5 +1,6 @@
 import XCTest
 import SQLite3
+import Plugin
 @testable import DBRepository
 
 final class DBRepositoryTests: XCTestCase {
@@ -65,19 +66,132 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(try tableExists(named: "memory_records", at: url))
         XCTAssertTrue(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
         XCTAssertTrue(try tableExists(named: "content_sensitivity_grants", at: url))
-        XCTAssertTrue(try tableExists(named: "plugins", at: url))
+        XCTAssertFalse(try tableExists(named: "plugins", at: url))
+        XCTAssertFalse(try tableExists(named: "plugin_versions", at: url))
+        XCTAssertFalse(try tableExists(named: "plugin_grants", at: url))
+        XCTAssertFalse(try tableExists(named: "plugin_invokes", at: url))
+        XCTAssertFalse(try tableExists(named: "pending_plugin_waits", at: url))
         XCTAssertTrue(try tableExists(named: "egress_blacklist", at: url))
         XCTAssertTrue(try tableExists(named: "egress_blacklist_exceptions", at: url))
-        XCTAssertTrue(try tableExists(named: "factory_sessions", at: url))
+        XCTAssertFalse(try tableExists(named: "factory_sessions", at: url))
         XCTAssertTrue(try tableExists(named: "policy_approvals", at: url))
 
-        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 23)
+        XCTAssertEqual(try schemaVersion(at: url), 23)
+        XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
+        XCTAssertFalse(try tableExists(named: "plugins", at: url))
+    }
 
-        XCTAssertEqual(try schemaVersion(at: url), 0)
-        XCTAssertFalse(try tableExists(named: "memory_sessions", at: url))
-        XCTAssertFalse(try tableExists(named: "memory_records", at: url))
-        XCTAssertFalse(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
-        XCTAssertFalse(try tableExists(named: "content_sensitivity_grants", at: url))
+    func testRetiredFactoryMemoryIsPurgedByMigration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 22)
+
+        let record = makeRecord(
+            sessionID: "factory-retired",
+            createdAt: .now,
+            prompt: "old factory instruction"
+        )
+        try await repository.upsert(record)
+        let beforePurge = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "factory-retired", agentID: "ui")
+        )
+        XCTAssertEqual(beforePurge.count, 1)
+
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
+        let afterPurge = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "factory-retired", agentID: "ui")
+        )
+        XCTAssertTrue(afterPurge.isEmpty)
+    }
+
+    func testLegacyScriptRuntimeDataIsPurgedIdempotently() async throws {
+        let repository = try makeRepository()
+        let url = try await repository.createEmptyDatabaseIfNeeded(
+            username: "app-user",
+            password: "app-secret"
+        )
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret",
+            to: 25
+        )
+
+        try await repository.upsert(
+            makeRecord(
+                sessionID: "legacy-script",
+                createdAt: .now,
+                prompt: #"{"tool":"script_exec","script":"function handle() {} // script.js"}"#
+            )
+        )
+        try await repository.upsert(
+            makeRecord(
+                sessionID: "swift-script",
+                createdAt: .now,
+                prompt: #"{"tool":"script_exec","script":"let data = readLine()"}"#
+            )
+        )
+
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret"
+        )
+        let legacyRecords = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "legacy-script", agentID: "ui")
+        )
+        let swiftRecords = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "swift-script", agentID: "ui")
+        )
+        XCTAssertTrue(legacyRecords.isEmpty)
+        XCTAssertEqual(swiftRecords.count, 1)
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret"
+        )
+        XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
+    }
+
+    func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let artifact = Data("compiled".utf8)
+        let skillFiles = ["skills/weather/SKILL.md": "# Weather"]
+        let files: [String: Data] = [
+            "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
+            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
+            "app.derrick/plugin.swift": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin": artifact,
+            "skills/weather/SKILL.md": Data("# Weather".utf8),
+        ]
+        let release = PluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
+            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
+            swiftSource: "print(\"[]\")",
+            compiledArtifact: artifact,
+            skillFiles: skillFiles,
+            contentHash: PluginContentHash.hash(files: files),
+            reviewSummary: "approved"
+        )
+
+        try await repository.savePluginFactoryRelease(release)
+        let loaded = try await repository.pluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0"
+        )
+        XCTAssertEqual(loaded?.contentHash, release.contentHash)
+        XCTAssertEqual(loaded?.skillFiles, skillFiles)
+        XCTAssertTrue(loaded?.verifyIntegrity() == true)
     }
 
     func testContentSensitivityGrantCRUD() async throws {
@@ -312,6 +426,20 @@ final class DBRepositoryTests: XCTestCase {
             createdAt: createdAt
         )
         return MemoryRecord(id: pair.id, pair: pair)
+    }
+
+    private func makeRepository() throws -> DBRepository {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return DBRepository(
+            configuration: DBRepositoryConfiguration(
+                applicationName: "ui",
+                databaseName: "derrick",
+                databaseDirectoryURL: directory,
+                username: "app-user",
+                password: "app-secret"
+            )
+        )
     }
 
     func testEnablesWALAndSurvivesConcurrentWriters() async throws {

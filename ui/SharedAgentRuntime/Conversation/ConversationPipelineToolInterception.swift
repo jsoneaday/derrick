@@ -229,13 +229,13 @@ extension ConversationPipeline {
                 decision: "denied",
                 actor: "policy-engine"
             )
-            if FactoryTurnGate.isHostDiscoveryTool(name) {
+            if AllowedMCPTool.isHostDiscoveryTool(name) {
                 return MCPToolResult(
                     content: [
                         MCPToolContent.text(
                             """
                             \(name) is not needed. Call catalog tools by name \
-                            (factory.build, factory.write_package, factory.review, factory.test, factory.promote). \
+                            (script_exec). \
                             Policy: \(reason)
                             """
                         ),
@@ -267,7 +267,7 @@ extension ConversationPipeline {
     }
 
     private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {
-        guard AllowedMCPTool.isScriptExec(toolName) || toolName == AllowedMCPTool.pluginInvoke.rawValue else { return }
+        guard AllowedMCPTool.isScriptExec(toolName) else { return }
         guard let data = resultText.data(using: .utf8) else { return }
         guard let payload = try? JSONDecoder().decode(ScriptExecutionResult.self, from: data) else { return }
 

@@ -16,6 +16,8 @@
           "message.post",
           "ui.present",
           "secret.request",
+          "storage.read",
+          "storage.write",
           "job.schedule",
           "log"
         ]
@@ -28,6 +30,7 @@
       "summary": { "type": "string" },
       "text": { "type": "string" },
       "content": { "type": "string" },
+      "html": { "type": "string" },
       "message": { "type": "string" },
       "schema_version": { "type": "integer" },
       "auth_ref": { "type": ["string", "null"] },

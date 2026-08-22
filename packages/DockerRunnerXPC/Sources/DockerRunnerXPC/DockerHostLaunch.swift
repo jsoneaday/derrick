@@ -18,34 +18,19 @@ public enum DockerHostLaunch: Sendable {
     public static let minTimeoutSeconds = 1
     /// Allows cold baseline builds that install Playwright Chromium (often >10 minutes).
     public static let maxTimeoutSeconds = 1_200
-    /// Max stdin payload (execution scripts / Dockerfiles).
+    /// Max stdin payload for Swift source, artifacts, and envelope input.
     public static let maxStdinBytes = 5 * 1024 * 1024
 
     /// Docker CLI subcommands the product may invoke.
     public static let allowedDockerSubcommands: Set<String> = [
         "version",
-        "build",
         "pull",
         "create",
         "start",
         "exec",
         "rm",
         "inspect",
-        "volume",
-        "image",
-        "network"
-    ]
-
-    /// Second-level tokens for `docker volume …`.
-    public static let allowedVolumeSubcommands: Set<String> = [
-        "create",
-        "inspect",
-        "rm",
-    ]
-
-    /// Second-level tokens for `docker network …` (cut net after bun install).
-    public static let allowedNetworkSubcommands: Set<String> = [
-        "disconnect"
+        "image"
     ]
 
     /// Second-level tokens for `docker image …`.

@@ -7,9 +7,12 @@ public enum ServiceHealthStatus: String, Codable, Sendable, Hashable {
     case unavailable
 }
 
-/// Guest container image the current product expects the daemon to use.
+/// Swift guest container image the current product expects the daemon to use.
 public enum DerrickGuestRuntime: Sendable {
-    public static let dockerImage = "derrick-bun:baseline-4"
+    /// Official Swift 6.4 image used by factory and script execution.
+    /// Swift 6.4 is not a stable Docker release yet; pin this tag to a digest
+    /// when publishing a production build.
+    public static let swiftPluginDockerImage = "swiftlang/swift:nightly-6.4.x-noble"
 }
 
 public struct ServiceHealthReport: Codable, Sendable, Hashable {

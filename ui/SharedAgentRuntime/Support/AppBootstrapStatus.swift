@@ -12,9 +12,7 @@ final class AppBootstrapStatus: ObservableObject {
         case loadingSession
         case connectingHelper
         case checkingDocker
-        case preparingVolumes
         case preparingImage
-        case startingContainers
         case verifyingEnvironment
         case ready
         case failed
@@ -193,25 +191,23 @@ final class AppBootstrapStatus: ObservableObject {
                 "The Docker helper service failed to start. Restart Derrick. If this continues, reinstall the app or check Console logs for DockerRunnerHelper."
             )
         }
-        if lower.contains("failed to build baseline") || lower.contains("failed to pull parent") {
+        if lower.contains("failed to pull")
+            || lower.contains("swift runtime image is unavailable") {
             return (
                 "Environment Image Setup Failed",
-                "Derrick could not build or download the Bun runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
+                "Derrick could not build or download the Swift runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
             )
         }
-        if lower.contains("failed to create warm container")
-            || lower.contains("failed to start warm container")
-            || lower.contains("is not running after start")
-            || lower.contains("invalid reference format") {
+        if lower.contains("invalid reference format") {
             return (
                 "Container Setup Failed",
                 "Derrick could not create or start its secure runtime containers. Open Docker Desktop and confirm it is running, then restart Derrick. Details are in the debug log."
             )
         }
-        if lower.contains("smoke test") || lower.contains("baseline package") {
+        if lower.contains("swift environment check") {
             return (
                 "Environment Verification Failed",
-                "The runtime started but failed a basic Bun environment check. Rebuild may help after updating Docker Desktop. See the debug log for technical details."
+                "The runtime started but failed a basic Swift environment check. Rebuild may help after updating Docker Desktop. See the debug log for technical details."
             )
         }
         if lower.contains("could not replace its background service")
@@ -222,13 +218,6 @@ final class AppBootstrapStatus: ObservableObject {
                 "Derrick could not replace its background service. Quit Derrick and open it again."
             )
         }
-        if lower.contains("volume") {
-            return (
-                "Docker Volume Setup Failed",
-                "Derrick could not create required Docker volumes. Ensure Docker Desktop is running and has permission to manage volumes, then restart Derrick."
-            )
-        }
-
         let trimmed = text.isEmpty ? "An unknown error occurred during startup." : text
         return (
             "Initialization Failed",

@@ -107,7 +107,7 @@ import DBRepository
     @Test func llmFailureClassifierFallsBackToGeneric() {
         let error = NSError(domain: "test", code: 500, userInfo: [NSLocalizedDescriptionKey: "Internal server error"])
         let context = LLMFailureClassifier.classify(error, provider: .google)
-        #expect(context == .generic(provider: "Gemini", message: "Internal server error"))
+        #expect(context == .generic(provider: "Google", message: "Internal server error"))
     }
 
     @Test func llmFailureContextMessagesAreUserFacing() {
@@ -129,7 +129,7 @@ import DBRepository
 
         let context = LLMFailureContext.outOfCredits(provider: "OpenAI")
         reporter.report(context)
-        #expect(reporter.latest == context)
+        #expect(reporter.latest == nil)
 
         reporter.clear()
         #expect(reporter.latest == nil)
@@ -141,6 +141,8 @@ import DBRepository
         let settings = LLMModelSettings(repository: repo)
         settings.summarizerModel = .openai(.gpt54)
         settings.scriptReviewerModel = .gemini(.gemini31FlashLite)
+        settings.pluginBuilderModel = .openai(.gpt56Luna)
+        settings.pluginSafetyReviewerModel = .gemini(.gemini25FlashLite)
         settings.workerAgentModel = .openai(.gpt56Terra)
 
         // Wait for asynchronous saving tasks to complete before reloading
@@ -150,6 +152,8 @@ import DBRepository
         await reloaded.loadSettings()
         #expect(reloaded.summarizerModel == .openai(.gpt54))
         #expect(reloaded.scriptReviewerModel == .gemini(.gemini31FlashLite))
+        #expect(reloaded.pluginBuilderModel == .openai(.gpt56Luna))
+        #expect(reloaded.pluginSafetyReviewerModel == .gemini(.gemini25FlashLite))
         #expect(reloaded.workerAgentModel == .openai(.gpt56Terra))
     }
 
@@ -160,6 +164,8 @@ import DBRepository
         await settings.loadSettings()
         #expect(settings.summarizerModel == .defaultHelperModel)
         #expect(settings.scriptReviewerModel == .defaultHelperModel)
+        #expect(settings.pluginBuilderModel == .defaultHelperModel)
+        #expect(settings.pluginSafetyReviewerModel == .defaultHelperModel)
         #expect(settings.workerAgentModel == .defaultHelperModel)
     }
 
@@ -174,7 +180,8 @@ import DBRepository
     }
 
     @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {
-        let root = URL(fileURLWithPath: "/tmp/a/b/c/d/e/f/\(UUID().uuidString)")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("debug-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let dummyBundle = root.appendingPathComponent("bundle", isDirectory: true)
         

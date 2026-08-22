@@ -1,9 +1,7 @@
 import Combine
 import DBRepository
-import DockerRunnerXPC
 import Foundation
 import LLMAgentClient
-import Plugin
 import ServiceContracts
 
 struct ChatTab: Identifiable, Hashable {
@@ -26,7 +24,6 @@ final class ChatSessionStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published private(set) var recentSessions: [ChatSessionDTO] = []
     @Published var scrollToBottomToken = 0
-    @Published var factoryKickoffPrompt: String?
 
     private var repository: DBRepository?
     private var activeTasks: [String: Task<Void, Never>] = [:]
@@ -51,7 +48,7 @@ final class ChatSessionStore: ObservableObject {
         }
         if tabs.isEmpty {
             if let latest = recentSessions.first(where: {
-                !JobSessionID.isJobSession($0.sessionID) && !FactorySessionID.isFactorySession($0.sessionID)
+                !JobSessionID.isJobSession($0.sessionID)
             }) {
                 selectSession(id: latest.sessionID)
             } else {
@@ -69,7 +66,7 @@ final class ChatSessionStore: ObservableObject {
             limit: 5
         )) ?? []
         recentSessions = rows.filter {
-            !JobSessionID.isJobSession($0.sessionID) && !FactorySessionID.isFactorySession($0.sessionID)
+            !JobSessionID.isJobSession($0.sessionID)
         }
     }
 
@@ -79,74 +76,6 @@ final class ChatSessionStore: ObservableObject {
         tabs.append(tab)
         selectedSessionID = id
         persistSessionShell(sessionID: id, title: tab.title)
-    }
-
-    func openFactorySession(editing pluginID: String? = nil) {
-        let id = FactorySessionID.make()
-        let locked = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = locked.isEmpty ? "Create plugin" : "Change \(locked)"
-        adoptFactorySession(
-            id: id,
-            title: title,
-            instructionPluginID: CreatePluginSample.pluginID,
-            reusePluginID: locked.isEmpty ? nil : locked,
-            goal: locked.isEmpty ? "" : "Change \(locked)"
-        )
-    }
-
-    func adoptFactorySession(
-        id: String,
-        title: String,
-        instructionPluginID: String,
-        reusePluginID: String?,
-        goal: String
-    ) {
-        if !tabs.contains(where: { $0.id == id }) {
-            tabs.append(ChatTab(id: id, title: title))
-        }
-        selectedSessionID = id
-        persistSessionShell(sessionID: id, title: title)
-        let kickoff = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        factoryKickoffPrompt = kickoff.isEmpty ? "Create a complementary plugin." : kickoff
-        Task {
-            await pruneFactoryStagingVolumes(keeping: id)
-            guard let repository else { return }
-            var draft = FactoryPackageDraft(goal: factoryKickoffPrompt ?? "")
-            if let reuse = reusePluginID, !reuse.isEmpty {
-                draft.pluginID = reuse
-                draft.reusePluginID = reuse
-            }
-            let spec = (try? JSONEncoder().encode(draft)).flatMap { String(data: $0, encoding: .utf8) }
-            try? await repository.upsertFactorySession(
-                FactorySessionRow(
-                    sessionID: id,
-                    specJSON: spec,
-                    stage: "spec",
-                    pluginID: reusePluginID,
-                    instructionPluginID: instructionPluginID
-                )
-            )
-        }
-    }
-
-    private func pruneFactoryStagingVolumes(keeping sessionID: String) async {
-        guard let repository else { return }
-        let sessions = (try? await repository.listFactorySessions()) ?? []
-        var names = Set<String>()
-        for session in sessions where session.sessionID != sessionID {
-            names.insert(DerrickNamedVolume.pluginStaging(factoryID: session.sessionID))
-            if let spec = session.specJSON,
-               let data = spec.data(using: .utf8),
-               let draft = try? JSONDecoder().decode(FactoryPackageDraft.self, from: data),
-               let workspace = draft.workspaceVolume, !workspace.isEmpty {
-                names.insert(workspace)
-            }
-        }
-        await XPCDockerRunner.shared.removeRemovableVolumes(Array(names))
-    }
-
-    var isFactorySessionSelected: Bool {
-        FactorySessionID.isFactorySession(selectedSessionID)
     }
 
     func selectSession(id: String) {
@@ -252,19 +181,6 @@ final class ChatSessionStore: ObservableObject {
         tabs[tabIndex].turns[turnIndex].toolName = dto.toolName
         if selectedSessionID == sessionID {
             scrollToBottomToken += 1
-        }
-        if status == .complete, let wizard = PluginHookPresentation.decodeOpenCreateWizard(chunkText) {
-            CreatePluginWizardStore.shared.present(goal: wizard.goal)
-            return
-        }
-        if status == .complete, let hook = PluginHookPresentation.decodeOpenFactory(chunkText) {
-            adoptFactorySession(
-                id: hook.sessionID,
-                title: hook.title,
-                instructionPluginID: hook.instructionPluginID,
-                reusePluginID: hook.reusePluginID,
-                goal: hook.goal
-            )
         }
     }
 

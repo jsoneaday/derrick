@@ -127,8 +127,8 @@ private enum ReactScaleToolFixture {
         // Useful facts first (what a good script prints); bulk scrape after — slim caps at 4k.
         let wrapperStdout = """
         [script_exec] wiped /tmp and /var/tmp
-        [script_exec] verified baseline package: requests -> requests
-        [script_exec] verified baseline package: urllib3 -> urllib3
+        [script_exec] Swift container ready
+        [script_exec] Swift artifact ready
         \(answerMarker)
         headline-0
         headline-1
@@ -180,7 +180,7 @@ private enum ReactScaleToolFixture {
             "reason": "User asked for current React version from the web",
             "script": script,
             "allow_network": "true",
-            "packages": "[]",
+            "dependencies": "{}",
             "timeout_seconds": "60"
         ]
         return (arguments, json)

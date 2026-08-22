@@ -18,6 +18,18 @@ final class LLMModelSettings: ObservableObject {
         }
     }
 
+    @Published var pluginBuilderModel: LLMModelChoice = .defaultHelperModel {
+        didSet {
+            Task { await save(pluginBuilderModel, forKey: "pluginBuilderModel") }
+        }
+    }
+
+    @Published var pluginSafetyReviewerModel: LLMModelChoice = .defaultHelperModel {
+        didSet {
+            Task { await save(pluginSafetyReviewerModel, forKey: "pluginSafetyReviewerModel") }
+        }
+    }
+
     @Published var workerAgentModel: LLMModelChoice = .defaultHelperModel {
         didSet {
             Task { await save(workerAgentModel, forKey: "workerAgentModel") }
@@ -40,6 +52,12 @@ final class LLMModelSettings: ObservableObject {
         }
         if let model = await Self.load(repository: repository, key: "scriptReviewerModel", username: username, password: password) {
             scriptReviewerModel = model
+        }
+        if let model = await Self.load(repository: repository, key: "pluginBuilderModel", username: username, password: password) {
+            pluginBuilderModel = model
+        }
+        if let model = await Self.load(repository: repository, key: "pluginSafetyReviewerModel", username: username, password: password) {
+            pluginSafetyReviewerModel = model
         }
         if let model = await Self.load(repository: repository, key: "workerAgentModel", username: username, password: password) {
             workerAgentModel = model

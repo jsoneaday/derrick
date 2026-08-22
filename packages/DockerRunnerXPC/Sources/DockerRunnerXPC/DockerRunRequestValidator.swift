@@ -10,7 +10,6 @@ public enum DockerRunRequestValidationError: Error, Sendable, Equatable, CustomS
     case disallowedDockerSubcommand(String)
     case disallowedDockerFlag(String)
     case disallowedVolumeMount(String)
-    case disallowedVolumeName(String)
     case timeoutOutOfRange(Int)
     case stdinTooLarge(Int)
 
@@ -35,8 +34,6 @@ public enum DockerRunRequestValidationError: Error, Sendable, Equatable, CustomS
             return "\(Self.launchErrorPrefix) docker flag is not allowed: \(flag)"
         case .disallowedVolumeMount(let value):
             return "\(Self.launchErrorPrefix) host bind mount is not allowed: \(value)"
-        case .disallowedVolumeName(let name):
-            return "\(Self.launchErrorPrefix) docker volume name is not removable: \(name)"
         case .timeoutOutOfRange(let value):
             return "\(Self.launchErrorPrefix) timeoutSeconds out of range: \(value) (allowed \(DockerHostLaunch.minTimeoutSeconds)…\(DockerHostLaunch.maxTimeoutSeconds))"
         case .stdinTooLarge(let bytes):
@@ -139,28 +136,16 @@ public enum DockerRunRequestValidator: Sendable {
             return .disallowedDockerSubcommand(subcommand)
         }
 
-        if subcommand == "volume" {
-            guard let second = dockerArgs.dropFirst().first,
-                  DockerHostLaunch.allowedVolumeSubcommands.contains(second) else {
-                return .disallowedDockerSubcommand("volume \(dockerArgs.dropFirst().first ?? "<missing>")")
-            }
-            if second == "rm", let error = validateVolumeRmNames(dockerArgs) {
-                return error
-            }
-        }
         if subcommand == "image" {
             guard let second = dockerArgs.dropFirst().first,
                   DockerHostLaunch.allowedImageSubcommands.contains(second) else {
                 return .disallowedDockerSubcommand("image \(dockerArgs.dropFirst().first ?? "<missing>")")
             }
         }
-        if subcommand == "network" {
-            guard let second = dockerArgs.dropFirst().first,
-                  DockerHostLaunch.allowedNetworkSubcommands.contains(second) else {
-                return .disallowedDockerSubcommand("network \(dockerArgs.dropFirst().first ?? "<missing>")")
-            }
+        if subcommand == "exec",
+           let error = validateExecArguments(dockerArgs) {
+            return error
         }
-
         var index = 0
         while index < dockerArgs.count {
             let arg = dockerArgs[index]
@@ -175,20 +160,10 @@ public enum DockerRunRequestValidator: Sendable {
             }
 
             if arg == "-v" || arg == "--volume" {
-                guard index + 1 < dockerArgs.count else {
-                    return .disallowedVolumeMount("<missing>")
-                }
-                let value = dockerArgs[index + 1]
-                index += 1
-                if let error = validateVolumeSpec(value) {
-                    return error
-                }
+                let value = index + 1 < dockerArgs.count ? dockerArgs[index + 1] : "<missing>"
+                return .disallowedVolumeMount(value)
             } else if arg.hasPrefix("-v=") || arg.hasPrefix("--volume=") {
-                let parts = arg.split(separator: "=", maxSplits: 1).map(String.init)
-                let value = parts.count == 2 ? parts[1] : ""
-                if let error = validateVolumeSpec(value) {
-                    return error
-                }
+                return .disallowedVolumeMount(String(arg.split(separator: "=", maxSplits: 1).last ?? ""))
             } else if arg == "--mount" || arg.hasPrefix("--mount=") {
                 let value: String
                 if arg.hasPrefix("--mount=") {
@@ -223,31 +198,54 @@ public enum DockerRunRequestValidator: Sendable {
         return nil
     }
 
-    /// `docker volume rm [-f] name…` — only Derrick scratch/plugin volumes.
-    private static func validateVolumeRmNames(_ dockerArgs: [String]) -> DockerRunRequestValidationError? {
-        let names = dockerArgs.dropFirst(2).filter { !$0.hasPrefix("-") }
-        guard !names.isEmpty else {
-            return .disallowedVolumeName("<missing>")
+    private static func validateExecArguments(
+        _ dockerArgs: [String]
+    ) -> DockerRunRequestValidationError? {
+        var args = Array(dockerArgs.dropFirst())
+        while args.first == "-i" || args.first == "--interactive" {
+            args.removeFirst()
         }
-        for name in names where !DerrickNamedVolume.isRemovable(name) {
-            return .disallowedVolumeName(name)
+        guard args.count >= 2 else {
+            return .disallowedDockerFlag("exec")
+        }
+        args.removeFirst() // container name
+        guard let command = args.first else {
+            return .disallowedDockerFlag("exec")
+        }
+
+        switch command {
+        case "sh":
+            guard args.count == 3,
+                  args[1] == "-c",
+                  (args[2] == "cat > /tmp/plugin.swift"
+                    || args[2] == "cat > /tmp/plugin")
+            else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "swift":
+            guard args.count == 2, args[1] == "/tmp/plugin.swift" else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "swiftc":
+            guard args == ["swiftc", "-O", "/tmp/plugin.swift", "-o", "/tmp/plugin"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "base64":
+            guard args == ["base64", "-w", "0", "/tmp/plugin"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "chmod":
+            guard args == ["chmod", "700", "/tmp/plugin"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "/tmp/plugin":
+            guard args == ["/tmp/plugin"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        default:
+            return .disallowedDockerFlag("exec \(command)")
         }
         return nil
     }
 
-    /// Named volumes (`name:/path`) are OK; host binds (`/host:/container`) are not.
-    private static func validateVolumeSpec(_ value: String) -> DockerRunRequestValidationError? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return .disallowedVolumeMount(value)
-        }
-        if trimmed.hasPrefix("/") {
-            return .disallowedVolumeMount(value)
-        }
-        // relative host paths (e.g. ./data:/data)
-        if trimmed.hasPrefix(".") || trimmed.hasPrefix("~") {
-            return .disallowedVolumeMount(value)
-        }
-        return nil
-    }
 }

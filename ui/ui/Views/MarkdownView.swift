@@ -118,6 +118,7 @@ private struct CSVTable {
 
 private enum RichTextFormat {
     case csv(CSVTable)
+    case html
     case markdown
     case plain
 }
@@ -136,6 +137,9 @@ private enum RichTextClassifier {
     static func classify(_ text: String) -> RichTextFormat {
         if let table = parseCSV(text) {
             return .csv(table)
+        }
+        if HTMLSanitizer.looksLikeHTML(text) {
+            return .html
         }
         if looksLikeMarkdown(text) {
             return .markdown
@@ -238,16 +242,22 @@ struct MarkdownResponseView: View {
     var body: some View {
         let normalized = RichTextClassifier.normalize(text)
 
-        switch RichTextClassifier.classify(normalized) {
-        case .csv(let table):
-            csvTableView(table: table, source: normalized)
-        case .markdown:
-            markdownView(text: normalized)
-        case .plain:
-            Text(verbatim: normalized)
-                .padding(.horizontal, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+        if let pluginHTML = PluginHTMLResultExtractor.payload(from: normalized) {
+            PluginHTMLResultView(payload: pluginHTML)
+        } else {
+            switch RichTextClassifier.classify(normalized) {
+            case .csv(let table):
+                csvTableView(table: table, source: normalized)
+            case .html:
+                HTMLResponseView(html: normalized)
+            case .markdown:
+                markdownView(text: normalized)
+            case .plain:
+                Text(verbatim: normalized)
+                    .padding(.horizontal, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
         }
     }
 

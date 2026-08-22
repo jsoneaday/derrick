@@ -60,10 +60,9 @@ private final class MCPDockerHelperLogSink: NSObject, DockerHelperLogSinkXPC, @u
     }
 }
 
-/// ScriptRunner in MCPService that runs docker **only** via DockerRunnerHelper peer XPC.
-/// UI prewarms volumes/image/warm containers; this path only docker-execs into them.
+/// MCPService access to DockerRunnerHelper peer XPC.
 /// Mid-flight egress prompts stay on the UI↔helper serviceName reverse channel.
-final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
+final class MCPServiceDockerHelperRunner: @unchecked Sendable {
     static let shared = MCPServiceDockerHelperRunner()
 
     private let lock = NSLock()
@@ -106,9 +105,12 @@ final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
         fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
     }
 
-    /// Prewarm the networked Docker pool (daemon embedded helper or UI peer).
-    func prewarmNetworkPool() async throws {
-        try await DockerNetworkContainerPool.shared.prewarm(executor: makeCLIExecutor())
+    /// Prewarm the shared Swift runtime image.
+    func prewarmSwiftRuntime() async throws {
+        try await SwiftDockerContainerPool.shared.prewarm(
+            image: SwiftScriptPreparer.image,
+            executor: makeStdinCLIExecutor()
+        )
     }
 
     var hasPeerEndpoint: Bool {
@@ -117,108 +119,17 @@ final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
         return peerEndpoint != nil
     }
 
-    func run(
-        script: String,
-        timeoutSeconds: Int,
-        allowNetwork: Bool,
-        packages: [String],
-        allowDependencyInstall: Bool
-    ) async throws -> ScriptExecutionResult {
-        let totalStarted = Date()
-        let ensureStarted = Date()
-        let ensureMS = ScriptPhaseTiming.elapsedMS(from: ensureStarted)
-
-        let executionScript = script
-        guard let stdinData = executionScript.data(using: .utf8) else {
-            throw MCPServiceDockerHelperError.encodeFailed("execution script")
-        }
-
-        let execStarted = Date()
-        let effectiveTimeout = DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: timeoutSeconds)
-        let response: DockerRunResponse = try await DockerNetworkContainerPool.shared.withContainer(
-            allowNetwork: allowNetwork,
-            executor: makeCLIExecutor()
-        ) { containerName in
-            let dockerArgs = DockerScriptPreparer.dockerExecArguments(containerName: containerName)
-            let request = DockerHostLaunch.makeRequest(
-                dockerArguments: dockerArgs,
-                stdinData: stdinData,
-                timeoutSeconds: effectiveTimeout,
-                environment: DockerScriptPreparer.processEnvironment()
-            )
-            let requestData = try JSONEncoder().encode(request)
-            let responseData: Data = try await self.withProxy { proxy in
-                try await withCheckedThrowingContinuation { cont in
-                    proxy.runProcess(requestData: requestData as NSData) { reply in
-                        cont.resume(returning: reply as Data)
-                    }
-                }
-            }
-            return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
-        }
-        let execMS = ScriptPhaseTiming.elapsedMS(from: execStarted)
-
-        if let launchError = response.launchError {
-            throw NSError(
-                domain: "MCPServer",
-                code: 503,
-                userInfo: [NSLocalizedDescriptionKey: launchError]
-            )
-        }
-
-        let stdoutText = String(decoding: response.stdout, as: UTF8.self)
-        let stderrText = String(decoding: response.stderr, as: UTF8.self)
-        let totalMS = ScriptPhaseTiming.elapsedMS(from: totalStarted)
-        let scriptMetrics = ScriptPhaseTiming.scriptMetrics(script)
-
-        if let dockerMessage = DockerScriptPreparer.dockerUnavailableMessage(
-            stderr: stderrText,
-            exitCode: response.exitCode
-        ) {
-            throw NSError(
-                domain: "MCPServer",
-                code: 503,
-                userInfo: [NSLocalizedDescriptionKey: dockerMessage]
-            )
-        }
-
-        let phaseTiming = ScriptPhaseTiming(
-            ensureMS: ensureMS,
-            execMS: execMS,
-            totalMS: totalMS,
-            scriptCharCount: scriptMetrics.chars,
-            scriptLineCount: scriptMetrics.lines,
-            wrapperCharCount: executionScript.utf8.count
-        )
-        fputs("[MCPService] \(phaseTiming.summaryLine) runner=helper-xpc\n", stderr)
-
-        return ScriptExecutionResult.runnerOutcome(
-            timedOut: response.timedOut,
-            exitCode: response.exitCode,
-            stdout: stdoutText,
-            stderr: stderrText,
-            durationMS: totalMS,
-            phaseTiming: phaseTiming
-        )
-    }
-
-    // MARK: - Docker pool (via helper XPC)
-
-    func makeCLIExecutor() -> DockerCLIExecutor {
-        { arguments, stdin, timeoutSeconds in
-            let response = try await self.runDocker(arguments, stdin: stdin, timeoutSeconds: timeoutSeconds)
-            return DockerCLIResult(
-                exitCode: response.exitCode,
-                stdout: response.stdout,
-                stderr: response.stderr
-            )
-        }
-    }
-
     /// Executor that can attach stdin (script writes, invoke JSON).
     func makeStdinCLIExecutor() -> @Sendable ([String], Data, Int) async throws -> DockerCLIResult {
         { arguments, stdin, timeoutSeconds in
             let response = try await self.runDocker(arguments, stdin: stdin, timeoutSeconds: timeoutSeconds)
+            if let launchError = response.launchError {
+                return DockerCLIResult(
+                    exitCode: response.exitCode == 0 ? 1 : response.exitCode,
+                    stdout: response.stdout,
+                    stderr: Data(launchError.utf8)
+                )
+            }
             return DockerCLIResult(
                 exitCode: response.exitCode,
                 stdout: response.stdout,
@@ -240,7 +151,7 @@ final class MCPServiceDockerHelperRunner: ScriptRunner, @unchecked Sendable {
             dockerArguments: dockerArguments,
             stdinData: stdin,
             timeoutSeconds: timeoutSeconds,
-            environment: DockerScriptPreparer.processEnvironment()
+            environment: DockerHostLaunch.clientProcessEnvironment()
         )
         let requestData = try JSONEncoder().encode(request)
         // Bound by caller timeout (+slack), not the 120s withProxy default — failed helper

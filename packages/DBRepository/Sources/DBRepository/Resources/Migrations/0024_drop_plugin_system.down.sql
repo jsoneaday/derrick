@@ -1,0 +1,1 @@
+-- The retired plugin system is intentionally not restored.

@@ -69,15 +69,15 @@ public enum PluginEnvelopeError: Error, Equatable, LocalizedError {
         case .notAnObject:
             return "Envelope must be a JSON object"
         case .notAnArray:
-            return "handle() must return a JSON array of envelopes"
+            return "Swift program must return a JSON array of envelopes"
         case .invalidJSON(let preview):
-            return "handle() stdout was not JSON: \(preview)"
+            return "Swift program stdout was not JSON: \(preview)"
         }
     }
 }
 
 public enum PluginEnvelopeList {
-    /// Guest stdout must be a JSON array of envelope objects. Strings and bare objects fail.
+    /// Swift guest stdout must be a JSON array of envelope objects. Strings and bare objects fail.
     public static func decode(_ data: Data) throws -> [PluginEnvelope] {
         let trimmed = data.drop(while: { $0 == 0x20 || $0 == 0x0a || $0 == 0x0d || $0 == 0x09 })
         guard !trimmed.isEmpty else {

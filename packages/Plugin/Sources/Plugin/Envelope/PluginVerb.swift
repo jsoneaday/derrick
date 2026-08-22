@@ -6,11 +6,13 @@ public enum PluginVerb: String, Codable, Sendable, Hashable, CaseIterable {
     case resultEmit = "result.emit"
     case uiPresent = "ui.present"
     case secretRequest = "secret.request"
+    case storageRead = "storage.read"
+    case storageWrite = "storage.write"
     case jobSchedule = "job.schedule"
     case httpRequest = "http.request"
     case log
 
-    /// When `verb`/`type` is omitted, infer from payload shape (guest JS often
+    /// When `verb`/`type` is omitted, infer from payload shape (generated Swift often
     /// returns `{title,summary}` after `http_results` or `{url}` for a fetch).
     public static func infer(from payload: [String: PluginJSON]) -> PluginVerb? {
         if payload["url"]?.stringValue != nil { return .httpRequest }
@@ -46,7 +48,7 @@ public enum PluginVerb: String, Codable, Sendable, Hashable, CaseIterable {
 
     public var classification: PluginVerbClass {
         switch self {
-        case .httpRequest, .uiPresent, .secretRequest:
+        case .httpRequest, .uiPresent, .secretRequest, .storageRead, .storageWrite:
             return .continuation
         case .resultEmit, .messagePost:
             return .terminal

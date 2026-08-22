@@ -1,10 +1,10 @@
 import Foundation
 import ServiceContracts
 
-/// Canonical JSON Schema for `handle()` stdout. Loaded from SharedAgentRuntime Resources.
+/// Canonical JSON Schema for standalone Swift program stdout.
 public enum PluginEnvelopeSchema {
     public static var jsonSchema: String {
-        DerrickGuestTypeScript.registerPluginResourceBundle()
+        DerrickBundledText.registerSearchRoot(Bundle.module.resourceURL ?? Bundle.module.bundleURL)
         return DerrickBundledText.mustLoad("guest/handle-return.schema.json")
     }
 }

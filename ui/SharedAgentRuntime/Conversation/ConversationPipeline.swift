@@ -2,7 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
-import Plugin
+import MCPToolCatalog
 import ServiceContracts
 
 protocol ConversationStreamingClient: Sendable {
@@ -120,7 +120,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         if !toolInstructions.isEmpty {
             sections.append(toolInstructions)
         }
-        if !toolInstructions.contains("export interface HandleEvent") {
+        if !toolInstructions.contains("Swift plugin contract:") {
             if let sdk = try? PromptResources.guestSDKForModel() {
                 sections.append(sdk)
             }
@@ -150,7 +150,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
             debugLog("Loading tool catalog…")
         }
         let tools = try await mcpClient.searchTools(matching: "").filter {
-            FactoryTurnGate.isHostDiscoveryTool($0.name) == false
+            AllowedMCPTool.isHostDiscoveryTool($0.name) == false
         }
         guard !tools.isEmpty else {
             throw ConversationPipelineError.toolCatalogUnavailable("Tool catalog empty (MCP mesh or agents host).")

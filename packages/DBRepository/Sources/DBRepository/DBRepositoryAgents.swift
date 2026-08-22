@@ -52,7 +52,6 @@ public extension DBRepository {
             FROM chat_sessions
             WHERE application_name = \(quoted(applicationName))
               AND session_id NOT LIKE 'job-%'
-              AND session_id NOT LIKE 'factory-%'
             ORDER BY updated_at DESC
             LIMIT \(max(1, limit));
             """

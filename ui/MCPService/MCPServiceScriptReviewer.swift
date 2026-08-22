@@ -137,7 +137,6 @@ final class MCPServiceCallContext: @unchecked Sendable {
     private var _helperAPIKey: String?
     private var _helperReviewerModelJSON: String?
     private var _memorySessionKey: MemorySessionKey?
-    private var _pluginID: String?
 
     private init() {}
 
@@ -153,18 +152,11 @@ final class MCPServiceCallContext: @unchecked Sendable {
         lock.unlock()
     }
 
-    func setPluginID(_ pluginID: String?) {
-        lock.lock()
-        _pluginID = pluginID
-        lock.unlock()
-    }
-
     func clear() {
         lock.lock()
         _helperAPIKey = nil
         _helperReviewerModelJSON = nil
         _memorySessionKey = nil
-        _pluginID = nil
         lock.unlock()
     }
 
@@ -188,9 +180,4 @@ final class MCPServiceCallContext: @unchecked Sendable {
         return _memorySessionKey
     }
 
-    var pluginID: String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _pluginID
-    }
 }

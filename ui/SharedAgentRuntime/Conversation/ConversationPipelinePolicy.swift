@@ -7,7 +7,6 @@ import PartialJSON
 import Lib
 import AppEvents
 import PolicyUserInteraction
-import Plugin
 import ServiceContracts
 
 extension ConversationPipeline {
@@ -31,9 +30,7 @@ extension ConversationPipeline {
                         UsageLimitsService.shared.resetMessageCounters()
                     }
                     // Upper bound is absolute max; per-message cap + session raises gate tool rounds.
-                    let maxToolRoundIterations = FactorySessionID.isFactorySession(sessionID)
-                        ? FactoryTurnGate.pipelineToolRounds
-                        : UsageLimits.absoluteMax.maxToolRoundsPerMessage
+                    let maxToolRoundIterations = UsageLimits.absoluteMax.maxToolRoundsPerMessage
                     let jsonDecoder = JSONDecoder()
                     let jsonEncoder = JSONEncoder()
                     PipelineTiming.log(
@@ -230,13 +227,6 @@ extension ConversationPipeline {
                                     }
                                     break
                                 case .complete:
-                                    let factoryStillRunning = FactoryTurnGate.nextRequiredStep(
-                                        sessionID: sessionID,
-                                        records: aggregatedToolCalls
-                                    ) != nil
-                                    if factoryStillRunning {
-                                        break
-                                    }
                                     if let assistantResponse = agentResponse?.assistantResponse {
                                         // Smart hold: only pause complete *UI* once ungranted email appears.
                                         // Thinking/tool_call keep streaming; non-sensitive answers stream fully.
@@ -414,11 +404,7 @@ extension ConversationPipeline {
                         }
 
                         // Flush any held complete text after allow/confirm (single paint of remainder).
-                        let factoryStillRunning = FactoryTurnGate.nextRequiredStep(
-                            sessionID: sessionID,
-                            records: aggregatedToolCalls
-                        ) != nil
-                        if factoryStillRunning == false, agentResponse?.status == .complete || holdCompleteUI {
+                        if agentResponse?.status == .complete || holdCompleteUI {
                             let text = interceptedCompletion
                             if holdCompleteUI || lastYieldedCompletionLength < text.count {
                                 let start = min(heldCompleteThroughLength, text.count)
@@ -437,8 +423,7 @@ extension ConversationPipeline {
                         if agentResponse?.status == .toolCall || agentResponse?.status == .toolBatch {
                             let limitStarted = Date()
                             let roundAllowed = await UsageLimitsService.shared.allowToolRound(
-                                roundIndex: round,
-                                factoryPipeline: FactorySessionID.isFactorySession(sessionID)
+                                roundIndex: round
                             )
                             let toolLimitMS = PipelineTiming.elapsedMS(from: limitStarted)
                             if !roundAllowed {
@@ -448,14 +433,10 @@ extension ConversationPipeline {
                                 PipelineTiming.log(
                                     "\(roundLabel) stopped_tool_round_limit tool_limit_ms=\(toolLimitMS) usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) turn_total_ms=\(PipelineTiming.elapsedMS(from: overallStarted))"
                                 )
-                                let stopMessage = FactoryTurnGate.userFacingStopMessage(
-                                    sessionID: sessionID,
-                                    records: aggregatedToolCalls
-                                )
                                 continuation.yield(
                                     AgentResponseNextChunk(
                                         status: .complete,
-                                        chunk: stopMessage
+                                        chunk: "Stopped: max tool rounds reached."
                                     )
                                 )
                                 break
@@ -512,15 +493,6 @@ extension ConversationPipeline {
                             }
                             let toolWallMS = PipelineTiming.elapsedMS(from: toolStarted)
                             aggregatedToolCalls.append(contentsOf: toolExecution.records)
-                            for record in toolExecution.records where FactoryTurnGate.isPipelineTool(record.name) {
-                                debugLog(
-                                    FactoryAttemptLog.describe(
-                                        tool: record.name,
-                                        arguments: record.arguments,
-                                        result: record.result
-                                    )
-                                )
-                            }
                             let slimFollowUpBody = ToolFollowUpFormatter.slimToolResults(records: toolExecution.records)
                             let slimRequestLine = ToolFollowUpFormatter.slimToolRequestLine(records: toolExecution.records)
                             await MainActor.run {
@@ -533,56 +505,12 @@ extension ConversationPipeline {
                                 "\(roundLabel) tool wall_ms=\(toolWallMS) parse_ms=\(parseToolMS) limit_ms=\(toolLimitMS) usage_ms=\(usageMS) records=\(toolExecution.records.count) summary_chars=\(toolExecution.summary.utf8.count) slim_followup_chars=\(slimFollowUpBody.utf8.count) names=\(toolExecution.records.map(\.name).joined(separator: ","))"
                             )
 
-                            if let hookResult = toolExecution.records.reversed().compactMap({ record -> String? in
-                                guard record.name == "plugin.invoke" else { return nil }
-                                let raw = record.result ?? ""
-                                return PluginHookPresentation.decodeOpenFactory(raw) == nil ? nil : raw
-                            }).first {
-                                continuation.yield(
-                                    AgentResponseNextChunk(
-                                        status: .complete,
-                                        chunk: hookResult
-                                    )
-                                )
-                                PipelineTiming.log("\(roundLabel) plugin_hook_complete")
-                                break
-                            }
-
-                            if let promoteTest = toolExecution.records.reversed().compactMap({ record -> PluginInvokePresentation.TestReport? in
-                                guard record.name == FactoryTurnGate.factoryPromote
-                                    || record.name == FactoryTurnGate.factoryInstallSample else {
-                                    return nil
-                                }
-                                return PluginInvokePresentation.testReport(fromPromoteResult: record.result ?? "")
-                            }).first {
-                                continuation.yield(
-                                    AgentResponseNextChunk(
-                                        status: .complete,
-                                        chunk: PluginInvokePresentation.encodeTestReport(promoteTest)
-                                    )
-                                )
-                                PipelineTiming.log(
-                                    "\(roundLabel) factory_test_complete plugin=\(promoteTest.heading) kind=\(promoteTest.kind.rawValue)"
-                                )
-                                break
-                            }
-
                             let followUpStarted = Date()
-                            if let factoryFollowUp = FactoryTurnGate.continuationPrompt(
-                                sessionID: sessionID,
+                            workingPrompt = Self.buildFollowUpPrompt(
                                 originalPrompt: prompt,
                                 assistantToolRequest: slimRequestLine,
-                                toolResultSummary: slimFollowUpBody,
-                                records: aggregatedToolCalls
-                            ) {
-                                workingPrompt = factoryFollowUp
-                            } else {
-                                workingPrompt = Self.buildFollowUpPrompt(
-                                    originalPrompt: prompt,
-                                    assistantToolRequest: slimRequestLine,
-                                    toolResultSummary: slimFollowUpBody
-                                )
-                            }
+                                toolResultSummary: slimFollowUpBody
+                            )
                             let followUpBuildMS = PipelineTiming.elapsedMS(from: followUpStarted)
                             PipelineTiming.log(
                                 "\(roundLabel) followup_build_ms=\(followUpBuildMS) followup_chars=\(workingPrompt.utf8.count) slim_result_chars=\(slimFollowUpBody.utf8.count) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
@@ -597,23 +525,6 @@ extension ConversationPipeline {
                             PipelineTiming.log(
                                 "\(roundLabel) tool_payload_invalid round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted))"
                             )
-                            continue
-                        }
-
-                        if let factoryFollowUp = FactoryTurnGate.continuationPrompt(
-                            sessionID: sessionID,
-                            originalPrompt: prompt,
-                            assistantToolRequest: nil,
-                            toolResultSummary: nil,
-                            records: aggregatedToolCalls
-                        ) {
-                            await MainActor.run {
-                                debugLog("Factory session incomplete — continuing to next required tool")
-                            }
-                            PipelineTiming.log(
-                                "\(roundLabel) factory_continue usage_ms=\(usageMS) round_total_ms=\(PipelineTiming.elapsedMS(from: roundStarted)) tool_records=\(aggregatedToolCalls.count)"
-                            )
-                            workingPrompt = factoryFollowUp
                             continue
                         }
 

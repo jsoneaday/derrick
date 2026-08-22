@@ -50,10 +50,12 @@ struct PolicyEventModalHeader: View {
                 .font(ModalChrome.symbolFont)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(ModalChrome.symbolColor(for: event.kind))
-            Text(event.title)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)

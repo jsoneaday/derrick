@@ -175,8 +175,8 @@ public enum PolicyUserEventFactory {
         let firstLine = trimmed.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
         return failure(
             source: .system,
-            title: "TypeScript check failed",
-            summary: firstLine ?? "Guest tsc rejected the script.",
+            title: "Swift check failed",
+            summary: firstLine ?? "The Swift compiler rejected the script.",
             detail: trimmed.isEmpty ? nil : trimmed,
             toolName: toolName,
             correlationId: correlationId
@@ -207,10 +207,16 @@ public enum PolicyUserEventFactory {
             return "The script exited with code \(exitCode)."
         }
         let lower = stderr.lowercased()
-        if lower.contains("jsondecodeerror") || lower.contains("expecting value") {
+        if lower.contains("jsondecodeerror")
+            || lower.contains("decodingerror")
+            || lower.contains("jsondecoder")
+            || lower.contains("data corrupted") {
             return "The script expected JSON from a network response but received non-JSON (often an HTML error or block page). Check the destination URL and response."
         }
-        if lower.contains("connectionerror") || lower.contains("max retries") || lower.contains("nameresolutionerror") {
+        if lower.contains("urlerror")
+            || lower.contains("connection")
+            || lower.contains("dns")
+            || lower.contains("name resolution") {
             return "The script could not reach a network host (connection or DNS failure)."
         }
         if lower.contains("timeout") || lower.contains("timed out") {
@@ -456,45 +462,6 @@ public enum PolicyUserEventFactory {
             toolName: nil,
             payloadPreview: payloadPreview,
             rememberKey: "content.category:\(key)"
-        )
-    }
-
-    public static func pluginInstall(
-        pluginID: String,
-        version: String,
-        summary: String,
-        detail: String,
-        payloadPreview: String?,
-        toolName: String = "factory.promote",
-        isUpdate: Bool = false,
-        correlationId: String? = nil
-    ) -> PolicyUserEvent {
-        approvalRequired(
-            source: .toolGovernance,
-            title: isUpdate ? "Update plugin" : "Install plugin",
-            summary: summary,
-            detail: detail,
-            toolName: toolName,
-            payloadPreview: payloadPreview,
-            correlationId: correlationId,
-            rememberKey: "plugin.install:\(pluginID):\(version)"
-        )
-    }
-
-    public static func pluginSecretGrant(
-        pluginID: String,
-        provider: String,
-        correlationId: String? = nil
-    ) -> PolicyUserEvent {
-        approvalRequired(
-            source: .toolGovernance,
-            title: "Plugin permission",
-            summary: "\(pluginID) wants to use your \(provider) secret on matching hosts.",
-            detail: "The token stays on this Mac. The plugin never sees it. Deny skips this request.",
-            toolName: "plugin.invoke",
-            payloadPreview: provider,
-            correlationId: correlationId,
-            rememberKey: "plugin.secret:\(pluginID):\(provider)"
         )
     }
 

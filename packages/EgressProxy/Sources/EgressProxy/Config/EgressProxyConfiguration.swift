@@ -24,13 +24,7 @@ public enum EgressProxyConfiguration: Sendable {
     /// Live allow decisions use the DB-backed list pushed into the helper — not this array at request time.
     public static let defaultSeedDomainSuffixes: [String] = [
         "github.com",
-        "githubusercontent.com",    
-        "npmjs.org",
-        "npmjs.com",
-        "registry.npmjs.org",
-        "pypi.org",
-        "pythonhosted.org",
-        "files.pythonhosted.org"
+        "githubusercontent.com"
     ]
 
     /// Hostnames that are always rejected (host/metadata SSRF).

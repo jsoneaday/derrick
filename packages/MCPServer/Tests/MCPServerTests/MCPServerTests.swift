@@ -1,4 +1,5 @@
 import Foundation
+import DockerRunnerXPC
 import Testing
 import MCPClient
 import ServiceContracts
@@ -6,42 +7,21 @@ import Plugin
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
-    private struct StubScriptRunner: ScriptRunner {
-        func run(
-            script: String,
-            timeoutSeconds: Int,
-            allowNetwork: Bool,
-            packages: [String],
-            allowDependencyInstall: Bool
-        ) async throws -> ScriptExecutionResult {
-            _ = packages
-            _ = allowDependencyInstall
-            return ScriptExecutionResult(
-                status: .completed,
-                decision: .allow,
-                failureStage: .none,
-                verifier: "stub",
-                validationFindings: [],
-                reviewerAssessment: nil,
-                stdout: "ok:\(script.count)",
-                stderr: "",
+    private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { arguments, _, _ in
+        if arguments.contains("base64") {
+            let artifact = Data("compiled".utf8).base64EncodedString()
+            return DockerCLIResult(exitCode: 0, stdout: Data(artifact.utf8), stderr: Data())
+        }
+        if arguments.contains("/tmp/plugin"),
+           !arguments.contains("chmod"),
+           !arguments.contains("cat") {
+            return DockerCLIResult(
                 exitCode: 0,
-                timedOut: false,
-                durationMS: 1,
-                phaseTiming: ScriptPhaseTiming(
-                    ensureMS: 1,
-                    execMS: 1,
-                    totalMS: 1,
-                    scriptCharCount: script.utf8.count,
-                    scriptLineCount: 1,
-                    wrapperCharCount: 0
-                )
+                stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
+                stderr: Data()
             )
         }
-    }
-
-    private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { _, _, _ in
-        DockerCLIResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data())
+        return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
 
     private struct StubReviewer: ScriptReviewer {
@@ -148,19 +128,8 @@ import Plugin
         #expect(tools.map(\.name).contains("script_exec"))
     }
 
-    @Test func bunBaselineDockerfileHasNoPythonToolchain() {
-        let dockerfile = DockerScriptPreparer.baselineDockerfile
-        #expect(dockerfile.contains(DockerScriptPreparer.parentImage))
-        #expect(dockerfile.contains("oven/bun:1-debian"))
-        #expect(!dockerfile.contains("uv venv"))
-        #expect(!dockerfile.contains("uv pip install"))
-        #expect(!dockerfile.contains("playwright"))
-        #expect(!dockerfile.contains("crawlee"))
-        #expect(dockerfile.contains("runner.js") || dockerfile.contains("base64 -d"))
-    }
-
     @Test func phaseTimingScriptMetricsCountLinesAndChars() {
-        let script = "import json\nprint(1)\n"
+        let script = "import Foundation\nprint(1)\n"
         let metrics = ScriptPhaseTiming.scriptMetrics(script)
         #expect(metrics.chars == script.utf8.count)
         #expect(metrics.lines == 3)
@@ -201,7 +170,7 @@ import Plugin
         await client.setAccessGate(StubDenyGate())
         let fetched = await client.perform(
             method: "GET",
-            urlString: "https://login.bank.com/",
+            urlString: "https://example.com/",
             invokeID: "inv-1"
         )
         #expect(fetched.succeeded == false)
@@ -215,118 +184,79 @@ import Plugin
         let response = ok.response(requestID: "r1")
         #expect(response.succeeded)
         #expect(response.error == nil)
-        let invoke = PluginHostInvoke(seq: 1, event: PluginHopEvent(kind: .httpResults, httpResults: [response]))
-        let data = try JSONWire.encode(invoke)
-        let decoded = try JSONDecoder().decode(PluginHostInvoke.self, from: data)
-        #expect(decoded.event.httpResults?.first?.succeeded == true)
-        #expect(decoded.event.httpResults?.first?.error == nil)
-        #expect(decoded.event.httpResults?.first?.body == "<html>")
+        let event = PluginHopEvent(kind: .httpResults, httpResults: [response])
+        let data = try JSONWire.encode(event)
+        let decoded = try JSONDecoder().decode(PluginHopEvent.self, from: data)
+        #expect(decoded.httpResults?.first?.succeeded == true)
+        #expect(decoded.httpResults?.first?.error == nil)
+        #expect(decoded.httpResults?.first?.body == "<html>")
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let results = (object?["event"] as? [String: Any])?["http_results"] as? [[String: Any]]
+        let results = object?["http_results"] as? [[String: Any]]
         #expect(results?.first?["body"] as? String == "<html>")
         #expect(results?.first?["json"] == nil)
     }
 
-    @Test func dockerfileInstallsTypeScriptAndGuestIsTS() {
-        let dockerfile = DockerScriptPreparer.baselineDockerfile
-        #expect(dockerfile.contains("bun add -g typescript@7"))
-        #expect(dockerfile.contains("tsc --version"))
-        #expect(DerrickGuestRuntime.dockerImage == "derrick-bun:baseline-4")
-        #expect(!DerrickGuestTypeScript.tsconfigJSON.contains("baseUrl"))
-        #expect(!DerrickGuestTypeScript.handleCheckTS.contains("./script.ts"))
-        #expect(DockerScriptPreparer.guestRunner.contains("script.ts"))
-        #expect(DerrickGuestTypeScript.handleCheckTS.contains("HandleResult"))
+    @Test func swiftRuntimeUsesPinnedImage() {
+        #expect(SwiftScriptPreparer.image == DerrickGuestRuntime.swiftPluginDockerImage)
+        #expect(SwiftScriptPreparer.containerPrefix == "derrick-swift-runtime")
+        #expect(SwiftScriptPreparer.maxTimeoutSeconds == 300)
     }
 
-    @Test func injectHelpersForwardsNonEmptyStdinAndRejectsEmptyWrite() async throws {
-        var stdinBytes: [Int] = []
-        try await DockerVolumeIO.injectHelpers { args, stdin, _ in
-            if args.contains("exec") {
-                stdinBytes.append(stdin.count)
-                return DockerCLIResult(
-                    exitCode: 0,
-                    stdout: Data("\(stdin.count)".utf8),
-                    stderr: Data()
-                )
+    @Test func swiftExecutorUsesReadOnlyExecutableContainer() async throws {
+        let recorder = DockerCallRecorder()
+        let runner = SwiftDockerExecutor(
+            image: "swift:pinned",
+            executor: { arguments, _, _ in
+                await recorder.append(arguments)
+                if arguments.contains("base64") {
+                    let artifact = Data("compiled".utf8).base64EncodedString()
+                    return DockerCLIResult(exitCode: 0, stdout: Data(artifact.utf8), stderr: Data())
+                }
+                if arguments.contains("/tmp/plugin"),
+                   !arguments.contains("chmod"),
+                   !arguments.contains("cat") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
+                        stderr: Data()
+                    )
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             }
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
-        #expect(stdinBytes.count == 3)
-        #expect(stdinBytes.allSatisfy { $0 > 0 })
-
-        await #expect(throws: VolumeIOPathError.self) {
-            try await DockerVolumeIO.writeFile(
-                volume: DerrickNamedVolume.helpers,
-                relativePath: "empty.txt",
-                data: Data(),
-                exec: { _, _, _ in DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data()) }
-            )
-        }
-    }
-
-    @Test func typecheckFailureIsShownToUser() {
-        let err = ScriptLeaseError.typecheckFailed("script.ts(1,1): error TS2322: Type 'string' is not assignable to type 'HandleResult'.")
-        #expect(err.errorDescription?.contains("TS2322") == true)
-        #expect(err.errorDescription?.contains("TypeScript check failed") == true)
-    }
-
-    @Test func bunPoolCreateUsesSleepHoldAndBunImage() {
-        let name = DockerScriptPreparer.poolContainerName(slotIndex: 0)
-        #expect(name == "derrick-runner-bun-1-0")
-        let args = DockerScriptPreparer.dockerCreateWarmContainerArguments(containerName: name)
-        #expect(args.contains("--name"))
-        #expect(args.contains(name))
-        #expect(args.contains("/bin/sleep"))
-        #expect(args.contains("infinity"))
-        #expect(args.contains(DerrickGuestRuntime.dockerImage))
-        #expect(args.contains("-v"))
-        #expect(args.contains { $0.hasPrefix("derrick-script-scratch-") })
-        #expect(args.contains { $0.contains("derrick-script-helpers") })
-        #expect(!args.contains("NET_ADMIN"))
-        #expect(!args.contains { $0.contains("PLAYWRIGHT") })
-        #expect(!args.contains("HTTP_PROXY"))
-        #expect(!args.contains { $0.contains("host.docker.internal") })
-    }
-
-    @Test func handoffCreateIsNetworkNoneReadOnly() {
-        let args = DockerScriptPreparer.dockerCreateHandoffArguments(
-            containerName: "derrick-runner-bun-1-0",
-            scratchVolume: "derrick-script-scratch-slot-0"
         )
-        #expect(args.contains("--network"))
-        #expect(args.contains("none"))
-        #expect(args.contains("--read-only"))
-        #expect(!args.contains("HTTP_PROXY"))
-        #expect(DockerScriptPreparer.poolSlotCount == 2)
+        let artifact = try await runner.compile(source: "import Foundation\nprint(\"[]\")")
+        _ = try await runner.runArtifact(artifact, input: Data(#"{"kind":"manual"}"#.utf8))
+
+        let calls = await recorder.calls
+        let create = calls.first(where: { $0.first == "create" }) ?? []
+        #expect(create.contains("--network"))
+        #expect(create.contains("none"))
+        #expect(create.contains("--read-only"))
+        #expect(create.contains("--tmpfs"))
+        #expect(create.contains { $0.contains("exec") })
     }
 
-    @Test func volumeIORejectsEscapingPath() throws {
-        #expect(throws: VolumeIOPathError.self) {
-            _ = try DockerVolumeIO.validatedRelativePath("../etc/passwd")
-        }
-        let ok = try DockerVolumeIO.validatedRelativePath("runner.js")
-        #expect(ok == "runner.js")
+    @Test func swiftSourceVerifierRejectsHostEscapeAndDependencies() {
+        let findings = SwiftScriptVerifier.validate(
+            source: "import Foundation\nlet _ = URLSession.shared",
+            dependencies: ["example": "1.0.0"]
+        )
+        #expect(findings.contains("Direct network access is not allowed; emit http.request envelopes."))
+        #expect(findings.contains("Swift script dependencies are not supported; use the standard library and Foundation."))
     }
 
-    @Test func bunPoolExecUsesRunner() {
-        let name = DockerScriptPreparer.poolContainerName(slotIndex: 0)
-        let args = DockerScriptPreparer.dockerExecArguments(containerName: name)
-        #expect(args.contains("exec"))
-        #expect(args.contains(name))
-        #expect(args.contains("bun"))
-        #expect(args.contains(DockerScriptPreparer.runnerPath))
+    @Test func swiftSourceVerifierAllowsStandaloneInput() {
+        let findings = SwiftScriptVerifier.validate(
+            source: "import Foundation\nlet data = FileHandle.standardInput.readDataToEndOfFile()"
+        )
+        #expect(findings.isEmpty)
     }
 
-    @Test func dockerUnavailableMessageIgnoresPackageLoadFailures() {
-        let stderr = "[script_exec] baseline package verification failed: charset_normalizer -> charset_normalizer: Error loading shared library /workspace/node_modules/charset_normalizer/cd.node: Operation not permitted"
-
-        #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 1) == nil)
-        #expect(DockerScriptPreparer.dockerUnavailableMessage(stderr: stderr, exitCode: 127) != nil)
-    }
-
-    @Test func scriptToolBlocksReadonlyViolations() async throws {
+    @Test func swiftScriptToolBlocksReadonlyViolations() async throws {
         let bridge = try await MCPLocalBridge.make { server in
-            await server.registerScriptExecutionTool(stdinExecutor: Self.dummyStdin, reviewer: StubReviewer(
+            await server.registerScriptExecutionTool(
+                stdinExecutor: Self.dummyStdin,
+                reviewer: StubReviewer(
                     assessment: ScriptReviewAssessment(
                         alignedWithRequest: true,
                         confidence: 0.9,
@@ -341,17 +271,54 @@ import Plugin
         let result = try await bridge.client.callTool(
             named: "script_exec",
             arguments: [
-                "mode": .string("readonly"),
                 "description": .string("attempt write"),
                 "reason": .string("test"),
-                "script": .string("export function handle() { writeFile('/tmp/a', 'x'); return []; }")
+                "script": .string(
+                    "import Foundation\nlet _ = FileManager.default.createDirectory(atPath: \"/tmp/a\", withIntermediateDirectories: true)"
+                )
             ]
         )
 
-        #expect(result.isError == false)
         #expect(result.text.contains("\"status\":\"blocked\""))
-        #expect(result.text.contains("\"decision\":\"deny\""))
         #expect(result.text.contains("\"failureStage\":\"staticValidation\""))
+    }
+
+    @Test func swiftExecutorUsesSwiftImage() {
+        #expect(DerrickGuestRuntime.swiftPluginDockerImage.contains("swift"))
+    }
+
+    @Test func swiftRuntimeErrorUsesSwiftLanguage() {
+        let error = SwiftDockerExecutorError.commandFailed("swiftc", "compile failed")
+        #expect(error.localizedDescription.contains("swiftc"))
+    }
+
+    @Test func hostHopDispatcherStopsAtTerminalEnvelope() async throws {
+        let result = try await PluginHostHopDispatcher.run(
+            initialInput: Data(#"{"kind":"manual"}"#.utf8)
+        ) { _ in
+            PluginFactoryExecutionResult(
+                exitCode: 0,
+                stdout: Data(#"[{"verb":"result.emit","summary":"done"}]"#.utf8)
+            )
+        }
+        #expect(result.exitCode == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self).contains("done"))
+    }
+
+    @Test func swiftContainerArgumentsStayNetworkIsolated() {
+        let name = "derrick-swift-runtime-test"
+        let args = [
+            "create", "--network", "none", "--name", name, "--read-only",
+            "--tmpfs", "/tmp:rw,exec,nosuid,size=128m",
+            "swiftlang/swift:nightly-6.4.x-noble", "/bin/sleep", "infinity",
+        ]
+        #expect(args.contains("--name"))
+        #expect(args.contains(name))
+        #expect(args.contains("/bin/sleep"))
+        #expect(args.contains("infinity"))
+        #expect(args.contains("--network"))
+        #expect(args.contains("none"))
+        #expect(args.contains("--read-only"))
     }
 
     @Test func scriptToolDeniesWriteWhenReviewerMissing() async throws {
@@ -365,7 +332,7 @@ import Plugin
                 "mode": .string("write"),
                 "description": .string("create report file"),
                 "reason": .string("user asked for file output"),
-                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hello' }]; }"),
+                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
                 "expected_effects": .array([.string("write /tmp/report.txt")]),
                 "allow_network": .bool(true)
             ]
@@ -397,7 +364,7 @@ import Plugin
                 "mode": .string("readonly"),
                 "description": .string("inspect csv"),
                 "reason": .string("analyze user-provided data"),
-                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hi' }]; }"),
+                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
                 "user_prompt": .string("summarize this csv"),
                 "allow_network": .bool(true)
             ]
@@ -475,9 +442,9 @@ import Plugin
     @Test func effectiveScriptTimeoutCapsAtContainerLeaseTTL() {
         ContainerLifecycleRuntime.resetToDefaultForTesting()
         defer { ContainerLifecycleRuntime.resetToDefaultForTesting() }
-        #expect(DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: 30) == 30)
-        #expect(DockerScriptPreparer.effectiveScriptTimeoutSeconds(requested: 900) == DockerScriptPreparer.containerRunMaxTTLSeconds)
-        #expect(DockerScriptPreparer.containerRunMaxTTLSeconds == 7 * 60)
+        #expect(SwiftScriptPreparer.effectiveScriptTimeoutSeconds(requested: 30) == 30)
+        #expect(SwiftScriptPreparer.effectiveScriptTimeoutSeconds(requested: 900) == SwiftScriptPreparer.containerRunMaxTTLSeconds)
+        #expect(SwiftScriptPreparer.containerRunMaxTTLSeconds == 7 * 60)
     }
 
     @Test func containerLeaseExceededProducesClearLLMMessage() {
@@ -512,7 +479,7 @@ import Plugin
                 "mode": .string("readonly"),
                 "description": .string("fetch page"),
                 "reason": .string("test"),
-                "script": .string("export function handle() { return [{ verb: 'result.emit', summary: 'hi' }]; }"),
+                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
                 "allow_network": .bool(true)
             ]
         )
@@ -521,5 +488,21 @@ import Plugin
         #expect(result.text.contains("\"decision\":\"allow\""))
         #expect(result.text.contains("\"failureStage\":\"none\""))
         #expect(result.text.contains("Looks fine with soft concerns"))
+    }
+}
+
+private actor DockerCallRecorder {
+    private(set) var calls: [[String]] = []
+
+    func append(_ arguments: [String]) {
+        calls.append(arguments)
+    }
+}
+
+private actor StdinByteRecorder {
+    private(set) var values: [Int] = []
+
+    func append(_ value: Int) {
+        values.append(value)
     }
 }

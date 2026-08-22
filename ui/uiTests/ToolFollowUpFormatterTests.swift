@@ -7,7 +7,7 @@ import Testing
     @Test func stripsScriptWrapperLinesFromStdout() {
         let raw = """
         [script_exec] wiped /tmp and /var/tmp
-        [script_exec] verified baseline package: requests -> requests
+        [script_exec] Swift container ready
         real data line
         [TIME_METRIC] script_exec total_ms=1
         more data
@@ -89,7 +89,7 @@ import Testing
           "status": "failed",
           "failureStage": "execution",
           "stdout": "",
-          "stderr": "[script_exec] Syntax error: bad\\nTraceback (most recent call last):\\n  File x",
+          "stderr": "[script_exec] Swift compiler error\\nplugin.swift:1:1: error: expected expression",
           "exitCode": 1,
           "timedOut": false
         }
@@ -97,29 +97,29 @@ import Testing
         let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json)
         #expect(slim.contains("failureStage: execution"))
         #expect(slim.contains("stderr:"))
-        #expect(slim.contains("Traceback"))
-        #expect(!slim.contains("[script_exec] Syntax error"))
+        #expect(slim.contains("expected expression"))
+        #expect(!slim.contains("[script_exec] Swift compiler error"))
     }
 
     @Test func scriptRequestOmitsFullScriptBody() {
         let script = """
-        import json
-        print(1)
-        print(2)
+        import Foundation
+        let input = FileHandle.standardInput.readDataToEndOfFile()
+        print(input.count)
         """
         let line = ToolFollowUpFormatter.slimRequestDescription(
             name: "script_exec",
             arguments: [
                 "allow_network": "true",
                 "script": script,
-                "packages": #"["requests"]"#
+                "dependencies": #"{"swiftpkg":"1.0.0"}"#
             ]
         )
         #expect(line.contains("script_exec"))
         #expect(line.contains("allow_network=true"))
         #expect(line.contains("script_lines="))
-        #expect(line.contains("packages=1"))
-        #expect(!line.contains("import json"))
+        #expect(line.contains("dependencies=unsupported"))
+        #expect(!line.contains("import Foundation"))
         #expect(!line.contains("print(1)"))
     }
 

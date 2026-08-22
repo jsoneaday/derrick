@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 /// SHA-256 of the hashed plugin tree (`plugin.json`, `app.derrick/**`,
-/// `skills/**`, `bun.lock`). `node_modules` is excluded.
+/// `skills/**`).
 public struct PluginContentHash: RawRepresentable, Codable, Sendable, Hashable, CustomStringConvertible {
     public let rawValue: String
 
@@ -54,7 +54,6 @@ public struct PluginContentHash: RawRepresentable, Codable, Sendable, Hashable, 
         }
 
         try consider(root.appendingPathComponent("plugin.json"))
-        try consider(root.appendingPathComponent("bun.lock"))
         for folder in ["app.derrick", "skills"] {
             let dir = root.appendingPathComponent(folder)
             var isDir: ObjCBool = false
@@ -65,10 +64,6 @@ public struct PluginContentHash: RawRepresentable, Codable, Sendable, Hashable, 
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let fileURL as URL in enumerator {
-                if fileURL.path.contains("/node_modules/") || fileURL.lastPathComponent == "node_modules" {
-                    enumerator.skipDescendants()
-                    continue
-                }
                 let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
                 if values.isRegularFile == true {
                     try consider(fileURL)
@@ -79,8 +74,8 @@ public struct PluginContentHash: RawRepresentable, Codable, Sendable, Hashable, 
     }
 
     public static func shouldHash(relativePath: String) -> Bool {
-        if relativePath == "plugin.json" || relativePath == "bun.lock" { return true }
-        if relativePath.hasPrefix("app.derrick/") { return !relativePath.contains("/node_modules/") }
+        if relativePath == "plugin.json" { return true }
+        if relativePath.hasPrefix("app.derrick/") { return true }
         if relativePath.hasPrefix("skills/") { return true }
         return false
     }

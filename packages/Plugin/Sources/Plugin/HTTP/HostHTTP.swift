@@ -73,4 +73,26 @@ public struct HostHTTPResponse: Codable, Sendable, Hashable {
         case fileHandle = "file_handle"
         case error
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(requestID, forKey: .requestID)
+        try container.encode(status, forKey: .status)
+        try container.encode(headers, forKey: .headers)
+        try container.encode(body, forKey: .body)
+        try container.encodeIfPresent(json, forKey: .json)
+        try container.encodeIfPresent(fileHandle, forKey: .fileHandle)
+        try container.encodeIfPresent(error, forKey: .error)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        status = try container.decode(Int.self, forKey: .status)
+        headers = try container.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
+        body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+        json = try container.decodeIfPresent(Data.self, forKey: .json)
+        fileHandle = try container.decodeIfPresent(String.self, forKey: .fileHandle)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
 }

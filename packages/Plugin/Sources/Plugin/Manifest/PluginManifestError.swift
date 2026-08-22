@@ -14,7 +14,6 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
     case pathEscapesRoot(String)
     case missingRuntime
     case missingFile(String)
-    case missingLockfile
     case unknownAuthProvider(String)
     case invalidAuthRefName(String)
     case invalidTriggerPrefix(String)
@@ -43,7 +42,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .invalidFieldType(let f):
             return "plugin.json field has the wrong type: \(f)"
         case .invalidEntrypoint(let p):
-            return "Entrypoint must be a plugin-relative .js path: \(p)"
+            return "Entrypoint must be a plugin-relative .swift path: \(p)"
         case .pathNotRelative(let p):
             return "Path must be plugin-relative and start with ./: \(p)"
         case .pathEscapesRoot(let p):
@@ -52,8 +51,6 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
             return "app.derrick runtime.json is required for a handle plugin"
         case .missingFile(let p):
             return "Missing plugin file: \(p)"
-        case .missingLockfile:
-            return "bun.lock is required when dependencies are declared"
         case .unknownAuthProvider(let p):
             return "Unknown auth provider: \(p)"
         case .invalidAuthRefName(let n):
@@ -63,7 +60,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .intervalTooShort(let s):
             return "Schedule interval must be at least \(PluginContract.minScheduleIntervalSeconds)s (got \(s))"
         case .invalidDependency(let n):
-            return "Invalid npm dependency: \(n)"
+            return "Swift plugin dependencies are not supported: \(n)"
         case .invalidContentHash(let h):
             return "Invalid content hash: \(h)"
         case .invalidSkill(let s):

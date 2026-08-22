@@ -44,19 +44,11 @@ import Testing
     }
 
     @Test func loadsGuestSDKFromResourcesDirectory() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let resources = root.appendingPathComponent("Resources", isDirectory: true)
-        let guest = resources.appendingPathComponent("guest", isDirectory: true)
-        try FileManager.default.createDirectory(at: guest, withIntermediateDirectories: true)
-        try "export interface HandleEvent {}\n".write(
-            to: guest.appendingPathComponent("derrick.ts"),
-            atomically: true,
-            encoding: .utf8
-        )
-        #expect(try PromptResources.guestSDKSource(from: root) == "export interface HandleEvent {}")
-        let wrapped = try PromptResources.guestSDKForModel(from: root)
-        #expect(wrapped.contains("```typescript"))
-        #expect(wrapped.contains("export interface HandleEvent {}"))
+        let source = try PromptResources.guestSDKSource()
+        #expect(source.contains("standalone Swift executable"))
+        let wrapped = try PromptResources.guestSDKForModel()
+        #expect(wrapped.contains("```swift"))
+        #expect(wrapped.contains("Swift plugin contract"))
     }
 
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {

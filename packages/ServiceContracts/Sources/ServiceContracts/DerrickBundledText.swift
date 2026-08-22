@@ -47,11 +47,15 @@ public enum DerrickBundledText: Sendable {
         }
     }
 
-    public static func formatTypeScriptForModel(_ source: String, heading: String) -> String {
+    public static func formatCodeForModel(
+        _ source: String,
+        heading: String,
+        language: String = "swift"
+    ) -> String {
         """
         # \(heading)
 
-        ```typescript
+        ```\(language)
         \(source)
         ```
         """

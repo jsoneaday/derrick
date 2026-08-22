@@ -81,7 +81,6 @@ public actor DBRepository {
 
     public func createEmptyDatabaseIfNeeded(username: String, password: String) throws -> URL {
         let url = try migrateSessionMemory(username: username, password: password)
-        try seedSystemPlugins()
         return url
     }
 

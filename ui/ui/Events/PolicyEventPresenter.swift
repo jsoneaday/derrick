@@ -30,8 +30,6 @@ final class PolicyEventPresenter: ObservableObject {
 
     /// Decision wait timeout for approval / network / usage modals.
     static let decisionTimeoutNanoseconds: UInt64 = 60_000_000_000
-    /// Plugin install/update cards include source the user may read.
-    static let pluginDecisionTimeoutNanoseconds: UInt64 = 300_000_000_000
 
     /// - Parameter bus: Defaults to shared; tests may inject an isolated bus.
     init(bus: AppEventBus = .shared) {
@@ -133,10 +131,7 @@ final class PolicyEventPresenter: ObservableObject {
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
                 do {
-                    let nanos = next.rememberKey?.hasPrefix("plugin.install:") == true
-                        ? Self.pluginDecisionTimeoutNanoseconds
-                        : Self.decisionTimeoutNanoseconds
-                    try await Task.sleep(nanoseconds: nanos)
+                    try await Task.sleep(nanoseconds: Self.decisionTimeoutNanoseconds)
                 } catch {
                     return
                 }

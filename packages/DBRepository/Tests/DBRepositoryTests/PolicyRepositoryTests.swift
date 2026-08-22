@@ -126,7 +126,7 @@ final class PolicyRepositoryTests: XCTestCase {
             sessionID: sessionID,
             ruleID: "runtime-confirmation",
             requestType: "tool_invocation",
-            requestPayloadJSON: #"{"tool_name":"factory.build"}"#,
+            requestPayloadJSON: #"{"tool_name":"script_exec"}"#,
             decision: "denied",
             actor: "policy-engine"
         )

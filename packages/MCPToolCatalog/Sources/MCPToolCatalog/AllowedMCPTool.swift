@@ -16,14 +16,12 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case jobsCreate = "jobs_create"
     /// Recurring or one-shot schedule template. Local orchestration → JobService.
     case jobsScheduleCreate = "jobs_schedule_create"
-    case factoryBuild = "factory.build"
-    case factoryWritePackage = "factory.write_package"
-    case factoryReview = "factory.review"
-    case factoryTest = "factory.test"
-    case factoryPromote = "factory.promote"
-    case factoryInstallSample = "factory.install_sample"
-    case pluginInvoke = "plugin.invoke"
+    /// Starts one bounded plugin-factory build from a user's goal.
+    case pluginFactoryBuild = "plugin_factory_build"
+    /// Lists approved compiled plugin releases.
     case pluginList = "plugin.list"
+    /// Runs one approved compiled plugin release.
+    case pluginInvoke = "plugin.invoke"
 
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
@@ -32,10 +30,14 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
         name == scriptExec.rawValue
     }
 
+    public static func isHostDiscoveryTool(_ name: String) -> Bool {
+        name == "tool_search" || name == "tool" || name == "tool_batch"
+    }
+
     public var defaultDescription: String {
         switch self {
         case .scriptExec:
-            return "Run declared JavaScript (Bun) in a constrained Docker container after verification. Use netFetch for HTTP; the host performs the request."
+            return "Run declared standalone Swift in a constrained Docker container after verification. Emit HTTP request envelopes; the host performs the request."
         case .sessionMemorySearch:
             return "Search prior session memory entries with optional query and paging."
         case .agentsSpawn:
@@ -52,22 +54,12 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "Create a one-shot background job (optional delay). Freezes a tool call; optional wake of this agent after the tool runs."
         case .jobsScheduleCreate:
             return "Create a recurring or one-shot schedule that spawns job runs (interval or once). Freezes a tool template; optional wake after each fire."
-        case .factoryBuild:
-            return "Start or resume this Software Factory session. Required: goal (the user's request, in their words)."
-        case .factoryWritePackage:
-            return "Write the plugin package (id, version, description, TypeScript handle, optional deps and fixtures). Runs static checks."
-        case .factoryReview:
-            return "Security-review the current factory package against its spec. Required before promote."
-        case .factoryTest:
-            return "Run a test of the current plugin with sample parameters. Required before install."
-        case .factoryPromote:
-            return "Ask the user to install the reviewed plugin. Swift hashes, grants, and enables one version. Factory cannot install by itself."
-        case .factoryInstallSample:
-            return "Install the shipped daily-news sample after the user approves. No auth. One public news host."
-        case .pluginInvoke:
-            return "Run an installed plugin's frozen handle. Pass plugin_id and optional params (JSON object → event.params). Same hop loop as script_exec (netFetch → host HTTP)."
+        case .pluginFactoryBuild:
+            return "Translate a user goal into an Agent Plugin draft, test it, independently review it, compile it with Swift, and verify its release hash."
         case .pluginList:
-            return "List installed plugins (id, version, description, enabled)."
+            return "List approved compiled Agent Plugin releases."
+        case .pluginInvoke:
+            return "Run one approved compiled Agent Plugin by id with a JSON input object."
         }
     }
 }

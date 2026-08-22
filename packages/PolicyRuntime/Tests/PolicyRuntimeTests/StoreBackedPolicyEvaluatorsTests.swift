@@ -43,7 +43,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
             ToolInvocationEvent(
                 sessionID: "factory-1",
                 toolName: "tool_search",
-                argumentsJSON: #"{"query":"factory.build factory.write_package"}"#
+                argumentsJSON: #"{"query":"script_exec"}"#
             )
         )
         XCTAssertEqual(outcome, .allow)

@@ -13,10 +13,7 @@ Use a tool when the user asks for any of:
 - search, look up, browse, fetch, scrape, or “from the web / online”
 - site-specific retail or catalog data (e.g. Amazon, “best sellers”, “top 10 … being sold”, prices, availability)
 
-Unless the user is explicit about *how* to do it (names a plugin, asks for a script, or names `script_exec`):
-1. Call `plugin.list` first.
-2. If an installed plugin fits, call `plugin.invoke` with that `plugin_id`. Do not write a script for work a plugin already does.
-3. Only if no installed plugin fits, use `script_exec` (live web via host HTTP).
+Use `script_exec` for scripting, automation, and live web access through the host HTTP bridge.
 
 For those requests:
 1. Prefer calling the tool **on the first turn** with reasonable defaults.

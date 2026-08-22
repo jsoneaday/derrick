@@ -1,4 +1,4 @@
-/// Contract types for sandboxed Bun scripts and Agent Plugin packages.
+/// Contract types for sandboxed Swift programs and Agent Plugin packages.
 /// This module does not execute guest code and does not talk XPC.
 public enum PluginContract {
     public static let envelopeSchemaVersion = 1
@@ -13,6 +13,4 @@ public enum PluginContract {
     public static let defaultHTTPJSONBytes = 1_048_576
     public static let defaultHTTPFileBytes = 10_485_760
     public static let defaultTimeoutSeconds = 60
-    /// Max encoded JSON size for `plugin.invoke` params.
-    public static let maxInvokeParamsBytes = 16_384
 }

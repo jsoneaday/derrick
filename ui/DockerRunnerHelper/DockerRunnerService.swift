@@ -42,12 +42,25 @@ actor ProcessRunner {
         }
 
         var launchError: Error? = nil
+        var stdoutTask: Task<Data, Never>?
+        var stderrTask: Task<Data, Never>?
         await withCheckedContinuation { continuation in
             process.terminationHandler = { _ in
                 continuation.resume()
             }
             do {
                 try process.run()
+                // Drain both pipes concurrently. Waiting for process termination before
+                // reading allows a large artifact (for example, base64-encoded Swift
+                // output) to fill a pipe and deadlock the child.
+                let stdoutReader = stdoutPipe.fileHandleForReading
+                let stderrReader = stderrPipe.fileHandleForReading
+                stdoutTask = Task.detached {
+                    (try? stdoutReader.readToEnd()) ?? Data()
+                }
+                stderrTask = Task.detached {
+                    (try? stderrReader.readToEnd()) ?? Data()
+                }
                 stdinPipe.fileHandleForWriting.write(launch.stdinData)
                 stdinPipe.fileHandleForWriting.closeFile()
             } catch {
@@ -65,8 +78,8 @@ actor ProcessRunner {
         }
 
         let isTimedOut = await tracker.timedOut
-        let stdout = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-        let stderr = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let stdout = await stdoutTask?.value ?? Data()
+        let stderr = await stderrTask?.value ?? Data()
         let exitCode = isTimedOut ? Int32(-1) : process.terminationStatus
 
         logs.append("Process finished. Timed out: \(isTimedOut). Exit code: \(exitCode). Stdout bytes: \(stdout.count). Stderr bytes: \(stderr.count).")

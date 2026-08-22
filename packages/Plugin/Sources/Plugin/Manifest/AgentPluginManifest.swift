@@ -185,7 +185,7 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
 
     public init(entrypoint: String? = nil, runtime: String? = nil) throws {
         if let entrypoint {
-            self.entrypoint = try PluginPath.validateJSEntrypoint(entrypoint)
+            self.entrypoint = try PluginPath.validateRuntimeEntrypoint(entrypoint)
         } else {
             self.entrypoint = nil
         }

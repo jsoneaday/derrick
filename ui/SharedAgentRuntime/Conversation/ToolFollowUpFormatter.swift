@@ -51,7 +51,7 @@ enum ToolFollowUpFormatter {
     // MARK: - Request description
 
     static func slimRequestDescription(name: String, arguments: [String: String]) -> String {
-        if AllowedMCPTool.isScriptExec(name) || name.hasSuffix("script_exec") || name == AllowedMCPTool.pluginInvoke.rawValue {
+        if AllowedMCPTool.isScriptExec(name) || name.hasSuffix("script_exec") {
             return slimScriptRequestDescription(name: name, arguments: arguments)
         }
         return slimGenericRequestDescription(name: name, arguments: arguments)
@@ -62,11 +62,10 @@ enum ToolFollowUpFormatter {
         if let allowNetwork = arguments["allow_network"] ?? arguments["allowNetwork"] {
             parts.append("allow_network=\(allowNetwork)")
         }
-        if let packages = arguments["packages"] {
-            let count = packageCount(from: packages)
-            if count > 0 {
-                parts.append("packages=\(count)")
-            }
+        if let dependencies = arguments["dependencies"],
+           !dependencies.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           dependencies != "{}" {
+            parts.append("dependencies=unsupported")
         }
         if let script = arguments["script"] {
             let lineCount = max(1, script.split(separator: "\n", omittingEmptySubsequences: false).count)
@@ -91,16 +90,6 @@ enum ToolFollowUpFormatter {
             return "\(name) (\(pairs.joined(separator: ", ")))"
         }
         return "\(name) (args: \(keys); large omitted: \(largeKeys.joined(separator: ",")))"
-    }
-
-    private static func packageCount(from raw: String) -> Int {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("["), let data = trimmed.data(using: .utf8),
-           let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] {
-            return arr.count
-        }
-        if trimmed.isEmpty || trimmed == "[]" { return 0 }
-        return trimmed.split(separator: ",").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
     }
 
     // MARK: - Script result
@@ -192,10 +181,6 @@ enum ToolFollowUpFormatter {
             if trimmed.isEmpty { return true }
             if trimmed.hasPrefix("[script_exec]") { return false }
             if trimmed.hasPrefix("[TIME_METRIC]") { return false }
-            // Common package-verify noise without the bracket prefix (defensive).
-            if trimmed.localizedCaseInsensitiveContains("baseline package verification") { return false }
-            if trimmed.localizedCaseInsensitiveContains("verified baseline package:") { return false }
-            if trimmed == "wiped /tmp and /var/tmp" { return false }
             return true
         }
         return filtered

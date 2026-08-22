@@ -9,7 +9,6 @@ import MCPToolCatalog
 import MemorySystem
 import PolicyRuntime
 import ServiceContracts
-import Plugin
 
 @MainActor
 final class ConversationModel {
@@ -105,17 +104,10 @@ final class ConversationModel {
         }
         let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
-        var mcpToolInstructions = [
+        let mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
             try PromptResources.guestSDKForModel(),
         ].joined(separator: "\n\n")
-        if FactorySessionID.isFactorySession(sessionID) {
-            if let skill = await factorySkillInstructions(repository: repository, sessionID: sessionID) {
-                mcpToolInstructions += "\n\n" + skill
-                let skillPlugin = await skillPluginID(repository: repository, sessionID: sessionID)
-                debugLog("[skill] attached session=\(sessionID) plugin=\(skillPlugin) chars=\(skill.count)")
-            }
-        }
 
         let budget = MemoryBudget(maxTokenCount: 200_000)
         let summarizer = ConfiguredMemorySummarizer(
@@ -206,7 +198,53 @@ final class ConversationModel {
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws {
-        if try await tryPrefixInvoke(prompt: prompt, onChunk: onChunk) {
+        if let factoryGoal = Self.pluginFactoryGoal(from: prompt) {
+            onChunk(
+                AgentResponseNextChunk(
+                    status: .toolCall,
+                    chunk: nil,
+                    toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+                )
+            )
+            let result = try await toolClient.callTool(
+                named: AllowedMCPTool.pluginFactoryBuild.rawValue,
+                arguments: ["goal": .string(factoryGoal)]
+            )
+            if !result.isError,
+               let pluginID = Self.pluginID(fromFactoryResult: result.text) {
+                onChunk(
+                    AgentResponseNextChunk(
+                        status: .toolCall,
+                        chunk: nil,
+                        toolName: AllowedMCPTool.pluginInvoke.rawValue
+                    )
+                )
+                let runResult = try await toolClient.callTool(
+                    named: AllowedMCPTool.pluginInvoke.rawValue,
+                    arguments: ["plugin_id": .string(pluginID)]
+                )
+                onChunk(
+                    AgentResponseNextChunk(
+                        status: .complete,
+                        chunk: runResult.text,
+                        toolName: AllowedMCPTool.pluginInvoke.rawValue
+                    )
+                )
+                return
+            }
+            onChunk(
+                AgentResponseNextChunk(
+                    status: .complete,
+                    chunk: result.text,
+                    toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+                )
+            )
+            return
+        }
+        if try await invokeApprovedPluginIfRequested(
+            prompt: prompt,
+            onChunk: onChunk
+        ) {
             return
         }
         let sessionKey = self.sessionKey
@@ -280,6 +318,93 @@ final class ConversationModel {
                 }
             }
         }
+    }
+
+    private static func pluginFactoryGoal(from prompt: String) -> String? {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = "/create-plugin"
+        guard trimmed == command || trimmed.hasPrefix(command + " ") else {
+            return nil
+        }
+        let goal = String(trimmed.dropFirst(command.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return goal.isEmpty ? "Help me design a useful Agent Plugin. Ask for the missing goal in the result." : goal
+    }
+
+    private static func pluginID(fromFactoryResult text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let receipt = try? JSONDecoder().decode(PluginFactoryBuildReceipt.self, from: data),
+              receipt.ok,
+              let pluginID = receipt.pluginID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !pluginID.isEmpty
+        else {
+            return nil
+        }
+        return pluginID
+    }
+
+    private func invokeApprovedPluginIfRequested(
+        prompt: String,
+        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
+    ) async throws -> Bool {
+        guard let request = Self.pluginInvocation(from: prompt) else { return false }
+        let listed = try? await toolClient.callTool(
+            named: AllowedMCPTool.pluginList.rawValue,
+            arguments: [:]
+        )
+        guard let listed,
+              Self.pluginIDs(from: listed.text).contains(request.pluginID) else {
+            return false
+        }
+
+        var arguments: [String: Value] = [
+            "plugin_id": .string(request.pluginID),
+        ]
+        if !request.remainder.isEmpty {
+            let input: [String: String] = ["text": request.remainder]
+            let data = try JSONSerialization.data(withJSONObject: input, options: [.sortedKeys])
+            arguments["input_json"] = .string(String(decoding: data, as: UTF8.self))
+        }
+        onChunk(
+            AgentResponseNextChunk(
+                status: .toolCall,
+                chunk: nil,
+                toolName: AllowedMCPTool.pluginInvoke.rawValue
+            )
+        )
+        let result = try await toolClient.callTool(
+            named: AllowedMCPTool.pluginInvoke.rawValue,
+            arguments: arguments
+        )
+        onChunk(
+            AgentResponseNextChunk(
+                status: .complete,
+                chunk: result.text,
+                toolName: AllowedMCPTool.pluginInvoke.rawValue
+            )
+        )
+        return true
+    }
+
+    private static func pluginInvocation(from prompt: String) -> (pluginID: String, remainder: String)? {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return nil }
+        let parts = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        guard let first = parts.first else { return nil }
+        let pluginID = String(first.dropFirst())
+        guard !pluginID.isEmpty, pluginID != "create-plugin", pluginID != "edit-plugin" else {
+            return nil
+        }
+        let remainder = parts.count == 2 ? String(parts[1]) : ""
+        return (pluginID, remainder)
+    }
+
+    private static func pluginIDs(from listJSON: String) -> Set<String> {
+        guard let data = listJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
+            return []
+        }
+        return Set(obj.compactMap { $0["plugin_id"] })
     }
 
     /// Builds the existing conversation pipeline stream for one envelope body (turn engine unchanged).
@@ -556,128 +681,6 @@ final class ConversationModel {
         """
     }
 
-    /// `/plugin-id rest` skips the LLM when exactly one installed plugin matches.
-    private func tryPrefixInvoke(
-        prompt: String,
-        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
-    ) async throws -> Bool {
-        guard let parsed = PluginPrefix.parse(prompt) else { return false }
-        let listed: MCPToolResult
-        do {
-            listed = try await toolClient.callTool(named: AllowedMCPTool.pluginList.rawValue, arguments: [:])
-        } catch {
-            return false
-        }
-        let ids = pluginIDs(from: listed.text)
-        guard let pluginID = PluginPrefix.uniqueMatch(handle: parsed.handle, pluginIDs: ids) else {
-            return false
-        }
-        var arguments: [String: Value] = [
-            "plugin_id": .string(pluginID),
-            "kind": .string(PluginEventKind.messageInRoom.rawValue),
-        ]
-        if !parsed.remainder.isEmpty {
-            let mapped = FactoryInvokeParams.chatParams(remainder: parsed.remainder)
-            arguments["params"] = .object(mapped.mapValues { mcpValue(from: $0) })
-        }
-        onChunk(
-            AgentResponseNextChunk(
-                status: .toolCall,
-                chunk: nil,
-                toolName: AllowedMCPTool.pluginInvoke.rawValue
-            )
-        )
-        let result = try await toolClient.callTool(
-            named: AllowedMCPTool.pluginInvoke.rawValue,
-            arguments: arguments
-        )
-        if PluginHookPresentation.isHookWire(result.text) {
-            onChunk(
-                AgentResponseNextChunk(
-                    status: .complete,
-                    chunk: result.text,
-                    toolName: AllowedMCPTool.pluginInvoke.rawValue
-                )
-            )
-            return true
-        }
-        let body = PluginInvokePresentation.userFacingText(fromScriptResult: result.text)
-        let chunk: String
-        if PluginInvokePresentation.isProgrammatic(body) {
-            chunk = PluginInvokePresentation.encodeTestReport(
-                PluginInvokePresentation.TestReport(
-                    heading: "/\(pluginID)",
-                    body: body,
-                    kind: .programmatic
-                )
-            )
-        } else {
-            chunk = body
-        }
-        onChunk(
-            AgentResponseNextChunk(
-                status: .complete,
-                chunk: chunk,
-                toolName: AllowedMCPTool.pluginInvoke.rawValue
-            )
-        )
-        return true
-    }
-
-    private func pluginIDs(from listJSON: String) -> [String] {
-        guard let data = listJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rows = obj["plugins"] as? [[String: Any]] else {
-            return []
-        }
-        return rows.compactMap { row in
-            let enabled = row["enabled"] as? Bool ?? true
-            guard enabled else { return nil }
-            return (row["plugin_id"] as? String) ?? (row["id"] as? String)
-        }
-    }
-
-    private func mcpValue(from json: PluginJSON) -> Value {
-        switch json {
-        case .null:
-            return .null
-        case .bool(let flag):
-            return .bool(flag)
-        case .number(let number):
-            if number.rounded() == number,
-               number >= Double(Int.min),
-               number <= Double(Int.max) {
-                return .int(Int(number))
-            }
-            return .double(number)
-        case .string(let text):
-            return .string(text)
-        case .array(let items):
-            return .array(items.map(mcpValue(from:)))
-        case .object(let object):
-            return .object(object.mapValues { mcpValue(from: $0) })
-        }
-    }
-
-    private static func skillPluginID(repository: DBRepository, sessionID: String) async -> String {
-        let session = try? await repository.factorySession(sessionID: sessionID)
-        return session?.instructionPluginID ?? CreatePluginSample.pluginID
-    }
-
-    private static func factorySkillInstructions(repository: DBRepository, sessionID: String) async -> String? {
-        let pluginID = await skillPluginID(repository: repository, sessionID: sessionID)
-        guard let plugin = try? await repository.plugin(id: pluginID),
-              let versionID = plugin.currentVersionID,
-              let version = try? await repository.pluginVersion(id: versionID) else {
-            return try? DerrickBundledText.load("create_plugin_skill.md")
-        }
-        let bodies = version.skills.values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        if bodies.isEmpty {
-            return try? DerrickBundledText.load("create_plugin_skill.md")
-        }
-        return bodies.joined(separator: "\n\n")
-    }
-
     /// Opens the app DB and always seeds baseline policy rules when missing.
     /// Seeding is not debug-only: empty rule tables fail closed at evaluation time.
     static func makeMemoryStore(
@@ -808,5 +811,15 @@ final class ConversationModel {
         }
 
         return inserted
+    }
+}
+
+private struct PluginFactoryBuildReceipt: Decodable {
+    let ok: Bool
+    let pluginID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case pluginID = "plugin_id"
     }
 }

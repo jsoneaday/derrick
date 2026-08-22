@@ -1,5 +1,6 @@
 import SwiftUI
 import DBRepository
+import Plugin
 import ServiceContracts
 
 private let sideMenuRecentsFontSize = CGFloat(12)
@@ -12,11 +13,9 @@ private enum SidebarContentMode: Equatable {
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject var chatSessions: ChatSessionStore
-    var onInsertPluginPrefix: ((String) -> Void)?
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
-    @ObservedObject private var pluginList = PluginListStore.shared
-    @State private var expandedPluginIDs: Set<String> = []
+    @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
     @State private var contentMode: SidebarContentMode = .recents
 
     var body: some View {
@@ -52,7 +51,7 @@ struct SidebarView: View {
                         id: "chats",
                         icon: "message.fill",
                         title: "Chats",
-                        isProminent: contentMode == .recents
+                        isProminent: true
                     )
                 ) {
                     contentMode = .recents
@@ -66,7 +65,7 @@ struct SidebarView: View {
                     )
                 ) {
                     contentMode = .plugins
-                    Task { await pluginList.reload() }
+                    Task { await pluginFactoryList.reload() }
                 }
             }
 
@@ -109,7 +108,7 @@ struct SidebarView: View {
                 .frame(width: 1)
         }
         .task {
-            await pluginList.reload()
+            await pluginFactoryList.reload()
         }
     }
 
@@ -161,153 +160,51 @@ struct SidebarView: View {
 
     private var pluginsList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Installed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.top, 4)
+            Text("Approved")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if pluginList.plugins.isEmpty {
-                        Text("No installed plugins")
+                    if pluginFactoryList.releases.isEmpty {
+                        Text("No plugins yet")
                             .font(.system(size: sideMenuRecentsFontSize))
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(pluginList.plugins) { plugin in
-                            pluginRow(plugin)
+                        ForEach(pluginFactoryList.releases) { release in
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("/\(release.pluginID)")
+                                        .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
+                                        .lineLimit(1)
+                                    Text(release.isSystem ? "system" : "v\(release.version)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                if !release.isSystem {
+                                    Button {
+                                        Task { await pluginFactoryList.delete(release) }
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Delete \(release.pluginID) \(release.version)")
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    if let message = pluginList.lastActionMessage, !message.isEmpty {
-                        Text(message)
+                    if let error = pluginFactoryList.lastError {
+                        Text(error)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func pluginRow(_ plugin: PluginSidebarItem) -> some View {
-        let expanded = expandedPluginIDs.contains(plugin.id)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Button {
-                    if expanded {
-                        expandedPluginIDs.remove(plugin.id)
-                    } else {
-                        expandedPluginIDs.insert(plugin.id)
-                    }
-                } label: {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 10, height: 16)
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 6) {
-                                Text(plugin.id)
-                                    .font(.system(size: sideMenuRecentsFontSize))
-                                    .lineLimit(1)
-                                if !plugin.version.isEmpty {
-                                    Text(plugin.version)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if plugin.isSystem {
-                                    Text("system")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            if !plugin.description.isEmpty {
-                                Text(plugin.description)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .buttonStyle(.plain)
-                if !plugin.isSystem {
-                    Button {
-                        contentMode = .recents
-                        chatSessions.openFactorySession(editing: plugin.id)
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Change \(plugin.id)")
-                }
-                Button {
-                    onInsertPluginPrefix?("/\(plugin.id)")
-                } label: {
-                    Text("/")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Insert /\(plugin.id) into the prompt")
-                .disabled(!plugin.enabled)
-                if !plugin.isSystem {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { plugin.enabled },
-                            set: { newValue in
-                                Task { await pluginList.setEnabled(id: plugin.id, enabled: newValue) }
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                }
-            }
-            if expanded {
-                ForEach(plugin.versions) { version in
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 6) {
-                                Text(version.version)
-                                    .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
-                                if version.isCurrent {
-                                    Text("current")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                } else if !version.status.isEmpty {
-                                    Text(version.status)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 16)
-                        if !plugin.isSystem {
-                            Button {
-                                pluginList.pendingVersionDelete = PendingPluginVersionDelete(
-                                    version: version,
-                                    pluginID: plugin.id
-                                )
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Delete version \(version.version)")
-                        }
-                    }
-                }
             }
         }
     }
@@ -327,53 +224,6 @@ struct SidebarView: View {
         helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
         chatSessions: store
     )
-}
-
-private enum PluginDeleteConfirmFocus: Hashable {
-    case delete
-    case cancel
-}
-
-struct PluginDeleteConfirmFooter: View {
-    var onCancel: () -> Void
-    var onDelete: () -> Void
-    @FocusState private var focused: PluginDeleteConfirmFocus?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Spacer(minLength: 0)
-            Button("Cancel", action: onCancel)
-                .buttonStyle(ModalSecondaryButtonStyle())
-                .focusable()
-                .focused($focused, equals: .cancel)
-                .keyboardShortcut(.cancelAction)
-            Button("Delete", action: onDelete)
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .focusable()
-                .focused($focused, equals: .delete)
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 16)
-        .padding(.top, 4)
-        .defaultFocus($focused, .delete)
-        .onAppear { focused = .delete }
-        .onKeyPress(.return) {
-            if focused == .cancel {
-                onCancel()
-            } else {
-                onDelete()
-            }
-            return .handled
-        }
-        .onKeyPress(.space) {
-            if focused == .cancel {
-                onCancel()
-            } else {
-                onDelete()
-            }
-            return .handled
-        }
-    }
 }
 
 struct SidebarRow: Identifiable, Hashable, Sendable {

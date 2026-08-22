@@ -13,7 +13,7 @@ The UI + multiple embedded XPC services (Agent, Job, MCP) + JobKeepAlive created
 | --- | --- |
 | **`derrick.ui`** | Sandboxed SwiftUI client only |
 | **`derrick.ui.Daemon` (`derrickd`)** | Unsandboxed LoginAgent: Agent + Jobs + MCP host + AppEventBus + **sole** notification poster |
-| **`derrick.ui.DockerRunnerHelper`** | Remains external constrained runner (`docker` CLI only for `script_exec`; see [adr-bun-script-runtime.md](adr-bun-script-runtime.md)) |
+| **`derrick.ui.DockerRunnerHelper`** | Remains external constrained runner for `script_exec` and plugin execution (see [adr-swift-script-runtime.md](adr-swift-script-runtime.md)) |
 | Docker Engine | Remains external |
 
 - UI ↔ Daemon: **XPC** over Mach service `VUSK4B2YKQ.derrick.shared.daemon` (app-group child — required for sandboxed UI `mach-lookup`)

@@ -15,7 +15,7 @@ Checks (if any fail return failure JSON immediately):
    that performs the requested work (e.g. netFetch the URL) just because it has no delay.
 2) No tokens, API keys, passwords, or other secret literals in the source.
 
-Do not deny for TypeScript style, fetch/sockets, destination URLs, or declared deps. The host and tsc already enforce those. The guest has no network; the host performs HTTP and applies SSRF there.
+Do not deny for Swift style, envelope construction, destination URLs, or the absence of dependencies. The host compiler and Swift verifier enforce direct network and process restrictions. The guest has no network; the host performs HTTP and applies SSRF there.
 
 Return only valid JSON with this exact schema:
 {

@@ -45,7 +45,7 @@ public struct PluginPackage: Sendable, Hashable {
         let data = try Data(contentsOf: runtimeURL)
         var runtime = try PluginDecoding.decode(DerrickRuntime.self, from: data)
         if let entry = pointers.entrypoint {
-            runtime.entrypoint = try PluginPath.validateJSEntrypoint(entry)
+            runtime.entrypoint = try PluginPath.validateRuntimeEntrypoint(entry)
         }
 
         let entryURL = try PluginPath.resolve(root: root, relative: runtime.entrypoint)
@@ -53,20 +53,6 @@ public struct PluginPackage: Sendable, Hashable {
             throw PluginManifestError.missingFile(runtime.entrypoint)
         }
 
-        if runtime.requiresLockfile {
-            let lockCandidates = [
-                "./\(PluginContract.derrickExtensionNamespace)/bun.lock",
-                "./bun.lock",
-            ]
-            let found = lockCandidates.contains { rel in
-                (try? PluginPath.resolve(root: root, relative: rel)).map {
-                    FileManager.default.fileExists(atPath: $0.path)
-                } ?? false
-            }
-            if !found {
-                throw PluginManifestError.missingLockfile
-            }
-        }
         return runtime
     }
 

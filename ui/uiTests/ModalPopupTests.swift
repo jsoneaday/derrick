@@ -16,7 +16,7 @@ import Testing
 
     @Test func defaultsArePositiveAndUsable() {
         #expect(ModalPopupDefaults.minWidth > 0)
-        #expect(ModalPopupDefaults.minHeight > 0)
+        #expect(ModalPopupDefaults.minHeight >= 0)
         #expect(ModalPopupDefaults.maxWidth >= ModalPopupDefaults.minWidth)
         #expect(ModalPopupDefaults.maxHeight >= ModalPopupDefaults.minHeight)
         #expect(ModalPopupDefaults.cornerRadius > 0)

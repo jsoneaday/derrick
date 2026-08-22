@@ -6,9 +6,11 @@ import MCPClient
 import MCPServer
 import MCPToolCatalog
 import MemorySystem
+import Plugin
 import ServiceContracts
 
-/// MCP effectors hosted in MCPService (`script_exec` + session memory). No agents_* tools.
+/// MCP effectors hosted in MCPService (`script_exec` + factory plugin tools +
+/// session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
 
@@ -28,12 +30,27 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Docker via DockerRunnerHelper peer XPC only — never DockerScriptRunner / local CLI.
+        // Swift Docker execution via DockerRunnerHelper peer XPC only.
         // UI prewarms containers and hands the helper peer endpoint at bootstrap.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
-        await HostHTTPClient.shared.setSecretAttacher(PluginHostSecretAttacher(repository: repo))
+        let factorySettings = await MainActor.run {
+            LLMModelSettings(repository: repo)
+        }
+        await factorySettings.loadSettings()
+        let factoryExecutor = SwiftPluginFactoryDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
+        let factoryService = ConfiguredPluginFactoryService(
+            repository: repo,
+            settings: factorySettings,
+            executor: factoryExecutor,
+            apiKeyProvider: {
+                MCPServiceCallContext.shared.helperAPIKey
+                    ?? TurnProcessContext.effectiveAPIKey
+            }
+        )
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
                 stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
@@ -45,16 +62,39 @@ actor MCPServiceToolHost {
                     }
                 }
             )
-            await PluginFactoryHost.registerTools(
-                on: server,
-                repository: repo,
-                stdinExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
-                reviewer: MCPServiceScriptReviewer(),
-                logger: { message in
-                    fputs("[MCPService] \(message)\n", stderr)
-                    Task {
-                        await MCPServiceStore.shared.log(level: .info, message: message, code: "factory")
+            await server.register(
+                PluginFactoryToolModule.makeRegistration { goal in
+                    try await factoryService.build(userGoal: goal)
+                }
+            )
+            await server.register(
+                PluginRuntimeToolModule.makeListRegistration {
+                    try await repo.listPluginFactoryReleaseSummaries()
+                }
+            )
+            await server.register(
+                PluginRuntimeToolModule.makeInvokeRegistration { pluginID, input in
+                    guard let summary = try await repo.listPluginFactoryReleaseSummaries()
+                        .first(where: { $0.pluginID == pluginID }) else {
+                        return PluginFactoryExecutionResult(
+                            exitCode: 1,
+                            stderr: Data("No approved plugin named \(pluginID).".utf8)
+                        )
                     }
+                    guard let release = try await repo.pluginFactoryRelease(
+                        pluginID: summary.pluginID,
+                        version: summary.version
+                    ) else {
+                        return PluginFactoryExecutionResult(
+                            exitCode: 1,
+                            stderr: Data("Approved plugin release is missing.".utf8)
+                        )
+                    }
+                    return try await self.runApprovedPlugin(
+                        release.compiledArtifact,
+                        input: input,
+                        executor: factoryExecutor
+                    )
                 }
             )
             await server.registerSessionMemorySearchTool { arguments in
@@ -75,7 +115,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec + factory + plugin.invoke)",
+            message: "MCP tool host ready (script_exec)",
             code: "tool_host_ready"
         )
         return made
@@ -92,18 +132,7 @@ actor MCPServiceToolHost {
         let mapped = tools.map {
             MCPToolDescriptorDTO(name: $0.name, description: $0.description ?? "")
         }
-        let repo = try await MCPServiceStore.shared.sharedRepository()
-        let sessionID: String?
-        if case .agent(let id, _) = principal {
-            sessionID = id
-        } else {
-            sessionID = nil
-        }
-        return await PluginFactoryHost.searchVisible(
-            tools: mapped,
-            repository: repo,
-            sessionID: sessionID
-        )
+        return mapped
     }
 
     func callTool(request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
@@ -131,8 +160,6 @@ actor MCPServiceToolHost {
         switch request.principal {
         case .agent(let sessionID, let agentID):
             sessionKey = MemorySessionKey(sessionID: sessionID, agentID: agentID)
-        case .plugin(let pluginID, let version):
-            sessionKey = MemorySessionKey(sessionID: "plugin-\(pluginID)", agentID: version)
         default:
             sessionKey = MemorySessionKey(sessionID: "mcp-service", agentID: "mcp")
         }
@@ -150,8 +177,7 @@ actor MCPServiceToolHost {
         }
 
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
-        // `{}` is a valid empty object for tools with no required args (factory.review,
-        // factory.promote, plugin.list). factory.build still requires `goal`.
+        // `{}` is a valid empty object for tools with no required args.
         let args: [String: Value]
         do {
             args = try parseToolArgumentsObject(request.argumentsJSON)
@@ -196,14 +222,17 @@ actor MCPServiceToolHost {
             message: message
         )
     }
-}
 
-enum MCPServiceToolHostError: Error, LocalizedError {
-    case invalidArguments(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidArguments(let m): return m
-        }
+    private func runApprovedPlugin(
+        _ artifact: Data,
+        input: Data,
+        executor: SwiftPluginFactoryDockerExecutor
+    ) async throws -> PluginFactoryExecutionResult {
+        try await PluginHostHopDispatcher.run(
+            initialInput: input,
+            execute: { nextInput in
+                try await executor.runCompiledArtifact(artifact, input: nextInput)
+            }
+        )
     }
 }

@@ -36,7 +36,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MCPServerTests",
-            dependencies: ["MCPServer", "MCPClient"],
+            dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC"],
             path: "Tests/MCPServerTests"
         )
     ]

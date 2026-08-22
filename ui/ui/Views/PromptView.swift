@@ -7,14 +7,16 @@
 
 import SwiftUI
 import LLMAgentClient
-import Plugin
 
 private final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
-    var slashKeyHandler: ((NSEvent) -> Bool)?
+    var pluginKeyHandler: ((NSEvent) -> Bool)?
+    var pluginIDs: [String] = [] {
+        didSet { applyPluginHighlighting() }
+    }
 
     override func keyDown(with event: NSEvent) {
-        if slashKeyHandler?(event) == true {
+        if pluginKeyHandler?(event) == true {
             return
         }
         if (event.keyCode == 36 || event.keyCode == 76),
@@ -25,13 +27,40 @@ private final class PromptTextView: NSTextView {
 
         super.keyDown(with: event)
     }
+
+    func applyPluginHighlighting() {
+        guard let textStorage else { return }
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        textStorage.addAttribute(.foregroundColor, value: NSColor.textColor, range: fullRange)
+        guard textStorage.length > 1 else { return }
+        let text = string as NSString
+        guard text.character(at: 0) == 47 else { return }
+        let delimiter = text.rangeOfCharacter(
+            from: .whitespacesAndNewlines,
+            options: [],
+            range: NSRange(location: 1, length: text.length - 1)
+        )
+        let tokenLength = delimiter.location == NSNotFound ? text.length : delimiter.location
+        guard tokenLength > 1 else { return }
+        let token = text.substring(with: NSRange(location: 1, length: tokenLength - 1))
+        guard pluginIDs.contains(where: { $0.caseInsensitiveCompare(token) == .orderedSame
+            || $0.lowercased().hasPrefix(token.lowercased()) }) else {
+            return
+        }
+        textStorage.addAttribute(
+            .foregroundColor,
+            value: NSColor(calibratedRed: 0.176, green: 0.286, blue: 0.576, alpha: 1),
+            range: NSRange(location: 0, length: tokenLength)
+        )
+    }
 }
 
 struct PromptInputView: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     let focusToken: Int
-    var slashKeyHandler: ((NSEvent) -> Bool)?
+    var pluginIDs: [String] = []
+    var pluginKeyHandler: ((NSEvent) -> Bool)?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator {
@@ -42,7 +71,8 @@ struct PromptInputView: NSViewRepresentable {
         let textView = PromptTextView()
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
-        textView.slashKeyHandler = slashKeyHandler
+        textView.pluginKeyHandler = pluginKeyHandler
+        textView.pluginIDs = pluginIDs
         textView.isRichText = false
         textView.importsGraphics = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -78,7 +108,8 @@ struct PromptInputView: NSViewRepresentable {
         }
 
         textView.onSubmit = onSubmit
-        textView.slashKeyHandler = slashKeyHandler
+        textView.pluginKeyHandler = pluginKeyHandler
+        textView.pluginIDs = pluginIDs
         textView.isEditable = isEnabled
         // Allow select/copy even when send is disabled; block typing via isEditable.
         textView.isSelectable = true
@@ -88,6 +119,7 @@ struct PromptInputView: NSViewRepresentable {
             let end = (text as NSString).length
             textView.setSelectedRange(NSRange(location: end, length: 0))
         }
+        textView.applyPluginHighlighting()
 
         if isEnabled, context.coordinator.lastFocusedToken != focusToken {
             context.coordinator.lastFocusedToken = focusToken
@@ -115,49 +147,28 @@ struct PromptInputView: NSViewRepresentable {
     }
 }
 
-struct PluginSlashMenu: View {
-    let matches: [PluginSidebarItem]
+struct PluginAutocompleteMenu: View {
+    let matches: [String]
     let highlightedIndex: Int
-    let onChoose: (PluginSidebarItem) -> Void
+    let onChoose: (String) -> Void
 
     private let accent = Color(red: 0.176, green: 0.286, blue: 0.576)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if matches.isEmpty {
-                Text("No matching plugins")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-            } else {
-                ForEach(Array(matches.enumerated()), id: \.element.id) { index, plugin in
-                    Button {
-                        onChoose(plugin)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("/\(plugin.id)")
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(accent)
-                            if !plugin.description.isEmpty {
-                                Text(plugin.description)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(accent.opacity(0.65))
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
+            ForEach(Array(matches.enumerated()), id: \.element) { index, pluginID in
+                Button {
+                    onChoose(pluginID)
+                } label: {
+                    Text("/\(pluginID)")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(accent)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            index == highlightedIndex
-                                ? accent.opacity(0.12)
-                                : Color.clear
-                        )
-                    }
-                    .buttonStyle(.plain)
+                        .background(index == highlightedIndex ? accent.opacity(0.12) : .clear)
                 }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,30 +178,6 @@ struct PluginSlashMenu: View {
                 .stroke(accent.opacity(0.35), lineWidth: 1)
         )
         .shadow(color: accent.opacity(0.12), radius: 8, x: 0, y: 2)
-    }
-}
-
-struct PluginProgrammaticOutputBox: View {
-    let text: String
-    private let accent = Color(red: 0.176, green: 0.286, blue: 0.576)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Output")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(accent)
-            Text(text)
-                .font(.system(size: 12, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(12)
-        .frame(maxWidth: 720, alignment: .leading)
-        .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(accent.opacity(0.35), lineWidth: 1)
-        )
     }
 }
 
@@ -271,20 +258,8 @@ struct PromptCompletionCard: View {
                             CompletionStatusView(status: statusString, toolName: nil)
                         }
 
-                        if let test = turn.pluginTest {
-                            Text(test.heading)
-                                .font(.system(size: 15, weight: .semibold))
-                                .frame(maxWidth: 720, alignment: .leading)
-                            if test.kind == .programmatic {
-                                PluginProgrammaticOutputBox(text: test.body)
-                            } else {
-                                MarkdownResponseView(text: test.body, allowsCSVExport: true)
-                                    .font(.system(size: 15))
-                            }
-                        } else {
-                            MarkdownResponseView(text: turn.response, allowsCSVExport: true)
-                                .font(.system(size: 15))
-                        }
+                        MarkdownResponseView(text: turn.response, allowsCSVExport: true)
+                            .font(.system(size: 15))
 
                         if !isActiveStreamingTurn, !turn.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             HStack {
@@ -316,7 +291,7 @@ struct PromptCompletionCard: View {
         .transition(.opacity.combined(with: .move(edge: .top)))
         .animation(.easeInOut(duration: 0.45), value: isCompletionVisible)
         .onAppear {
-            isCompletionVisible = !turn.response.isEmpty || turn.pluginTest != nil
+            isCompletionVisible = !turn.response.isEmpty
         }
         .onChange(of: turn.response) { _, newValue in
             if newValue.isEmpty {

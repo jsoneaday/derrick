@@ -32,7 +32,7 @@ import Testing
         let error = NSError(
             domain: "XPCDockerRunner",
             code: 14,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to create warm container derrick-runner-bun-1-0: invalid reference format"]
+            userInfo: [NSLocalizedDescriptionKey: "Failed to create Swift runtime container: invalid reference format"]
         )
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Container"))
@@ -117,6 +117,9 @@ import Testing
         }
         if status.phase == .failed {
             status.dismissFailure()
+        }
+        if status.isInitializing {
+            status.noteBootstrapCancelled()
         }
         #expect(status.beginLoadingSession() == true)
         #expect(status.isModalPresented)

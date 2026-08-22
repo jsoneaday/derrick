@@ -17,7 +17,6 @@ struct ChatTurn: Identifiable, Hashable {
     var thought: String
     var status: AgentResponseStatus?
     var toolName: String?
-    var pluginTest: PluginInvokePresentation.TestReport?
 
     init(
         id: UUID = UUID(),
@@ -25,8 +24,7 @@ struct ChatTurn: Identifiable, Hashable {
         response: String = "",
         thought: String = "",
         status: AgentResponseStatus? = nil,
-        toolName: String? = nil,
-        pluginTest: PluginInvokePresentation.TestReport? = nil
+        toolName: String? = nil
     ) {
         self.id = id
         self.prompt = prompt
@@ -34,7 +32,6 @@ struct ChatTurn: Identifiable, Hashable {
         self.thought = thought
         self.status = status
         self.toolName = toolName
-        self.pluginTest = pluginTest
     }
 
     /// Thinking is the current plan snapshot. Complete appends the user-visible answer.
@@ -43,19 +40,6 @@ struct ChatTurn: Identifiable, Hashable {
         case .thinking:
             thought = chunk
         case .complete:
-            if let report = PluginInvokePresentation.decodeTestReport(chunk) {
-                pluginTest = report
-                response = report.body
-                return
-            }
-            if PluginHookPresentation.decodeOpenCreateWizard(chunk) != nil {
-                response = "Opened the create-plugin form."
-                return
-            }
-            if PluginHookPresentation.decodeOpenFactory(chunk) != nil {
-                response = "Started a factory session."
-                return
-            }
             response += chunk
         case .toolCall, .toolBatch:
             break
@@ -301,7 +285,7 @@ struct ContentView: View {
     @State private var repository: DBRepository?
     /// UI is a client: chat turns run in AgentService. True after DB + AgentService ensure-up.
     @State private var sessionReady = false
-    @State private var prompt = "create a plugin that summarizes today's news"
+    @State private var prompt = ""
     @State private var errorMessage: String?
     @State private var isPresentingAPIKeyPrompt = false
     @State private var isPresentingDockerRequiredAlert = false
@@ -316,31 +300,14 @@ struct ContentView: View {
     @State private var isDebugPanelVisible = false
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
-    @ObservedObject private var pluginList = PluginListStore.shared
-    @ObservedObject private var createPluginWizard = CreatePluginWizardStore.shared
-    @State private var slashHighlight = 0
-    @State private var slashMenuDismissed = false
+    @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
+    @State private var pluginAutocompleteHighlight = 0
+    @State private var pluginAutocompleteDismissed = false
 
     private var canSendPrompt: Bool {
         sessionReady
             && !chatSessions.isSelectedTabStreaming
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var pluginDeleteTitle: String {
-        guard let pending = pluginList.pendingVersionDelete else { return "Delete version?" }
-        return "Delete \(pending.pluginID) \(pending.version.version)?"
-    }
-
-    private var pluginDeleteMessage: String {
-        guard let pending = pluginList.pendingVersionDelete,
-              let plugin = pluginList.plugins.first(where: { $0.id == pending.pluginID }) else {
-            return "Removes this version. If it is the last one, the plugin is removed."
-        }
-        if plugin.versions.count <= 1 {
-            return "This is the only version. The plugin, its grants, and private data will be removed."
-        }
-        return "Removes this version only. The latest remaining version stays current."
     }
 
     private var visibleModels: [LLMModelChoice] {
@@ -359,17 +326,26 @@ struct ContentView: View {
         debugConfiguration.isDebugEnabled
     }
 
-    private var slashHandle: String? {
-        PluginPrefix.typingHandle(prompt)
+    private var pluginIDs: [String] {
+        pluginFactoryList.releases.map(\.pluginID)
     }
 
-    private var slashMatches: [PluginSidebarItem] {
-        guard let slashHandle else { return [] }
-        return pluginList.slashMatches(handle: slashHandle)
+    private var pluginHandle: String? {
+        guard prompt.hasPrefix("/") else { return nil }
+        let handle = prompt.dropFirst()
+        guard !handle.contains(where: \.isWhitespace) else { return nil }
+        return String(handle)
     }
 
-    private var showsSlashMenu: Bool {
-        slashHandle != nil && !slashMenuDismissed && sessionReady && !isActiveTabStreaming
+    private var pluginAutocompleteMatches: [String] {
+        guard let pluginHandle, !pluginAutocompleteDismissed else { return [] }
+        let lower = pluginHandle.lowercased()
+        return pluginIDs.filter { lower.isEmpty || $0.lowercased().hasPrefix(lower) }
+    }
+
+    private var showsPluginAutocomplete: Bool {
+        sessionReady && !isActiveTabStreaming && pluginHandle != nil
+            && !pluginAutocompleteDismissed && !pluginAutocompleteMatches.isEmpty
     }
 
     var body: some View {
@@ -377,10 +353,7 @@ struct ContentView: View {
             if let helperModelSettings = helperModelSettings {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
-                    chatSessions: chatSessions,
-                    onInsertPluginPrefix: { prefix in
-                        applyPluginPrefix(prefix)
-                    }
+                    chatSessions: chatSessions
                 )
                     .frame(width: 296)
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
@@ -393,16 +366,6 @@ struct ContentView: View {
                 ChatTabBarView(store: chatSessions)
                 mainPanel
             }
-        }
-        .onChange(of: chatSessions.factoryKickoffPrompt) { _, _ in
-            sendFactoryKickoffIfNeeded()
-        }
-        .onChange(of: chatSessions.selectedSessionID) { _, _ in
-            sendFactoryKickoffIfNeeded()
-        }
-        .onChange(of: sessionReady) { _, ready in
-            guard ready else { return }
-            sendFactoryKickoffIfNeeded()
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -513,7 +476,7 @@ struct ContentView: View {
                     if bootstrapStatus.isInitializing {
                         Text(
                             bootstrapStatus.phase == .preparingImage
-                                ? "First install builds the Bun script image. Keep Docker Desktop running."
+                                ? "First install prepares the Swift runtime image. Keep Docker Desktop running."
                                 : "This may take a minute the first time while Docker images and containers are prepared."
                         )
                             .font(.caption)
@@ -538,70 +501,6 @@ struct ContentView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
                     .padding(.top, 4)
-                }
-            }
-        )
-        .modalPopup(
-            isPresented: pluginList.pendingVersionDelete != nil,
-            minWidth: 380,
-            minHeight: 0,
-            maxWidth: 440,
-            maxHeight: 240,
-            onBackdropDismiss: { pluginList.pendingVersionDelete = nil },
-            onEscape: { pluginList.pendingVersionDelete = nil },
-            header: {
-                Text(pluginDeleteTitle)
-                    .font(.headline)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 18)
-                    .padding(.bottom, 8)
-            },
-            body: {
-                Text(pluginDeleteMessage)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-            },
-            footer: {
-                PluginDeleteConfirmFooter(
-                    onCancel: { pluginList.pendingVersionDelete = nil },
-                    onDelete: {
-                        Task { await pluginList.confirmPendingVersionDelete() }
-                    }
-                )
-            }
-        )
-        .modalPopup(
-            isPresented: createPluginWizard.isPresented && !bootstrapStatus.isModalPresented,
-            minWidth: 460,
-            minHeight: 0,
-            maxWidth: 560,
-            maxHeight: 640,
-            onBackdropDismiss: createPluginWizard.phase == .reviewing
-                ? nil
-                : { createPluginWizard.dismiss() },
-            onEscape: createPluginWizard.phase == .reviewing
-                ? nil
-                : { createPluginWizard.dismiss() },
-            header: {
-                Text("Create a plugin")
-                    .font(.headline)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 18)
-                    .padding(.bottom, 8)
-            },
-            body: {
-                CreatePluginWizardView(store: createPluginWizard)
-            },
-            footer: {
-                if let settings = helperModelSettings {
-                    CreatePluginWizardFooter(
-                        store: createPluginWizard,
-                        settings: settings,
-                        onCreate: startFactoryFromWizard
-                    )
                 }
             }
         )
@@ -657,11 +556,7 @@ struct ContentView: View {
                 await UsageLimitsService.shared.configure(repository: repo)
                 await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
-                await SoftwareFactorySettingsService.shared.configure(repository: repo)
-                await PluginListStore.shared.configure(repository: repo)
-                if isDebugEnabled {
-                    await FactoryLogMirror.shared.start(repository: repo)
-                }
+                await PluginFactoryListStore.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
@@ -777,7 +672,7 @@ struct ContentView: View {
         do {
             let repo = try await ensureSessionStoreLoaded()
             sessionReady = true
-            await PluginListStore.shared.configure(repository: repo)
+            await PluginFactoryListStore.shared.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
             if isDebugEnabled {
@@ -958,11 +853,11 @@ struct ContentView: View {
                     .padding(.bottom, 8)
             }
 
-            if showsSlashMenu {
-                PluginSlashMenu(
-                    matches: slashMatches,
-                    highlightedIndex: slashHighlight,
-                    onChoose: { applySlashCompletion($0) }
+            if showsPluginAutocomplete {
+                PluginAutocompleteMenu(
+                    matches: pluginAutocompleteMatches,
+                    highlightedIndex: pluginAutocompleteHighlight,
+                    onChoose: { applyPluginCompletion($0) }
                 )
                 .padding(.bottom, 8)
             }
@@ -976,7 +871,8 @@ struct ContentView: View {
                             startStreaming()
                         },
                         focusToken: promptFocusToken,
-                        slashKeyHandler: handleSlashKey
+                        pluginIDs: pluginIDs,
+                        pluginKeyHandler: handlePluginKey
                     )
                     .frame(height: inputHeight)
                     .disabled(!sessionReady || isActiveTabStreaming)
@@ -1079,58 +975,39 @@ struct ContentView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
         }
-        .onChange(of: slashHandle) { oldHandle, handle in
-            slashHighlight = 0
-            slashMenuDismissed = false
-            if oldHandle == nil, handle != nil {
-                Task { await pluginList.reload() }
-            }
-        }
-        .onChange(of: slashMatches.map(\.id)) { _, _ in
-            if slashHighlight >= slashMatches.count {
-                slashHighlight = max(slashMatches.count - 1, 0)
-            }
+        .onChange(of: pluginHandle) { _, _ in
+            pluginAutocompleteHighlight = 0
+            pluginAutocompleteDismissed = false
         }
     }
 
-    private func handleSlashKey(_ event: NSEvent) -> Bool {
-        guard showsSlashMenu else { return false }
+    private func handlePluginKey(_ event: NSEvent) -> Bool {
+        guard showsPluginAutocomplete else { return false }
         let flags = event.modifierFlags.intersection([.option, .shift, .command, .control])
         switch event.keyCode {
-        case 126: // up
-            guard !slashMatches.isEmpty else { return true }
-            slashHighlight = (slashHighlight + slashMatches.count - 1) % slashMatches.count
+        case 126:
+            pluginAutocompleteHighlight = (pluginAutocompleteHighlight + pluginAutocompleteMatches.count - 1)
+                % pluginAutocompleteMatches.count
             return true
-        case 125: // down
-            guard !slashMatches.isEmpty else { return true }
-            slashHighlight = (slashHighlight + 1) % slashMatches.count
+        case 125:
+            pluginAutocompleteHighlight = (pluginAutocompleteHighlight + 1) % pluginAutocompleteMatches.count
             return true
-        case 48: // tab
-            guard flags.isEmpty, slashMatches.indices.contains(slashHighlight) else { return false }
-            applySlashCompletion(slashMatches[slashHighlight])
+        case 48, 36, 76:
+            guard flags.isEmpty else { return false }
+            applyPluginCompletion(pluginAutocompleteMatches[pluginAutocompleteHighlight])
             return true
-        case 53: // escape
-            slashMenuDismissed = true
-            return true
-        case 36, 76: // return
-            guard flags.isEmpty, slashMatches.indices.contains(slashHighlight) else { return false }
-            applySlashCompletion(slashMatches[slashHighlight])
+        case 53:
+            pluginAutocompleteDismissed = true
             return true
         default:
             return false
         }
     }
 
-    private func applySlashCompletion(_ plugin: PluginSidebarItem) {
-        applyPluginPrefix("/\(plugin.id)")
-    }
-
-    /// Insert `/plugin-id ` so the operator can add params before sending.
-    private func applyPluginPrefix(_ prefix: String) {
-        let id = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        prompt = id.hasSuffix(" ") ? id : "\(id) "
-        slashHighlight = 0
-        slashMenuDismissed = true
+    private func applyPluginCompletion(_ pluginID: String) {
+        prompt = "/\(pluginID) "
+        pluginAutocompleteHighlight = 0
+        pluginAutocompleteDismissed = true
         promptFocusToken += 1
     }
 
@@ -1168,10 +1045,6 @@ struct ContentView: View {
     }
 
     private func copyTurn(_ turn: ChatTurn) {
-        if let test = turn.pluginTest {
-            copyToPasteboard("\(test.heading)\n\(test.body)")
-            return
-        }
         let completion = turn.response.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = completion.isEmpty ? turn.prompt : completion
         copyToPasteboard(text)
@@ -1202,29 +1075,6 @@ struct ContentView: View {
         default:
             return .streaming
         }
-    }
-
-    private func startFactoryFromWizard() {
-        let kickoff = createPluginWizard.factoryKickoff
-        createPluginWizard.dismiss()
-        chatSessions.adoptFactorySession(
-            id: FactorySessionID.make(),
-            title: "Create plugin",
-            instructionPluginID: CreatePluginSample.pluginID,
-            reusePluginID: nil,
-            goal: kickoff
-        )
-    }
-
-    private func sendFactoryKickoffIfNeeded() {
-        guard sessionReady,
-              FactorySessionID.isFactorySession(chatSessions.selectedSessionID),
-              let value = chatSessions.factoryKickoffPrompt,
-              !value.isEmpty
-        else { return }
-        chatSessions.factoryKickoffPrompt = nil
-        prompt = value
-        startStreaming()
     }
 
     private func startStreaming() {

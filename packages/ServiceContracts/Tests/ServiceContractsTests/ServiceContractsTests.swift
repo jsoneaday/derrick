@@ -29,42 +29,28 @@ import Testing
             service: .agent,
             status: .ok,
             detail: "up",
-            guestRuntimeImage: DerrickGuestRuntime.dockerImage
+            guestRuntimeImage: DerrickGuestRuntime.swiftPluginDockerImage
         )
         let data = try AgentServiceXPCCodec.encodeHealth(report)
         let decoded = try AgentServiceXPCCodec.decodeHealth(data)
         #expect(decoded.service == .agent)
         #expect(decoded.status == .ok)
         #expect(decoded.detail == "up")
-        #expect(decoded.guestRuntimeImage == DerrickGuestRuntime.dockerImage)
-        #expect(decoded.guestRuntimeImage == "derrick-bun:baseline-4")
+        #expect(decoded.guestRuntimeImage == DerrickGuestRuntime.swiftPluginDockerImage)
+        #expect(decoded.guestRuntimeImage == "swiftlang/swift:nightly-6.4.x-noble")
         #expect(decoded.executableFingerprint == nil)
     }
 
-    @Test func bundledGuestSDKLoadsFromSourceTree() throws {
-        let sdk = try DerrickBundledText.load("guest/derrick.ts")
-        #expect(sdk.contains("export interface HandleEvent"))
-        #expect(sdk.contains("export function netFetch"))
-        let runner = try DerrickBundledText.load("guest/runner.ts")
-        #expect(runner.contains("script.ts"))
-        let createSkill = try DerrickBundledText.load("create_plugin_skill.md")
-        #expect(createSkill.contains("factory.build"))
-        let reviewer = try DerrickBundledText.load("factory_reviewer_instructions.md")
-        #expect(reviewer.contains("Software Factory reviewer"))
-        #expect(reviewer.contains("stated goal"))
-        #expect(reviewer.contains("secret literals"))
-        #expect(reviewer.contains("event.params"))
-        #expect(!reviewer.contains("plugin_id must"))
-        #expect(!reviewer.contains("No fetch"))
+    @Test func bundledScriptReviewerInstructionsLoadFromSourceTree() throws {
         let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
         #expect(scriptReviewer.contains("intent alignment"))
         #expect(scriptReviewer.contains("secret literals"))
-        #expect(!scriptReviewer.contains("TypeScript 7"))
+        #expect(scriptReviewer.contains("Swift verifier"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
         let json = """
-        {"service":"agent","status":"ok","protocolVersion":1,"serviceVersion":"0.1.0","pid":1,"checkedAt":0}
+        {"service":"derrick.ui.AgentService","status":"ok","protocolVersion":1,"serviceVersion":"0.1.0","pid":1,"checkedAt":0}
         """
         let decoded = try JSONDecoder().decode(ServiceHealthReport.self, from: Data(json.utf8))
         #expect(decoded.guestRuntimeImage == nil)
@@ -75,7 +61,7 @@ import Testing
         let report = ServiceHealthReport(
             service: .daemon,
             status: .ok,
-            guestRuntimeImage: DerrickGuestRuntime.dockerImage,
+            guestRuntimeImage: DerrickGuestRuntime.swiftPluginDockerImage,
             executableFingerprint: "1-2-3.000"
         )
         let data = try DerrickDaemonXPCCodec.encodeHealth(report)
@@ -86,29 +72,6 @@ import Testing
     @Test func principalLabels() {
         #expect(ServicePrincipal.ui.logLabel == "ui")
         #expect(ServicePrincipal.job(jobID: "j1").logLabel == "job:j1")
-        #expect(ServicePrincipal.plugin(pluginID: "daily-news", version: "1.0.0").logLabel == "plugin:daily-news@1.0.0")
-    }
-
-    @Test func pluginPrincipalRoundTripAndHMAC() throws {
-        let principal = ServicePrincipal.plugin(pluginID: "daily-news", version: "1.0.0")
-        let data = try JSONEncoder.service.encode(principal)
-        let decoded = try JSONDecoder.service.decode(ServicePrincipal.self, from: data)
-        #expect(decoded == principal)
-        #expect(JobSource.plugin.rawValue == "plugin")
-        #expect(FactorySessionID.isFactorySession("factory-abc"))
-        #expect(!FactorySessionID.isFactorySession("chat-1"))
-        #expect(SoftwareFactorySettings.default.enabled == false)
-
-        let key = ServiceMessageSigning.developmentKey(seed: "test-plugin-principal")
-        var message = ServiceMessage(
-            from: .mcp,
-            to: .daemon,
-            type: .ping,
-            principal: principal,
-            payloadJSON: Data(#"{}"#.utf8)
-        )
-        ServiceMessageSigning.sign(&message, key: key)
-        #expect(ServiceMessageSigning.verify(message, key: key))
     }
 
     @Test func messageCodable() throws {
@@ -356,31 +319,6 @@ import Testing
         let cal = Calendar.current
         #expect(cal.component(.hour, from: at3pm) == 15)
 
-        let invoke = try JobOrderBuilder.createJobRequest(
-            from: JobCreateOrderInput(
-                toolName: "plugin.invoke",
-                toolArgumentsJSON: #"{"plugin_id":"daily-news"}"#,
-                wakeAfter: false
-            ),
-            principal: .system,
-            sessionID: nil,
-            agentID: nil,
-            now: now
-        )
-        #expect(invoke.steps[0].kind == .runTool)
-        #expect(throws: JobOrderBuilderError.invalidToolArgumentsJSON) {
-            _ = try JobOrderBuilder.createJobRequest(
-                from: JobCreateOrderInput(
-                    toolName: "plugin.invoke",
-                    toolArgumentsJSON: #"{"kind":"schedule"}"#,
-                    wakeAfter: false
-                ),
-                principal: .system,
-                sessionID: nil,
-                agentID: nil,
-                now: now
-            )
-        }
         #expect(throws: JobOrderBuilderError.toolNotAllowed("shell_exec")) {
             _ = try JobOrderBuilder.createJobRequest(
                 from: JobCreateOrderInput(
@@ -621,16 +559,16 @@ import Testing
             !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
-                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
             )
         )
         #expect(
             DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "old",
                 expectedFingerprint: "new",
-                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
             )
         )
         #expect(
@@ -638,23 +576,23 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: "stale-guest:old",
-                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
             )
         )
         #expect(
             DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: nil,
                 expectedFingerprint: "a",
-                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
             )
         )
         #expect(
             !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: nil,
-                reportedGuestRuntime: DerrickGuestRuntime.dockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.dockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
             )
         )
     }
