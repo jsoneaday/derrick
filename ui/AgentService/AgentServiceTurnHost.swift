@@ -134,7 +134,6 @@ actor AgentServiceTurnHost {
             await UsageLimitsService.shared.configure(repository: repo)
             await ContainerLifecycleSettingsService.shared.configure(repository: repo)
             await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
-            await EgressAllowlistService.shared.pushToHelper()
         }
         if let settings = helperModelSettings {
             await settings.loadSettings()

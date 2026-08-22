@@ -1,13 +1,12 @@
 import Foundation
 import Combine
 import DBRepository
-import DockerRunnerXPC
 import EgressProxy
 import AppEvents
 import PolicyUserInteraction
 import ServiceContracts
 
-/// App-owned egress allowlist: DB persistence + helper sync + preflight prompts.
+/// App-owned egress allowlist: DB persistence + host HTTP preflight prompts.
 /// Not exposed as MCP. Not part of tool/content policy rules.
 @MainActor
 final class EgressAllowlistService: ObservableObject {
@@ -19,13 +18,6 @@ final class EgressAllowlistService: ObservableObject {
     private let username = "ui"
     private let password = "ui"
     private let localPolicy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
-
-    /// Concurrent CONNECT prompts coalesce into one modal (fixed window from first waiter).
-    private var midFlightPending: [String: [CheckedContinuation<PolicyUserDecision, Never>]] = [:]
-    private var midFlightFlushTask: Task<Void, Never>?
-    private var midFlightPresenting = false
-    private var midFlightToolName = "script_exec"
-    private static let midFlightCoalesceNanoseconds: UInt64 = 500_000_000
 
     private init() {}
 
@@ -42,7 +34,6 @@ final class EgressAllowlistService: ObservableObject {
                 debugLog("Egress allowlist seed skipped (suffixes already present).")
             }
             try await reload()
-            await pushToHelper()
         } catch {
             debugLog("Egress allowlist configure failed: \(error.localizedDescription)")
         }
@@ -62,32 +53,9 @@ final class EgressAllowlistService: ObservableObject {
         }
     }
 
-    func enabledSuffixStrings() -> [String] {
-        suffixes.filter(\.enabled).map(\.suffix)
-    }
-
-    /// UI embeds DockerRunnerHelper; AgentService cannot open that sibling XPC.
     private var isAgentServiceProcess: Bool {
         let bid = Bundle.main.bundleIdentifier ?? ""
         return bid == DerrickServiceID.agent.rawValue || bid.hasSuffix(".AgentService")
-    }
-
-    func pushToHelper() async {
-        // AgentService cannot open DockerRunnerHelper XPC; UI process owns helper sync.
-        if isAgentServiceProcess { return }
-        await XPCDockerRunner.shared.pushEgressAllowedDomainSuffixes(enabledSuffixStrings())
-    }
-
-    /// Push session host grants to the helper only from the UI process.
-    private func grantSessionHostsToHelper(_ hosts: [String]) async {
-        guard !hosts.isEmpty else { return }
-        if isAgentServiceProcess {
-            debugLog(
-                "Skipping helper session grant from AgentService (UI already applied via reverse XPC)"
-            )
-            return
-        }
-        await XPCDockerRunner.shared.grantEgressSessionHosts(hosts)
     }
 
     func addSuffix(_ raw: String, source: String = "user") async throws {
@@ -104,16 +72,13 @@ final class EgressAllowlistService: ObservableObject {
             EgressAllowedDomainSuffix(suffix: suffix, source: source, enabled: true)
         )
         try await reload()
-        await pushToHelper()
     }
 
     func removeSuffix(id: String) async throws {
         guard let repository else { return }
         try await repository.deleteEgressAllowedDomainSuffix(id: id)
         try await reload(clearSessionHosts: true)
-        await pushToHelper()
-        // Daemon embedded helper resyncs from DB on the next JobNetworkPreflight.
-        debugLog("Egress allowlist removed id=\(id) — UI helper synced; daemon resyncs on next job")
+        debugLog("Egress allowlist removed id=\(id)")
     }
 
     /// Preflight network hosts before script execution.
@@ -198,9 +163,6 @@ final class EgressAllowlistService: ObservableObject {
             }
         }
 
-        if !sessionGrants.isEmpty {
-            await grantSessionHostsToHelper(sessionGrants)
-        }
         PipelineTiming.log(
             "egress_preflight ok hosts=\(hosts.count) prompted=\(needsPrompt.count) session_grants=\(sessionGrants.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
         )
@@ -272,46 +234,8 @@ final class EgressAllowlistService: ObservableObject {
         return ordered
     }
 
-    // MARK: - Mid-flight batching
-
-    private func enqueueMidFlightHostPrompt(_ host: String, toolName: String) async -> PolicyUserDecision {
-        midFlightToolName = toolName
-        return await withCheckedContinuation { (continuation: CheckedContinuation<PolicyUserDecision, Never>) in
-            midFlightPending[host, default: []].append(continuation)
-            scheduleMidFlightFlushIfNeeded()
-        }
-    }
-
-    private func scheduleMidFlightFlushIfNeeded() {
-        guard midFlightFlushTask == nil, !midFlightPresenting else { return }
-        midFlightFlushTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: Self.midFlightCoalesceNanoseconds)
-            self.midFlightFlushTask = nil
-            await self.flushMidFlightHostPrompts()
-        }
-    }
-
-    private func flushMidFlightHostPrompts() async {
-        guard !midFlightPending.isEmpty else { return }
-        midFlightPresenting = true
-        let snapshot = midFlightPending
-        midFlightPending = [:]
-        let hosts = Array(snapshot.keys).sorted()
-        debugLog("Egress mid-flight batch prompt hosts=\(hosts.count)")
-        let decision = await promptForHosts(hosts, toolName: midFlightToolName)
-        for (_, waiters) in snapshot {
-            for waiter in waiters {
-                waiter.resume(returning: decision)
-            }
-        }
-        midFlightPresenting = false
-        if !midFlightPending.isEmpty {
-            scheduleMidFlightFlushIfNeeded()
-        }
-    }
-
-    /// Apply a user egress decision in **this** process (UI): memory + helper allowlist.
-    /// Call when the UI answers a reverse-XPC network prompt so mid-flight does not re-prompt.
+    /// Apply a user egress decision in this process.
+    /// Call when the UI answers a network prompt so later requests do not re-prompt.
     func applyUserNetworkDecision(host: String, decision: PolicyUserDecision) async {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return }
@@ -320,7 +244,6 @@ final class EgressAllowlistService: ObservableObject {
         case .approved(let actor), .approvedOnce(let actor):
             debugLog("Egress UI apply once host=\(normalized) actor=\(actor ?? "?")")
             localPolicy.grantSessionHosts([normalized])
-            await grantSessionHostsToHelper([normalized])
         case .approvedPermanently(let actor):
             debugLog("Egress UI apply always host=\(normalized) actor=\(actor ?? "?")")
             let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
@@ -329,93 +252,9 @@ final class EgressAllowlistService: ObservableObject {
             } catch {
                 debugLog("Egress UI apply always persist failed: \(error.localizedDescription)")
             }
-            // Exact host + permanent suffix so helper/mid-flight skip immediately.
             localPolicy.grantSessionHosts([normalized])
-            await grantSessionHostsToHelper([normalized])
-            await pushToHelper()
         case .denied, .dismissed, .timedOut:
             break
-        }
-    }
-
-    /// Mid-flight CONNECT hold from the helper (reverse XPC).
-    /// Persists always-allow suffixes and session grants so the helper can complete the tunnel.
-    func handleMidFlightHostAccess(host: String, toolName: String = "script_exec") async -> EgressHostAccessReply {
-        let midStarted = Date()
-        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized.isEmpty {
-            return EgressHostAccessReply(decision: .deny, actor: "system")
-        }
-        // AgentService may have persisted "always" to the shared DB; reload before prompting.
-        // Preserve session grants across reload (setAllowedDomainSuffixes does not clear them).
-        if let repository {
-            do {
-                try await reload()
-            } catch {
-                debugLog("Egress mid-flight reload failed: \(error.localizedDescription)")
-            }
-        }
-        if localPolicy.isHardBlockedHostname(normalized) {
-            debugLog("Egress mid-flight hard-block for \(normalized)")
-            PipelineTiming.log(
-                "egress_midflight hard_block host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
-            )
-            return EgressHostAccessReply(decision: .deny, actor: "system")
-        }
-        // Already covered (preflight grant, permanent list, or shared DB).
-        if localPolicy.isHostCoveredByAllowlist(normalized) {
-            debugLog("Egress mid-flight already allowed for \(normalized)")
-            // Keep helper session allowlist in sync for this CONNECT.
-            await grantSessionHostsToHelper([normalized])
-            PipelineTiming.log(
-                "egress_midflight already_allowed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=0"
-            )
-            return EgressHostAccessReply(decision: .once, actor: "system")
-        }
-
-        let modalStarted = Date()
-        let decision = await enqueueMidFlightHostPrompt(normalized, toolName: toolName)
-        let modalMS = PipelineTiming.elapsedMS(from: modalStarted)
-        switch decision {
-        case .approved(let actor), .approvedOnce(let actor):
-            debugLog("Egress mid-flight allow once for \(normalized) by \(actor ?? "user")")
-            localPolicy.grantSessionHosts([normalized])
-            await grantSessionHostsToHelper([normalized])
-            PipelineTiming.log(
-                "egress_midflight once host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
-            )
-            return EgressHostAccessReply(decision: .once, actor: actor)
-        case .approvedPermanently(let actor):
-            debugLog("Egress mid-flight allow always for \(normalized) by \(actor ?? "user")")
-            let suffix = EgressHostExtractor.permanentSuffix(for: normalized)
-            do {
-                try await addSuffix(suffix, source: "user")
-                // Session grant covers the exact host while permanent suffix propagates.
-                localPolicy.grantSessionHosts([normalized])
-                await grantSessionHostsToHelper([normalized])
-                PipelineTiming.log(
-                    "egress_midflight always host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
-                )
-                return EgressHostAccessReply(decision: .always, actor: actor)
-            } catch {
-                debugLog("Egress mid-flight permanent save failed: \(error.localizedDescription)")
-                PipelineTiming.log(
-                    "egress_midflight persist_failed host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
-                )
-                return EgressHostAccessReply(decision: .deny, actor: actor)
-            }
-        case .denied(let actor):
-            debugLog("Egress mid-flight deny for \(normalized) by \(actor ?? "user")")
-            PipelineTiming.log(
-                "egress_midflight denied host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
-            )
-            return EgressHostAccessReply(decision: .deny, actor: actor)
-        case .dismissed, .timedOut:
-            debugLog("Egress mid-flight dismissed/timeout for \(normalized)")
-            PipelineTiming.log(
-                "egress_midflight dismissed_or_timeout host=\(normalized) total_ms=\(PipelineTiming.elapsedMS(from: midStarted)) modal_ms=\(modalMS)"
-            )
-            return EgressHostAccessReply(decision: .deny, actor: "system")
         }
     }
 

@@ -5,7 +5,6 @@ let processInfo = ProcessInfo.processInfo
 HelperLogRelay.shared.log("DockerRunnerHelper main starting. pid=\(processInfo.processIdentifier)")
 HelperLogRelay.shared.log("Helper bundle path=\(Bundle.main.bundleURL.path)")
 HelperLogRelay.shared.log("Helper executable path=\(processInfo.arguments.first ?? "<unknown>")")
-EgressProxyBootstrap.startIfNeeded()
 // Peer listener for MCPService (endpoint handed off via UI XPC, not disk).
 _ = DockerHelperPeerEndpoint.shared.endpointForHandoff()
 let listener = NSXPCListener.service()

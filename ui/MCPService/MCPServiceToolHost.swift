@@ -33,7 +33,6 @@ actor MCPServiceToolHost {
         // Swift Docker execution via DockerRunnerHelper peer XPC only.
         // UI prewarms containers and hands the helper peer endpoint at bootstrap.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
-        // Mid-flight egress via helper→UI serviceName reverse channel remains the backstop.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
         let factorySettings = await MainActor.run {
             LLMModelSettings(repository: repo)

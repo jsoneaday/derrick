@@ -130,7 +130,7 @@ final class DBRepositoryTests: XCTestCase {
             makeRecord(
                 sessionID: "legacy-script",
                 createdAt: .now,
-                prompt: #"{"tool":"script_exec","script":"function handle() {} // script.js"}"#
+                prompt: #"{"tool":"script_exec","script":"function handle() {} // legacy source"}"#
             )
         )
         try await repository.upsert(

@@ -9,8 +9,6 @@ public enum InProcessServiceBridges: Sendable {
     /// Job script network banner preflight (toolName, argumentsJSON, jobID).
     public typealias JobNetworkPreflight =
         @Sendable (_ toolName: String, _ argumentsJSON: String, _ jobID: String) async throws -> Void
-    public typealias PushEgressAllowlist = @Sendable (_ suffixes: [String]) async -> Void
-    public typealias GrantEgressSessionHosts = @Sendable (_ hosts: [String]) async -> Void
 
     nonisolated(unsafe) public static var mcpCallTool: CallTool?
     nonisolated(unsafe) public static var mcpSearchTools: SearchTools?
@@ -22,6 +20,4 @@ public enum InProcessServiceBridges: Sendable {
     /// Installed by derrickd: banner-based network approval before scheduled script jobs.
     nonisolated(unsafe) public static var jobNetworkPreflight: JobNetworkPreflight?
 
-    nonisolated(unsafe) public static var pushEgressAllowlist: PushEgressAllowlist?
-    nonisolated(unsafe) public static var grantEgressSessionHosts: GrantEgressSessionHosts?
 }

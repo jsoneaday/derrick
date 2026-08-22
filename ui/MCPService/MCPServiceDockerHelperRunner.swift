@@ -1,62 +1,14 @@
 import Foundation
-import DBRepository
 import DockerRunnerXPC
-import EgressProxy
 import MCPServer
-import MCPToolCatalog
-import PolicyUserInteraction
 import ServiceContracts
 
 extension NSData: @unchecked @retroactive Sendable {}
 
-/// Reverse XPC sink for daemon → embedded DockerRunnerHelper (logs + egress prompts).
+/// Reverse XPC sink for daemon → embedded DockerRunnerHelper logs.
 private final class MCPDockerHelperLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked Sendable {
     func appendLog(message: String) {
         fputs("[DockerHelper] \(message)\n", stderr)
-    }
-
-    func requestEgressHostAccess(host: String, withReply reply: @escaping @Sendable (NSData) -> Void) {
-        // Daemon embedded helper serves scheduled jobs. Network approval is banner-based
-        // (HITL notifications), never live-chat modals — those belong to the UI helper path.
-        Task {
-            let decision: EgressHostAccessReply.Decision
-            do {
-                let repo = try await MCPServiceStore.shared.sharedRepository()
-                let policyDecision = await HITLOfflineNetworkService.awaitDecision(
-                    host: host,
-                    toolName: AllowedMCPTool.scriptExec.rawValue,
-                    turnID: "midflight-\(host)",
-                    isJobContext: true,
-                    repository: repo,
-                    timeoutNanoseconds: 300_000_000_000
-                )
-                switch policyDecision {
-                case .approvedPermanently(let actor):
-                    let suffix = EgressHostExtractor.permanentSuffix(for: host)
-                    try? await repo.saveEgressAllowedDomainSuffix(
-                        EgressAllowedDomainSuffix(suffix: suffix, source: actor ?? "midflight-banner", enabled: true)
-                    )
-                    let rows = (try? await repo.loadEgressAllowedDomainSuffixes(includeDisabled: false)) ?? []
-                    await MCPServiceDockerHelperRunner.shared.pushEgressAllowedDomainSuffixes(
-                        rows.filter(\.enabled).map(\.suffix)
-                    )
-                    decision = .always
-                case .approved, .approvedOnce:
-                    await MCPServiceDockerHelperRunner.shared.grantEgressSessionHosts([host])
-                    decision = .once
-                case .denied, .dismissed, .timedOut:
-                    decision = .deny
-                }
-            } catch {
-                fputs(
-                    "[MCPService] mid-flight egress banner failed host=\(host): \(error.localizedDescription)\n",
-                    stderr
-                )
-                decision = .deny
-            }
-            let data = (try? EgressHostAccessReply(decision: decision).encodeJSON()) ?? Data("{}".utf8)
-            reply(data as NSData)
-        }
     }
 }
 
@@ -229,41 +181,6 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
                 self.invalidateConnection()
                 throw error
             }
-        }
-    }
-
-    /// Pushes permanent egress suffixes into the embedded helper (daemon headless path).
-    func pushEgressAllowedDomainSuffixes(_ suffixes: [String]) async {
-        guard let data = try? JSONEncoder().encode(suffixes) else { return }
-        do {
-            let ok: Bool = try await withProxy { proxy in
-                try await withCheckedThrowingContinuation { cont in
-                    proxy.setEgressAllowedDomainSuffixes(suffixesJSON: data as NSData) { success in
-                        cont.resume(returning: success)
-                    }
-                }
-            }
-            fputs("[MCPService] egress allowlist push ok=\(ok) count=\(suffixes.count)\n", stderr)
-        } catch {
-            fputs("[MCPService] egress allowlist push failed: \(error.localizedDescription)\n", stderr)
-        }
-    }
-
-    /// Session-only host grants (Allow once) for the embedded helper.
-    func grantEgressSessionHosts(_ hosts: [String]) async {
-        guard !hosts.isEmpty else { return }
-        guard let data = try? JSONEncoder().encode(hosts) else { return }
-        do {
-            let ok: Bool = try await withProxy { proxy in
-                try await withCheckedThrowingContinuation { cont in
-                    proxy.grantEgressSessionHosts(hostsJSON: data as NSData) { success in
-                        cont.resume(returning: success)
-                    }
-                }
-            }
-            fputs("[MCPService] egress session grant ok=\(ok) hosts=\(hosts.joined(separator: ","))\n", stderr)
-        } catch {
-            fputs("[MCPService] egress session grant failed: \(error.localizedDescription)\n", stderr)
         }
     }
 

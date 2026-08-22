@@ -8,7 +8,6 @@ import ServiceContracts
 /// Before a scheduled job runs a network-enabled script, ensure hosts are allowlisted.
 /// Uncovered hosts use the HITL **banner** path (not live chat modals / schedule preflight).
 ///
-/// Helper push/grant goes through `InProcessServiceBridges` (installed by derrickd).
 public enum JobNetworkPreflight {
     public enum PreflightError: Error, LocalizedError {
         case denied(host: String, actor: String?)
@@ -37,9 +36,7 @@ public enum JobNetworkPreflight {
         let hosts = JobOrderPreflight.extractNetworkHosts(script: script)
         guard !hosts.isEmpty else { return }
 
-        // Re-sync embedded helper from DB so settings removals take effect before this run.
         let suffixes = try await loadEnabledSuffixes(repository: repository)
-        await InProcessServiceBridges.pushEgressAllowlist?(suffixes)
 
         let policy = DefaultDestinationPolicy(allowedDomainSuffixes: suffixes)
         var uncovered: [String] = []
@@ -93,7 +90,6 @@ public enum JobNetworkPreflight {
                     EgressAllowedDomainSuffix(suffix: suffix, source: actor ?? "job-banner", enabled: true)
                 )
                 allowedSuffixes = try await loadEnabledSuffixes(repository: repository)
-                await InProcessServiceBridges.pushEgressAllowlist?(allowedSuffixes)
                 fputs(
                     "[JobNetworkPreflight] always host=\(host) suffix=\(suffix) actor=\(actor ?? "?")\n",
                     stderr
@@ -113,9 +109,6 @@ public enum JobNetworkPreflight {
             }
         }
 
-        if !sessionGrants.isEmpty {
-            await InProcessServiceBridges.grantEgressSessionHosts?(sessionGrants)
-        }
     }
 
     private static func loadEnabledSuffixes(repository: DBRepository) async throws -> [String] {

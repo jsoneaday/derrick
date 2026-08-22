@@ -32,12 +32,6 @@ enum DaemonModuleBootstrap {
                 return MCPToolSearchResultDTO(ok: true, tools: tools, message: "ok")
             }
             InProcessServiceBridges.jobLocalProxy = JobServiceExportedObject()
-            InProcessServiceBridges.pushEgressAllowlist = { suffixes in
-                await MCPServiceDockerHelperRunner.shared.pushEgressAllowedDomainSuffixes(suffixes)
-            }
-            InProcessServiceBridges.grantEgressSessionHosts = { hosts in
-                await MCPServiceDockerHelperRunner.shared.grantEgressSessionHosts(hosts)
-            }
             InProcessServiceBridges.jobNetworkPreflight = { toolName, argumentsJSON, jobID in
                 let repo = try await JobServiceStore.shared.sharedRepository()
                 try await JobNetworkPreflight.approveScriptNetworkIfNeeded(
@@ -78,13 +72,9 @@ enum DaemonModuleBootstrap {
     private static func syncEmbeddedDockerHelper() async {
         guard DerrickProcessRole.isDaemon else { return }
         do {
-            let repo = try await MCPServiceStore.shared.sharedRepository()
-            let rows = try await repo.loadEgressAllowedDomainSuffixes(includeDisabled: false)
-            let suffixes = rows.filter(\.enabled).map(\.suffix)
-            await MCPServiceDockerHelperRunner.shared.pushEgressAllowedDomainSuffixes(suffixes)
             try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
             try await MCPServiceDockerHelperRunner.shared.prewarmSwiftRuntime()
-            fputs("[derrickd] embedded Docker helper verified (egress count=\(suffixes.count))\n", stderr)
+            fputs("[derrickd] embedded Docker helper verified\n", stderr)
         } catch {
             fputs("[derrickd] embedded Docker helper sync failed: \(error.localizedDescription)\n", stderr)
         }

@@ -204,12 +204,6 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(EgressHostExtractor.permanentSuffix(for: "reactjs.org") == "reactjs.org")
     }
 
-    @Test func configurationExposesContainerProxyURL() {
-        #expect(EgressProxyConfiguration.containerProxyURL.contains("host.docker.internal"))
-        #expect(EgressProxyConfiguration.containerProxyURL.contains("\(EgressProxyConfiguration.listenPort)"))
-        #expect(EgressProxyConfiguration.containerProxyEnvironment["HTTPS_PROXY"] != nil)
-    }
-
     @Test func configurationDefaultsToLoopbackListenHost() {
         #expect(EgressProxyConfiguration.listenHost == "127.0.0.1")
     }

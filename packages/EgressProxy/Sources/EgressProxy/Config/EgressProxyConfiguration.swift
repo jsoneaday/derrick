@@ -8,7 +8,7 @@ public enum EgressProxyConfiguration: Sendable {
     /// `EgressProxyServer` sets `requiredLocalEndpoint` to this host so it does not bind all interfaces.
     public static let listenHost: String = "127.0.0.1"
 
-    /// Fixed port so Docker containers can target `host.docker.internal:<port>`.
+    /// Fixed loopback port reserved for the standalone proxy service.
     public static let listenPort: UInt16 = 18_080
 
     /// Max concurrent client connections.
@@ -57,23 +57,4 @@ public enum EgressProxyConfiguration: Sendable {
         "ff00::/8"
     ]
 
-    /// URL injected into containers for cooperative HTTP clients (`requests`, etc.).
-    public static var containerProxyURL: String {
-        "http://host.docker.internal:\(listenPort)"
-    }
-
-    /// Environment entries for Docker processes that should use the proxy.
-    public static var containerProxyEnvironment: [String: String] {
-        let url = containerProxyURL
-        return [
-            "HTTP_PROXY": url,
-            "HTTPS_PROXY": url,
-            "http_proxy": url,
-            "https_proxy": url,
-            "ALL_PROXY": url,
-            "all_proxy": url,
-            "NO_PROXY": "",
-            "no_proxy": ""
-        ]
-    }
 }

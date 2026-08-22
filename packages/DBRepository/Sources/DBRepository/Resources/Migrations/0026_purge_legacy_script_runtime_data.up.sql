@@ -1,4 +1,4 @@
--- Remove persisted source and metadata created by the retired JavaScript
+-- Remove persisted source and metadata created by the retired non-Swift
 -- runtime. The predicates deliberately keep current standalone Swift runs.
 
 DELETE FROM pending_hitl_approvals

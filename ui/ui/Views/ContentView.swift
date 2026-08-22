@@ -595,7 +595,6 @@ struct ContentView: View {
 
                 try await XPCDockerRunner.shared.waitUntilPrewarmed()
                 bootstrapStatus.update(phase: .connectingHelper, message: "Finishing setup…")
-                await EgressAllowlistService.shared.pushToHelper()
 
                 // Daemon MCP uses its embedded Docker helper; handoff is best-effort while UI is open.
                 do {
@@ -610,7 +609,6 @@ struct ContentView: View {
                 bootstrapStatus.markReady()
                 await chatSessions.configure(repository: repo)
                 await DerrickNotificationService.shared.activateSession(repository: repo)
-                await EgressAllowlistService.shared.pushToHelper()
                 if isDebugEnabled {
                     debugLogStore.log(
                         "UI client ready (Docker + derrickd Agent/Job/MCP)"

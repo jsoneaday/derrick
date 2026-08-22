@@ -1,8 +1,6 @@
-import AppEvents
 import DockerRunnerXPC
 import Foundation
 import MCPServer
-import PolicyUserInteraction
 import ServiceContracts
 
 extension NSData: @unchecked @retroactive Sendable {}
@@ -29,25 +27,6 @@ private final class XPCReplyOnce: @unchecked Sendable {
         self.continuation = nil
         lock.unlock()
         continuation?.resume(throwing: error)
-    }
-}
-
-private final class XPCBoolReplyOnce: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Bool, Never>?
-
-    init(_ continuation: CheckedContinuation<Bool, Never>) {
-        self.continuation = continuation
-    }
-
-    @discardableResult
-    func resume(returning value: Bool) -> Bool {
-        lock.lock()
-        let continuation = self.continuation
-        self.continuation = nil
-        lock.unlock()
-        continuation?.resume(returning: value)
-        return continuation != nil
     }
 }
 
@@ -178,20 +157,6 @@ private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked 
             debugLog("[XPC helper] \(message)")
         }
     }
-
-    func requestEgressHostAccess(
-        host: String,
-        withReply reply: @escaping @Sendable (NSData) -> Void
-    ) {
-        Task { @MainActor in
-            debugLog("[XPC helper] Mid-flight egress prompt for host=\(host)")
-            let payload = await EgressAllowlistService.shared.handleMidFlightHostAccess(host: host)
-            let data = (try? payload.encodeJSON())
-                ?? (try? EgressHostAccessReply(decision: .deny).encodeJSON())
-                ?? Data("{}".utf8)
-            reply(data as NSData)
-        }
-    }
 }
 
 /// UI-owned XPC bridge and Swift runtime prewarmer.
@@ -298,44 +263,6 @@ public final class XPCDockerRunner: @unchecked Sendable {
         }
     }
 
-    public func pushEgressAllowedDomainSuffixes(_ suffixes: [String]) async {
-        guard let data = try? JSONEncoder().encode(suffixes) else { return }
-        nonisolated(unsafe) let payload = data as NSData
-        let ok = await serviceCallWithTimeout(label: "egress allowlist push") { reply in
-            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
-                debugLog("XPC egress allowlist push failed: \(error.localizedDescription)")
-                reply(false)
-            }
-            guard let service = proxy as? any DockerProcessRunnerXPC else {
-                reply(false)
-                return
-            }
-            service.setEgressAllowedDomainSuffixes(suffixesJSON: payload) { success in
-                reply(success)
-            }
-        }
-        debugLog("Pushed egress allowlist to helper (ok=\(ok), count=\(suffixes.count))")
-    }
-
-    public func grantEgressSessionHosts(_ hosts: [String]) async {
-        guard !hosts.isEmpty, let data = try? JSONEncoder().encode(hosts) else { return }
-        nonisolated(unsafe) let payload = data as NSData
-        let ok = await serviceCallWithTimeout(label: "egress session grant") { reply in
-            let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
-                debugLog("XPC egress session grant failed: \(error.localizedDescription)")
-                reply(false)
-            }
-            guard let service = proxy as? any DockerProcessRunnerXPC else {
-                reply(false)
-                return
-            }
-            service.grantEgressSessionHosts(hostsJSON: payload) { success in
-                reply(success)
-            }
-        }
-        debugLog("Pushed egress session hosts to helper (ok=\(ok), hosts=\(hosts.joined(separator: ",")))")
-    }
-
     private func prewarmEnvironment() async {
         do {
             await reportBootstrap(phase: .checkingDocker, message: "Checking Docker Desktop…")
@@ -436,29 +363,6 @@ public final class XPCDockerRunner: @unchecked Sendable {
             }
         }
         return try JSONDecoder().decode(DockerRunResponse.self, from: responseData)
-    }
-
-    private func serviceCallWithTimeout(
-        label: String,
-        timeoutNanoseconds: UInt64 = 15_000_000_000,
-        call: @escaping @Sendable (@escaping @Sendable (Bool) -> Void) -> Void
-    ) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let box = XPCBoolReplyOnce(continuation)
-            Task {
-                do {
-                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
-                } catch {
-                    return
-                }
-                if box.resume(returning: false) {
-                    debugLog("XPC \(label) timed out.")
-                }
-            }
-            call { success in
-                _ = box.resume(returning: success)
-            }
-        }
     }
 
     private func reportBootstrap(
