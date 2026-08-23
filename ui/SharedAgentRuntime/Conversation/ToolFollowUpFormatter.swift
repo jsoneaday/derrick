@@ -1,6 +1,7 @@
 import Foundation
 import MemorySystem
 import MCPToolCatalog
+import ServiceContracts
 
 /// Builds slim tool payloads for the next agent turn.
 /// Full tool JSON stays in debug logs and `ToolCallRecord.result`; only this formatter shapes model context.
@@ -33,19 +34,11 @@ enum ToolFollowUpFormatter {
             """
         }
 
-        // Prefer structured script_exec JSON when present.
-        if let script = decodeScriptResult(from: trimmed) {
-            return formatScriptResult(toolName: toolName, result: script, stdoutCap: stdoutCap)
+        if let outcome = ToolExecutionOutcome.decode(from: trimmed) {
+            return formatOutcome(toolName: toolName, outcome: outcome, stdoutCap: stdoutCap)
         }
 
-        // Fallback: strip wrapper noise and cap opaque text (never pass raw multi-kb JSON dumps when possible).
-        let cleaned = stripWrapperLines(from: trimmed)
-        let capped = cap(cleaned, maxChars: stdoutCap)
-        return """
-        tool: \(toolName)
-        result:
-        \(capped)
-        """
+        return "tool: \(toolName)\nresult:\n\(cap(trimmed, maxChars: stdoutCap))"
     }
 
     // MARK: - Request description
@@ -92,101 +85,97 @@ enum ToolFollowUpFormatter {
         return "\(name) (args: \(keys); large omitted: \(largeKeys.joined(separator: ",")))"
     }
 
-    // MARK: - Script result
-
-    /// Fields we care about for agent context (ignores timing/reviewer/verifier).
-    struct ScriptSlimDecode: Decodable, Equatable {
-        var status: String?
-        var failureStage: String?
-        var stdout: String?
-        var stderr: String?
-        var exitCode: Int32?
-        var timedOut: Bool?
-        var validationFindings: [String]?
-    }
-
-    static func decodeScriptResult(from raw: String) -> ScriptSlimDecode? {
-        // result may be prefixed with "toolName: " from some summary paths
-        let jsonCandidate: String
-        if let brace = raw.firstIndex(of: "{") {
-            jsonCandidate = String(raw[brace...])
-        } else {
-            jsonCandidate = raw
-        }
-        guard let data = jsonCandidate.data(using: .utf8) else { return nil }
-        guard let decoded = try? JSONDecoder().decode(ScriptSlimDecode.self, from: data) else { return nil }
-        // Require at least one execution-shaped field so random JSON objects are not treated as script results.
-        let looksLikeScript =
-            decoded.stdout != nil
-            || decoded.stderr != nil
-            || decoded.exitCode != nil
-            || decoded.timedOut != nil
-            || decoded.failureStage != nil
-            || (decoded.status.map { ["completed", "failed", "timeout", "blocked"].contains($0) } ?? false)
-        return looksLikeScript ? decoded : nil
-    }
-
-    static func formatScriptResult(toolName: String, result: ScriptSlimDecode, stdoutCap: Int) -> String {
-        var lines: [String] = ["tool: \(toolName)"]
-
-        if let status = result.status, !status.isEmpty {
-            lines.append("status: \(status)")
-        }
-        if let stage = result.failureStage, !stage.isEmpty, stage != "none" {
-            lines.append("failureStage: \(stage)")
-        }
-        if let exitCode = result.exitCode {
+    static func formatOutcome(
+        toolName: String,
+        outcome: ToolExecutionOutcome,
+        stdoutCap: Int
+    ) -> String {
+        var lines = [
+            "tool: \(toolName)",
+            "status: \(outcome.status.rawValue)",
+            "stage: \(outcome.stage.rawValue)",
+        ]
+        if let exitCode = outcome.exitCode {
             lines.append("exitCode: \(exitCode)")
         }
-        if let timedOut = result.timedOut {
-            lines.append("timedOut: \(timedOut)")
+        if outcome.timedOut {
+            lines.append("timedOut: true")
         }
-
-        let findings = (result.validationFindings ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let showFindingsDespiteStdout = result.failureStage == "containerLease"
-        // Surface findings when blocked/failed pre-run, or when lease TTL explains a stopped run.
-        if !findings.isEmpty, showFindingsDespiteStdout || result.stdout?.isEmpty != false {
-            lines.append("findings:")
-            for finding in findings.prefix(8) {
-                lines.append("- \(finding)")
+        if let durationMS = outcome.durationMS {
+            lines.append("durationMS: \(durationMS)")
+        }
+        if let retry = outcome.retry {
+            lines.append(
+                "retry: allowed=\(retry.allowed)" +
+                (retry.attempt.map { " attempt=\($0)" } ?? "") +
+                (retry.maxAttempts.map { " maxAttempts=\($0)" } ?? "")
+            )
+        }
+        if !outcome.diagnostics.isEmpty {
+            lines.append("diagnostics:")
+            for diagnostic in outcome.diagnostics.prefix(8) {
+                lines.append("- [\(diagnostic.severity.rawValue)] \(diagnostic.message)")
             }
         }
-
-        let cleanedStdout = stripWrapperLines(from: result.stdout ?? "")
-        if !cleanedStdout.isEmpty {
-            lines.append("stdout:")
-            lines.append(cap(cleanedStdout, maxChars: stdoutCap))
+        if let output = outcome.output, !output.value.isEmpty {
+            lines.append("output format: \(output.format.rawValue)")
+            lines.append("output:")
+            lines.append(cap(output.value, maxChars: stdoutCap))
         }
-
-        let cleanedStderr = stripWrapperLines(from: result.stderr ?? "")
-        if !cleanedStderr.isEmpty {
-            lines.append("stderr:")
-            lines.append(cap(cleanedStderr, maxChars: stdoutCap))
+        if outcome.output == nil && outcome.diagnostics.isEmpty {
+            lines.append("result: (no output or diagnostics)")
         }
-
-        if cleanedStdout.isEmpty && cleanedStderr.isEmpty && findings.isEmpty {
-            lines.append("result: (no stdout/stderr)")
-        }
-
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Text hygiene
-
-    /// Drop container wrapper / timing lines that are not user-facing tool output.
-    static func stripWrapperLines(from text: String) -> String {
-        guard !text.isEmpty else { return text }
-        let filtered = text.split(separator: "\n", omittingEmptySubsequences: false).filter { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { return true }
-            if trimmed.hasPrefix("[script_exec]") { return false }
-            if trimmed.hasPrefix("[TIME_METRIC]") { return false }
-            return true
+    /// Ensures a failed script's actionable findings reach the user even if the
+    /// follow-up model omits them from its final prose response.
+    static func appendingFailureDetails(
+        to response: String,
+        records: [ToolCallRecord]
+    ) -> String {
+        guard let record = records.reversed().first(where: {
+            guard let result = $0.result else { return false }
+            return ToolExecutionOutcome.decode(from: result) != nil
+        }),
+        let rawResult = record.result,
+        let details = failureDetails(from: rawResult)
+        else {
+            return response
         }
-        return filtered
+
+        let reasons = details.reasons
+        let responseAlreadyIncludesReasons = reasons.allSatisfy { response.contains($0) }
+        guard !responseAlreadyIncludesReasons else { return response }
+
+        let reasonLines = reasons
+            .prefix(8)
+            .map { "- \($0)" }
             .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return response.trimmingCharacters(in: .whitespacesAndNewlines)
+            + "\n\nTool failure details:\n"
+            + "- Failure stage: \(details.stage)\n"
+            + reasonLines
     }
+
+    private static func failureDetails(
+        from rawResult: String
+    ) -> (stage: String, reasons: [String])? {
+        guard let outcome = ToolExecutionOutcome.decode(from: rawResult),
+              outcome.indicatesFailure else {
+            return nil
+        }
+        let reasons = outcome.diagnostics
+            .map(\.message)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return (
+            outcome.stage.rawValue,
+            reasons.isEmpty ? ["No diagnostic detail was returned."] : reasons
+        )
+    }
+
+    // MARK: - Text sizing
 
     static func cap(_ text: String, maxChars: Int) -> String {
         guard maxChars > 0 else { return "…[truncated]…" }

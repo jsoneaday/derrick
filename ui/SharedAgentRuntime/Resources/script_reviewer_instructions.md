@@ -15,6 +15,16 @@ Checks (if any fail return failure JSON immediately):
    that performs the requested work (e.g. netFetch the URL) just because it has no delay.
 2) No tokens, API keys, passwords, or other secret literals in the source.
 
+3) The script implements the requested terminal result, not just the fetch.
+   For requests to summarize, list, inspect, or extract fetched content, the `http_results` branch
+   must parse the relevant response body and emit the requested data. Do not allow
+   `String(describing: http_results)`, a fetch-only confirmation, or an entire raw body copied to
+   `content` unless the user explicitly requested the raw source. If raw HTML is requested, `html`
+   is allowed because the host sanitizes it before rendering.
+4) Fetched HTML/XML is treated as untrusted data. Text and Markdown results must remove unsafe
+   markup and validate generated links as http or https. Do not reject ordinary safe HTML in the
+   `html` field solely because the host performs the final sanitization.
+
 Do not deny for Swift style, envelope construction, destination URLs, or the absence of dependencies. The host compiler and Swift verifier enforce direct network and process restrictions. The guest has no network; the host performs HTTP and applies SSRF there.
 
 Return only valid JSON with this exact schema:

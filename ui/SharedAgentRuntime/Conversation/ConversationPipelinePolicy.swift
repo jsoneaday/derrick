@@ -315,6 +315,14 @@ extension ConversationPipeline {
                                 }
                             }
                         }
+                        let isToolResponse = agentResponse?.status == .toolCall
+                            || agentResponse?.status == .toolBatch
+                        if !isToolResponse {
+                            fullCompletion = ToolFollowUpFormatter.appendingFailureDetails(
+                                to: fullCompletion,
+                                records: aggregatedToolCalls
+                            )
+                        }
                         let completionEvent = AssistantCompletionEvent(
                             sessionID: sessionID,
                             fullCompletion: fullCompletion,
@@ -816,6 +824,8 @@ extension ConversationPipeline {
         Produce the final user-facing response using the tool execution result as authoritative.
         Do not say you cannot fetch live data if the tool result contains live data.
         Do not ask the user whether to run a command that has already run.
+        If any tool result is blocked or failed, clearly show the user its failure stage and every
+        provided reason. Do not describe a blocked or failed tool call as successful.
         When presenting a list of choices, options, steps, items, or alternative paths to the user, ALWAYS format them as a clean Markdown bulleted list (using `-` or `*`) or a numbered list (using `1.`, `2.`), instead of writing them as plain paragraphs.
         Use the JSON schema to respond. Set status to "complete" and populate the assistant_response field.
         """

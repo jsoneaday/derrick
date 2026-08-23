@@ -218,6 +218,15 @@ final class AppBootstrapStatus: ObservableObject {
                 "Derrick could not replace its background service. Quit Derrick and open it again."
             )
         }
+        if lower.contains("daemon registration failed")
+            || lower.contains("failed to register derrick daemon")
+            || lower.contains("launchctl bootstrap")
+            || lower.contains("smappservice") && lower.contains("operation not permitted") {
+            return (
+                "Background Service Could Not Start",
+                "Derrick could not start its background service. Open System Settings → General → Login Items and enable Derrick, then try again."
+            )
+        }
         let trimmed = text.isEmpty ? "An unknown error occurred during startup." : text
         return (
             "Initialization Failed",

@@ -128,6 +128,52 @@ import Plugin
         #expect(tools.map(\.name).contains("script_exec"))
     }
 
+    @Test func pluginInvokeSurfacesExecutionFailure() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                PluginRuntimeToolModule.makeInvokeRegistration { _, _ in
+                    PluginFactoryExecutionResult(
+                        exitCode: 7,
+                        stderr: Data("swift runtime failed".utf8)
+                    )
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "plugin.invoke",
+            arguments: ["plugin_id": .string("weather-tool")]
+        )
+
+        #expect(result.isError)
+        let outcome = try #require(ToolExecutionOutcome.decode(from: result.text))
+        #expect(outcome.status == .failed)
+        #expect(outcome.stage == .execution)
+        #expect(result.text.contains("exit 7"))
+        #expect(result.text.contains("swift runtime failed"))
+    }
+
+    @Test func pluginFactorySurfacesReviewFailureOutcome() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                PluginFactoryToolModule.makeRegistration { _ in
+                    throw PluginFactoryError.reviewRejected("The draft did not satisfy the contract.")
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "plugin_factory_build",
+            arguments: ["goal": .string("make a safe plugin")]
+        )
+
+        #expect(result.isError)
+        let outcome = try #require(ToolExecutionOutcome.decode(from: result.text))
+        #expect(outcome.status == .blocked)
+        #expect(outcome.stage == .review)
+        #expect(outcome.diagnostics.first?.message.contains("did not satisfy") == true)
+    }
+
     @Test func phaseTimingScriptMetricsCountLinesAndChars() {
         let script = "import Foundation\nprint(1)\n"
         let metrics = ScriptPhaseTiming.scriptMetrics(script)
@@ -252,6 +298,53 @@ import Plugin
         #expect(findings.isEmpty)
     }
 
+    @Test func swiftScriptCanReturnHTMLResult() async throws {
+        let resultText = try await ScriptExecutionRuntime.run(
+            arguments: [
+                "description": .string("render a safe card"),
+                "reason": .string("manual HTML output check"),
+                "script": .string(
+                    "import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"
+                )
+            ],
+            stdinExecutor: { arguments, _, _ in
+                if arguments.contains("base64") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(Data("compiled".utf8).base64EncodedString().utf8),
+                        stderr: Data()
+                    )
+                }
+                if arguments.contains("/tmp/plugin"),
+                   !arguments.contains("chmod"),
+                   !arguments.contains("cat") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"[{"verb":"result.emit","html":"<p><strong>Safe</strong></p>"}]"#.utf8
+                        ),
+                        stderr: Data()
+                    )
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            },
+            reviewer: StubReviewer(
+                assessment: ScriptReviewAssessment(
+                    alignedWithRequest: true,
+                    confidence: 1,
+                    suggestedAction: "allow",
+                    concerns: [],
+                    summary: "safe"
+                )
+            ),
+            logger: { _ in }
+        )
+
+        let result = try #require(ToolExecutionOutcome.decode(from: resultText))
+        #expect(result.status == .completed)
+        #expect(result.output?.value == "<p><strong>Safe</strong></p>")
+    }
+
     @Test func swiftScriptToolBlocksReadonlyViolations() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
@@ -280,7 +373,7 @@ import Plugin
         )
 
         #expect(result.text.contains("\"status\":\"blocked\""))
-        #expect(result.text.contains("\"failureStage\":\"staticValidation\""))
+        #expect(result.text.contains("\"stage\":\"validation\""))
     }
 
     @Test func swiftExecutorUsesSwiftImage() {
@@ -339,8 +432,7 @@ import Plugin
         )
 
         #expect(result.text.contains("\"status\":\"blocked\""))
-        #expect(result.text.contains("\"decision\":\"deny\""))
-        #expect(result.text.contains("\"failureStage\":\"llmReview\""))
+        #expect(result.text.contains("\"stage\":\"review\""))
         #expect(result.text.contains("requires configured reviewer"))
     }
 
@@ -371,8 +463,7 @@ import Plugin
         )
 
         #expect(result.text.contains("\"status\":\"blocked\""))
-        #expect(result.text.contains("\"decision\":\"deny\""))
-        #expect(result.text.contains("\"failureStage\":\"llmReview\""))
+        #expect(result.text.contains("\"stage\":\"review\""))
         #expect(result.text.contains("Script appears unrelated to user prompt."))
     }
 
@@ -388,9 +479,10 @@ import Plugin
         #expect(result.status == .failed)
         #expect(result.decision == .allow)
         #expect(result.failureStage == .execution)
-        #expect(result.indicatesToolError)
-        #expect(result.failureSummary == "ValueError: boom")
-        #expect(MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(result), transportIsError: false))
+        let outcome = result.toolExecutionOutcome()
+        #expect(outcome.indicatesFailure)
+        #expect(outcome.failureSummary == "ValueError: boom")
+        #expect(MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(outcome), transportIsError: false))
     }
 
     @Test func scriptSuccessIsNotSemanticError() {
@@ -402,8 +494,9 @@ import Plugin
             durationMS: 5,
             phaseTiming: nil
         )
-        #expect(!result.indicatesToolError)
-        #expect(!MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(result), transportIsError: false))
+        let outcome = result.toolExecutionOutcome()
+        #expect(!outcome.indicatesFailure)
+        #expect(!MCPToolOutcomeSemantics.isError(toolName: "script_exec", text: encodeJSON(outcome), transportIsError: false))
     }
 
     private func encodeJSON(_ value: some Encodable) -> String {
@@ -456,7 +549,7 @@ import Plugin
         #expect(result.timedOut)
         #expect(result.validationFindings.first?.contains("7 minutes") == true)
         #expect(result.stderr.contains("container lease expired"))
-        #expect(result.failureSummary?.contains("container lease expired") == true)
+        #expect(result.toolExecutionOutcome().failureSummary?.contains("container lease expired") == true)
     }
 
     @Test func allowAssessmentSurvivesSuccessfulRunWithoutDenyStage() async throws {
@@ -485,9 +578,8 @@ import Plugin
         )
 
         #expect(result.text.contains("\"status\":\"completed\""))
-        #expect(result.text.contains("\"decision\":\"allow\""))
-        #expect(result.text.contains("\"failureStage\":\"none\""))
-        #expect(result.text.contains("Looks fine with soft concerns"))
+        #expect(result.text.contains("\"stage\":\"none\""))
+        #expect(result.text.contains("\"format\":\"text\""))
     }
 }
 

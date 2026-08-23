@@ -186,10 +186,6 @@ extension ConversationPipeline {
                         debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
                         debugLog("Tool result content: \(Self.debugPayload(result.text))")
                     }
-                    await Self.publishPolicyUserEventIfBlocked(
-                        toolName: interceptedEvent.toolName,
-                        resultText: result.text
-                    )
                     await Self.publishJobSchedulingFailureIfNeeded(
                         toolName: interceptedEvent.toolName,
                         resultText: result.text,
@@ -263,76 +259,6 @@ extension ConversationPipeline {
                 "tool=\(name) cancelled encode_ms=\(encodeMS) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted)) reason=\(reason)"
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
-        }
-    }
-
-    private static func publishPolicyUserEventIfBlocked(toolName: String, resultText: String) async {
-        guard AllowedMCPTool.isScriptExec(toolName) else { return }
-        guard let data = resultText.data(using: .utf8) else { return }
-        guard let payload = try? JSONDecoder().decode(ScriptExecutionResult.self, from: data) else { return }
-
-        // Switch only on explicit failureStage — never infer from decision + reviewerAssessment
-        // (an allow assessment must not surface as “security review denied”).
-        let event: PolicyUserEvent?
-        switch payload.failureStage {
-        case .none:
-            event = nil
-        case .staticValidation:
-            let findings = payload.validationFindings
-            event = PolicyUserEventFactory.staticValidationDenied(
-                findings: findings.isEmpty ? ["The request was blocked by static policy checks."] : findings,
-                toolName: toolName,
-                scriptPreview: nil
-            )
-        case .typecheck:
-            let message = payload.validationFindings.joined(separator: "\n")
-            let detail = message.isEmpty ? payload.stderr : message
-            event = PolicyUserEventFactory.typecheckFailed(message: detail, toolName: toolName)
-        case .llmReview:
-            if let assessment = payload.reviewerAssessment,
-               assessment.suggestedAction.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "deny"
-                || assessment.alignedWithRequest == false {
-                event = PolicyUserEventFactory.reviewerDenied(
-                    summary: assessment.summary,
-                    concerns: assessment.concerns,
-                    toolName: toolName
-                )
-            } else {
-                // Reviewer missing/failed/error findings — not soft allow concerns.
-                let findings = payload.validationFindings
-                event = PolicyUserEventFactory.reviewerDenied(
-                    summary: findings.first ?? "Security review could not approve this request.",
-                    concerns: findings,
-                    toolName: toolName
-                )
-            }
-        case .execution:
-            event = PolicyUserEventFactory.scriptExecutionFailed(
-                exitCode: payload.exitCode,
-                stderr: payload.stderr,
-                toolName: toolName
-            )
-        case .timeout:
-            event = PolicyUserEventFactory.scriptExecutionTimedOut(toolName: toolName)
-        case .containerLease:
-            let detail = payload.validationFindings.joined(separator: "\n")
-            event = PolicyUserEventFactory.scriptExecutionContainerLeaseExceeded(
-                detail: detail.isEmpty ? nil : detail,
-                toolName: toolName
-            )
-        case .egress:
-            let detailFromIO = [payload.stderr, payload.stdout]
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .joined(separator: "\n")
-            let detail = detailFromIO.isEmpty
-                ? payload.validationFindings.joined(separator: "\n")
-                : detailFromIO
-            event = PolicyUserEventFactory.egressDenied(detail: detail, toolName: toolName)
-        }
-
-        if let event {
-            await PolicyDecisionRouting.publishNotice(event)
         }
     }
 
@@ -500,25 +426,12 @@ extension ConversationPipeline {
 
     private static func recordReviewerTokensIfPresent(resultText: String) async {
         guard let data = resultText.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let timing = obj["phaseTiming"] as? [String: Any]
+              let outcome = ToolExecutionOutcome.decode(from: String(decoding: data, as: UTF8.self))
         else { return }
-        // Prefer explicit API usage if the tool ever embeds it; else char-based estimate for reviewer I/O.
-        if let prompt = timing["reviewerPromptTokens"] as? Int,
-           let completion = timing["reviewerCompletionTokens"] as? Int {
-            let usage = AgentTokenUsage(
-                promptTokens: prompt,
-                completionTokens: completion,
-                source: .providerAPI
-            )
-            _ = await UsageLimitsService.shared.recordAPIUsage(usage)
-            return
-        }
-        let req = timing["reviewerRequestChars"] as? Int ?? 0
-        let res = timing["reviewerResponseChars"] as? Int ?? 0
+        guard let metrics = outcome.metrics else { return }
         let usage = AgentTokenUsage(
-            promptTokens: max(0, (req + 3) / 4),
-            completionTokens: max(0, (res + 3) / 4),
+            promptTokens: max(0, (metrics.reviewerRequestChars + 3) / 4),
+            completionTokens: max(0, (metrics.reviewerResponseChars + 3) / 4),
             source: .estimated
         )
         guard usage.totalTokens > 0 else { return }

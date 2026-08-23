@@ -2,6 +2,7 @@ import Foundation
 import MCP
 import MCPToolCatalog
 import Plugin
+import ServiceContracts
 
 /// MCP entrypoint for the factory. The model supplies only the user's goal;
 /// builder, runner, reviewer, compiler, and hash verification stay host-owned.
@@ -34,16 +35,71 @@ public enum PluginFactoryToolModule: MCPToolModule {
             guard !goal.isEmpty else {
                 return #"{"ok":false,"error":"goal is required."}"#
             }
-            let release = try await build(goal)
-            let summary = FactoryBuildSummary(
-                pluginID: release.pluginID,
-                version: release.version,
-                contentHash: release.contentHash.rawValue,
-                reviewSummary: release.reviewSummary
-            )
-            let data = try JSONEncoder().encode(summary)
-            return String(decoding: data, as: UTF8.self)
+            do {
+                let release = try await build(goal)
+                let summary = FactoryBuildSummary(
+                    pluginID: release.pluginID,
+                    version: release.version,
+                    contentHash: release.contentHash.rawValue,
+                    reviewSummary: release.reviewSummary
+                )
+                let data = try JSONEncoder().encode(summary)
+                return try ToolExecutionOutcome.completed(
+                    output: ToolExecutionOutcome.Output(
+                        format: .json,
+                        value: String(decoding: data, as: UTF8.self)
+                    )
+                ).encodedJSON()
+            } catch let error as PluginFactoryError {
+                return try failureOutcome(for: error).encodedJSON()
+            } catch {
+                return try ToolExecutionOutcome.failure(
+                    stage: .execution,
+                    diagnostics: [
+                        ToolExecutionOutcome.Diagnostic(
+                            code: "plugin_factory_failed",
+                            message: error.localizedDescription
+                        )
+                    ],
+                    retry: ToolExecutionOutcome.Retry(allowed: false)
+                ).encodedJSON()
+            }
         }
+    }
+
+    private static func failureOutcome(
+        for error: PluginFactoryError
+    ) -> ToolExecutionOutcome {
+        let status: ToolExecutionOutcome.Status
+        let stage: ToolExecutionOutcome.Stage
+        switch error {
+        case .invalidManifest, .invalidSkillPath, .reservedPluginID, .invalidSource:
+            status = .blocked
+            stage = .validation
+        case .directRunFailed, .invalidDirectOutput:
+            status = .failed
+            stage = .execution
+        case .reviewRejected:
+            status = .blocked
+            stage = .review
+        case .compileFailed:
+            status = .failed
+            stage = .compilation
+        case .compiledRunFailed, .invalidCompiledOutput:
+            status = .failed
+            stage = .execution
+        }
+        return ToolExecutionOutcome.failure(
+            status: status,
+            stage: stage,
+            diagnostics: [
+                ToolExecutionOutcome.Diagnostic(
+                    code: "plugin_factory_failed",
+                    message: error.localizedDescription
+                )
+            ],
+            retry: ToolExecutionOutcome.Retry(allowed: false)
+        )
     }
 }
 

@@ -1,6 +1,7 @@
 import Foundation
 import LLMAgentClient
 import MCP
+import ServiceContracts
 
 public struct ScriptExecutionArguments: Sendable {
     public enum Mode: String, Sendable {
@@ -203,7 +204,8 @@ public struct ScriptPhaseTiming: Codable, Sendable, Equatable {
     }
 }
 
-public struct ScriptExecutionResult: Codable, Sendable {
+/// Internal state used while constructing the common `ToolExecutionOutcome`.
+public struct ScriptExecutionResult: Sendable {
     public let status: ScriptExecutionStatus
     public let decision: ScriptExecutionDecision
     /// Explicit gate that failed. UI and callers must switch on this — never infer from `decision` + `reviewerAssessment`.
@@ -337,6 +339,89 @@ public struct ScriptReviewAssessment: Codable, Sendable {
         self.suggestedAction = suggestedAction
         self.concerns = concerns
         self.summary = summary
+    }
+}
+
+public extension ScriptExecutionResult {
+    /// Converts the detailed script runtime result to the common MCP outcome.
+    func toolExecutionOutcome() -> ToolExecutionOutcome {
+        let status: ToolExecutionOutcome.Status
+        switch self.status {
+        case .completed:
+            status = .completed
+        case .blocked:
+            status = .blocked
+        case .failed:
+            status = .failed
+        case .timeout:
+            status = .timeout
+        }
+
+        let stage: ToolExecutionOutcome.Stage
+        switch failureStage {
+        case .none:
+            stage = .none
+        case .staticValidation:
+            stage = .validation
+        case .typecheck:
+            stage = .compilation
+        case .llmReview:
+            stage = .review
+        case .execution:
+            stage = .execution
+        case .egress:
+            stage = .network
+        case .timeout, .containerLease:
+            stage = .timeout
+        }
+
+        var diagnostics = validationFindings.map {
+            ToolExecutionOutcome.Diagnostic(code: "script_validation", message: $0)
+        }
+        if diagnostics.isEmpty,
+           !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            diagnostics.append(
+                ToolExecutionOutcome.Diagnostic(
+                    code: "script_stderr",
+                    message: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            )
+        }
+        if diagnostics.isEmpty, status != .completed {
+            diagnostics.append(
+                ToolExecutionOutcome.Diagnostic(
+                    code: "script_failed",
+                    message: "The script did not complete successfully."
+                )
+            )
+        }
+
+        let output = status == .completed && !stdout.isEmpty
+            ? ToolExecutionOutcome.Output(format: .text, value: stdout)
+            : nil
+        let metrics = phaseTiming.map {
+            ToolExecutionOutcome.Metrics(
+                staticValidateMS: $0.staticValidateMS,
+                reviewerMS: $0.reviewerMS,
+                ensureMS: $0.ensureMS,
+                execMS: $0.execMS,
+                totalMS: $0.totalMS,
+                scriptCharCount: $0.scriptCharCount,
+                scriptLineCount: $0.scriptLineCount,
+                reviewerRequestChars: $0.reviewerRequestChars,
+                reviewerResponseChars: $0.reviewerResponseChars
+            )
+        }
+        return ToolExecutionOutcome(
+            status: status,
+            stage: stage,
+            output: output,
+            diagnostics: diagnostics,
+            metrics: metrics,
+            exitCode: exitCode,
+            timedOut: timedOut,
+            durationMS: durationMS
+        )
     }
 }
 

@@ -3,6 +3,15 @@ import Testing
 @testable import Plugin
 
 @Suite struct PluginFactoryTests {
+    @Test func envelopeDecoderFlattensNestedResultAliases() throws {
+        let raw = "[{\"verb\":\"result\",\"result\":{\"emit\":{\"content\":\"## News digest\"}}}]"
+        let envelopes = try PluginEnvelopeList.decode(Data(raw.utf8))
+
+        #expect(envelopes.count == 1)
+        #expect(envelopes[0].verb == .resultEmit)
+        #expect(envelopes[0].payload["content"]?.stringValue == "## News digest")
+    }
+
     @Test func buildRunsDraftReviewsCompilesAndVerifiesRelease() async throws {
         let executor = RecordingFactoryExecutor()
         let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
@@ -108,6 +117,68 @@ import Testing
         #expect(requests.count == 2)
         #expect(requests[1].feedback?.contains("compile error") == true)
         #expect(await reviewer.callCount == 1)
+    }
+
+    @Test func sessionRetriesReviewRejectionWithReviewerFeedback() async throws {
+        let executor = RecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(
+            results: [
+                PluginFactoryReview(
+                    decision: .rejected,
+                    findings: [
+                        PluginReviewFinding(
+                            severity: .blocking,
+                            category: .correctness,
+                            message: "Sort the returned items by a stable key."
+                        )
+                    ],
+                    summary: "The first draft is not deterministic."
+                ),
+                PluginFactoryReview(approved: true, summary: "safe")
+            ]
+        )
+        let builder = RecordingFactoryBuilder(draft: draft())
+
+        let release = try await PluginFactorySession().build(
+            userGoal: "make a weather plugin",
+            builder: builder,
+            executor: executor,
+            reviewer: reviewer
+        )
+
+        #expect(release.pluginID == "weather-tool")
+        #expect(await reviewer.callCount == 2)
+        #expect(await executor.draftRunCount == 2)
+        #expect(await executor.compileCount == 1)
+        let requests = await builder.requests
+        #expect(requests.count == 2)
+        #expect(requests[1].feedback?.contains("Sort the returned items") == true)
+    }
+
+    @Test func sessionRejectsAfterReviewAttemptBudgetIsExhausted() async throws {
+        let executor = RecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(
+            result: PluginFactoryReview(approved: false, summary: "The draft remains unsafe.")
+        )
+        let builder = RecordingFactoryBuilder(draft: draft())
+
+        do {
+            _ = try await PluginFactorySession(
+                configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)
+            ).build(
+                userGoal: "make a weather plugin",
+                builder: builder,
+                executor: executor,
+                reviewer: reviewer
+            )
+            Issue.record("Expected review rejection")
+        } catch let error as PluginFactoryError {
+            #expect(error == .reviewRejected("The draft remains unsafe."))
+            #expect(await reviewer.callCount == 3)
+            #expect(await executor.draftRunCount == 3)
+            #expect(await executor.compileCount == 0)
+            #expect(await builder.requests.count == 3)
+        }
     }
 
     @Test func reservedSystemPluginIDsCannotBeCreated() async {
@@ -261,11 +332,15 @@ private actor RecordingFactoryBuilder: PluginFactoryBuilder {
 }
 
 private actor RecordingFactoryReviewer: PluginFactoryReviewer {
-    let result: PluginFactoryReview
+    let results: [PluginFactoryReview]
     private(set) var callCount = 0
 
     init(result: PluginFactoryReview) {
-        self.result = result
+        self.results = [result]
+    }
+
+    init(results: [PluginFactoryReview]) {
+        self.results = results
     }
 
     func review(
@@ -274,6 +349,7 @@ private actor RecordingFactoryReviewer: PluginFactoryReviewer {
     ) async throws -> PluginFactoryReview {
         _ = draft
         _ = directRun
+        let result = results[min(callCount, results.count - 1)]
         callCount += 1
         return result
     }

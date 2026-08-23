@@ -34,15 +34,22 @@ struct ChatTurn: Identifiable, Hashable {
         self.toolName = toolName
     }
 
-    /// Thinking is the current plan snapshot. Complete appends the user-visible answer.
-    mutating func applyStreamChunk(status: AgentResponseStatus, chunk: String) {
+    /// Thinking is the current plan snapshot. Progress tool chunks append to
+    /// the response without ending the active tool status.
+    mutating func applyStreamChunk(
+        status: AgentResponseStatus,
+        chunk: String,
+        isProgress: Bool = false
+    ) {
         switch status {
         case .thinking:
             thought = chunk
         case .complete:
             response += chunk
         case .toolCall, .toolBatch:
-            break
+            if isProgress {
+                response += chunk
+            }
         }
     }
 }
@@ -327,7 +334,7 @@ struct ContentView: View {
     }
 
     private var pluginIDs: [String] {
-        pluginFactoryList.releases.map(\.pluginID)
+        pluginFactoryList.pluginIDs
     }
 
     private var pluginHandle: String? {
@@ -559,7 +566,16 @@ struct ContentView: View {
                 await PluginFactoryListStore.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
-                await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
+                guard await DaemonBootstrapCoordinator.prepareForHostApp(force: true) else {
+                    throw NSError(
+                        domain: "DaemonHygiene",
+                        code: 503,
+                        userInfo: [
+                            NSLocalizedDescriptionKey:
+                                "Derrick daemon registration failed. Enable Derrick in System Settings → Login Items, then try again."
+                        ]
+                    )
+                }
 
                 // Connect derrickd before Docker prewarm so Mach XPC is not competing with
                 // long-running DockerRunnerHelper work on the same bootstrap path.

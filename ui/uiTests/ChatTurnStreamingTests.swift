@@ -27,4 +27,16 @@ import Testing
         turn.applyStreamChunk(status: .complete, chunk: "successfully.")
         #expect(turn.response == "Done successfully.")
     }
+
+    @Test func progressToolChunkAppendsWithoutEndingStatus() {
+        var turn = ChatTurn(prompt: "create a plugin")
+        turn.applyStreamChunk(
+            status: .toolCall,
+            chunk: "Drafting plugin…",
+            isProgress: true
+        )
+
+        #expect(turn.response == "Drafting plugin…")
+        #expect(turn.status == nil)
+    }
 }

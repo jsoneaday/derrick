@@ -80,15 +80,7 @@ public final class AgentServiceClient: @unchecked Sendable {
             do {
                 nonisolated(unsafe) let proxy = try remoteProxy()
                 let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
-                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
-                        proxy.bootstrap { data in
-                            do {
-                                cont.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
-                            } catch {
-                                cont.resume(throwing: error)
-                            }
-                        }
-                    }
+                    try await self.requestBootstrap(using: proxy)
                 }
                 await MainActor.run {
                     debugLog(
@@ -100,15 +92,7 @@ public final class AgentServiceClient: @unchecked Sendable {
                 }
 
                 let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
-                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
-                        proxy.health { data in
-                            do {
-                                cont.resume(returning: try AgentServiceXPCCodec.decodeHealth(data as Data))
-                            } catch {
-                                cont.resume(throwing: error)
-                            }
-                        }
-                    }
+                    try await self.requestHealth(using: proxy)
                 }
                 await MainActor.run {
                     debugLog(
@@ -127,6 +111,46 @@ public final class AgentServiceClient: @unchecked Sendable {
             }
         }
         throw lastError ?? AgentServiceClientError.unavailable
+    }
+
+    private func requestBootstrap(
+        using proxy: DerrickDaemonServiceXPC
+    ) async throws -> DerrickDaemonBootstrapResult {
+        let reply = XPCThrowingReplyOnce<DerrickDaemonBootstrapResult>()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { continuation in
+                reply.install(continuation)
+                proxy.bootstrap { data in
+                    do {
+                        reply.resume(returning: try DerrickDaemonXPCCodec.decodeBootstrap(data as Data))
+                    } catch {
+                        reply.resume(throwing: error)
+                    }
+                }
+            }
+        }, onCancel: {
+            reply.resume(throwing: CancellationError())
+        })
+    }
+
+    private func requestHealth(
+        using proxy: DerrickDaemonServiceXPC
+    ) async throws -> ServiceHealthReport {
+        let reply = XPCThrowingReplyOnce<ServiceHealthReport>()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { continuation in
+                reply.install(continuation)
+                proxy.health { data in
+                    do {
+                        reply.resume(returning: try AgentServiceXPCCodec.decodeHealth(data as Data))
+                    } catch {
+                        reply.resume(throwing: error)
+                    }
+                }
+            }
+        }, onCancel: {
+            reply.resume(throwing: CancellationError())
+        })
     }
 
     private nonisolated func markReady() {
@@ -495,6 +519,64 @@ public final class AgentServiceClient: @unchecked Sendable {
             defer { group.cancelAll() }
             guard let first = try await group.next() else { throw AgentServiceClientError.timeout }
             return first
+        }
+    }
+}
+
+/// Resumes an XPC continuation once across reply, cancellation, and timeout.
+private final class XPCThrowingReplyOnce<T: Sendable>: @unchecked Sendable {
+    private enum Resolution {
+        case returned(T)
+        case failed(Error)
+    }
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var resolution: Resolution?
+
+    func install(_ continuation: CheckedContinuation<T, Error>) {
+        lock.lock()
+        if let resolution {
+            lock.unlock()
+            resume(continuation, with: resolution)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func resume(returning value: T) {
+        resolve(.returned(value))
+    }
+
+    func resume(throwing error: Error) {
+        resolve(.failed(error))
+    }
+
+    private func resolve(_ resolution: Resolution) {
+        lock.lock()
+        guard self.resolution == nil else {
+            lock.unlock()
+            return
+        }
+        self.resolution = resolution
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+
+        guard let continuation else { return }
+        resume(continuation, with: resolution)
+    }
+
+    private func resume(
+        _ continuation: CheckedContinuation<T, Error>,
+        with resolution: Resolution
+    ) {
+        switch resolution {
+        case .returned(let value):
+            continuation.resume(returning: value)
+        case .failed(let error):
+            continuation.resume(throwing: error)
         }
     }
 }

@@ -3,11 +3,22 @@ import Plugin
 import SQLite3
 
 public extension DBRepository {
-    /// Persists an approved release exactly once. A version is immutable after
-    /// promotion; callers must create a new version for every source change.
+    /// Persists an approved release exactly once. Repeating the same release is
+    /// idempotent; a changed package must use a new version.
     func savePluginFactoryRelease(_ release: PluginFactoryRelease) throws {
         guard release.verifyIntegrity() else {
             throw DBRepositoryError.sqliteOperationFailed("Refusing to store a release with an invalid content hash.")
+        }
+        if let existing = try pluginFactoryRelease(
+            pluginID: release.pluginID,
+            version: release.version
+        ) {
+            guard existing.contentHash == release.contentHash else {
+                throw DBRepositoryError.sqliteOperationFailed(
+                    "Plugin \(release.pluginID) version \(release.version) already exists with different content."
+                )
+            }
+            return
         }
         let skillsData = try JSONEncoder().encode(release.skillFiles)
         let skillsJSON = String(decoding: skillsData, as: UTF8.self)
@@ -119,12 +130,15 @@ public extension DBRepository {
         }
     }
 
-    func deletePluginFactoryRelease(pluginID: String) throws {
+    func deletePluginFactoryRelease(pluginID: String, version: String? = nil) throws {
+        let versionClause = version.map {
+            " AND version = \(quoted($0))"
+        } ?? ""
         try withDatabaseHandle { handle in
             try Self.execute(
                 """
                 DELETE FROM plugin_factory_releases
-                WHERE plugin_id = \(quoted(pluginID));
+                WHERE plugin_id = \(quoted(pluginID))\(versionClause);
                 """,
                 on: handle
             )

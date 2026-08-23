@@ -273,11 +273,24 @@ public enum JobServiceLoginAgent {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = arguments
-        process.standardError = Pipe()
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
         process.standardOutput = Pipe()
         do {
             try process.run()
             process.waitUntilExit()
+            let detail = String(
+                data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            )?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if process.terminationStatus != 0, !detail.isEmpty {
+                fputs(
+                    "[derrickd] launchctl \(arguments.joined(separator: " ")) " +
+                    "status=\(process.terminationStatus) detail=\(detail)\n",
+                    stderr
+                )
+            }
             return process.terminationStatus
         } catch {
             fputs(

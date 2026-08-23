@@ -107,8 +107,8 @@ final class EgressAllowlistService: ObservableObject {
                 PipelineTiming.log(
                     "egress_preflight blocked_hard host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
                 )
-                // Modal published by pipeline from failureStage=egress result.
-                return Self.blockedResultJSON(findings: [message], stage: "egress")
+                // Modal is published by the pipeline from the common network outcome.
+                return Self.blockedResultJSON(findings: [message])
             }
 
             if localPolicy.isHostCoveredByAllowlist(host) {
@@ -140,8 +140,7 @@ final class EgressAllowlistService: ObservableObject {
                             "egress_preflight persist_failed host=\(host) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
                         )
                         return Self.blockedResultJSON(
-                            findings: ["Failed to save permanent allow for \(host): \(error.localizedDescription)"],
-                            stage: "egress"
+                            findings: ["Failed to save permanent allow for \(host): \(error.localizedDescription)"]
                         )
                     }
                 }
@@ -152,14 +151,14 @@ final class EgressAllowlistService: ObservableObject {
                 PipelineTiming.log(
                     "egress_preflight user_denied hosts=\(needsPrompt.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS) prompted_hosts=\(needsPrompt.count)"
                 )
-                return Self.blockedResultJSON(findings: [message], stage: "egress")
+                return Self.blockedResultJSON(findings: [message])
             case .dismissed, .timedOut:
                 let listed = needsPrompt.joined(separator: ", ")
                 let message = "Network access to “\(listed)” was not approved. The script was not run."
                 PipelineTiming.log(
                     "egress_preflight dismissed_or_timeout hosts=\(needsPrompt.count) total_ms=\(PipelineTiming.elapsedMS(from: preflightStarted)) modal_ms=\(modalMS)"
                 )
-                return Self.blockedResultJSON(findings: [message], stage: "egress")
+                return Self.blockedResultJSON(findings: [message])
             }
         }
 
@@ -258,24 +257,17 @@ final class EgressAllowlistService: ObservableObject {
         }
     }
 
-    private static func blockedResultJSON(findings: [String], stage: String) -> String {
-        let payload: [String: Any] = [
-            "status": "blocked",
-            "decision": "deny",
-            "failureStage": stage,
-            "verifier": "egress-preflight",
-            "validationFindings": findings,
-            "reviewerAssessment": NSNull(),
-            "stdout": "",
-            "stderr": "",
-            "exitCode": -1,
-            "timedOut": false,
-            "durationMS": 0
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
-            return #"{"status":"blocked","decision":"deny","failureStage":"egress","validationFindings":["egress denied"]}"#
-        }
-        return text
+    private static func blockedResultJSON(findings: [String]) -> String {
+        let diagnostics = findings.isEmpty
+            ? [ToolExecutionOutcome.Diagnostic(code: "egress_denied", message: "Network access was denied.")]
+            : findings.map {
+                ToolExecutionOutcome.Diagnostic(code: "egress_denied", message: $0)
+            }
+        return (try? ToolExecutionOutcome.failure(
+            status: .blocked,
+            stage: .network,
+            diagnostics: diagnostics,
+            retry: ToolExecutionOutcome.Retry(allowed: false)
+        ).encodedJSON()) ?? #"{"status":"blocked","stage":"network","diagnostics":[]}"#
     }
 }

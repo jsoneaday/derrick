@@ -206,12 +206,28 @@ final class ConversationModel {
                     toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
                 )
             )
-            let result = try await toolClient.callTool(
-                named: AllowedMCPTool.pluginFactoryBuild.rawValue,
-                arguments: ["goal": .string(factoryGoal)]
-            )
+            let progressTask = Self.startPluginFactoryProgress(onChunk: onChunk)
+            let result: MCPToolResult
+            do {
+                result = try await toolClient.callTool(
+                    named: AllowedMCPTool.pluginFactoryBuild.rawValue,
+                    arguments: ["goal": .string(factoryGoal)]
+                )
+            } catch {
+                progressTask.cancel()
+                throw error
+            }
+            progressTask.cancel()
             if !result.isError,
                let pluginID = Self.pluginID(fromFactoryResult: result.text) {
+                onChunk(
+                    AgentResponseNextChunk(
+                        status: .toolCall,
+                        chunk: "\n\n**Plugin approved and saved.** Running it now…\n\n",
+                        toolName: AllowedMCPTool.pluginFactoryBuild.rawValue,
+                        isProgress: true
+                    )
+                )
                 onChunk(
                     AgentResponseNextChunk(
                         status: .toolCall,
@@ -331,13 +347,46 @@ final class ConversationModel {
         return goal.isEmpty ? "Help me design a useful Agent Plugin. Ask for the missing goal in the result." : goal
     }
 
+    private static func startPluginFactoryProgress(
+        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            let updates: [(UInt64, String)] = [
+                (0, "**Plugin creation started.**\n\nDrafting a standalone Swift plugin…\n\n"),
+                (2_000_000_000, "Running the draft test and validating its output…\n\n"),
+                (15_000_000_000, "Reviewing plugin safety, correctness, and request alignment…\n\n"),
+                (30_000_000_000, "Compiling and verifying the approved plugin release…\n\n"),
+            ]
+            for (delayNanoseconds, message) in updates {
+                if delayNanoseconds > 0 {
+                    do {
+                        try await Task.sleep(nanoseconds: delayNanoseconds)
+                    } catch {
+                        return
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                onChunk(
+                    AgentResponseNextChunk(
+                        status: .toolCall,
+                        chunk: message,
+                        toolName: AllowedMCPTool.pluginFactoryBuild.rawValue,
+                        isProgress: true
+                    )
+                )
+            }
+        }
+    }
+
     private static func pluginID(fromFactoryResult text: String) -> String? {
-        guard let data = text.data(using: .utf8),
+        guard let outcome = ToolExecutionOutcome.decode(from: text),
+              outcome.status == .completed,
+              let value = outcome.output?.value,
+              let data = value.data(using: .utf8),
               let receipt = try? JSONDecoder().decode(PluginFactoryBuildReceipt.self, from: data),
               receipt.ok,
               let pluginID = receipt.pluginID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !pluginID.isEmpty
-        else {
+              !pluginID.isEmpty else {
             return nil
         }
         return pluginID

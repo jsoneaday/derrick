@@ -160,6 +160,97 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
     }
 
+    func testLegacyToolOutcomesArePurgedByMigration() async throws {
+        let repository = try makeRepository()
+        let url = try await repository.createEmptyDatabaseIfNeeded(
+            username: "app-user",
+            password: "app-secret"
+        )
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret",
+            to: 26
+        )
+
+        let legacyOutcome = #"{"status":"blocked","failureStage":"llmReview","reviewerAssessment":{},"phaseTiming":{}}"#
+        try await repository.upsert(
+            makeRecord(
+                sessionID: "legacy-outcome-tool-call",
+                createdAt: .now,
+                prompt: "preserve this conversation",
+                toolCalls: [
+                    ToolCallRecord(
+                        name: "script_exec",
+                        result: legacyOutcome
+                    )
+                ]
+            )
+        )
+        try await repository.upsert(
+            makeRecord(
+                sessionID: "legacy-outcome-completion",
+                createdAt: .now,
+                prompt: "remove this old result",
+                completion: legacyOutcome
+            )
+        )
+
+        let timestamp = "2026-01-01T00:00:00Z"
+        try execute(
+            """
+            INSERT INTO jobs (id, status, principal_json, source, created_at, updated_at)
+            VALUES ('legacy-outcome-job', 'failed', '{}', 'test', '\(timestamp)', '\(timestamp)');
+            INSERT INTO job_steps (
+                id, job_id, step_index, kind, status, payload_json, result_json
+            ) VALUES (
+                'legacy-outcome-step', 'legacy-outcome-job', 0, 'tool', 'failed', '{}',
+                \(sqlLiteral(legacyOutcome))
+            );
+            INSERT INTO job_results (
+                id, job_id, job_session_id, response_text, created_at
+            ) VALUES (
+                'legacy-outcome-result', 'legacy-outcome-job', 'legacy-outcome-session',
+                \(sqlLiteral(legacyOutcome)), '\(timestamp)'
+            );
+            INSERT INTO service_logs (
+                id, service, level, code, message, detail_json, created_at
+            ) VALUES (
+                'legacy-outcome-log', 'mcp', 'debug', 'legacy', 'old result',
+                \(sqlLiteral(legacyOutcome)), '\(timestamp)'
+            );
+            """,
+            at: url
+        )
+
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret"
+        )
+
+        let preserved = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "legacy-outcome-tool-call", agentID: "ui")
+        )
+        XCTAssertEqual(preserved.count, 1)
+        XCTAssertTrue(preserved.first?.pair.toolCalls.isEmpty == true)
+        let removedCompletion = try await repository.records(
+            sessionKey: MemorySessionKey(sessionID: "legacy-outcome-completion", agentID: "ui")
+        )
+        XCTAssertTrue(removedCompletion.isEmpty)
+
+        let job = try await repository.fetchJob(id: "legacy-outcome-job")
+        XCTAssertNil(job?.1.first?.resultJSON)
+        let jobResult = try await repository.fetchJobResult(id: "legacy-outcome-result")
+        XCTAssertNil(jobResult)
+        let logs = try await repository.recentServiceLogs(limit: 100)
+        XCTAssertFalse(logs.contains { $0.message == "old result" })
+        XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
+
+        _ = try await repository.migrateSessionMemory(
+            username: "app-user",
+            password: "app-secret"
+        )
+    }
+
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
@@ -184,6 +275,7 @@ final class DBRepositoryTests: XCTestCase {
             reviewSummary: "approved"
         )
 
+        try await repository.savePluginFactoryRelease(release)
         try await repository.savePluginFactoryRelease(release)
         let loaded = try await repository.pluginFactoryRelease(
             pluginID: "weather-tool",
@@ -417,15 +509,49 @@ final class DBRepositoryTests: XCTestCase {
         return sqlite3_step(statement) == SQLITE_ROW
     }
 
-    private func makeRecord(sessionID: String, createdAt: Date, prompt: String) -> MemoryRecord {
+    private func makeRecord(
+        sessionID: String,
+        createdAt: Date,
+        prompt: String,
+        completion: String = "completion",
+        toolCalls: [ToolCallRecord] = []
+    ) -> MemoryRecord {
         let pair = PromptResponsePair(
             sessionID: sessionID,
             agentID: "ui",
             prompt: prompt,
-            completion: "completion",
+            completion: completion,
+            toolCalls: toolCalls,
             createdAt: createdAt
         )
         return MemoryRecord(id: pair.id, pair: pair)
+    }
+
+    private func execute(_ sql: String, at url: URL) throws {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let handle else {
+            throw NSError(
+                domain: "DBRepositoryTests",
+                code: 9,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to open SQLite database for writing"]
+            )
+        }
+        defer { sqlite3_close(handle) }
+
+        guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "DBRepositoryTests",
+                code: 10,
+                userInfo: [
+                    NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(handle))
+                ]
+            )
+        }
+    }
+
+    private func sqlLiteral(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "''"))'"
     }
 
     private func makeRepository() throws -> DBRepository {

@@ -2,12 +2,17 @@ import Foundation
 import MCP
 import MCPClient
 import MCPToolCatalog
+import ServiceContracts
 
 #if canImport(System)
 import System
 #else
 @preconcurrency import SystemPackage
 #endif
+
+private func toolExecutionOutcomeIsError(_ text: String) -> Bool {
+    ToolExecutionOutcome.decode(from: text)?.indicatesFailure ?? false
+}
 
 public actor MCPToolRegistry {
     public typealias Handler = @Sendable ([String: Value]) async throws -> String
@@ -70,7 +75,13 @@ public actor MCPToolRegistry {
                 group.addTask {
                     do {
                         let content = try await self.call(name: invocation.toolName, arguments: invocation.arguments)
-                        return (index, MCPToolResult(content: [MCPToolContent.text(content)], isError: false))
+                        return (
+                            index,
+                            MCPToolResult(
+                                content: [MCPToolContent.text(content)],
+                                isError: toolExecutionOutcomeIsError(content)
+                            )
+                        )
                     } catch {
                         print("[MCPServer] batch call failed for \(invocation.toolName): \(error)")
                         return (
@@ -274,18 +285,27 @@ public final class MCPServerHost: MCPToolRegistering, @unchecked Sendable {
                 let input = params.arguments?["arguments"]?.stringValue ?? "{}"
                 let decoded = Self.decodeArguments(from: input)
                 let result = try await registry.call(name: name, arguments: decoded)
-                return .init(content: [.text(text: result, annotations: nil, _meta: nil)], isError: false)
+                return .init(
+                    content: [.text(text: result, annotations: nil, _meta: nil)],
+                    isError: Self.isExecutionOutcomeError(result)
+                )
 
             case "tool_batch":
                 let input = params.arguments?["request_json"]?.stringValue ?? "{}"
                 let request = Self.decodeBatchRequest(from: input)
                 let result = await registry.batchCall(request)
-                return .init(content: [.text(text: Self.encodeJSON(result), annotations: nil, _meta: nil)], isError: false)
+                return .init(
+                    content: [.text(text: Self.encodeJSON(result), annotations: nil, _meta: nil)],
+                    isError: result.isError
+                )
 
             default:
                 do {
                     let result = try await registry.call(name: params.name, arguments: params.arguments ?? [:])
-                    return .init(content: [.text(text: result, annotations: nil, _meta: nil)], isError: false)
+                    return .init(
+                        content: [.text(text: result, annotations: nil, _meta: nil)],
+                        isError: Self.isExecutionOutcomeError(result)
+                    )
                 } catch {
                     print("[MCPServer] tool call failed for \(params.name): \(error)")
                     return .init(content: [.text(text: error.localizedDescription, annotations: nil, _meta: nil)], isError: true)
@@ -314,6 +334,10 @@ public final class MCPServerHost: MCPToolRegistering, @unchecked Sendable {
             return "[]"
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func isExecutionOutcomeError(_ text: String) -> Bool {
+        toolExecutionOutcomeIsError(text)
     }
 
     private static func integerValue(from value: Any?) -> Int? {

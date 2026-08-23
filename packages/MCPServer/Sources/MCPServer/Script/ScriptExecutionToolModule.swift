@@ -12,7 +12,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
             "properties": .object([
                 "description": .object([
                     "type": .string("string"),
-                    "description": .string("Human description of what the script does.")
+                    "description": .string("Human description of the complete terminal result, including what the script extracts or produces after any host HTTP request.")
                 ]),
                 "reason": .object([
                     "type": .string("string"),
@@ -24,7 +24,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),
-                    "description": .string("Original user prompt to validate relevance.")
+                    "description": .string("Original user prompt. Required so the reviewer can verify that the terminal result fulfills the user's request.")
                 ]),
                 "dependencies": .object([
                     "type": .string("object"),
@@ -35,7 +35,12 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                     "description": .string("Tool timeout in seconds (1...300).")
                 ])
             ]),
-            "required": .array([.string("description"), .string("reason"), .string("script")])
+            "required": .array([
+                .string("description"),
+                .string("reason"),
+                .string("script"),
+                .string("user_prompt"),
+            ])
         ])
     }
 

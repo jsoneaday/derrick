@@ -241,23 +241,39 @@ struct MarkdownResponseView: View {
 
     var body: some View {
         let normalized = RichTextClassifier.normalize(text)
+        let pluginResult = PluginResultExtractor.payload(from: normalized)
 
-        if let pluginHTML = PluginHTMLResultExtractor.payload(from: normalized) {
-            PluginHTMLResultView(payload: pluginHTML)
-        } else {
-            switch RichTextClassifier.classify(normalized) {
-            case .csv(let table):
-                csvTableView(table: table, source: normalized)
+        if let pluginResult {
+            switch pluginResult.format {
             case .html:
-                HTMLResponseView(html: normalized)
-            case .markdown:
-                markdownView(text: normalized)
-            case .plain:
-                Text(verbatim: normalized)
-                    .padding(.horizontal, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                PluginHTMLResultView(
+                    payload: PluginHTMLPayload(
+                        title: pluginResult.title,
+                        html: pluginResult.body
+                    )
+                )
+            case .text:
+                classifiedResponseView(pluginResult.displayText)
             }
+        } else {
+            classifiedResponseView(normalized)
+        }
+    }
+
+    @ViewBuilder
+    private func classifiedResponseView(_ text: String) -> some View {
+        switch RichTextClassifier.classify(text) {
+        case .csv(let table):
+            csvTableView(table: table, source: text)
+        case .html:
+            HTMLResponseView(html: text)
+        case .markdown:
+            markdownView(text: text)
+        case .plain:
+            Text(verbatim: text)
+                .padding(.horizontal, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
     }
 

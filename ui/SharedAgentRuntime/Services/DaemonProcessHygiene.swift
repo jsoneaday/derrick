@@ -145,8 +145,9 @@ public enum DaemonProcessHygiene {
     }
 
     /// Kill stray daemons and stale embedded builds, then kickstart launchd when needed.
-    public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async {
-        guard !DerrickProcessRole.isDaemon else { return }
+    @discardableResult
+    public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async -> Bool {
+        guard !DerrickProcessRole.isDaemon else { return true }
 
         let paths = JobServiceLoginAgent.preflightPaths()
         let expectedExe = paths.executable
@@ -156,7 +157,7 @@ public enum DaemonProcessHygiene {
                 "[DaemonHygiene] skip — embedded daemon missing at \(expectedExe.path)\n",
                 stderr
             )
-            return
+            return false
         }
 
         let expectedMtime = modificationDate(expectedExe)
@@ -175,8 +176,12 @@ public enum DaemonProcessHygiene {
                 "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedPath))\n",
                 stderr
             )
-            await restartDaemonIfNeeded(evictedAny: false, hostPath: hostPath, expectedPath: expectedPath, expectedMtime: expectedMtime)
-            return
+            return await restartDaemonIfNeeded(
+                evictedAny: false,
+                hostPath: hostPath,
+                expectedPath: expectedPath,
+                expectedMtime: expectedMtime
+            )
         }
 
         debugLog("[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es)")
@@ -221,7 +226,7 @@ public enum DaemonProcessHygiene {
                     == DerrickDaemonHygiene.canonicalPath(expectedPath)
         }
 
-        await restartDaemonIfNeeded(
+        let registrationSucceeded = await restartDaemonIfNeeded(
             evictedAny: evictedAny,
             hasHealthyExpectedDaemon: hasHealthy,
             hostPath: hostPath,
@@ -236,32 +241,52 @@ public enum DaemonProcessHygiene {
            }) {
             UserDefaults.standard.set(expectedMtime.timeIntervalSince1970, forKey: acceptedMtimeDefaultsKey)
         }
+        return registrationSucceeded
     }
 
+    @discardableResult
     private static func restartDaemonIfNeeded(
         evictedAny: Bool,
         hasHealthyExpectedDaemon: Bool = false,
         hostPath: String = "",
         expectedPath: String = "",
         expectedMtime: Date? = nil
-    ) async {
+    ) async -> Bool {
         guard DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
             evictedAny: evictedAny,
             hasHealthyExpectedDaemon: hasHealthyExpectedDaemon
         ) else {
             fputs("[DaemonHygiene] expected daemon healthy — skip register/kickstart\n", stderr)
-            return
+            return true
         }
         fputs(
             "[DaemonHygiene] register+kickstart evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)\n",
             stderr
         )
-        await MainActor.run {
-            try? JobServiceLoginAgent.ensureRegistered()
+        let registered = await MainActor.run {
+            do {
+                let result = try JobServiceLoginAgent.ensureRegistered()
+                guard result.isRunningOrEnabled else {
+                    fputs(
+                        "[DaemonHygiene] daemon registration requires user action: \(result.detail)\n",
+                        stderr
+                    )
+                    return false
+                }
+                return true
+            } catch {
+                fputs(
+                    "[DaemonHygiene] daemon registration failed: \(error.localizedDescription)\n",
+                    stderr
+                )
+                return false
+            }
         }
+        guard registered else { return false }
         try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
         JobServiceLoginAgent.reloadRegisteredDaemon()
         debugLog("[DaemonHygiene] reload requested after evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)")
+        return true
     }
 
     // MARK: - Process scan

@@ -112,11 +112,33 @@ public struct AgentResponseNextChunk: Decodable, Encodable, Sendable {
     public let status: AgentResponseStatus
     public let toolName: String?
     public let chunk: String?
+    public let isProgress: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case toolName
+        case chunk
+        case isProgress
+    }
     
-    public init(status: AgentResponseStatus, chunk: String? = nil, toolName: String? = nil) {
+    public init(
+        status: AgentResponseStatus,
+        chunk: String? = nil,
+        toolName: String? = nil,
+        isProgress: Bool = false
+    ) {
         self.status = status
         self.toolName = toolName
         self.chunk = chunk
+        self.isProgress = isProgress
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(AgentResponseStatus.self, forKey: .status)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        chunk = try container.decodeIfPresent(String.self, forKey: .chunk)
+        isProgress = try container.decodeIfPresent(Bool.self, forKey: .isProgress) ?? false
     }
 }
 

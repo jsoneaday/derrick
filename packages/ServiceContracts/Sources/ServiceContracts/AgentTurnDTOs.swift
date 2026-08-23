@@ -66,19 +66,41 @@ public struct AgentTurnChunkDTO: Codable, Sendable, Hashable {
     public let status: String
     public let chunk: String?
     public let toolName: String?
+    public let isProgress: Bool
 
     public init(
         turnID: String,
         sessionID: String? = nil,
         status: String,
         chunk: String? = nil,
-        toolName: String? = nil
+        toolName: String? = nil,
+        isProgress: Bool = false
     ) {
         self.turnID = turnID
         self.sessionID = sessionID
         self.status = status
         self.chunk = chunk
         self.toolName = toolName
+        self.isProgress = isProgress
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case turnID
+        case sessionID
+        case status
+        case chunk
+        case toolName
+        case isProgress
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        turnID = try container.decode(String.self, forKey: .turnID)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        status = try container.decode(String.self, forKey: .status)
+        chunk = try container.decodeIfPresent(String.self, forKey: .chunk)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        isProgress = try container.decodeIfPresent(Bool.self, forKey: .isProgress) ?? false
     }
 }
 

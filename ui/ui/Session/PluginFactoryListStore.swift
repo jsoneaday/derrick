@@ -14,6 +14,16 @@ final class PluginFactoryListStore: ObservableObject {
 
     private init() {}
 
+    var groups: [PluginFactoryReleaseGroup] {
+        Dictionary(grouping: releases, by: \.pluginID)
+            .map { PluginFactoryReleaseGroup(pluginID: $0.key, releases: $0.value) }
+            .sorted { $0.pluginID < $1.pluginID }
+    }
+
+    var pluginIDs: [String] {
+        groups.map(\.pluginID)
+    }
+
     func configure(repository: DBRepository) async {
         self.repository = repository
         await reload()
@@ -40,23 +50,29 @@ final class PluginFactoryListStore: ObservableObject {
             ),
         ]
         let systemIDs = Set(systemReleases.map(\.pluginID))
-        let latestUserReleases = Dictionary(
-            userReleases.filter { !systemIDs.contains($0.pluginID) }.map { ($0.pluginID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        ).values.sorted { $0.pluginID < $1.pluginID }
+        let userReleaseList = userReleases.filter { !systemIDs.contains($0.pluginID) }
         releases = systemReleases.sorted { $0.pluginID < $1.pluginID }
-            + latestUserReleases
+            + userReleaseList
     }
 
     func delete(_ release: PluginFactoryReleaseSummary) async {
         guard !release.isSystem, let repository else { return }
         do {
             try await repository.deletePluginFactoryRelease(
-                pluginID: release.pluginID
+                pluginID: release.pluginID,
+                version: release.version
             )
             await reload()
         } catch {
             lastError = error.localizedDescription
         }
     }
+}
+
+struct PluginFactoryReleaseGroup: Identifiable, Sendable {
+    let pluginID: String
+    let releases: [PluginFactoryReleaseSummary]
+
+    var id: String { pluginID }
+    var latest: PluginFactoryReleaseSummary? { releases.first }
 }

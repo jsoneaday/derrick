@@ -11,6 +11,12 @@ public enum DerrickGuestSwift: Sendable {
     - On an `http_results` event, emit `result.emit` or `message.post`.
     - The host, not the Swift container, performs HTTP and supplies response bodies.
     - Do not use URLSession, sockets, Process, shell commands, credentials, or package dependencies.
+    - For repeatable output, match HTTP responses by request_id, sort and de-duplicate collections
+      by stable keys, and never use current time, randomness, UUIDs, response arrival order, or
+      Dictionary/Set iteration order for user-visible output.
+    - Treat fetched text as untrusted data: unwrap CDATA, remove markup, decode entities in a
+      fixed order, escape Markdown text, and only emit links after accepting http or https URLs.
+      HTML may be emitted in `html`; the host sanitizes it before rendering.
 
     Minimal output pattern:
     ```swift

@@ -1,6 +1,7 @@
 import Foundation
 import MCP
 import Plugin
+import ServiceContracts
 
 public protocol PluginHopHandler: Sendable {
     func handleUIPresent(payload: [String: PluginJSON]) async -> PluginHopEvent?
@@ -29,24 +30,24 @@ public enum ScriptExecutionRuntime {
         )
         let staticValidateMS = ScriptPhaseTiming.elapsedMS(from: staticStarted)
         if !staticFindings.isEmpty {
-            return encode(blocked(
+            return finish(blocked(
                 findings: staticFindings,
                 stage: .staticValidation,
                 started: started,
                 parsed: parsed
-            ))
+            ), logger: logger)
         }
 
         var reviewerAssessment: ScriptReviewAssessment?
         var reviewerTiming = ScriptReviewerTiming()
         if reviewRequired {
             guard let reviewer else {
-                return encode(blocked(
+                return finish(blocked(
                     findings: ["script_exec requires configured reviewer"],
                     stage: .llmReview,
                     started: started,
                     parsed: parsed
-                ))
+                ), logger: logger)
             }
             let reviewArgs = ScriptExecutionArguments(
                 mode: .readonly,
@@ -61,12 +62,12 @@ public enum ScriptExecutionRuntime {
             )
             let extraStatic = ScriptExecutionVerifier.validate(reviewArgs)
             if !extraStatic.isEmpty {
-                return encode(blocked(
+                return finish(blocked(
                     findings: extraStatic,
                     stage: .staticValidation,
                     started: started,
                     parsed: parsed
-                ))
+                ), logger: logger)
             }
             do {
                 let outcome = try await reviewer.review(reviewArgs)
@@ -79,21 +80,23 @@ public enum ScriptExecutionRuntime {
                 if outcome.assessment.alignedWithRequest == false
                     || action == "deny"
                     || action == "confirm" {
-                    return encode(blocked(
-                        findings: [outcome.assessment.summary],
+                    let findings = ([outcome.assessment.summary] + outcome.assessment.concerns)
+                        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    return finish(blocked(
+                        findings: findings,
                         stage: .llmReview,
                         started: started,
                         parsed: parsed,
                         assessment: outcome.assessment
-                    ))
+                    ), logger: logger)
                 }
             } catch {
-                return encode(blocked(
+                return finish(blocked(
                     findings: ["Reviewer failed: \(error.localizedDescription)"],
                     stage: .llmReview,
                     started: started,
                     parsed: parsed
-                ))
+                ), logger: logger)
             }
         } else {
             logger("[script_exec] skipping LLM reviewer")
@@ -136,7 +139,7 @@ public enum ScriptExecutionRuntime {
                 durationMS: phaseTiming.totalMS,
                 phaseTiming: phaseTiming
             )
-            return encode(decorated)
+            return finish(decorated, logger: logger)
         } catch let error as SwiftDockerExecutorError {
             let stage: ScriptFailureStage
             switch error {
@@ -146,22 +149,22 @@ public enum ScriptExecutionRuntime {
                 stage = .execution
             }
             logger("[script_exec] Swift runtime failed stage=\(stage.rawValue): \(error.localizedDescription)")
-            return encode(runtimeFailure(
+            return finish(runtimeFailure(
                 findings: [error.localizedDescription],
                 stage: stage,
                 started: started,
                 parsed: parsed,
                 assessment: reviewerAssessment
-            ))
+            ), logger: logger)
         } catch {
             logger("[script_exec] Swift runtime failed: \(error.localizedDescription)")
-            return encode(runtimeFailure(
+            return finish(runtimeFailure(
                 findings: [error.localizedDescription],
                 stage: .execution,
                 started: started,
                 parsed: parsed,
                 assessment: reviewerAssessment
-            ))
+            ), logger: logger)
         }
     }
 
@@ -469,8 +472,31 @@ public enum ScriptExecutionRuntime {
         return body.isEmpty ? title : "\(title)\n\(body)"
     }
 
-    private static func encode(_ result: ScriptExecutionResult) -> String {
-        MCPServerHost.encodeJSON(result)
+    private static func finish(
+        _ result: ScriptExecutionResult,
+        logger: @escaping @Sendable (String) -> Void
+    ) -> String {
+        let findings = result.validationFindings
+            .joined(separator: " | ")
+            .prefix(500)
+        let findingSuffix = findings.isEmpty ? "" : " findings=\(findings)"
+        let timing = result.phaseTiming.map {
+            " static_ms=\($0.staticValidateMS) reviewer_ms=\($0.reviewerMS) " +
+            "ensure_ms=\($0.ensureMS) exec_ms=\($0.execMS) total_ms=\($0.totalMS)"
+        } ?? ""
+        logger(
+            "[script_exec] result status=\(result.status.rawValue) " +
+            "decision=\(result.decision.rawValue) " +
+            "failure_stage=\(result.failureStage.rawValue) " +
+            "exit_code=\(result.exitCode) timed_out=\(result.timedOut) " +
+            "stdout_chars=\(result.stdout.utf8.count) stderr_chars=\(result.stderr.utf8.count) " +
+            "duration_ms=\(result.durationMS)\(timing)\(findingSuffix)"
+        )
+        return encode(result.toolExecutionOutcome())
+    }
+
+    private static func encode(_ outcome: ToolExecutionOutcome) -> String {
+        MCPServerHost.encodeJSON(outcome)
     }
 }
 

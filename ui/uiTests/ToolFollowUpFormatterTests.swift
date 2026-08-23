@@ -1,23 +1,10 @@
 import Foundation
 import MemorySystem
+import ServiceContracts
 import Testing
 @testable import ui
 
 @Suite struct ToolFollowUpFormatterTests {
-    @Test func stripsScriptWrapperLinesFromStdout() {
-        let raw = """
-        [script_exec] wiped /tmp and /var/tmp
-        [script_exec] Swift container ready
-        real data line
-        [TIME_METRIC] script_exec total_ms=1
-        more data
-        """
-        let cleaned = ToolFollowUpFormatter.stripWrapperLines(from: raw)
-        #expect(cleaned == "real data line\nmore data")
-        #expect(!cleaned.contains("[script_exec]"))
-        #expect(!cleaned.contains("[TIME_METRIC]"))
-    }
-
     @Test func capsLongTextWithMarker() {
         let long = String(repeating: "a", count: 100)
         let capped = ToolFollowUpFormatter.cap(long, maxChars: 40)
@@ -26,79 +13,76 @@ import Testing
         #expect(ToolFollowUpFormatter.cap("short", maxChars: 40) == "short")
     }
 
-    @Test func slimsScriptJSONDroppingReviewerAndTiming() throws {
-        let json = """
-        {
-          "status": "completed",
-          "decision": "allow",
-          "failureStage": "none",
-          "verifier": "static-check-v1",
-          "validationFindings": [],
-          "reviewerAssessment": {
-            "alignedWithRequest": true,
-            "confidence": 0.9,
-            "suggestedAction": "allow",
-            "concerns": ["noise"],
-            "summary": "ok"
-          },
-          "stdout": "[script_exec] wiped /tmp and /var/tmp\\nHELLO_WORLD\\n",
-          "stderr": "",
-          "exitCode": 0,
-          "timedOut": false,
-          "durationMS": 1234,
-          "phaseTiming": {
-            "staticValidateMS": 1,
-            "reviewerMS": 4000,
-            "ensureMS": 100,
-            "execMS": 200,
-            "totalMS": 4300,
-            "scriptCharCount": 999,
-            "scriptLineCount": 20,
-            "wrapperCharCount": 5000
-          }
-        }
-        """
-        let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json, stdoutCap: 4_000)
+    @Test func formatsUnifiedOutcomeWithoutInternalMetrics() throws {
+        let outcome = try ToolExecutionOutcome.completed(
+            output: ToolExecutionOutcome.Output(format: .text, value: "HELLO_WORLD"),
+            metrics: ToolExecutionOutcome.Metrics(
+                reviewerMS: 4_000,
+                totalMS: 4_300,
+                scriptCharCount: 999
+            )
+        ).encodedJSON()
+        let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: outcome, stdoutCap: 4_000)
         #expect(slim.contains("tool: script_exec"))
         #expect(slim.contains("status: completed"))
-        #expect(slim.contains("exitCode: 0"))
-        #expect(slim.contains("timedOut: false"))
+        #expect(slim.contains("stage: none"))
+        #expect(slim.contains("output format: text"))
         #expect(slim.contains("HELLO_WORLD"))
-        #expect(!slim.contains("wiped /tmp"))
-        #expect(!slim.contains("reviewerAssessment"))
-        #expect(!slim.contains("phaseTiming"))
-        #expect(!slim.contains("static-check-v1"))
-        #expect(!slim.contains("noise"))
-        #expect(!slim.contains("durationMS"))
-        #expect(!slim.contains("failureStage"))
+        #expect(!slim.contains("reviewerMS"))
+        #expect(!slim.contains("scriptCharCount"))
     }
 
-    @Test func capsStdoutInScriptSlimResult() {
+    @Test func capsUnifiedOutcomeOutput() throws {
         let big = String(repeating: "x", count: 6_000)
-        let json = """
-        {"status":"completed","stdout":"\(big)","stderr":"","exitCode":0,"timedOut":false,"failureStage":"none"}
-        """
+        let json = try ToolExecutionOutcome.completed(
+            output: ToolExecutionOutcome.Output(format: .text, value: big)
+        ).encodedJSON()
         let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json, stdoutCap: 100)
         #expect(slim.contains("…[truncated]…"))
         #expect(slim.count < 6_000)
     }
 
-    @Test func includesStderrWhenPresentAndStripsWrappers() {
-        let json = """
-        {
-          "status": "failed",
-          "failureStage": "execution",
-          "stdout": "",
-          "stderr": "[script_exec] Swift compiler error\\nplugin.swift:1:1: error: expected expression",
-          "exitCode": 1,
-          "timedOut": false
-        }
-        """
+    @Test func includesUnifiedDiagnosticsAlongsidePartialOutput() throws {
+        let json = try ToolExecutionOutcome.failure(
+            stage: .execution,
+            diagnostics: [
+                ToolExecutionOutcome.Diagnostic(
+                    code: "script_failed",
+                    message: "The terminal result did not contain the requested fields."
+                )
+            ]
+        ).encodedJSON()
         let slim = ToolFollowUpFormatter.slim(toolName: "script_exec", rawResult: json)
-        #expect(slim.contains("failureStage: execution"))
-        #expect(slim.contains("stderr:"))
-        #expect(slim.contains("expected expression"))
-        #expect(!slim.contains("[script_exec] Swift compiler error"))
+        #expect(slim.contains("stage: execution"))
+        #expect(slim.contains("diagnostics:"))
+        #expect(slim.contains("The terminal result did not contain the requested fields."))
+    }
+
+    @Test func appendsFailureDetailsWhenFinalResponseOmitsThem() throws {
+        let json = try ToolExecutionOutcome.failure(
+            status: .blocked,
+            stage: .review,
+            diagnostics: [
+                ToolExecutionOutcome.Diagnostic(
+                    code: "functional_mismatch",
+                    message: "The script returned raw HTML instead of extracting the requested fields."
+                )
+            ]
+        ).encodedJSON()
+        let records = [
+            ToolCallRecord(
+                name: "script_exec",
+                arguments: [:],
+                result: json
+            )
+        ]
+        let response = ToolFollowUpFormatter.appendingFailureDetails(
+            to: "I could not complete the request.",
+            records: records
+        )
+        #expect(response.contains("Tool failure details:"))
+        #expect(response.contains("Failure stage: review"))
+        #expect(response.contains("The script returned raw HTML"))
     }
 
     @Test func scriptRequestOmitsFullScriptBody() {
@@ -123,34 +107,39 @@ import Testing
         #expect(!line.contains("print(1)"))
     }
 
-    @Test func slimToolResultsUsesRecordsAndKeepsFullResultElsewhere() {
-        let full = #"{"status":"completed","stdout":"answer-42","stderr":"","exitCode":0,"timedOut":false,"failureStage":"none","reviewerAssessment":{"alignedWithRequest":true,"confidence":1,"suggestedAction":"allow","concerns":[],"summary":"ok"},"phaseTiming":{"staticValidateMS":1,"reviewerMS":1,"ensureMS":1,"execMS":1,"totalMS":4,"scriptCharCount":1,"scriptLineCount":1,"wrapperCharCount":1}}"#
+    @Test func slimToolResultsUsesRecordsAndKeepsFullResultElsewhere() throws {
+        let full = try ToolExecutionOutcome.completed(
+            output: ToolExecutionOutcome.Output(format: .text, value: "answer-42"),
+            metrics: ToolExecutionOutcome.Metrics(
+                staticValidateMS: 1,
+                reviewerMS: 1,
+                ensureMS: 1,
+                execMS: 1,
+                totalMS: 4,
+                scriptCharCount: 1,
+                scriptLineCount: 1
+            )
+        ).encodedJSON()
         let record = ToolCallRecord(
             name: "script_exec",
             arguments: ["script": "print('answer-42')\n"],
             result: full
         )
-        // Full result remains on the record for memory/debug consumers.
-        #expect(record.result?.contains("reviewerAssessment") == true)
-        #expect(record.result?.contains("phaseTiming") == true)
+        // Full outcome remains on the record for memory/debug consumers.
+        #expect(record.result?.contains("\"metrics\"") == true)
 
         let slim = ToolFollowUpFormatter.slimToolResults(records: [record])
         #expect(slim.contains("answer-42"))
-        #expect(!slim.contains("reviewerAssessment"))
-        #expect(!slim.contains("phaseTiming"))
+        #expect(!slim.contains("reviewerMS"))
 
         let request = ToolFollowUpFormatter.slimToolRequestLine(records: [record])
         #expect(request.contains("script_exec"))
         #expect(!request.contains("print('answer-42')"))
     }
 
-    @Test func nonJSONResultIsStillStrippedAndCapped() {
-        let noise = """
-        [script_exec] wiped /tmp and /var/tmp
-        \(String(repeating: "z", count: 50))
-        """
+    @Test func opaqueResultIsCapped() {
+        let noise = String(repeating: "z", count: 50)
         let slim = ToolFollowUpFormatter.slim(toolName: "other_tool", rawResult: noise, stdoutCap: 20)
-        #expect(!slim.contains("[script_exec]"))
         #expect(slim.contains("…[truncated]…"))
         #expect(slim.contains("tool: other_tool"))
     }

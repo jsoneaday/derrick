@@ -27,11 +27,16 @@ public struct PluginEnvelope: Codable, Sendable, Hashable {
         let verbRaw = rest["verb"]?.stringValue ?? rest["type"]?.stringValue
         rest.removeValue(forKey: "verb")
         rest.removeValue(forKey: "type")
-        for nestKey in ["data", "result", "payload"] {
-            if case .object(let nested)? = rest[nestKey] {
-                rest.removeValue(forKey: nestKey)
-                for (key, value) in nested where rest[key] == nil {
-                    rest[key] = value
+        var flattened = true
+        while flattened {
+            flattened = false
+            for nestKey in ["data", "result", "payload", "emit"] {
+                if case .object(let nested)? = rest[nestKey] {
+                    rest.removeValue(forKey: nestKey)
+                    for (key, value) in nested where rest[key] == nil {
+                        rest[key] = value
+                    }
+                    flattened = true
                 }
             }
         }

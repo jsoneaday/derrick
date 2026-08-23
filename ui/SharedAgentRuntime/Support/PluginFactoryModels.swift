@@ -10,26 +10,35 @@ actor ConfiguredPluginFactoryService {
     private let repository: DBRepository
     private let settings: LLMModelSettings
     private let executor: any PluginFactoryExecutor
+    private let logger: PluginFactoryLogger
     private let apiKeyProvider: @Sendable () -> String?
 
     init(
         repository: DBRepository,
         settings: LLMModelSettings,
         executor: any PluginFactoryExecutor,
+        logger: @escaping PluginFactoryLogger = { _ in },
         apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
     ) {
         self.repository = repository
         self.settings = settings
         self.executor = executor
+        self.logger = logger
         self.apiKeyProvider = apiKeyProvider
     }
 
     func build(userGoal: String) async throws -> PluginFactoryRelease {
+        let existingReleases = try await repository.listPluginFactoryReleaseSummaries()
         let release = try await PluginFactorySession().build(
             userGoal: userGoal,
-            builder: ConfiguredPluginFactoryBuilder(settings: settings, apiKeyProvider: apiKeyProvider),
+            builder: ConfiguredPluginFactoryBuilder(
+                settings: settings,
+                existingReleases: existingReleases,
+                apiKeyProvider: apiKeyProvider
+            ),
             executor: executor,
-            reviewer: ConfiguredPluginSafetyReviewer(settings: settings, apiKeyProvider: apiKeyProvider)
+            reviewer: ConfiguredPluginSafetyReviewer(settings: settings, apiKeyProvider: apiKeyProvider),
+            logger: logger
         )
         try await repository.savePluginFactoryRelease(release)
         return release
@@ -40,13 +49,16 @@ actor ConfiguredPluginFactoryService {
 /// intent into data; it does not run, review, compile, or release source.
 actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     private let settings: LLMModelSettings
+    private let existingReleases: [PluginFactoryReleaseSummary]
     private let apiKeyProvider: @Sendable () -> String?
 
     init(
         settings: LLMModelSettings,
+        existingReleases: [PluginFactoryReleaseSummary] = [],
         apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
     ) {
         self.settings = settings
+        self.existingReleases = existingReleases
         self.apiKeyProvider = apiKeyProvider
     }
 
@@ -58,7 +70,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
 
         let response = try await stream(
             AgentRequest.prompt(
-                Self.userPrompt(for: request),
+                Self.userPrompt(for: request, existingReleases: existingReleases),
                 system: Self.builderSystemPrompt,
                 temperature: 0,
                 responseSchema: Self.builderResponseSchema
@@ -118,6 +130,25 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     Only the host performs HTTP; the Swift container has no network.
     Use only the Derrick contract types shown in the source comments and never use Process, URLSession,
     sockets, shell commands, or credentials. Keep the draft small and deterministic.
+    Before returning the draft, self-check the implementation:
+    - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
+      Never use response arrival order, Set iteration order, current time, randomness, or UUIDs
+      to determine user-visible output.
+    - Match host responses by the emitted request_id. If a malformed fixture contains duplicate
+      matches, choose by a stable comparison of response fields rather than taking the first one.
+      Do not iterate a Dictionary when applying transformations; use an ordered array of rules.
+    - Do not claim that data is recent, current, complete, or filtered unless the source actually
+      enforces that claim from data supplied by the host. Publication dates may be displayed as
+      source data; do not compare them with the wall clock.
+    - Keep source-derived titles as titles, but make generated explanatory summaries complete
+      sentences. Remove feed markup before placing it in text or Markdown fields.
+      Decode entities with an explicit, fixed-order rule list. Escape untrusted Markdown text,
+      and only create links after validating an http or https URL. Never let feed content provide
+      Markdown syntax, HTML, or a URL scheme.
+    - Use the `html` field only for HTML output; the host sanitizes it before rendering.
+    - Check Swift control flow before returning: every `guard` `else` branch must return,
+      throw, or otherwise exit after emitting an envelope, and every bound value must be used.
+      The draft must compile without relying on warnings being ignored.
     Implement the user's goal directly in the plugin. Never generate prompts, model instructions,
     or a plan for Chat/another model to perform the core function. For news goals, the plugin must
     fetch and parse the requested public feed data and emit a source-grounded result from that data.
@@ -161,13 +192,29 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         ]
     )
 
-    private static func userPrompt(for request: PluginFactoryBuilderRequest) -> String {
+    private static func userPrompt(
+        for request: PluginFactoryBuilderRequest,
+        existingReleases: [PluginFactoryReleaseSummary]
+    ) -> String {
         var sections = ["User goal:\n\(request.userGoal)"]
+        if !existingReleases.isEmpty {
+            let catalog = existingReleases
+                .map { "\($0.pluginID)@\($0.version)" }
+                .joined(separator: "\n")
+            sections.append(
+                """
+                Existing released plugin versions:
+                \(catalog)
+                Choose a version that is not already released for the plugin_id you return.
+                If reusing an existing plugin_id, increment its semantic patch version.
+                """
+            )
+        }
         if let previous = request.previousDraft {
             sections.append("Previous draft:\n\(previous.swiftSource)")
         }
         if let feedback = request.feedback {
-            sections.append("Direct-test feedback to correct once:\n\(feedback)")
+            sections.append("Factory feedback to correct before the next attempt:\n\(feedback)")
         }
         return sections.joined(separator: "\n\n")
     }
@@ -279,7 +326,12 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
       {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
     ]}
     Reject unsafe, misleading, unrelated, non-deterministic, credential-seeking, or policy-bypassing code.
-    Compilation success is not approval. Do not rewrite the code and do not suggest an automatic retry.
+    Apply these checks from observable evidence:
+    - A deterministic result uses stable sorting and de-duplication and does not depend on response order, current time, randomness, or UUIDs.
+    - Source-derived headline titles may be fragments; only generated explanatory summaries must be complete sentences when the manifest requires prose.
+    - `result.emit.html` is an allowed output format. Derrick sanitizes it with an allowlist before rendering. Reject executable script behavior or a deliberate sanitizer bypass, not ordinary safe HTML tags.
+    - Reject missing source-grounded parsing or claims that the direct test output does not support.
+    Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
     """
 
     private static let reviewerResponseSchema = AgentSchema(
@@ -309,6 +361,9 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     ) -> String {
         let output = String(decoding: directRun.stdout, as: UTF8.self)
         return """
+        User goal:
+        \(draft.userGoal ?? "(not supplied)")
+
         Manifest:
         \(draft.manifestJSON)
 

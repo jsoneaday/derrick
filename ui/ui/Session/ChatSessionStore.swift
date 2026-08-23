@@ -176,7 +176,11 @@ final class ChatSessionStore: ObservableObject {
         let turnIndex = tabs[tabIndex].turns.count - 1
         let status = AgentResponseStatus(rawValue: dto.status) ?? .thinking
         let chunkText = dto.chunk ?? ""
-        tabs[tabIndex].turns[turnIndex].applyStreamChunk(status: status, chunk: chunkText)
+        tabs[tabIndex].turns[turnIndex].applyStreamChunk(
+            status: status,
+            chunk: chunkText,
+            isProgress: dto.isProgress
+        )
         tabs[tabIndex].turns[turnIndex].status = status
         tabs[tabIndex].turns[turnIndex].toolName = dto.toolName
         if selectedSessionID == sessionID {

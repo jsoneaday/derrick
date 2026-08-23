@@ -3,6 +3,33 @@ import Testing
 @testable import ServiceContracts
 
 @Suite struct ServiceContractsTests {
+    @Test func toolExecutionOutcomeRoundTripsOutputAndDiagnostics() throws {
+        let outcome = ToolExecutionOutcome.failure(
+            status: .blocked,
+            stage: .review,
+            diagnostics: [
+                ToolExecutionOutcome.Diagnostic(
+                    code: "functional_mismatch",
+                    message: "The result did not satisfy the request."
+                )
+            ],
+            retry: ToolExecutionOutcome.Retry(
+                allowed: true,
+                attempt: 2,
+                maxAttempts: 3
+            )
+        )
+
+        let decoded = try #require(
+            ToolExecutionOutcome.decode(from: try outcome.encodedJSON())
+        )
+        #expect(decoded.status == .blocked)
+        #expect(decoded.stage == .review)
+        #expect(decoded.failureSummary == "The result did not satisfy the request.")
+        #expect(decoded.retry?.attempt == 2)
+        #expect(decoded.retry?.maxAttempts == 3)
+    }
+
     @Test func egressBlacklistDTOsRoundTrip() throws {
         let entry = EgressBlacklistEntryDTO(
             id: "e1",
@@ -122,12 +149,20 @@ import Testing
         #expect(decoded.prompt == "hello")
         #expect(decoded.sessionID == "s1")
 
-        let chunk = AgentTurnChunkDTO(turnID: "t1", sessionID: "s1", status: "complete", chunk: "hi", toolName: nil)
+        let chunk = AgentTurnChunkDTO(
+            turnID: "t1",
+            sessionID: "s1",
+            status: "tool_call",
+            chunk: "Building",
+            toolName: "plugin_factory_build",
+            isProgress: true
+        )
         let chunkData = try AgentServiceXPCCodec.encodeTurnChunk(chunk)
         let decodedChunk = try AgentServiceXPCCodec.decodeTurnChunk(chunkData)
-        #expect(decodedChunk.chunk == "hi")
-        #expect(decodedChunk.status == "complete")
+        #expect(decodedChunk.chunk == "Building")
+        #expect(decodedChunk.status == "tool_call")
         #expect(decodedChunk.sessionID == "s1")
+        #expect(decodedChunk.isProgress)
     }
 
     @Test func mcpToolCallRoundTrip() throws {

@@ -13,9 +13,14 @@
    1. For `script_exec`, use standalone **Swift**. Read one JSON event from standard input and write a JSON **array** of envelopes to standard output. Do not use URLSession, sockets, Process, shell commands, credentials, or package dependencies.
    2. The container has no network. Emit `http.request` envelopes; the host performs HTTP and invokes the Swift program again with an `http_results` event.
    3. On the first hop emit `{"verb":"http.request","request_id":"…","method":"GET","url":"…"}`. On `http_results`, parse the supplied UTF-8 body and emit `result.emit` or `message.post`.
-   4. Prefer content sites. Do **not** scrape Google/Bing/Yahoo SERP HTML.
-   5. Keep scripts short. Use `timeout_seconds` on the tool args if needed.
-   6. If the first fetch is empty, try another `script_exec` with different URLs before answering.
+   4. The script must complete the user's requested extraction or summary, not only prove that a fetch happened. Never emit `String(describing: http_results)` or copy an entire fetched body into `content` unless the user explicitly requested the raw source. For HTML/XML, remove scripts and styles, extract the relevant visible fields, normalize the text, and cap the result. If raw HTML is explicitly requested, emit it in `html`; the host sanitizes that field.
+   5. Prefer content sites. Do **not** scrape Google/Bing/Yahoo SERP HTML.
+   6. Keep scripts short. Use `timeout_seconds` on the tool args if needed.
+   7. If the first fetch is empty, try another `script_exec` with different URLs before answering.
+   8. If `script_exec` returns `blocked` or `failed` with implementation findings, treat those
+      findings as correction feedback and make at most one corrected `script_exec` call before
+      answering. Do not repeat the same script unchanged. If the reviewer identifies a security
+      refusal or the corrected call also fails, report the exact finding instead of claiming success.
 9. After tool execution, respond with clean user-facing output only (Markdown/JSON/CSV as requested); do not include raw tool-call JSON, escaped script source, or internal control payloads.
 10. Multi-agent tools (when listed in the catalog):
    1. If the user names a multi-agent tool or asks to spawn/list/send/cancel agents, issue that `tool_call` (or `tool_batch`) **before** any `complete` answer. Do not invent tool results.

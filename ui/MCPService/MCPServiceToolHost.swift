@@ -45,6 +45,14 @@ actor MCPServiceToolHost {
             repository: repo,
             settings: factorySettings,
             executor: factoryExecutor,
+            logger: { message in
+                fputs("[MCPService] \(message)\n", stderr)
+                await MCPServiceStore.shared.log(
+                    level: .debug,
+                    message: message,
+                    code: "plugin_factory"
+                )
+            },
             apiKeyProvider: {
                 MCPServiceCallContext.shared.helperAPIKey
                     ?? TurnProcessContext.effectiveAPIKey
@@ -63,7 +71,22 @@ actor MCPServiceToolHost {
             )
             await server.register(
                 PluginFactoryToolModule.makeRegistration { goal in
-                    try await factoryService.build(userGoal: goal)
+                    do {
+                        let release = try await factoryService.build(userGoal: goal)
+                        await MCPServiceStore.shared.log(
+                            level: .info,
+                            message: "plugin factory completed plugin=\(release.pluginID) version=\(release.version)",
+                            code: "plugin_factory_completed"
+                        )
+                        return release
+                    } catch {
+                        await MCPServiceStore.shared.log(
+                            level: .error,
+                            message: "plugin factory failed: \(error.localizedDescription)",
+                            code: "plugin_factory_failed"
+                        )
+                        throw error
+                    }
                 }
             )
             await server.register(
@@ -181,6 +204,12 @@ actor MCPServiceToolHost {
         do {
             args = try parseToolArgumentsObject(request.argumentsJSON)
         } catch {
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "tool argument parsing failed tool=\(toolName): \(error.localizedDescription)",
+                code: "tool_failed",
+                detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+            )
             return MCPToolCallResultDTO(
                 requestID: request.requestID,
                 ok: false,
@@ -193,6 +222,12 @@ actor MCPServiceToolHost {
         do {
             result = try await client.callTool(named: toolName, arguments: args)
         } catch {
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "tool execution failed tool=\(toolName): \(error.localizedDescription)",
+                code: "tool_failed",
+                detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+            )
             return MCPToolCallResultDTO(
                 requestID: request.requestID,
                 ok: false,
@@ -212,6 +247,14 @@ actor MCPServiceToolHost {
                 ?? "tool reported error"
         } else {
             message = "ok"
+        }
+        if isError {
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "tool returned an error tool=\(toolName): \(message)",
+                code: "tool_failed",
+                detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+            )
         }
         return MCPToolCallResultDTO(
             requestID: request.requestID,

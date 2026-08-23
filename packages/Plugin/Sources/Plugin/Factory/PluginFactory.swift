@@ -1,5 +1,7 @@
 import Foundation
 
+public typealias PluginFactoryLogger = @Sendable (String) async -> Void
+
 /// The factory creates Agent Plugin packages whose Derrick entrypoint is Swift.
 /// A draft is always a standalone file: the container runs it with `swift file.swift`.
 /// A released version is run only from the optimized artifact returned by `swiftc -O`.
@@ -8,30 +10,47 @@ public struct PluginFactoryDraft: Sendable, Hashable {
     public let swiftSource: String
     public let testInput: Data
     public let skillFiles: [String: String]
+    /// Original request context supplied only to the independent reviewer.
+    /// It is not persisted in the released plugin package.
+    public let userGoal: String?
 
     public init(
         manifestJSON: String,
         swiftSource: String,
         testInput: Data = Data("{}".utf8),
-        skillFiles: [String: String] = [:]
+        skillFiles: [String: String] = [:],
+        userGoal: String? = nil
     ) {
         self.manifestJSON = manifestJSON
         self.swiftSource = swiftSource
         self.testInput = testInput
         self.skillFiles = skillFiles
+        self.userGoal = userGoal
     }
 
     public init(
         manifest: PluginFactoryManifestInput,
         swiftSource: String,
         testInput: Data = Data("{}".utf8),
-        skillFiles: [String: String] = [:]
+        skillFiles: [String: String] = [:],
+        userGoal: String? = nil
     ) throws {
         self.init(
             manifestJSON: try manifest.encodedJSON(),
             swiftSource: swiftSource,
             testInput: testInput,
-            skillFiles: skillFiles
+            skillFiles: skillFiles,
+            userGoal: userGoal
+        )
+    }
+
+    public func withUserGoal(_ userGoal: String) -> PluginFactoryDraft {
+        PluginFactoryDraft(
+            manifestJSON: manifestJSON,
+            swiftSource: swiftSource,
+            testInput: testInput,
+            skillFiles: skillFiles,
+            userGoal: userGoal
         )
     }
 }
@@ -79,7 +98,7 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
 }
 
 /// Input to the builder model. Feedback is present only after a bounded,
-/// correctable direct-test failure; the builder never decides approval.
+/// correctable factory failure; the builder never decides approval.
 public struct PluginFactoryBuilderRequest: Sendable, Hashable {
     public let userGoal: String
     public let previousDraft: PluginFactoryDraft?
@@ -380,6 +399,8 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
             return true
         case .invalidSkillPath:
             return true
+        case .reviewRejected:
+            return true
         default:
             return false
         }
@@ -403,7 +424,8 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
 }
 
 public struct PluginFactoryConfiguration: Sendable, Hashable {
-    /// A failed direct test may be shown to the builder at most this many times.
+    /// A correctable factory failure may be shown to the builder within this
+    /// total attempt budget, including the initial draft.
     public let maxBuilderAttempts: Int
 
     public init(maxBuilderAttempts: Int = 3) {
@@ -411,9 +433,9 @@ public struct PluginFactoryConfiguration: Sendable, Hashable {
     }
 }
 
-/// Coordinates the builder model and the deterministic factory. There is no
-/// automatic reviewer or compiler retry: only direct-test diagnostics may cause
-/// one bounded builder correction cycle.
+/// Coordinates the builder model and the deterministic factory. Correctable
+/// draft, review, and direct-test diagnostics receive one bounded correction
+/// cycle within the configured attempt budget.
 public struct PluginFactorySession: Sendable {
     public let configuration: PluginFactoryConfiguration
 
@@ -425,7 +447,8 @@ public struct PluginFactorySession: Sendable {
         userGoal: String,
         builder: any PluginFactoryBuilder,
         executor: any PluginFactoryExecutor,
-        reviewer: any PluginFactoryReviewer
+        reviewer: any PluginFactoryReviewer,
+        logger: @escaping PluginFactoryLogger = { _ in }
     ) async throws -> PluginFactoryRelease {
         var request = PluginFactoryBuilderRequest(userGoal: userGoal)
         var lastError: PluginFactoryError?
@@ -433,15 +456,24 @@ public struct PluginFactorySession: Sendable {
 
         for attempt in 0..<configuration.maxBuilderAttempts {
             do {
-                let draft = try await builder.makeDraft(request)
+                await logger(
+                    "[plugin_factory] attempt=\(attempt + 1)/\(configuration.maxBuilderAttempts) draft_started"
+                )
+                let builtDraft = try await builder.makeDraft(request)
+                let draft = builtDraft.withUserGoal(userGoal)
                 currentDraft = draft
                 return try await PluginFactory().build(
                     draft: draft,
                     executor: executor,
-                    reviewer: reviewer
+                    reviewer: reviewer,
+                    logger: logger
                 )
             } catch let error as PluginFactoryError {
                 lastError = error
+                await logger(
+                    "[plugin_factory] attempt=\(attempt + 1)/\(configuration.maxBuilderAttempts) " +
+                    "failed=\(pluginFactoryLogValue(error.localizedDescription))"
+                )
                 guard error.isBuilderCorrectable,
                       attempt + 1 < configuration.maxBuilderAttempts else {
                     throw error
@@ -465,49 +497,94 @@ public struct PluginFactory: Sendable {
     public func build(
         draft: PluginFactoryDraft,
         executor: any PluginFactoryExecutor,
-        reviewer: any PluginFactoryReviewer
+        reviewer: any PluginFactoryReviewer,
+        logger: @escaping PluginFactoryLogger = { _ in }
     ) async throws -> PluginFactoryRelease {
         let manifest = try validatedManifest(from: draft.manifestJSON)
         try validateSource(draft.swiftSource)
 
-        let direct = try await executor.runSwiftFile(
-            source: draft.swiftSource,
-            input: draft.testInput
+        let direct: PluginFactoryExecutionResult
+        do {
+            direct = try await executor.runSwiftFile(
+                source: draft.swiftSource,
+                input: draft.testInput
+            )
+        } catch {
+            await logger("[plugin_factory] direct_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw PluginFactoryError.directRunFailed(error.localizedDescription)
+        }
+        await logger(
+            "[plugin_factory] direct_test exit=\(direct.exitCode) " +
+            "stdout_chars=\(direct.stdout.count) stderr_chars=\(direct.stderr.count)"
         )
         guard direct.exitCode == 0 else {
+            await logger("[plugin_factory] direct_test rejected=\(pluginFactoryLogValue(outputSummary(direct)))")
             throw PluginFactoryError.directRunFailed(outputSummary(direct))
         }
         do {
             try validateOutput(direct.stdout)
         } catch {
+            await logger("[plugin_factory] direct_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.invalidDirectOutput(error.localizedDescription)
         }
 
-        let review = try await reviewer.review(draft: draft, directRun: direct)
+        let review: PluginFactoryReview
+        do {
+            review = try await reviewer.review(draft: draft, directRun: direct)
+        } catch {
+            await logger("[plugin_factory] review failed=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw error
+        }
+        await logger(
+            "[plugin_factory] review decision=\(review.decision.rawValue) " +
+            "finding_count=\(review.findings.count) summary=\(pluginFactoryLogValue(review.summary))"
+        )
         guard review.approved else {
-            throw PluginFactoryError.reviewRejected(review.summary)
+            let findings = review.findings
+                .map { "\($0.severity.rawValue): \($0.message)" }
+                .joined(separator: " ")
+            let detail = findings.isEmpty
+                ? review.summary
+                : "\(review.summary) \(findings)"
+            await logger("[plugin_factory] review rejected=\(pluginFactoryLogValue(detail))")
+            throw PluginFactoryError.reviewRejected(detail)
         }
 
         let artifact: Data
         do {
             artifact = try await executor.compileSwiftFile(source: draft.swiftSource)
         } catch {
+            await logger("[plugin_factory] compile failed=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.compileFailed(error.localizedDescription)
         }
+        await logger("[plugin_factory] compile succeeded artifact_bytes=\(artifact.count)")
         guard !artifact.isEmpty else {
+            await logger("[plugin_factory] compile rejected=swiftc returned an empty artifact")
             throw PluginFactoryError.compileFailed("swiftc returned an empty artifact.")
         }
 
-        let compiled = try await executor.runCompiledArtifact(
-            artifact,
-            input: draft.testInput
+        let compiled: PluginFactoryExecutionResult
+        do {
+            compiled = try await executor.runCompiledArtifact(
+                artifact,
+                input: draft.testInput
+            )
+        } catch {
+            await logger("[plugin_factory] compiled_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw PluginFactoryError.compiledRunFailed(error.localizedDescription)
+        }
+        await logger(
+            "[plugin_factory] compiled_test exit=\(compiled.exitCode) " +
+            "stdout_chars=\(compiled.stdout.count) stderr_chars=\(compiled.stderr.count)"
         )
         guard compiled.exitCode == 0 else {
+            await logger("[plugin_factory] compiled_test rejected=\(pluginFactoryLogValue(outputSummary(compiled)))")
             throw PluginFactoryError.compiledRunFailed(outputSummary(compiled))
         }
         do {
             try validateOutput(compiled.stdout)
         } catch {
+            await logger("[plugin_factory] compiled_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.invalidCompiledOutput(error.localizedDescription)
         }
 
@@ -599,4 +676,12 @@ public struct PluginFactory: Sendable {
             .joined(separator: "\n")
         return combined.isEmpty ? "exit \(result.exitCode) with no output." : combined
     }
+
+}
+
+private func pluginFactoryLogValue(_ value: String) -> String {
+    let singleLine = value
+        .replacingOccurrences(of: "\r", with: " ")
+        .replacingOccurrences(of: "\n", with: " ")
+    return String(singleLine.prefix(500))
 }

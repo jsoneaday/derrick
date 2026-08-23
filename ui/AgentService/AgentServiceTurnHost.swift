@@ -363,7 +363,9 @@ actor AgentServiceTurnHost {
                                     approvalPresenter: approvalPresenter
                                 ) { chunk in
                                     let n = counter.increment()
-                                    if chunk.status == .complete, let text = chunk.chunk, !text.isEmpty {
+                                    if (chunk.status == .complete || chunk.isProgress),
+                                       let text = chunk.chunk,
+                                       !text.isEmpty {
                                         responseBox.append(text)
                                     }
                                     guard !suppressChatStream else { return }
@@ -372,7 +374,8 @@ actor AgentServiceTurnHost {
                                         sessionID: jobSessionID,
                                         status: chunk.status.rawValue,
                                         chunk: chunk.chunk,
-                                        toolName: chunk.toolName
+                                        toolName: chunk.toolName,
+                                        isProgress: chunk.isProgress
                                     )
                                     guard let data = try? AgentServiceXPCCodec.encodeTurnChunk(dto) else {
                                         fputs("[AgentService] failed to encode chunk for \(turnID)\n", stderr)
