@@ -1,0 +1,6 @@
+.git
+.build
+DerivedData
+ui
+packages/*/.build
+packages/*/.swiftpm

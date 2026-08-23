@@ -8,6 +8,10 @@ public enum EgressProxyConfiguration: Sendable {
     /// `EgressProxyServer` sets `requiredLocalEndpoint` to this host so it does not bind all interfaces.
     public static let listenHost: String = "127.0.0.1"
 
+    /// Interface used when a trusted Docker worker must reach the host proxy.
+    /// The worker authenticates with the per-process client token.
+    public static let dockerWorkerListenHost: String = "0.0.0.0"
+
     /// Fixed loopback port reserved for the standalone proxy service.
     public static let listenPort: UInt16 = 18_080
 

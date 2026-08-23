@@ -16,6 +16,7 @@ public actor EgressProxyServer: EgressProxyServing {
     private let configuredPort: UInt16
     private let listenHost: String
     private let maxConcurrentConnections: Int
+    private let requiredClientToken: String?
 
     private var listener: NWListener?
     private var activeConnections = 0
@@ -27,7 +28,8 @@ public actor EgressProxyServer: EgressProxyServing {
         logger: any EgressProxyLogging = OSLogEgressProxyLogger(),
         listenHost: String = EgressProxyConfiguration.listenHost,
         listenPort: UInt16 = EgressProxyConfiguration.listenPort,
-        maxConcurrentConnections: Int = EgressProxyConfiguration.maxConcurrentConnections
+        maxConcurrentConnections: Int = EgressProxyConfiguration.maxConcurrentConnections,
+        requiredClientToken: String? = nil
     ) {
         self.policy = policy
         self.logger = logger
@@ -35,6 +37,7 @@ public actor EgressProxyServer: EgressProxyServing {
         self.configuredPort = listenPort
         self.boundPort = listenPort
         self.maxConcurrentConnections = maxConcurrentConnections
+        self.requiredClientToken = requiredClientToken
     }
 
     public var isRunning: Bool { running }
@@ -122,7 +125,8 @@ public actor EgressProxyServer: EgressProxyServing {
         let handler = ProxyConnectionHandler(
             connection: connection,
             policy: policy,
-            logger: logger
+            logger: logger,
+            requiredClientToken: requiredClientToken
         )
         await handler.run()
     }

@@ -16,6 +16,7 @@ let package = Package(
         .package(path: "../MCPClient"),
         .package(path: "../LLMAgentClient"),
         .package(path: "../DockerRunnerXPC"),
+        .package(path: "../EgressProxy"),
         .package(path: "../MCPToolCatalog"),
         .package(path: "../ServiceContracts"),
         .package(path: "../Plugin")
@@ -28,6 +29,7 @@ let package = Package(
                 "MCPClient",
                 "LLMAgentClient",
                 "DockerRunnerXPC",
+                "EgressProxy",
                 "MCPToolCatalog",
                 "ServiceContracts",
                 "Plugin"

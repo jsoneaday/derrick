@@ -9,8 +9,8 @@ import MemorySystem
 import Plugin
 import ServiceContracts
 
-/// MCP effectors hosted in MCPService (`script_exec` + factory plugin tools +
-/// session memory). No agents_* tools.
+/// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, factory
+/// plugin tools, and session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
 
@@ -39,6 +39,9 @@ actor MCPServiceToolHost {
         }
         await factorySettings.loadSettings()
         let factoryExecutor = SwiftPluginFactoryDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
+        let webCrawlerExecutor = WebCrawlerDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let factoryService = ConfiguredPluginFactoryService(
@@ -90,6 +93,14 @@ actor MCPServiceToolHost {
                 }
             )
             await server.register(
+                WebCrawlerToolModule.makeRegistration { input, timeoutSeconds in
+                    try await webCrawlerExecutor.run(
+                        input: input,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                }
+            )
+            await server.register(
                 PluginRuntimeToolModule.makeListRegistration {
                     try await repo.listPluginFactoryReleaseSummaries()
                 }
@@ -137,7 +148,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec)",
+            message: "MCP tool host ready (script_exec, web.crawl)",
             code: "tool_host_ready"
         )
         return made
@@ -175,6 +186,27 @@ actor MCPServiceToolHost {
                 isError: true,
                 text: "",
                 message: "Tool \(toolName) is owned by AgentService, not MCPService."
+            )
+        }
+        if toolName == AllowedMCPTool.webCrawl.rawValue,
+           !isJobPrincipal(request.principal) {
+            let outcome = ToolExecutionOutcome.failure(
+                status: .blocked,
+                stage: .validation,
+                diagnostics: [
+                    ToolExecutionOutcome.Diagnostic(
+                        code: "web_crawl_requires_notification",
+                        message: "web.crawl must be submitted through jobs_create so the result can arrive in a notification banner."
+                    )
+                ],
+                retry: ToolExecutionOutcome.Retry(allowed: false)
+            )
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: true,
+                isError: true,
+                text: (try? outcome.encodedJSON()) ?? "",
+                message: "Submit web.crawl through jobs_create for notification delivery."
             )
         }
 
@@ -276,5 +308,12 @@ actor MCPServiceToolHost {
                 try await executor.runCompiledArtifact(artifact, input: nextInput)
             }
         )
+    }
+
+    private func isJobPrincipal(_ principal: ServicePrincipal) -> Bool {
+        if case .job = principal {
+            return true
+        }
+        return false
     }
 }

@@ -30,11 +30,11 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_name": .object([
                         "type": .string("string"),
-                        "description": .string("Effector to freeze (v1: script_exec only).")
+                        "description": .string("Effector to freeze: script_exec or web.crawl.")
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),
-                        "description": .string("Frozen effector args. For script_exec use {description,reason,script} where script is standalone Swift reading JSON from stdin and writing Derrick envelope JSON to stdout. Keep script short; put real line breaks as \\n only (one compact JSON line).")
+                        "description": .string("Frozen effector args. For web.crawl use {start_url,goal,max_pages,max_depth,timeout_seconds}. For script_exec use {description,reason,script} where script is standalone Swift reading JSON from stdin and writing Derrick envelope JSON to stdout.")
                     ]),
                     "wake_after": .object([
                         "type": .string("boolean"),
@@ -103,7 +103,7 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_name": .object([
                         "type": .string("string"),
-                        "description": .string("Effector template (v1: script_exec).")
+                        "description": .string("Effector template: script_exec or web.crawl.")
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),

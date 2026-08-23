@@ -22,6 +22,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case pluginList = "plugin.list"
     /// Runs one approved compiled plugin release.
     case pluginInvoke = "plugin.invoke"
+    /// Crawls a bounded same-origin website in an isolated Swift container.
+    case webCrawl = "web.crawl"
 
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
@@ -60,6 +62,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "List approved compiled Agent Plugin releases."
         case .pluginInvoke:
             return "Run one approved compiled Agent Plugin by id with a JSON input object."
+        case .webCrawl:
+            return "Crawl a bounded same-origin website in an isolated Swift container and return structured page summaries."
         }
     }
 }

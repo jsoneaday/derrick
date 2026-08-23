@@ -242,6 +242,10 @@ public enum DockerRunRequestValidator: Sendable {
             guard args == ["/tmp/plugin"] else {
                 return .disallowedDockerFlag("exec \(command)")
             }
+        case "/usr/local/bin/derrick-web-crawler":
+            guard args == ["/usr/local/bin/derrick-web-crawler"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
         default:
             return .disallowedDockerFlag("exec \(command)")
         }

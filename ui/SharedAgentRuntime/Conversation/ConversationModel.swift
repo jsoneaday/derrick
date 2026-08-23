@@ -106,6 +106,7 @@ final class ConversationModel {
         let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
         let mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
+            try PromptResources.webCrawlerSkill(),
             try PromptResources.guestSDKForModel(),
         ].joined(separator: "\n\n")
 
@@ -673,8 +674,11 @@ final class ConversationModel {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         let runAtStr = job.runAt.map { iso.string(from: $0) } ?? "asap"
+        let message = toolName == AllowedMCPTool.webCrawl.rawValue
+            ? "Web crawl submitted. You'll get a notification banner when it finishes—tap it to view the result."
+            : "Job created. You'll get a notification when it finishes—tap the notification to view the result."
         return """
-        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"Job created. You'll get a notification when it finishes—tap the notification to view the result."}
+        {"ok":true,"job_id":"\(job.id)","status":"\(job.status.rawValue)","run_at":"\(runAtStr)","message":"\(message)"}
         """
     }
 

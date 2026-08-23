@@ -208,6 +208,11 @@ private struct StaticDNSResolver: DNSResolving {
         #expect(EgressProxyConfiguration.listenHost == "127.0.0.1")
     }
 
+    @Test func dockerWorkerListenHostIsReachableFromContainers() {
+        #expect(EgressProxyConfiguration.dockerWorkerListenHost == "0.0.0.0")
+        #expect(EgressProxyConfiguration.listenPort == 18_080)
+    }
+
     @Test func listenParametersRequireConfiguredLocalEndpoint() {
         let parameters = EgressProxyListenBinding.tcpParameters(
             host: EgressProxyConfiguration.listenHost,

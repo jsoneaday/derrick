@@ -82,7 +82,7 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
     public var errorDescription: String? {
         switch self {
         case .emptyToolName: return "tool_name is required."
-        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs (v1: script_exec)."
+        case .toolNotAllowed(let n): return "tool_name '\(n)' is not allowed for jobs."
         case .invalidToolArgumentsJSON: return "tool_arguments must be a JSON object."
         case .wakePromptRequired: return "wake_prompt is required when wake_after is true."
         case .invalidRunAfterSeconds(let s): return "run_after_seconds out of range: \(s) (allow 0...86400)."
@@ -96,7 +96,7 @@ public enum JobOrderBuilderError: Error, LocalizedError, Sendable, Equatable {
 /// Pure mapping: agent order intents → JobService create requests.
 public enum JobOrderBuilder {
     /// Effectors the agent may freeze into a job.
-    public static let allowedToolNames: Set<String> = ["script_exec"]
+    public static let allowedToolNames: Set<String> = ["script_exec", "web.crawl"]
 
     public static let maxRunAfterSeconds = 86_400
 

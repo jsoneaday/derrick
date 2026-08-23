@@ -11,7 +11,8 @@ final class JobMCPClient: @unchecked Sendable {
     private let lock = NSLock()
     private var connection: NSXPCConnection?
     private var peerEndpoint: NSXPCListenerEndpoint?
-    private let callTimeoutNanoseconds: UInt64 = 120_000_000_000
+    /// A web crawl may run for the full fifteen-minute tool limit.
+    private let callTimeoutNanoseconds: UInt64 = 915_000_000_000
 
     private init() {}
 

@@ -6,11 +6,18 @@ struct ProxyConnectionHandler: Sendable {
     private let connection: NWConnection
     private let policy: any DestinationPolicy
     private let logger: any EgressProxyLogging
+    private let requiredClientToken: String?
 
-    init(connection: NWConnection, policy: any DestinationPolicy, logger: any EgressProxyLogging) {
+    init(
+        connection: NWConnection,
+        policy: any DestinationPolicy,
+        logger: any EgressProxyLogging,
+        requiredClientToken: String? = nil
+    ) {
         self.connection = connection
         self.policy = policy
         self.logger = logger
+        self.requiredClientToken = requiredClientToken
     }
 
     func run() async {
@@ -25,6 +32,18 @@ struct ProxyConnectionHandler: Sendable {
             let request = try parseProxyRequest(headerText)
             let destination = request.destination
             let clientDescription = connection.currentPath?.remoteEndpoint.map { "\($0)" }
+
+            if let requiredClientToken,
+               request.clientToken != requiredClientToken {
+                logger.logError("rejecting proxy client with invalid crawler token")
+                try await sendClient(
+                    connection,
+                    statusLine: "HTTP/1.1 407 Proxy Authentication Required",
+                    body: "crawler authentication required"
+                )
+                connection.cancel()
+                return
+            }
 
             let decision = await policy.evaluate(destination: destination)
             switch decision {
@@ -142,6 +161,7 @@ private enum ProxyRequestKind: Sendable {
 private struct ParsedProxyRequest: Sendable {
     let kind: ProxyRequestKind
     let destination: ProxyDestination
+    let clientToken: String?
 }
 
 private func parseProxyRequest(_ text: String) throws -> ParsedProxyRequest {
@@ -163,7 +183,8 @@ private func parseProxyRequest(_ text: String) throws -> ParsedProxyRequest {
         }
         return ParsedProxyRequest(
             kind: .connect,
-            destination: ProxyDestination(host: hostPort[0], port: port)
+            destination: ProxyDestination(host: hostPort[0], port: port),
+            clientToken: proxyClientToken(from: lines)
         )
     }
 
@@ -180,8 +201,20 @@ private func parseProxyRequest(_ text: String) throws -> ParsedProxyRequest {
 
     return ParsedProxyRequest(
         kind: .httpAbsolute(method: method, pathAndQuery: pathAndQuery, restHeaders: rest),
-        destination: ProxyDestination(host: host, port: port)
+        destination: ProxyDestination(host: host, port: port),
+        clientToken: proxyClientToken(from: lines)
     )
+}
+
+private func proxyClientToken(from lines: [String]) -> String? {
+    guard let header = lines.dropFirst().first(where: {
+        $0.lowercased().hasPrefix("x-derrick-crawler-token:")
+    }) else {
+        return nil
+    }
+    let parts = header.split(separator: ":", maxSplits: 1)
+    guard parts.count == 2 else { return nil }
+    return String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 // MARK: - NWConnection helpers

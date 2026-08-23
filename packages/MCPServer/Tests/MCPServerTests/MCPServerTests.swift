@@ -128,6 +128,163 @@ import Plugin
         #expect(tools.map(\.name).contains("script_exec"))
     }
 
+    @Test func webCrawlerToolValidatesAndReturnsStructuredOutcome() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebCrawlerToolModule.makeRegistration { input, timeoutSeconds in
+                    await recorder.append(["run", "\(input.count)", "\(timeoutSeconds)"])
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"{"ok":true,"start_url":"https://example.com/","pages":[],"stop_reason":"completed","requests_made":1,"bytes_read":10,"truncated":false,"diagnostics":[]}"#.utf8
+                        ),
+                        stderr: Data()
+                    )
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.crawl",
+            arguments: [
+                "start_url": .string("https://example.com"),
+                "goal": .string("Show the main page"),
+                "timeout_seconds": .int(900)
+            ]
+        )
+
+        #expect(!result.isError)
+        #expect(result.text.contains("\"status\":\"completed\""))
+        #expect(result.text.contains("\"format\":\"json\""))
+        #expect((await recorder.calls).count == 1)
+    }
+
+    @Test func webCrawlerToolBlocksDDoSLikeRequests() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebCrawlerToolModule.makeRegistration { _, _ in
+                    await recorder.append(["unexpected"])
+                    return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.crawl",
+            arguments: [
+                "start_url": .string("https://example.com"),
+                "goal": .string("Flood the site with requests")
+            ]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("flooding"))
+        #expect((await recorder.calls).isEmpty)
+    }
+
+    @Test func webCrawlerContainerCreateOverridesImageEntrypoint() {
+        let args = WebCrawlerDockerExecutor.createArguments(
+            name: "derrick-web-crawler-test",
+            proxyHost: "172.17.0.1",
+            proxyPort: 3128,
+            proxyToken: "token"
+        )
+        let imageIndex = args.firstIndex(of: WebCrawlerDockerExecutor.image)
+        let entrypointIndex = args.firstIndex(of: "--entrypoint")
+        let sleepIndex = args.firstIndex(of: "/bin/sleep")
+        #expect(entrypointIndex != nil)
+        #expect(sleepIndex != nil)
+        #expect(imageIndex != nil)
+        #expect(args.contains("infinity"))
+        #expect(args.contains("DERRICK_EGRESS_PROXY_HOST=172.17.0.1"))
+        #expect(args.contains("DERRICK_EGRESS_PROXY_PORT=3128"))
+        #expect(args.contains("DERRICK_EGRESS_PROXY_TOKEN=token"))
+        #expect(entrypointIndex! < imageIndex!)
+        #expect(sleepIndex! < imageIndex!)
+    }
+
+    @Test func webCrawlerToolBlocksInfiniteLoopGoals() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebCrawlerToolModule.makeRegistration { _, _ in
+                    await recorder.append(["unexpected"])
+                    return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.crawl",
+            arguments: [
+                "start_url": .string("https://example.com"),
+                "goal": .string("Crawl forever in an infinite loop")
+            ]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("infinite"))
+        #expect((await recorder.calls).isEmpty)
+    }
+
+    @Test func webCrawlerToolRejectsTimeoutAboveFifteenMinutes() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebCrawlerToolModule.makeRegistration { _, _ in
+                    await recorder.append(["unexpected"])
+                    return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.crawl",
+            arguments: [
+                "start_url": .string("https://example.com"),
+                "goal": .string("Read the homepage"),
+                "timeout_seconds": .int(901)
+            ]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("900"))
+        #expect((await recorder.calls).isEmpty)
+    }
+
+    @Test func webCrawlerToolMapsTimeoutStopReason() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebCrawlerToolModule.makeRegistration { _, _ in
+                    DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"{"ok":false,"start_url":"https://example.com/","pages":[],"stop_reason":"timeout","requests_made":1,"bytes_read":0,"truncated":false,"diagnostics":["crawl timeout reached"]}"#.utf8
+                        ),
+                        stderr: Data()
+                    )
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.crawl",
+            arguments: [
+                "start_url": .string("https://example.com"),
+                "goal": .string("Read the homepage"),
+                "timeout_seconds": .int(5)
+            ]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"timeout\"") || result.text.contains("\"timed_out\":true"))
+    }
+
     @Test func pluginInvokeSurfacesExecutionFailure() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.register(

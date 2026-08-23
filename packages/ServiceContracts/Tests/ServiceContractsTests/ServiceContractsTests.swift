@@ -367,6 +367,20 @@ import Testing
                 now: now
             )
         }
+
+        let crawl = try JobOrderBuilder.createJobRequest(
+            from: JobCreateOrderInput(
+                toolName: "web.crawl",
+                toolArgumentsJSON: #"{"start_url":"https://example.com","goal":"read the page"}"#,
+                wakeAfter: true,
+                wakePrompt: "Present the crawl result to the user."
+            ),
+            principal: .agent(sessionID: "s1", agentID: "ui"),
+            sessionID: "s1",
+            agentID: "ui",
+            now: now
+        )
+        #expect(crawl.steps[0].kind == .runToolThenWake)
     }
 
     @Test func jobOrderBuilderScheduleInterval() throws {

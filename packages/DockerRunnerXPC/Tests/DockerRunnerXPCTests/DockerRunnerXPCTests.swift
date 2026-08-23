@@ -191,6 +191,8 @@ struct DockerRunnerXPCTests {
             ["pull", "img"],
             ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
             ["exec", "-i", "c", "/tmp/plugin"],
+            ["exec", "-i", "c", "/usr/local/bin/derrick-web-crawler"],
+            ["create", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
             ["start", "c"],
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"]

@@ -29,4 +29,17 @@ public enum JobOrderPreflight {
     public static func extractNetworkHosts(script: String) -> [String] {
         EgressHostExtractor.extractHosts(from: script)
     }
+
+    public static func webCrawlStartHost(toolArgumentsJSON: String) -> String? {
+        guard let data = toolArgumentsJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawURL = object["start_url"] as? String,
+              let url = URL(string: rawURL),
+              let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !host.isEmpty
+        else {
+            return nil
+        }
+        return host
+    }
 }

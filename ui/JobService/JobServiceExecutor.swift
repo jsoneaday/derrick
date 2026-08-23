@@ -149,7 +149,7 @@ actor JobServiceExecutor {
             JobRunToolPayload.self,
             from: Data(payloadJSON.utf8)
         )
-        let principal = try JSONDecoder.service.decode(
+        _ = try JSONDecoder.service.decode(
             ServicePrincipal.self,
             from: Data(principalJSON.utf8)
         )
@@ -165,7 +165,10 @@ actor JobServiceExecutor {
             try await preflight(payload.toolName, payload.argumentsJSON, jobID)
         }
         let request = MCPToolCallRequest(
-            principal: principal,
+            // The stored principal identifies who created the job. Execution
+            // must use the job identity so MCP and HTTP policy can attach
+            // decisions and diagnostics to this specific run.
+            principal: .job(jobID: jobID),
             toolName: payload.toolName,
             argumentsJSON: payload.argumentsJSON,
             helperAPIKey: payload.helperAPIKey,
