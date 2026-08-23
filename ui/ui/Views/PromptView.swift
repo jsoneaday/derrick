@@ -226,15 +226,24 @@ struct PromptCompletionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !turn.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !turn.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !turn.attachments.isEmpty
+            {
                 HStack {
                     Spacer(minLength: 0)
-                    Text(turn.prompt)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                        .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
-                        .frame(maxWidth: 720, alignment: .trailing)
-                        .textSelection(.enabled)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if !turn.attachments.isEmpty {
+                            ChatFileAttachmentChipBar(attachments: turn.attachments)
+                        }
+                        if !turn.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(turn.prompt)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 12)
+                                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: 720, alignment: .trailing)
                 }
             }
 

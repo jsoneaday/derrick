@@ -177,6 +177,27 @@ struct DockerRunnerXPCTests {
         #expect(DockerRunRequestValidator.validate(r) == .disallowedVolumeMount("/:/host"))
     }
 
+    @Test func allowsFileJobBindMountsAndRejectsOtherBinds() {
+        let jobID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        #expect(
+            FileJobBindMountPolicy.isAllowedVolumeSpec(
+                "/tmp/file-jobs/\(jobID)/in:/data/in:ro"
+            )
+        )
+        #expect(
+            FileJobBindMountPolicy.isAllowedVolumeSpec(
+                "/tmp/file-jobs/\(jobID)/out:/data/out"
+            )
+        )
+        #expect(
+            !FileJobBindMountPolicy.isAllowedVolumeSpec(
+                "/tmp/file-jobs/\(jobID)/in:/data/in"
+            )
+        )
+        #expect(!FileJobBindMountPolicy.isAllowedVolumeSpec("/Users/me/Documents:/data/in:ro"))
+        #expect(!FileJobBindMountPolicy.isAllowedVolumeSpec("/tmp/file-jobs/\(jobID)/in:/etc/passwd:ro"))
+    }
+
     @Test func rejectsVolumeMount() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
             "create", "-v", "derrick-cache:/tmp/cache", "--name", "x", "image"
@@ -195,7 +216,19 @@ struct DockerRunnerXPCTests {
             ["create", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
             ["start", "c"],
             ["rm", "-f", "c"],
-            ["inspect", "-f", "{{.State.Running}}", "c"]
+            ["inspect", "-f", "{{.State.Running}}", "c"],
+            ["exec", "-i", "c", "/usr/local/bin/derrick-file-extractor"],
+            [
+                "create",
+                "-v",
+                "/tmp/file-jobs/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/in:/data/in:ro",
+                "-v",
+                "/tmp/file-jobs/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/out:/data/out",
+                "--name",
+                "c",
+                "derrick-file-extractor:swift-6.4-v1",
+                "infinity"
+            ]
         ] as [[String]] {
             let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
             #expect(DockerRunRequestValidator.validate(r) == nil, "expected allow for \(args)")

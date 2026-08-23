@@ -44,6 +44,9 @@ actor MCPServiceToolHost {
         let webCrawlerExecutor = WebCrawlerDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
+        let fileExtractorExecutor = FileExtractorDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
         let factoryService = ConfiguredPluginFactoryService(
             repository: repo,
             settings: factorySettings,
@@ -101,6 +104,19 @@ actor MCPServiceToolHost {
                 }
             )
             await server.register(
+                FileExtractorToolModule.makeRegistration(
+                    sessionID: { MCPServiceCallContext.shared.memorySessionKey?.sessionID },
+                    run: { input, workspace, timeoutSeconds in
+                        try await fileExtractorExecutor.run(
+                            input: input,
+                            inputDirectory: workspace.inputDirectory,
+                            outputDirectory: workspace.outputDirectory,
+                            timeoutSeconds: timeoutSeconds
+                        )
+                    }
+                )
+            )
+            await server.register(
                 PluginRuntimeToolModule.makeListRegistration {
                     try await repo.listPluginFactoryReleaseSummaries()
                 }
@@ -148,7 +164,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec, web.crawl)",
+            message: "MCP tool host ready (script_exec, web.crawl, files.extract)",
             code: "tool_host_ready"
         )
         return made

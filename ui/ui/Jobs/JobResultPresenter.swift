@@ -162,7 +162,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         // Subclass so borderless panel can become key — otherwise accessory apps
         // look windowless and macOS auto-terminates them within seconds.
         let panel = JobResultKeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 512, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 608, height: 264),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -179,9 +179,9 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.contentViewController = hosting
         panel.delegate = self
-        let fit = hosting.sizeThatFits(in: NSSize(width: 512, height: CGFloat.greatestFiniteMagnitude))
-        let height = min(max(ceil(fit.height), 120), 480)
-        panel.setContentSize(NSSize(width: 512, height: height))
+        let fit = hosting.sizeThatFits(in: NSSize(width: 608, height: CGFloat.greatestFiniteMagnitude))
+        let height = min(max(ceil(fit.height), 144), 576)
+        panel.setContentSize(NSSize(width: 608, height: height))
         self.panel = panel
 
         position(panel)
@@ -214,7 +214,7 @@ final class JobResultPresenter: NSObject, ObservableObject, NSWindowDelegate {
         panel.layoutIfNeeded()
         var frame = panel.frame
         if frame.width < 100 || frame.height < 100 {
-            frame.size = NSSize(width: 512, height: 220)
+            frame.size = NSSize(width: 608, height: 264)
         }
         if let screen = NSScreen.main {
             let visible = screen.visibleFrame
@@ -276,7 +276,7 @@ private struct JobResultStandaloneCard: View {
             JobResultModalBody(result: result)
             JobResultModalFooter(onDismiss: onDismiss)
         }
-        .frame(width: 480)
+        .frame(width: 576)
         .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
@@ -332,7 +332,7 @@ struct JobResultModalBody: View {
     }
 
     private var needsScroll: Bool {
-        displayText.count > 420 || displayText.components(separatedBy: "\n").count > 10
+        displayText.count > 504 || displayText.components(separatedBy: "\n").count > 12
     }
 
     var body: some View {
@@ -348,7 +348,7 @@ struct JobResultModalBody: View {
                     ScrollView {
                         responseMarkdown
                     }
-                    .frame(maxHeight: 240)
+                    .frame(maxHeight: 288)
                 } else {
                     responseMarkdown
                         .fixedSize(horizontal: false, vertical: true)

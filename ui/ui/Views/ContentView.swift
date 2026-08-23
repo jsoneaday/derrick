@@ -13,6 +13,7 @@ private let bottomPromptIconSize = CGFloat(10)
 struct ChatTurn: Identifiable, Hashable {
     let id: UUID
     let prompt: String
+    let attachments: [ChatFileAttachment]
     var response: String
     var thought: String
     var status: AgentResponseStatus?
@@ -21,6 +22,7 @@ struct ChatTurn: Identifiable, Hashable {
     init(
         id: UUID = UUID(),
         prompt: String,
+        attachments: [ChatFileAttachment] = [],
         response: String = "",
         thought: String = "",
         status: AgentResponseStatus? = nil,
@@ -28,6 +30,7 @@ struct ChatTurn: Identifiable, Hashable {
     ) {
         self.id = id
         self.prompt = prompt
+        self.attachments = attachments
         self.response = response
         self.thought = thought
         self.status = status
@@ -314,7 +317,20 @@ struct ContentView: View {
     private var canSendPrompt: Bool {
         sessionReady
             && !chatSessions.isSelectedTabStreaming
-            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (
+                !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !pendingAttachments.isEmpty
+            )
+    }
+
+    private var pendingAttachments: [ChatFileAttachment] {
+        chatSessions.selectedTab?.pendingAttachments ?? []
+    }
+
+    private var canAttachFiles: Bool {
+        sessionReady
+            && !isActiveTabStreaming
+            && pendingAttachments.count < ChatFileAttachmentPolicy.maximumFileCount
     }
 
     private var visibleModels: [LLMModelChoice] {
@@ -877,6 +893,17 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
+                if !pendingAttachments.isEmpty {
+                    ChatFileAttachmentChipBar(
+                        attachments: pendingAttachments,
+                        onRemove: { chatSessions.removePendingAttachment(id: $0.id) }
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                    .padding(.bottom, 4)
+                    .disabled(isActiveTabStreaming)
+                }
+
                 ZStack(alignment: .topLeading) {
                     PromptInputView(
                         text: $prompt,
@@ -899,12 +926,20 @@ struct ContentView: View {
 
                 HStack(spacing: 12) {
                     Button {
+                        attachFiles()
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: bottomPromptFontSize, weight: .regular))
                             .foregroundStyle(Color(nsColor: .labelColor))
                     }
                     .buttonStyle(.plain)
+                    .disabled(!canAttachFiles)
+                    .help(
+                        pendingAttachments.count >= ChatFileAttachmentPolicy.maximumFileCount
+                            ? "You already attached \(ChatFileAttachmentPolicy.maximumFileCount) files"
+                            : "Attach files"
+                    )
+                    .accessibilityLabel("Attach files")
 
                     Spacer()
 
@@ -1092,7 +1127,7 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
-        guard sessionReady, !prompt.isEmpty else { return }
+        guard canSendPrompt else { return }
 
         let currentPrompt = prompt
         prompt = ""
@@ -1104,6 +1139,25 @@ struct ContentView: View {
             model: selectedModel
         ) { message in
             errorMessage = message
+        }
+    }
+
+    private func attachFiles() {
+        Task { @MainActor in
+            let urls = await ChatFileAttachmentPicker.pickFiles()
+            guard !urls.isEmpty else { return }
+            guard let sessionID = chatSessions.selectedSessionID else { return }
+            do {
+                let stager = try ChatFileAttachmentStager()
+                let staged = try stager.stage(
+                    urls: urls,
+                    sessionID: sessionID,
+                    existingCount: pendingAttachments.count
+                )
+                chatSessions.appendPendingAttachments(staged)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

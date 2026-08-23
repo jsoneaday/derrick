@@ -107,6 +107,7 @@ final class ConversationModel {
         let mcpToolInstructions = [
             try PromptResources.mcpToolInstructions(),
             try PromptResources.webCrawlerSkill(),
+            try PromptResources.filesExtractSkill(),
             try PromptResources.guestSDKForModel(),
         ].joined(separator: "\n\n")
 

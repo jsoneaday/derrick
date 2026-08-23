@@ -29,6 +29,10 @@ public enum PromptResources {
         try load(named: "web_crawler_skill", from: resourceRoot)
     }
 
+    public static func filesExtractSkill(from resourceRoot: URL? = nil) throws -> String {
+        try load(named: "files_extract_skill", from: resourceRoot)
+    }
+
     public static func scriptReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
         try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
     }

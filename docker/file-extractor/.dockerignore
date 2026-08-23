@@ -1,0 +1,4 @@
+*
+!packages/FileExtractor/Package.swift
+!packages/FileExtractor/Sources/
+!packages/FileExtractor/Tests/

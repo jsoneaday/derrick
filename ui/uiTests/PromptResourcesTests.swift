@@ -57,6 +57,20 @@ import Testing
         #expect(try PromptResources.webCrawlerSkill(from: root) == "Web crawler skill from file")
     }
 
+    @Test func loadsFilesExtractSkillFromResourcesDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+
+        try "File extractor skill from file\n".write(
+            to: resources.appendingPathComponent("files_extract_skill.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        #expect(try PromptResources.filesExtractSkill(from: root) == "File extractor skill from file")
+    }
+
     @Test func loadsGuestSDKFromResourcesDirectory() throws {
         let source = try PromptResources.guestSDKSource()
         #expect(source.contains("standalone Swift executable"))

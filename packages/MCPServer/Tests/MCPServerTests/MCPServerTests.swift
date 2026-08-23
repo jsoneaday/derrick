@@ -206,6 +206,187 @@ import Plugin
         #expect(sleepIndex! < imageIndex!)
     }
 
+    @Test func fileExtractorContainerCreateUsesJobBindMountsAndOverridesEntrypoint() {
+        let jobID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let input = URL(fileURLWithPath: "/tmp/file-jobs/\(jobID)/in")
+        let output = URL(fileURLWithPath: "/tmp/file-jobs/\(jobID)/out")
+        let args = FileExtractorDockerExecutor.createArguments(
+            name: "derrick-file-extractor-test",
+            inputDirectory: input,
+            outputDirectory: output
+        )
+        let imageIndex = args.firstIndex(of: FileExtractorDockerExecutor.image)
+        let entrypointIndex = args.firstIndex(of: "--entrypoint")
+        let sleepIndex = args.firstIndex(of: "/bin/sleep")
+        #expect(args.contains("--network"))
+        #expect(args.contains("none"))
+        #expect(args.contains("\(input.path):/data/in:ro"))
+        #expect(args.contains("\(output.path):/data/out"))
+        #expect(args.contains("infinity"))
+        #expect(entrypointIndex != nil)
+        #expect(sleepIndex != nil)
+        #expect(imageIndex != nil)
+        #expect(entrypointIndex! < imageIndex!)
+        #expect(sleepIndex! < imageIndex!)
+    }
+
+    @Test func fileJobWorkspaceCopiesAttachmentsAndPublishesOutputs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let attachments = root.appendingPathComponent("chat-attachments", isDirectory: true)
+        let jobs = root.appendingPathComponent("file-jobs", isDirectory: true)
+        let exports = root.appendingPathComponent("file-exports", isDirectory: true)
+        let session = attachments.appendingPathComponent("session-1", isDirectory: true)
+            .appendingPathComponent("a1", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try "name,score\nAda,10\n".write(
+            to: session.appendingPathComponent("My_Report.csv"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = try FileJobWorkspace.prepare(
+            sessionID: "session-1",
+            requestedFilenames: ["My Report.csv"],
+            attachmentsRoot: attachments,
+            jobsRoot: jobs,
+            exportsRoot: exports
+        )
+        #expect(workspace.copiedFilenames == ["My_Report.csv"])
+        #expect(
+            FileManager.default.fileExists(
+                atPath: workspace.inputDirectory.appendingPathComponent("My_Report.csv").path
+            )
+        )
+
+        try "extracted".write(
+            to: workspace.outputDirectory.appendingPathComponent("notes.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let exported = try workspace.publishOutputs()
+        #expect(exported == ["notes.md"])
+        #expect(
+            FileManager.default.fileExists(
+                atPath: workspace.exportDirectory.appendingPathComponent("notes.md").path
+            )
+        )
+        workspace.removeJobDirectories()
+        #expect(!FileManager.default.fileExists(atPath: workspace.inputDirectory.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: workspace.exportDirectory.appendingPathComponent("notes.md").path
+            )
+        )
+    }
+
+    @Test func fileJobWorkspaceRejectsPathTraversalRequestedNames() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let attachments = root.appendingPathComponent("chat-attachments", isDirectory: true)
+        let session = attachments.appendingPathComponent("session-1", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try "ok".write(to: session.appendingPathComponent("notes.csv"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(throws: FileJobWorkspaceError.unsafeFilename("../notes.csv")) {
+            _ = try FileJobWorkspace.prepare(
+                sessionID: "session-1",
+                requestedFilenames: ["../notes.csv"],
+                attachmentsRoot: attachments,
+                jobsRoot: root.appendingPathComponent("file-jobs", isDirectory: true),
+                exportsRoot: root.appendingPathComponent("file-exports", isDirectory: true)
+            )
+        }
+    }
+
+    @Test func fileExtractorToolExtractsAttachedFilesWithoutJobsCreate() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let attachments = root.appendingPathComponent("chat-attachments", isDirectory: true)
+        let jobs = root.appendingPathComponent("file-jobs", isDirectory: true)
+        let exports = root.appendingPathComponent("file-exports", isDirectory: true)
+        let session = attachments.appendingPathComponent("session-1", isDirectory: true)
+            .appendingPathComponent("a1", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try "name,score\nAda,10\n".write(
+            to: session.appendingPathComponent("notes.csv"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                FileExtractorToolModule.makeRegistration(
+                    sessionID: { "session-1" },
+                    prepareWorkspace: { sessionID, filenames in
+                        try FileJobWorkspace.prepare(
+                            sessionID: sessionID,
+                            requestedFilenames: filenames,
+                            attachmentsRoot: attachments,
+                            jobsRoot: jobs,
+                            exportsRoot: exports
+                        )
+                    },
+                    run: { input, workspace, timeoutSeconds in
+                        await recorder.append(["run", "\(input.count)", "\(timeoutSeconds)"])
+                        try "preview".write(
+                            to: workspace.outputDirectory.appendingPathComponent("notes.md"),
+                            atomically: true,
+                            encoding: .utf8
+                        )
+                        return DockerCLIResult(
+                            exitCode: 0,
+                            stdout: Data(
+                                #"{"ok":true,"operation":"extract","files":[{"input_name":"notes.csv","output_name":"notes.md","kind":"csv","byte_count":7,"preview":"Ada"}],"diagnostics":[]}"#.utf8
+                            ),
+                            stderr: Data()
+                        )
+                    }
+                )
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "files.extract",
+            arguments: [
+                "operation": .string("extract"),
+                "output_format": .string("markdown")
+            ]
+        )
+
+        #expect(!result.isError)
+        #expect(result.text.contains("\"status\":\"completed\""))
+        #expect(result.text.contains("notes.md"))
+        #expect(result.text.contains("Ada"))
+        #expect((await recorder.calls).count == 1)
+    }
+
+    @Test func fileExtractorToolRequiresOpenChat() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                FileExtractorToolModule.makeRegistration(
+                    sessionID: { nil },
+                    run: { _, _, _ in
+                        await recorder.append(["unexpected"])
+                        return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                    }
+                )
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "files.extract",
+            arguments: [:]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("chat"))
+        #expect((await recorder.calls).isEmpty)
+    }
+
     @Test func webCrawlerToolBlocksInfiniteLoopGoals() async throws {
         let recorder = DockerCallRecorder()
         let bridge = try await MCPLocalBridge.make { server in

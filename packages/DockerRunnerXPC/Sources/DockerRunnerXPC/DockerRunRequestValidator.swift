@@ -161,9 +161,15 @@ public enum DockerRunRequestValidator: Sendable {
 
             if arg == "-v" || arg == "--volume" {
                 let value = index + 1 < dockerArgs.count ? dockerArgs[index + 1] : "<missing>"
-                return .disallowedVolumeMount(value)
+                if !FileJobBindMountPolicy.isAllowedVolumeSpec(value) {
+                    return .disallowedVolumeMount(value)
+                }
+                index += 1
             } else if arg.hasPrefix("-v=") || arg.hasPrefix("--volume=") {
-                return .disallowedVolumeMount(String(arg.split(separator: "=", maxSplits: 1).last ?? ""))
+                let value = String(arg.split(separator: "=", maxSplits: 1).last ?? "")
+                if !FileJobBindMountPolicy.isAllowedVolumeSpec(value) {
+                    return .disallowedVolumeMount(value)
+                }
             } else if arg == "--mount" || arg.hasPrefix("--mount=") {
                 let value: String
                 if arg.hasPrefix("--mount=") {
@@ -244,6 +250,10 @@ public enum DockerRunRequestValidator: Sendable {
             }
         case "/usr/local/bin/derrick-web-crawler":
             guard args == ["/usr/local/bin/derrick-web-crawler"] else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "/usr/local/bin/derrick-file-extractor":
+            guard args == ["/usr/local/bin/derrick-file-extractor"] else {
                 return .disallowedDockerFlag("exec \(command)")
             }
         default:

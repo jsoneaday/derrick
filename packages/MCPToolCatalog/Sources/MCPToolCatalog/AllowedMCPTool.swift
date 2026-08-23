@@ -24,6 +24,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case pluginInvoke = "plugin.invoke"
     /// Crawls a bounded same-origin website in an isolated Swift container.
     case webCrawl = "web.crawl"
+    /// Extracts or converts attached chat files in an isolated Swift container.
+    case filesExtract = "files.extract"
 
     /// Wire name used by MCP list/call and policy matchers (`tool_name`).
     public var toolName: String { rawValue }
@@ -64,6 +66,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "Run one approved compiled Agent Plugin by id with a JSON input object."
         case .webCrawl:
             return "Crawl a bounded same-origin website in an isolated Swift container and return structured page summaries."
+        case .filesExtract:
+            return "Extract text or convert attached chat files (PDF, DOCX, XLSX, CSV, HTML) in an isolated Swift container. Call this tool directly; do not submit it through jobs_create."
         }
     }
 }

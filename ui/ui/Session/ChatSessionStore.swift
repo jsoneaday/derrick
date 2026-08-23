@@ -8,12 +8,20 @@ struct ChatTab: Identifiable, Hashable {
     let id: String
     var title: String
     var turns: [ChatTurn]
+    var pendingAttachments: [ChatFileAttachment]
     var isStreaming: Bool
 
-    init(id: String, title: String, turns: [ChatTurn] = [], isStreaming: Bool = false) {
+    init(
+        id: String,
+        title: String,
+        turns: [ChatTurn] = [],
+        pendingAttachments: [ChatFileAttachment] = [],
+        isStreaming: Bool = false
+    ) {
         self.id = id
         self.title = title
         self.turns = turns
+        self.pendingAttachments = pendingAttachments
         self.isStreaming = isStreaming
     }
 }
@@ -121,12 +129,30 @@ final class ChatSessionStore: ObservableObject {
         }
 
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let attachments = tabs[tabIndex].pendingAttachments
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
-        tabs[tabIndex].turns.append(ChatTurn(prompt: trimmed, response: ""))
+        tabs[tabIndex].pendingAttachments = []
+        tabs[tabIndex].turns.append(
+            ChatTurn(prompt: trimmed, attachments: attachments, response: "")
+        )
         tabs[tabIndex].isStreaming = true
-        updateTitleIfNeeded(sessionID: sessionID, prompt: trimmed, tabIndex: tabIndex)
+        updateTitleIfNeeded(
+            sessionID: sessionID,
+            prompt: trimmed,
+            attachments: attachments,
+            tabIndex: tabIndex
+        )
         scrollToBottomToken += 1
+
+        let stagedRoot = try? ChatFileAttachmentStager.defaultRootDirectory()
+        let agentPrompt = ChatFileAttachmentPromptComposer.agentPrompt(
+            userText: trimmed,
+            payloads: ChatFileAttachmentInliner.payloads(
+                attachments: attachments,
+                rootDirectory: stagedRoot
+            )
+        )
 
         activeTasks[sessionID]?.cancel()
         activeTasks[sessionID] = Task {
@@ -141,7 +167,7 @@ final class ChatSessionStore: ObservableObject {
                 let modelJSON = try JSONEncoder().encode(model)
                 let request = AgentTurnRequest(
                     sessionID: sessionID,
-                    prompt: trimmed,
+                    prompt: agentPrompt,
                     apiKey: apiKey,
                     modelJSON: modelJSON
                 )
@@ -188,9 +214,36 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
-    private func updateTitleIfNeeded(sessionID: String, prompt: String, tabIndex: Int) {
+    func appendPendingAttachments(_ attachments: [ChatFileAttachment]) {
+        guard let sessionID = selectedSessionID,
+              let tabIndex = tabs.firstIndex(where: { $0.id == sessionID })
+        else {
+            return
+        }
+        tabs[tabIndex].pendingAttachments.append(contentsOf: attachments)
+    }
+
+    func removePendingAttachment(id: String) {
+        guard let sessionID = selectedSessionID,
+              let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }),
+              let attachment = tabs[tabIndex].pendingAttachments.first(where: { $0.id == id })
+        else {
+            return
+        }
+        tabs[tabIndex].pendingAttachments.removeAll { $0.id == id }
+        if let stager = try? ChatFileAttachmentStager() {
+            stager.remove(attachment)
+        }
+    }
+
+    private func updateTitleIfNeeded(
+        sessionID: String,
+        prompt: String,
+        attachments: [ChatFileAttachment],
+        tabIndex: Int
+    ) {
         guard tabs[tabIndex].title == "New chat" || tabs[tabIndex].title.isEmpty else { return }
-        let title = Self.title(from: prompt)
+        let title = Self.title(from: prompt, attachments: attachments)
         tabs[tabIndex].title = title
         persistSessionShell(sessionID: sessionID, title: title)
         Task {
@@ -239,11 +292,12 @@ final class ChatSessionStore: ObservableObject {
         tabs[idx].turns.removeAll()
     }
 
-    private static func title(from prompt: String) -> String {
+    private static func title(from prompt: String, attachments: [ChatFileAttachment]) -> String {
         let collapsed = prompt
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if collapsed.count <= 48 { return collapsed }
-        return String(collapsed.prefix(48)) + "…"
+        let source = collapsed.isEmpty ? (attachments.first?.originalFilename ?? "Chat") : collapsed
+        if source.count <= 48 { return source }
+        return String(source.prefix(48)) + "…"
     }
 }
