@@ -55,6 +55,9 @@ actor AgentServiceTurnHost {
     private var helperModelSettings: LLMModelSettings?
     /// Per-session serial turn chains (one in-flight turn per session).
     private var sessionTurnTails: [String: Task<Void, Never>] = [:]
+    /// Identifies the turn represented by each cached tail so an older turn
+    /// cannot clear a newer queued tail during cleanup.
+    private var sessionTurnTailIDs: [String: String] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var turnSessionIDs: [String: String] = [:]
 
@@ -81,6 +84,7 @@ actor AgentServiceTurnHost {
         if agentIDOverride == nil, JobSessionID.isJobSession(sessionID) == false {
             primaryUISessionID = sessionID
         }
+        evictInactiveConversations(except: sessionID)
         await AgentServiceStore.shared.log(
             level: .info,
             message: "Turn host session ready session=\(sessionID)",
@@ -167,7 +171,7 @@ actor AgentServiceTurnHost {
             let parentSessionID = request.parentSessionID
 
             tasks[turnID]?.cancel()
-            let turnTask = enqueueSessionTurn(sessionID: sid) {
+            let turnTask = enqueueSessionTurn(sessionID: sid, turnID: turnID) {
                 await self.executeTurn(
                     turnID: turnID,
                     conversation: model,
@@ -233,11 +237,14 @@ actor AgentServiceTurnHost {
         for sessionID in jobSessionIDs {
             sessionTurnTails[sessionID]?.cancel()
             sessionTurnTails[sessionID] = nil
+            sessionTurnTailIDs[sessionID] = nil
+            conversations[sessionID] = nil
         }
     }
 
     private func enqueueSessionTurn(
         sessionID: String,
+        turnID: String,
         operation: @escaping @Sendable () async -> Void
     ) -> Task<Void, Never> {
         let previous = sessionTurnTails[sessionID]
@@ -249,6 +256,7 @@ actor AgentServiceTurnHost {
             await operation()
         }
         sessionTurnTails[sessionID] = task
+        sessionTurnTailIDs[sessionID] = turnID
         return task
     }
 
@@ -264,9 +272,14 @@ actor AgentServiceTurnHost {
         jobSessionID: String,
         parentSessionID: String?
     ) async {
+        defer {
+            finishTurnState(
+                turnID: turnID,
+                sessionID: jobSessionID,
+                evictJobConversation: delivery == .jobResultModal
+            )
+        }
         guard !Task.isCancelled else {
-            tasks[turnID] = nil
-            turnSessionIDs[turnID] = nil
             return
         }
         await AgentServiceStore.shared.log(
@@ -351,8 +364,6 @@ actor AgentServiceTurnHost {
                                             message: "turn blocked by blacklist preflight id=\(turnID)",
                                             code: "blacklist_preflight_denied"
                                         )
-                                        tasks[turnID] = nil
-                                        turnSessionIDs[turnID] = nil
                                         return
                                     }
                                 }
@@ -472,8 +483,46 @@ actor AgentServiceTurnHost {
                 }
             }
         }
+    }
+
+    /// Releases per-turn task chains and idle conversation models.
+    ///
+    /// Job sessions are one-shot and must not remain cached after completion.
+    /// Interactive sessions are retained only while they are the primary UI
+    /// session or still have another turn queued or running.
+    private func finishTurnState(
+        turnID: String,
+        sessionID: String,
+        evictJobConversation: Bool
+    ) {
         tasks[turnID] = nil
         turnSessionIDs[turnID] = nil
+
+        if sessionTurnTailIDs[sessionID] == turnID {
+            sessionTurnTails[sessionID] = nil
+            sessionTurnTailIDs[sessionID] = nil
+        }
+
+        let hasAnotherTurn = turnSessionIDs.values.contains(sessionID)
+        if evictJobConversation || (sessionID != primaryUISessionID && !hasAnotherTurn) {
+            conversations[sessionID] = nil
+        }
+    }
+
+    /// Prevents abandoned session models from accumulating in the long-lived
+    /// AgentService process. Active sessions remain available until their turn
+    /// cleanup runs.
+    private func evictInactiveConversations(except sessionID: String) {
+        let activeSessionIDs = Set(turnSessionIDs.values)
+        let inactiveSessionIDs = conversations.keys.filter { cachedSessionID in
+            cachedSessionID != sessionID
+                && !activeSessionIDs.contains(cachedSessionID)
+                && (JobSessionID.isJobSession(cachedSessionID)
+                    || cachedSessionID != primaryUISessionID)
+        }
+        for inactiveSessionID in inactiveSessionIDs {
+            conversations[inactiveSessionID] = nil
+        }
     }
 
     private static func jobFailureFallbackText(repository: DBRepository?, jobID: String?) async -> String? {

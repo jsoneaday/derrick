@@ -167,12 +167,10 @@ struct SidebarView: View {
     }
 
     private var pluginsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Approved")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+        let systemGroups = pluginFactoryList.groups.filter { $0.latest?.isSystem == true }
+        let userGroups = pluginFactoryList.groups.filter { $0.latest?.isSystem != true }
 
+        return VStack(alignment: .leading, spacing: 8) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if pluginFactoryList.releases.isEmpty {
@@ -180,66 +178,13 @@ struct SidebarView: View {
                             .font(.system(size: sideMenuRecentsFontSize))
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(pluginFactoryList.groups) { group in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Button {
-                                    if expandedPluginIDs.contains(group.pluginID) {
-                                        expandedPluginIDs.remove(group.pluginID)
-                                    } else {
-                                        expandedPluginIDs.insert(group.pluginID)
-                                    }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: expandedPluginIDs.contains(group.pluginID)
-                                            ? "chevron.down"
-                                            : "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("/\(group.pluginID)")
-                                                .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
-                                                .lineLimit(1)
-                                            Text(group.releases.count == 1
-                                                ? (group.latest?.isSystem == true ? "system" : "v\(group.latest?.version ?? "")")
-                                                : "\(group.releases.count) versions")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-
-                                if expandedPluginIDs.contains(group.pluginID) {
-                                    ForEach(group.releases) { release in
-                                        HStack(alignment: .top, spacing: 8) {
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(release.isSystem ? "system" : "v\(release.version)")
-                                                    .font(.caption2.weight(.semibold))
-                                                    .foregroundStyle(.secondary)
-                                                Text(release.reviewSummary)
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                                    .lineLimit(2)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            if !release.isSystem {
-                                                Button {
-                                                    Task { await pluginFactoryList.delete(release) }
-                                                } label: {
-                                                    Image(systemName: "trash")
-                                                        .font(.system(size: 11))
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                .buttonStyle(.plain)
-                                                .help("Delete \(release.pluginID) \(release.version)")
-                                            }
-                                        }
-                                        .padding(.leading, 18)
-                                    }
-                                }
-                            }
+                        if !systemGroups.isEmpty {
+                            pluginSectionTitle("System")
+                            pluginGroupRows(systemGroups)
+                        }
+                        if !userGroups.isEmpty {
+                            pluginSectionTitle("User")
+                            pluginGroupRows(userGroups)
                         }
                     }
                     if let error = pluginFactoryList.lastError {
@@ -249,6 +194,79 @@ struct SidebarView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func pluginSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func pluginGroupRows(_ groups: [PluginFactoryReleaseGroup]) -> some View {
+        ForEach(groups) { group in
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    if expandedPluginIDs.contains(group.pluginID) {
+                        expandedPluginIDs.remove(group.pluginID)
+                    } else {
+                        expandedPluginIDs.insert(group.pluginID)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: expandedPluginIDs.contains(group.pluginID)
+                            ? "chevron.down"
+                            : "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("/\(group.pluginID)")
+                                .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
+                                .lineLimit(1)
+                            Text(group.releases.count == 1
+                                ? (group.latest?.isSystem == true ? "system" : "v\(group.latest?.version ?? "")")
+                                : "\(group.releases.count) versions")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if expandedPluginIDs.contains(group.pluginID) {
+                    ForEach(group.releases) { release in
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(release.isSystem ? "system" : "v\(release.version)")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(release.reviewSummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if !release.isSystem {
+                                Button {
+                                    Task { await pluginFactoryList.delete(release) }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Delete \(release.pluginID) \(release.version)")
+                            }
+                        }
+                        .padding(.leading, 18)
+                    }
+                }
             }
         }
     }
