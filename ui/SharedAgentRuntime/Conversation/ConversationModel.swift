@@ -355,7 +355,11 @@ final class ConversationModel {
                 (0, "**Plugin creation started.**\n\nDrafting a standalone Swift plugin…\n\n"),
                 (2_000_000_000, "Running the draft test and validating its output…\n\n"),
                 (15_000_000_000, "Reviewing plugin safety, correctness, and request alignment…\n\n"),
-                (30_000_000_000, "Compiling and verifying the approved plugin release…\n\n"),
+                (30_000_000_000, "Compiling the Swift source…\n\n"),
+                (8_000_000_000, "Running the compiled plugin test…\n\n"),
+                (8_000_000_000, "Checking terminal output and plugin integrity…\n\n"),
+                (8_000_000_000, "Rechecking any correction attempt if the draft needed repair…\n\n"),
+                (8_000_000_000, "Saving the approved plugin release…\n\n"),
             ]
             for (delayNanoseconds, message) in updates {
                 if delayNanoseconds > 0 {
