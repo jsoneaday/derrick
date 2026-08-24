@@ -238,6 +238,29 @@ import Testing
         #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.swift")
     }
 
+    @Test func builderNormalizesUnderscorePluginIDAndWritesSecretLabels() throws {
+        let response = PluginFactoryBuilderResponse(
+            pluginID: "slack_connection",
+            version: "1.0.0",
+            description: "Slack send and receive.",
+            swiftSource: "import Foundation\nprint(\"[]\")",
+            secrets: [
+                try PluginSecretField(id: "username", label: "Slack username", kind: .username),
+                try PluginSecretField(id: "password", label: "Slack password", kind: .password),
+            ]
+        )
+        let draft = try response.draft()
+        let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
+        #expect(manifest.name.rawValue == "slack-connection")
+        #expect(manifest.derrick?.secrets.map(\.id) == ["username", "password"])
+        #expect(manifest.derrick?.secrets.map(\.label) == ["Slack username", "Slack password"])
+        #expect(draft.manifestJSON.contains("slack_connection") == false)
+    }
+
+    @Test func invalidManifestIsBuilderCorrectable() {
+        #expect(PluginFactoryError.invalidManifest("Invalid plugin id 'slack_connection'.").isBuilderCorrectable)
+    }
+
     @Test func builderRejectsInvalidSkillPathBeforeFactoryExecution() {
         let response = PluginFactoryBuilderResponse(
             pluginID: "weather-tool",

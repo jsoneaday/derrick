@@ -118,7 +118,14 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
     Return exactly one JSON object with these keys:
     plugin_id (string), version (string), description (string), swift_source (string),
-    test_input_json (string), skill_files (array of objects with path and body).
+    test_input_json (string), skill_files (array of objects with path and body),
+    secrets (array of objects with id, label, and kind; optional).
+    plugin_id must use lowercase letters, numbers, hyphens, and dots only
+    (for example slack-connection). Never use underscores in plugin_id.
+    If the plugin needs a username, password, token, or API key, declare them in secrets.
+    kind must be username, password, token, or api_key. id is a stable Keychain key
+    such as username or bot_token. label is the text shown when the user saves the value.
+    Never put real credentials in swift_source.
     Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
     including the exact `$schema` field for Agent Plugin 1.0 and the fixed
     extensions.app.derrick.entrypoint ./app.derrick/plugin.swift. The Swift source is a standalone executable run as:
@@ -183,6 +190,18 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
                         "body": AgentSchema(type: .string),
                     ],
                     required: ["path", "body"]
+                )
+            ),
+            "secrets": AgentSchema(
+                type: .array,
+                items: AgentSchema(
+                    type: .object,
+                    properties: [
+                        "id": AgentSchema(type: .string),
+                        "label": AgentSchema(type: .string),
+                        "kind": AgentSchema(type: .string),
+                    ],
+                    required: ["id", "label", "kind"]
                 )
             ),
         ],

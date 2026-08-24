@@ -73,6 +73,18 @@ public enum PluginRuntimeToolModule {
             let result: PluginFactoryExecutionResult
             do {
                 result = try await invoke(pluginID, normalizedInput)
+            } catch let error as PluginSecretsRequiredError {
+                return try ToolExecutionOutcome.failure(
+                    status: .blocked,
+                    stage: .validation,
+                    diagnostics: [
+                        ToolExecutionOutcome.Diagnostic(
+                            code: "plugin_secrets_required",
+                            message: secretsRequiredJSON(error)
+                        )
+                    ],
+                    retry: ToolExecutionOutcome.Retry(allowed: false)
+                ).encodedJSON()
             } catch {
                 return try failure(
                     stage: .execution,
@@ -124,6 +136,17 @@ public enum PluginRuntimeToolModule {
             ],
             retry: ToolExecutionOutcome.Retry(allowed: false)
         )
+    }
+
+    private static func secretsRequiredJSON(_ error: PluginSecretsRequiredError) -> String {
+        let payload = PluginCredentialPromptPayload(
+            pluginID: error.pluginID,
+            secrets: error.fields.map(\.descriptor)
+        )
+        if let data = try? JSONEncoder().encode(payload) {
+            return String(decoding: data, as: UTF8.self)
+        }
+        return error.localizedDescription
     }
 
     private static func diagnostic(from result: PluginFactoryExecutionResult) -> String {

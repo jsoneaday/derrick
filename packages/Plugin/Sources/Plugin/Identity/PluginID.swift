@@ -16,6 +16,33 @@ public struct PluginID: RawRepresentable, Codable, Sendable, Hashable, CustomStr
         self.rawValue = trimmed
     }
 
+    /// Factory-side cleanup: lowercase, turn `_` and spaces into `-`, then validate.
+    /// Published `plugin.json` names still have to match Agent Plugins 1.0.
+    public static func normalized(_ raw: String) throws -> PluginID {
+        let lowered = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var collapsed = ""
+        var last: Character?
+        for character in lowered {
+            let mapped: Character
+            if character == "_" || character.isWhitespace {
+                mapped = "-"
+            } else {
+                mapped = character
+            }
+            if (mapped == "-" && last == "-") || (mapped == "." && last == ".") {
+                continue
+            }
+            collapsed.append(mapped)
+            last = mapped
+        }
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-."))
+        do {
+            return try PluginID(trimmed)
+        } catch {
+            throw PluginManifestError.invalidName(raw)
+        }
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(String.self)

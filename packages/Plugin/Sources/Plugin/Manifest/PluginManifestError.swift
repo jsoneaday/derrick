@@ -7,6 +7,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
     case unsupportedSchema(String)
     case missingName
     case invalidName(String)
+    case invalidSecretField(String)
     case invalidAuthor
     case invalidFieldType(String)
     case invalidEntrypoint(String)
@@ -36,7 +37,9 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .missingName:
             return "plugin.json is missing name"
         case .invalidName(let n):
-            return "Invalid plugin name: \(n)"
+            return "Invalid plugin name '\(n)'. Use lowercase letters, numbers, hyphens, and dots (for example slack-connection)."
+        case .invalidSecretField(let n):
+            return "Invalid plugin secret field: \(n)"
         case .invalidAuthor:
             return "plugin.json author is invalid"
         case .invalidFieldType(let f):

@@ -227,6 +227,14 @@ import Testing
         #expect(dDecoded.actor == "user")
     }
 
+    @Test func pluginSecretKeychainAccountIsStable() {
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connection", fieldID: "password")
+                == "plugin-secret:slack-connection/password"
+        )
+        #expect(PluginCredentialPrompt.toolName == "plugin.credentials")
+    }
+
     @Test func messageSigningRoundTrip() {
         var msg = ServiceMessage(
             from: .job,

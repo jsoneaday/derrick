@@ -34,6 +34,7 @@ actor MCPServiceToolHost {
         // UI prewarms containers and hands the helper peer endpoint at bootstrap.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
+        await HostHTTPClient.shared.setSecretAttacher(PluginDeclaredSecretAttacher())
         let factorySettings = await MainActor.run {
             LLMModelSettings(repository: repo)
         }
@@ -138,6 +139,23 @@ actor MCPServiceToolHost {
                             exitCode: 1,
                             stderr: Data("Approved plugin release is missing.".utf8)
                         )
+                    }
+                    let secrets = PluginSecretField.fields(fromManifestJSON: Data(release.manifestJSON.utf8))
+                    let missing = PluginSecretKeychain.missingIDs(
+                        pluginID: release.pluginID,
+                        fields: secrets.map(\.descriptor)
+                    )
+                    if !missing.isEmpty {
+                        throw PluginSecretsRequiredError(pluginID: release.pluginID, fields: secrets.filter { field in
+                            missing.contains(where: { $0.id == field.id })
+                        })
+                    }
+                    HostHTTPCallContext.shared.setPluginSecrets(
+                        pluginID: release.pluginID,
+                        fields: secrets.map(\.descriptor)
+                    )
+                    defer {
+                        HostHTTPCallContext.shared.setPluginSecrets(pluginID: "", fields: [])
                     }
                     return try await self.runApprovedPlugin(
                         release.compiledArtifact,

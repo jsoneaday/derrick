@@ -182,8 +182,13 @@ public struct AgentPluginAuthor: Codable, Sendable, Hashable {
 public struct DerrickExtensionPointers: Sendable, Hashable {
     public var entrypoint: String?
     public var runtime: String?
+    public var secrets: [PluginSecretField]
 
-    public init(entrypoint: String? = nil, runtime: String? = nil) throws {
+    public init(
+        entrypoint: String? = nil,
+        runtime: String? = nil,
+        secrets: [PluginSecretField] = []
+    ) throws {
         if let entrypoint {
             self.entrypoint = try PluginPath.validateRuntimeEntrypoint(entrypoint)
         } else {
@@ -194,6 +199,7 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
         } else {
             self.runtime = nil
         }
+        self.secrets = secrets
     }
 
     public static func decode(_ json: PluginJSON) throws -> DerrickExtensionPointers {
@@ -207,6 +213,10 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
             }
             return string
         }
-        return try DerrickExtensionPointers(entrypoint: try path("entrypoint"), runtime: try path("runtime"))
+        return try DerrickExtensionPointers(
+            entrypoint: try path("entrypoint"),
+            runtime: try path("runtime"),
+            secrets: try PluginSecretField.decodeList(object["secrets"])
+        )
     }
 }

@@ -61,31 +61,45 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
     public let pluginID: String
     public let version: String
     public let description: String
+    public let secrets: [PluginSecretField]
 
-    public init(pluginID: String, version: String, description: String) {
+    public init(
+        pluginID: String,
+        version: String,
+        description: String,
+        secrets: [PluginSecretField] = []
+    ) {
         self.pluginID = pluginID
         self.version = version
         self.description = description
+        self.secrets = secrets
     }
 
     public func encodedJSON() throws -> String {
+        let normalizedID: PluginID
         do {
-            _ = try PluginID(pluginID)
+            normalizedID = try PluginID.normalized(pluginID)
         } catch {
-            throw PluginFactoryError.invalidManifest("Invalid plugin id '\(pluginID)'.")
+            throw PluginFactoryError.invalidManifest(
+                "Invalid plugin id '\(pluginID)'. Use lowercase letters, numbers, hyphens, and dots (for example slack-connection). Underscores are not allowed."
+            )
         }
         guard !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PluginFactoryError.invalidManifest("Version is required.")
         }
+        var derrick: [String: Any] = [
+            "entrypoint": "./app.derrick/plugin.swift",
+        ]
+        if !secrets.isEmpty {
+            derrick["secrets"] = secrets.map(\.jsonObject)
+        }
         let object: [String: Any] = [
             "$schema": PluginContract.agentPluginSchema,
-            "name": pluginID,
+            "name": normalizedID.rawValue,
             "version": version,
             "description": description,
             "extensions": [
-                PluginContract.derrickExtensionNamespace: [
-                    "entrypoint": "./app.derrick/plugin.swift",
-                ],
+                PluginContract.derrickExtensionNamespace: derrick,
             ],
         ]
         do {
@@ -154,6 +168,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     public let swiftSource: String
     public let testInputJSON: String
     public let skillFiles: [PluginFactorySkillFile]
+    public let secrets: [PluginSecretField]
 
     public init(
         pluginID: String,
@@ -161,7 +176,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         description: String,
         swiftSource: String,
         testInputJSON: String = "{}",
-        skillFiles: [PluginFactorySkillFile] = []
+        skillFiles: [PluginFactorySkillFile] = [],
+        secrets: [PluginSecretField] = []
     ) {
         self.pluginID = pluginID
         self.version = version
@@ -169,6 +185,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         self.swiftSource = swiftSource
         self.testInputJSON = testInputJSON
         self.skillFiles = skillFiles
+        self.secrets = secrets
     }
 
     enum CodingKeys: String, CodingKey {
@@ -177,6 +194,31 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         case swiftSource = "swift_source"
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
+        case secrets
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pluginID = try container.decode(String.self, forKey: .pluginID)
+        version = try container.decode(String.self, forKey: .version)
+        description = try container.decode(String.self, forKey: .description)
+        swiftSource = try container.decode(String.self, forKey: .swiftSource)
+        testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
+        skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
+        secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pluginID, forKey: .pluginID)
+        try container.encode(version, forKey: .version)
+        try container.encode(description, forKey: .description)
+        try container.encode(swiftSource, forKey: .swiftSource)
+        try container.encode(testInputJSON, forKey: .testInputJSON)
+        try container.encode(skillFiles, forKey: .skillFiles)
+        if !secrets.isEmpty {
+            try container.encode(secrets, forKey: .secrets)
+        }
     }
 
     public func draft() throws -> PluginFactoryDraft {
@@ -198,7 +240,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
             manifest: PluginFactoryManifestInput(
                 pluginID: pluginID,
                 version: version,
-                description: description
+                description: description,
+                secrets: secrets
             ),
             swiftSource: swiftSource,
             testInput: input,
@@ -397,7 +440,7 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         switch self {
         case .directRunFailed, .invalidDirectOutput:
             return true
-        case .invalidSkillPath:
+        case .invalidSkillPath, .invalidManifest:
             return true
         case .reviewRejected:
             return true

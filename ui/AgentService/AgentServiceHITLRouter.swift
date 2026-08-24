@@ -207,7 +207,9 @@ final class AgentServiceApprovalPresenter: ApprovalConfirmationPresenting, @unch
     }
 
     func confirm(_ request: ApprovalConfirmationRequest) async -> ApprovalConfirmationDecision {
-        if AgentServiceHITLRouter.shouldUseNotificationPath(sessionID: sessionID, isJobWake: isJobWake) {
+        let isCredentialPrompt = request.toolName == PluginCredentialPrompt.toolName
+        if !isCredentialPrompt,
+           AgentServiceHITLRouter.shouldUseNotificationPath(sessionID: sessionID, isJobWake: isJobWake) {
             guard let repository = try? await resolveRepository() else {
                 return .cancelled(actor: "system-no-repository")
             }

@@ -41,7 +41,9 @@ public enum PluginFactoryToolModule: MCPToolModule {
                     pluginID: release.pluginID,
                     version: release.version,
                     contentHash: release.contentHash.rawValue,
-                    reviewSummary: release.reviewSummary
+                    reviewSummary: release.reviewSummary,
+                    secrets: PluginSecretField.fields(fromManifestJSON: Data(release.manifestJSON.utf8))
+                        .map(\.descriptor)
                 )
                 let data = try JSONEncoder().encode(summary)
                 return try ToolExecutionOutcome.completed(
@@ -109,6 +111,7 @@ private struct FactoryBuildSummary: Codable, Sendable {
     let version: String
     let contentHash: String
     let reviewSummary: String
+    let secrets: [PluginSecretDescriptor]
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -116,5 +119,6 @@ private struct FactoryBuildSummary: Codable, Sendable {
         case version
         case contentHash = "content_hash"
         case reviewSummary = "review_summary"
+        case secrets
     }
 }

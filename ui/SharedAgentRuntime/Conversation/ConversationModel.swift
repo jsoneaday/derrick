@@ -222,6 +222,22 @@ final class ConversationModel {
             progressTask.cancel()
             if !result.isError,
                let pluginID = Self.pluginID(fromFactoryResult: result.text) {
+                let secrets = Self.secrets(fromFactoryResult: result.text)
+                let ready = await collectPluginCredentialsIfNeeded(
+                    pluginID: pluginID,
+                    fields: secrets,
+                    approvalPresenter: approvalPresenter
+                )
+                if !ready {
+                    onChunk(
+                        AgentResponseNextChunk(
+                            status: .complete,
+                            chunk: "Plugin **\(pluginID)** was saved. Add its credentials when you are ready to run it.",
+                            toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+                        )
+                    )
+                    return
+                }
                 onChunk(
                     AgentResponseNextChunk(
                         status: .toolCall,
@@ -237,9 +253,10 @@ final class ConversationModel {
                         toolName: AllowedMCPTool.pluginInvoke.rawValue
                     )
                 )
-                let runResult = try await toolClient.callTool(
-                    named: AllowedMCPTool.pluginInvoke.rawValue,
-                    arguments: ["plugin_id": .string(pluginID)]
+                let runResult = try await invokePlugin(
+                    pluginID: pluginID,
+                    arguments: ["plugin_id": .string(pluginID)],
+                    approvalPresenter: approvalPresenter
                 )
                 onChunk(
                     AgentResponseNextChunk(
@@ -261,6 +278,7 @@ final class ConversationModel {
         }
         if try await invokeApprovedPluginIfRequested(
             prompt: prompt,
+            approvalPresenter: approvalPresenter,
             onChunk: onChunk
         ) {
             return
@@ -384,6 +402,77 @@ final class ConversationModel {
         }
     }
 
+    private static func secrets(fromFactoryResult text: String) -> [PluginSecretDescriptor] {
+        guard let outcome = ToolExecutionOutcome.decode(from: text),
+              outcome.status == .completed,
+              let value = outcome.output?.value,
+              let data = value.data(using: .utf8),
+              let receipt = try? JSONDecoder().decode(PluginFactoryBuildReceipt.self, from: data) else {
+            return []
+        }
+        return receipt.secrets ?? []
+    }
+
+    private func collectPluginCredentialsIfNeeded(
+        pluginID: String,
+        fields: [PluginSecretDescriptor],
+        approvalPresenter: (any ApprovalConfirmationPresenting)?
+    ) async -> Bool {
+        let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: fields)
+        guard !missing.isEmpty else { return true }
+        guard let approvalPresenter else { return false }
+        let payload = PluginCredentialPromptPayload(pluginID: pluginID, secrets: missing)
+        guard let data = try? JSONEncoder().encode(payload) else { return false }
+        let decision = await approvalPresenter.confirm(
+            ApprovalConfirmationRequest(
+                sessionID: sessionKey.sessionID,
+                toolName: PluginCredentialPrompt.toolName,
+                argumentsJSON: String(decoding: data, as: UTF8.self),
+                requiredFields: missing.map(\.id)
+            )
+        )
+        switch decision {
+        case .approved:
+            return PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: missing).isEmpty
+        case .cancelled:
+            return false
+        }
+    }
+
+    private func invokePlugin(
+        pluginID: String,
+        arguments: [String: Value],
+        approvalPresenter: (any ApprovalConfirmationPresenting)?
+    ) async throws -> MCPToolResult {
+        var result = try await toolClient.callTool(
+            named: AllowedMCPTool.pluginInvoke.rawValue,
+            arguments: arguments
+        )
+        if let required = Self.secretsRequired(fromInvokeResult: result.text) {
+            let ready = await collectPluginCredentialsIfNeeded(
+                pluginID: required.pluginID.isEmpty ? pluginID : required.pluginID,
+                fields: required.secrets,
+                approvalPresenter: approvalPresenter
+            )
+            if ready {
+                result = try await toolClient.callTool(
+                    named: AllowedMCPTool.pluginInvoke.rawValue,
+                    arguments: arguments
+                )
+            }
+        }
+        return result
+    }
+
+    private static func secretsRequired(fromInvokeResult text: String) -> PluginCredentialPromptPayload? {
+        guard let outcome = ToolExecutionOutcome.decode(from: text),
+              outcome.status == .blocked,
+              let diagnostic = outcome.diagnostics.first(where: { $0.code == "plugin_secrets_required" }),
+              let data = diagnostic.message.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PluginCredentialPromptPayload.self, from: data)
+    }
     private static func pluginID(fromFactoryResult text: String) -> String? {
         guard let outcome = ToolExecutionOutcome.decode(from: text),
               outcome.status == .completed,
@@ -400,6 +489,7 @@ final class ConversationModel {
 
     private func invokeApprovedPluginIfRequested(
         prompt: String,
+        approvalPresenter: (any ApprovalConfirmationPresenting)?,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws -> Bool {
         guard let request = Self.pluginInvocation(from: prompt) else { return false }
@@ -427,9 +517,10 @@ final class ConversationModel {
                 toolName: AllowedMCPTool.pluginInvoke.rawValue
             )
         )
-        let result = try await toolClient.callTool(
-            named: AllowedMCPTool.pluginInvoke.rawValue,
-            arguments: arguments
+        let result = try await invokePlugin(
+            pluginID: request.pluginID,
+            arguments: arguments,
+            approvalPresenter: approvalPresenter
         )
         onChunk(
             AgentResponseNextChunk(
@@ -875,9 +966,11 @@ final class ConversationModel {
 private struct PluginFactoryBuildReceipt: Decodable {
     let ok: Bool
     let pluginID: String?
+    let secrets: [PluginSecretDescriptor]?
 
     enum CodingKeys: String, CodingKey {
         case ok
         case pluginID = "plugin_id"
+        case secrets
     }
 }

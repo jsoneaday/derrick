@@ -115,6 +115,9 @@ enum HITLLiveApprovalHandlers {
     }
 
     private static func presentToolApproval(_ request: AgentApprovalRequestDTO) async -> AgentApprovalDecisionDTO {
+        if request.toolName == PluginCredentialPrompt.toolName {
+            return await PluginCredentialPanelPresenter.shared.present(request)
+        }
         let preview = request.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary: String
         if preview.isEmpty {
