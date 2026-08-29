@@ -37,6 +37,41 @@ import Testing
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Container"))
         #expect(result.message.lowercased().contains("docker"))
+        #expect(result.recovery == .none)
+    }
+
+    @MainActor
+    @Test func classifyDaemonNeedsLoginItemsToggle() {
+        let result = AppBootstrapStatus.classifyError(
+            JobServiceLoginAgent.AgentError.needsLoginItemsApproval
+        )
+        #expect(result.title == "Background Service Did Not Start")
+        #expect(result.message.lowercased().contains("does not show a permission popup"))
+        #expect(result.message.lowercased().contains("turn derrick off"))
+        #expect(result.recovery == .openLoginItems)
+    }
+
+    @MainActor
+    @Test func classifyDaemonRegisterFailedUsesSameRecovery() {
+        let result = AppBootstrapStatus.classifyError(
+            JobServiceLoginAgent.AgentError.registerFailed("SM skipped")
+        )
+        #expect(result.recovery == .openLoginItems)
+        #expect(result.message.lowercased().contains("switch can stay on"))
+    }
+
+    @MainActor
+    @Test func classifyXPCTimeoutDoesNotBlameDockerOrXcode() {
+        let error = NSError(
+            domain: "AgentServiceClient",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "AgentService XPC call timed out."]
+        )
+        let result = AppBootstrapStatus.classifyError(error)
+        #expect(result.title.contains("Background Service"))
+        #expect(!result.message.lowercased().contains("docker"))
+        #expect(!result.message.lowercased().contains("xcode"))
+        #expect(result.recovery == .none)
     }
 
     @MainActor

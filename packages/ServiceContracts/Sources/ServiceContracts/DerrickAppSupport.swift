@@ -103,6 +103,15 @@ public enum DerrickAppSupport {
     /// Path fragment for the embedded Login Item daemon (`…/Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app`).
     public static let loginItemDaemonPathMarker = "/Contents/Library/LoginItems/JobKeepAlive.app"
 
+    /// LaunchAgent plist for `daemonSessionLaunchdLabel`. Kept out of `~/Library/LaunchAgents`
+    /// so BTM does not treat it as the disabled legacy `derrick.ui.Daemon` item.
+    public static func daemonSessionLaunchAgentPlistURL(homeDirectory: URL) -> URL {
+        homeDirectory.appendingPathComponent(
+            "Library/Application Support/Derrick/derrick.ui.Daemon.session.plist",
+            isDirectory: false
+        )
+    }
+
     /// True when this process is the launchd/SMAppService daemon nested under the host app.
     public static func isEmbeddedLoginItemDaemon(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
         bundleURL.standardizedFileURL.path.contains(loginItemDaemonPathMarker)

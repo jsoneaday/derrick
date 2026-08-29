@@ -42,9 +42,7 @@ public enum DaemonProcessHygiene {
                 stderr
             )
             JobServiceLoginAgent.bootoutRegisteredDaemon()
-            await MainActor.run {
-                try? JobServiceLoginAgent.ensureRegistered()
-            }
+            try? await JobServiceLoginAgent.ensureRegistered()
             JobServiceLoginAgent.reloadRegisteredDaemon()
             await waitUntilReplacementDaemon(replacing: health.pid)
         } else {
@@ -145,9 +143,8 @@ public enum DaemonProcessHygiene {
     }
 
     /// Kill stray daemons and stale embedded builds, then kickstart launchd when needed.
-    @discardableResult
-    public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async -> Bool {
-        guard !DerrickProcessRole.isDaemon else { return true }
+    public static func reconcile(hostAppBundle: URL = Bundle.main.bundleURL) async throws {
+        guard !DerrickProcessRole.isDaemon else { return }
 
         let paths = JobServiceLoginAgent.preflightPaths()
         let expectedExe = paths.executable
@@ -157,7 +154,7 @@ public enum DaemonProcessHygiene {
                 "[DaemonHygiene] skip — embedded daemon missing at \(expectedExe.path)\n",
                 stderr
             )
-            return false
+            throw JobServiceLoginAgent.AgentError.missingExecutable(expectedExe.path)
         }
 
         let expectedMtime = modificationDate(expectedExe)
@@ -176,12 +173,13 @@ public enum DaemonProcessHygiene {
                 "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedPath))\n",
                 stderr
             )
-            return await restartDaemonIfNeeded(
+            try await restartDaemonIfNeeded(
                 evictedAny: false,
                 hostPath: hostPath,
                 expectedPath: expectedPath,
                 expectedMtime: expectedMtime
             )
+            return
         }
 
         debugLog("[DaemonHygiene] reconcile found \(processes.count) JobKeepAlive process(es)")
@@ -226,7 +224,7 @@ public enum DaemonProcessHygiene {
                     == DerrickDaemonHygiene.canonicalPath(expectedPath)
         }
 
-        let registrationSucceeded = await restartDaemonIfNeeded(
+        try await restartDaemonIfNeeded(
             evictedAny: evictedAny,
             hasHealthyExpectedDaemon: hasHealthy,
             hostPath: hostPath,
@@ -241,52 +239,45 @@ public enum DaemonProcessHygiene {
            }) {
             UserDefaults.standard.set(expectedMtime.timeIntervalSince1970, forKey: acceptedMtimeDefaultsKey)
         }
-        return registrationSucceeded
     }
 
-    @discardableResult
     private static func restartDaemonIfNeeded(
         evictedAny: Bool,
         hasHealthyExpectedDaemon: Bool = false,
         hostPath: String = "",
         expectedPath: String = "",
         expectedMtime: Date? = nil
-    ) async -> Bool {
+    ) async throws {
         guard DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
             evictedAny: evictedAny,
             hasHealthyExpectedDaemon: hasHealthyExpectedDaemon
         ) else {
             fputs("[DaemonHygiene] expected daemon healthy — skip register/kickstart\n", stderr)
-            return true
+            return
         }
         fputs(
             "[DaemonHygiene] register+kickstart evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)\n",
             stderr
         )
-        let registered = await MainActor.run {
-            do {
-                let result = try JobServiceLoginAgent.ensureRegistered()
-                guard result.isRunningOrEnabled else {
-                    fputs(
-                        "[DaemonHygiene] daemon registration requires user action: \(result.detail)\n",
-                        stderr
-                    )
-                    return false
-                }
-                return true
-            } catch {
+        do {
+            let result = try await JobServiceLoginAgent.ensureRegistered()
+            guard result.isRunningOrEnabled else {
                 fputs(
-                    "[DaemonHygiene] daemon registration failed: \(error.localizedDescription)\n",
+                    "[DaemonHygiene] daemon registration requires user action: \(result.detail)\n",
                     stderr
                 )
-                return false
+                throw JobServiceLoginAgent.AgentError.needsLoginItemsApproval
             }
+        } catch {
+            fputs(
+                "[DaemonHygiene] daemon registration failed: \(error.localizedDescription)\n",
+                stderr
+            )
+            throw error
         }
-        guard registered else { return false }
         try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
         JobServiceLoginAgent.reloadRegisteredDaemon()
         debugLog("[DaemonHygiene] reload requested after evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)")
-        return true
     }
 
     // MARK: - Process scan

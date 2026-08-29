@@ -471,7 +471,7 @@ struct ContentView: View {
             minWidth: 380,
             minHeight: 0,
             maxWidth: 440,
-            maxHeight: 280,
+            maxHeight: bootstrapStatus.phase == .failed ? 420 : 280,
             onBackdropDismiss: bootstrapStatus.phase == .failed
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
@@ -530,14 +530,27 @@ struct ContentView: View {
             footer: {
                 // Only show footer chrome when there is an action (avoids empty padded gap while initializing).
                 if bootstrapStatus.phase == .failed {
-                    HStack {
+                    HStack(spacing: 10) {
                         Spacer(minLength: 0)
-                        Button("OK") {
-                            bootstrapStatus.dismissFailure()
+                        if bootstrapStatus.failureRecovery == .openLoginItems {
+                            Button("OK") {
+                                bootstrapStatus.dismissFailure()
+                            }
+                            .buttonStyle(ModalSecondaryButtonStyle())
+                            .keyboardShortcut(.cancelAction)
+                            Button("Open Login Items") {
+                                JobServiceLoginAgent.openLoginItemsSettings()
+                            }
+                            .buttonStyle(ModalPrimaryButtonStyle())
+                            .keyboardShortcut(.defaultAction)
+                        } else {
+                            Button("OK") {
+                                bootstrapStatus.dismissFailure()
+                            }
+                            .buttonStyle(ModalPrimaryButtonStyle())
+                            .keyboardShortcut(.defaultAction)
+                            .keyboardShortcut(.cancelAction)
                         }
-                        .buttonStyle(ModalPrimaryButtonStyle())
-                        .keyboardShortcut(.defaultAction)
-                        .keyboardShortcut(.cancelAction)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
@@ -600,16 +613,7 @@ struct ContentView: View {
                 await PluginFactoryListStore.shared.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
-                guard await DaemonBootstrapCoordinator.prepareForHostApp(force: true) else {
-                    throw NSError(
-                        domain: "DaemonHygiene",
-                        code: 503,
-                        userInfo: [
-                            NSLocalizedDescriptionKey:
-                                "Derrick daemon registration failed. Enable Derrick in System Settings → Login Items, then try again."
-                        ]
-                    )
-                }
+                try await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
 
                 // Connect derrickd before Docker prewarm so Mach XPC is not competing with
                 // long-running DockerRunnerHelper work on the same bootstrap path.
@@ -682,7 +686,8 @@ struct ContentView: View {
                     bootstrapStatus.markFailed(
                         title: classified.title,
                         message: classified.message,
-                        technicalDetail: String(describing: error)
+                        technicalDetail: String(describing: error),
+                        recovery: classified.recovery
                     )
                 }
             }

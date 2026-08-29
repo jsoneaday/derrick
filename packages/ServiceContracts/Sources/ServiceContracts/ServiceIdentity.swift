@@ -13,6 +13,10 @@ public enum DerrickServiceID: String, Codable, Sendable, CaseIterable, Hashable 
     /// Legacy keep-alive; superseded by `daemon`.
     case jobKeepAlive = "derrick.ui.JobKeepAlive"
 
+    /// Fallback launchd label when Background Task Management blocks `daemon`.
+    /// Mach service name stays `machServiceName` on `daemon`.
+    public static let daemonSessionLaunchdLabel = "derrick.ui.Daemon.session"
+
     /// App Group used for shared DB and sandboxed Mach lookup of the daemon.
     public static let appGroupID = "VUSK4B2YKQ.derrick.shared"
 

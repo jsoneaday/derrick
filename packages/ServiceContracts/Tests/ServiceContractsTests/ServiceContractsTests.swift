@@ -540,6 +540,17 @@ import Testing
         )
     }
 
+    @Test func daemonSessionLaunchAgentStaysOutOfLaunchAgents() {
+        let home = URL(fileURLWithPath: "/Users/me", isDirectory: true)
+        let url = DerrickAppSupport.daemonSessionLaunchAgentPlistURL(homeDirectory: home)
+        #expect(!url.path.contains("/Library/LaunchAgents/"))
+        #expect(url.path.contains("/Library/Application Support/Derrick/"))
+        #expect(url.lastPathComponent == "derrick.ui.Daemon.session.plist")
+        #expect(DerrickServiceID.daemonSessionLaunchdLabel == "derrick.ui.Daemon.session")
+        #expect(DerrickServiceID.daemonSessionLaunchdLabel != DerrickServiceID.daemon.rawValue)
+        #expect(DerrickServiceID.daemon.machServiceName == "VUSK4B2YKQ.derrick.shared.daemon")
+    }
+
     @Test func derrickDaemonHygieneDetectsOrphanPath() {
         let host = "/Users/me/DerivedData/.../Debug/Derrick.app"
         let orphan = "/Users/me/DerivedData/.../Debug/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"

@@ -17,6 +17,10 @@ You are a careful and methodocial Swift developer.
 - No assumptions. Read code and know, do not guess.
   - Check info.plist and app configurations instead of assuming it's a code issue
 - Always fix an issue at its issue. No band-aid fixes.
+- Always write tests and make sure new code is really working. 
+  - Write unit and e2e tests.
+  - Make sure app comes up completely without error
+  - Make any new feature or fix is actually working
 - Review all the related code again after any updates.
   - Make sure there are no conflicts between what the rag says and what the code types and comments say.
   - Make sure the model is sent what it needs first \*\*before\*\* it is tasked with producing something.

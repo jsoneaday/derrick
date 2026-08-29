@@ -115,8 +115,9 @@ app.run()
 // MARK: - LaunchAgent install
 
 enum DaemonLaunchAgentInstaller {
-    static let label = DerrickServiceID.daemon.rawValue
-    static let plistName = "\(label).plist"
+    /// Do not use `DerrickServiceID.daemon` here. BTM owns that label as a disabled
+    /// legacy agent in `~/Library/LaunchAgents`; bootstrap then returns 5 (I/O).
+    static let label = DerrickServiceID.daemonSessionLaunchdLabel
 
     static func install(executableURL: URL) throws {
         let exe = executableURL.resolvingSymlinksInPath().path
@@ -125,9 +126,11 @@ enum DaemonLaunchAgentInstaller {
         }
 
         let home = realUserHomeDirectory()
-        let agentsDir = home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
-        let dest = agentsDir.appendingPathComponent(plistName)
+        let dest = DerrickAppSupport.daemonSessionLaunchAgentPlistURL(homeDirectory: home)
+        try FileManager.default.createDirectory(
+            at: dest.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
 
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -151,10 +154,6 @@ enum DaemonLaunchAgentInstaller {
             <true/>
             <key>ThrottleInterval</key>
             <integer>2</integer>
-            <key>AssociatedBundleIdentifiers</key>
-            <array>
-                <string>\(DerrickServiceID.ui.rawValue)</string>
-            </array>
             <key>ProcessType</key>
             <string>Background</string>
             <key>StandardOutPath</key>
@@ -172,6 +171,7 @@ enum DaemonLaunchAgentInstaller {
         let uid = getuid()
         let domainLabel = "gui/\(uid)/\(label)"
         _ = runLaunchctlAllowFail(["bootout", "gui/\(uid)/\(DerrickServiceID.jobKeepAlive.rawValue)"], timeoutSeconds: 3)
+        _ = runLaunchctlAllowFail(["bootout", "gui/\(uid)/\(DerrickServiceID.daemon.rawValue)"], timeoutSeconds: 3)
         _ = runLaunchctlAllowFail(["bootout", domainLabel], timeoutSeconds: 3)
         let boot = runLaunchctlAllowFail(["bootstrap", "gui/\(uid)", dest.path], timeoutSeconds: 5)
         if boot.status != 0 {
@@ -179,7 +179,7 @@ enum DaemonLaunchAgentInstaller {
                 fputs("[derrickd] bootstrap \(boot.status) but job loaded — continuing\n", stderr)
             } else if boot.status == 5 {
                 throw InstallError.launchctlFailed(
-                    "launchctl bootstrap → 5 (I/O). Prefer SMAppService; or run from Terminal: \(exe) --install-launchd"
+                    "launchctl bootstrap → 5 (I/O) for \(label)"
                 )
             } else {
                 throw InstallError.launchctlFailed("launchctl bootstrap → \(boot.status) \(boot.output)")

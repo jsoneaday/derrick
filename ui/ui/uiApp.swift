@@ -176,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { _ in
-                Task { await DaemonBootstrapCoordinator.prepareForHostApp(force: false) }
+                Task { try? await DaemonBootstrapCoordinator.prepareForHostApp(force: false) }
             }
         }
     }
@@ -191,7 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DerrickNotificationService.shared.stop()
         let sem = DispatchSemaphore(value: 0)
         Task { @MainActor in
-            try? JobServiceLoginAgent.ensureRegistered()
+            try? await JobServiceLoginAgent.ensureRegistered()
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 5)

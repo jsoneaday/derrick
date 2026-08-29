@@ -7,23 +7,21 @@ enum DaemonBootstrapCoordinator {
     private static let debounceInterval: TimeInterval = 1_800
 
     /// Evict orphan/stale `JobKeepAlive` and ensure launchd targets this host app bundle.
-    @discardableResult
-    static func prepareForHostApp(force: Bool = false) async -> Bool {
+    static func prepareForHostApp(force: Bool = false) async throws {
         guard !JobResultPanelSession.isPanelOnlyLaunch,
               !DerrickNotificationLaunch.hasJobResultPresentationIntent(),
               !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         else {
-            return true
+            return
         }
         if !force {
             let elapsed = Date().timeIntervalSince(lastPrepareAt)
             guard elapsed >= debounceInterval else {
                 fputs("[DaemonHygiene] prepare skipped (debounce \(Int(elapsed))s)\n", stderr)
-                return true
+                return
             }
         }
-        let result = await DaemonProcessHygiene.reconcile()
+        try await DaemonProcessHygiene.reconcile()
         lastPrepareAt = Date()
-        return result
     }
 }
