@@ -119,13 +119,17 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     Return exactly one JSON object with these keys:
     plugin_id (string), version (string), description (string), swift_source (string),
     test_input_json (string), skill_files (array of objects with path and body),
-    secrets (array of objects with id, label, and kind; optional).
+    secrets (array of objects with id, label, and kind; optional),
+    role (string, optional: "connector" or "standard").
     plugin_id must use lowercase letters, numbers, hyphens, and dots only
     (for example slack-connection). Never use underscores in plugin_id.
     If the plugin needs a username, password, token, or API key, declare them in secrets.
     kind must be username, password, token, or api_key. id is a stable Keychain key
     such as username or bot_token. label is the text shown when the user saves the value.
     Never put real credentials in swift_source.
+    Set role to "connector" when the plugin sends and receives messages with an external
+    messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
+    The host lists connector plugins under Messaging. Do not guess this from the plugin_id.
     Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
     including the exact `$schema` field for Agent Plugin 1.0 and the fixed
     extensions.app.derrick.entrypoint ./app.derrick/plugin.swift. The Swift source is a standalone executable run as:
@@ -204,6 +208,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
                     required: ["id", "label", "kind"]
                 )
             ),
+            "role": AgentSchema(type: .string),
         ],
         required: [
             "plugin_id", "version", "description", "swift_source",

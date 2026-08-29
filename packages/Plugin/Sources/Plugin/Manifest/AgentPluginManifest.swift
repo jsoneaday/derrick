@@ -183,11 +183,15 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
     public var entrypoint: String?
     public var runtime: String?
     public var secrets: [PluginSecretField]
+    public var role: PluginRole
+
+    public var isConnector: Bool { role.isConnector }
 
     public init(
         entrypoint: String? = nil,
         runtime: String? = nil,
-        secrets: [PluginSecretField] = []
+        secrets: [PluginSecretField] = [],
+        role: PluginRole = .standard
     ) throws {
         if let entrypoint {
             self.entrypoint = try PluginPath.validateRuntimeEntrypoint(entrypoint)
@@ -200,6 +204,7 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
             self.runtime = nil
         }
         self.secrets = secrets
+        self.role = role
     }
 
     public static func decode(_ json: PluginJSON) throws -> DerrickExtensionPointers {
@@ -216,7 +221,33 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
         return try DerrickExtensionPointers(
             entrypoint: try path("entrypoint"),
             runtime: try path("runtime"),
-            secrets: try PluginSecretField.decodeList(object["secrets"])
+            secrets: try PluginSecretField.decodeList(object["secrets"]),
+            role: try decodeRole(object["role"])
         )
+    }
+
+    private static func decodeRole(_ json: PluginJSON?) throws -> PluginRole {
+        guard let json else { return .standard }
+        guard case .string(let raw) = json else {
+            throw PluginManifestError.invalidFieldType("extensions.app.derrick.role")
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let role = PluginRole(rawValue: trimmed) else {
+            throw PluginManifestError.invalidRole(raw)
+        }
+        return role
+    }
+}
+
+extension AgentPluginManifest {
+    public var isConnector: Bool { derrick?.isConnector == true }
+
+    public static func isConnector(manifestJSON: String) -> Bool {
+        guard let data = manifestJSON.data(using: .utf8),
+              let manifest = try? decode(data)
+        else {
+            return false
+        }
+        return manifest.isConnector
     }
 }

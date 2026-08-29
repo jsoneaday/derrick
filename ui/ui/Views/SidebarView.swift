@@ -5,18 +5,14 @@ import ServiceContracts
 
 private let sideMenuRecentsFontSize = CGFloat(12)
 
-private enum SidebarContentMode: Equatable {
-    case recents
-    case plugins
-}
-
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
     @ObservedObject var chatSessions: ChatSessionStore
+    @ObservedObject var messaging: MessagingStore
+    @Binding var workspace: AppWorkspace
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
-    @State private var contentMode: SidebarContentMode = .recents
     @State private var expandedPluginIDs: Set<String> = []
 
     var body: some View {
@@ -44,7 +40,7 @@ struct SidebarView: View {
                 SidebarActionRow(
                     row: SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
                 ) {
-                    contentMode = .recents
+                    workspace = .chats
                     chatSessions.openNewChat()
                 }
                 SidebarActionRow(
@@ -52,26 +48,42 @@ struct SidebarView: View {
                         id: "chats",
                         icon: "message.fill",
                         title: "Chats",
-                        isProminent: true
+                        isProminent: workspace == .chats
                     )
                 ) {
-                    contentMode = .recents
+                    workspace = .chats
                 }
                 SidebarActionRow(
                     row: SidebarRow(
                         id: "plugins",
                         icon: "puzzlepiece.extension.fill",
                         title: "Plugins",
-                        isProminent: contentMode == .plugins
+                        isProminent: workspace == .plugins
                     )
                 ) {
-                    contentMode = .plugins
-                    Task { await pluginFactoryList.reload() }
+                    workspace = .plugins
+                    Task {
+                        await pluginFactoryList.reload()
+                        await messaging.syncConnectorsFromFactory()
+                    }
+                }
+                SidebarActionRow(
+                    row: SidebarRow(
+                        id: "messaging",
+                        icon: "bubble.left.and.bubble.right.fill",
+                        title: "Messaging",
+                        isProminent: workspace == .messaging
+                    )
+                ) {
+                    workspace = .messaging
+                    Task { await messaging.syncConnectorsFromFactory() }
                 }
             }
 
-            if contentMode == .plugins {
+            if workspace == .plugins {
                 pluginsList
+            } else if workspace == .messaging {
+                messagingList
             } else {
                 recentsList
             }
@@ -112,11 +124,17 @@ struct SidebarView: View {
             await pluginFactoryList.reload()
         }
         .onChange(of: chatSessions.selectedTab?.turns.count ?? 0) { _, _ in
-            Task { await pluginFactoryList.reload() }
+            Task {
+                await pluginFactoryList.reload()
+                await messaging.syncConnectorsFromFactory()
+            }
         }
         .onChange(of: chatSessions.isSelectedTabStreaming) { _, isStreaming in
             guard !isStreaming else { return }
-            Task { await pluginFactoryList.reload() }
+            Task {
+                await pluginFactoryList.reload()
+                await messaging.syncConnectorsFromFactory()
+            }
         }
     }
 
@@ -142,7 +160,7 @@ struct SidebarView: View {
                     } else {
                         ForEach(chatSessions.recentSessions) { session in
                             Button {
-                                contentMode = .recents
+                                workspace = .chats
                                 chatSessions.selectSession(id: session.sessionID)
                             } label: {
                                 Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -159,6 +177,91 @@ struct SidebarView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var messagingList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Connectors")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.top, 4)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if messaging.connectors.isEmpty {
+                        Text("No messaging connectors yet")
+                            .font(.system(size: sideMenuRecentsFontSize))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(messaging.connectors) { connector in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button {
+                                    workspace = .messaging
+                                    Task { await messaging.openConnector(pluginID: connector.pluginID) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(connector.displayName)
+                                            .font(.system(size: sideMenuRecentsFontSize))
+                                            .lineLimit(1)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .foregroundStyle(
+                                                messaging.selectedPluginID == connector.pluginID
+                                                    ? Color.primary
+                                                    : Color.primary.opacity(0.9)
+                                            )
+                                        let unread = messaging.unreadTotal(for: connector.pluginID)
+                                        if unread > 0 {
+                                            MessagingUnreadBadge(count: unread)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+
+                                if messaging.selectedPluginID == connector.pluginID {
+                                    ForEach(messaging.threads) { thread in
+                                        Button {
+                                            workspace = .messaging
+                                            Task { await messaging.selectThread(id: thread.id) }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                if thread.muted {
+                                                    Image(systemName: "bell.slash")
+                                                        .font(.system(size: 9, weight: .semibold))
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Text(thread.title)
+                                                    .font(.system(size: sideMenuRecentsFontSize))
+                                                    .lineLimit(1)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .foregroundStyle(
+                                                        messaging.selectedThreadID == thread.id
+                                                            ? Color.primary
+                                                            : Color.primary.opacity(0.9)
+                                                    )
+                                                if thread.unreadCount > 0 {
+                                                    MessagingUnreadBadge(count: thread.unreadCount)
+                                                }
+                                            }
+                                            .padding(.leading, 16)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let error = messaging.lastError {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,7 +387,9 @@ struct SidebarView: View {
     let store = ChatSessionStore()
     SidebarView(
         helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
-        chatSessions: store
+        chatSessions: store,
+        messaging: MessagingStore(),
+        workspace: .constant(.chats)
     )
 }
 

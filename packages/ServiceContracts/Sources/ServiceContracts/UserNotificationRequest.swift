@@ -5,6 +5,7 @@ public enum UserNotificationKind: String, Codable, Sendable, Hashable {
     case jobResult
     case hitlApproval
     case notice
+    case messagingMessage
 }
 
 /// Cross-process request to post a macOS user notification.
@@ -45,4 +46,7 @@ public enum UserNotificationUserInfoKey: String, Sendable {
     case kind = "kind"
     case jobResultID = "jobResultID"
     case approvalID = "approvalID"
+    case pluginID = "pluginID"
+    case threadID = "threadID"
+    case messagingMessageID = "messagingMessageID"
 }

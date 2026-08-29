@@ -125,6 +125,14 @@ public actor NotificationPostingService {
             }
         case .notice:
             break
+        case .messagingMessage:
+            info["kind"] = "messaging-message"
+            if let pluginID = request.userInfo[UserNotificationUserInfoKey.pluginID.rawValue] {
+                info["pluginID"] = pluginID
+            }
+            if let threadID = request.userInfo[UserNotificationUserInfoKey.threadID.rawValue] {
+                info["threadID"] = threadID
+            }
         }
         return info
     }

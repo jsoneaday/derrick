@@ -62,17 +62,20 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
     public let version: String
     public let description: String
     public let secrets: [PluginSecretField]
+    public let role: PluginRole
 
     public init(
         pluginID: String,
         version: String,
         description: String,
-        secrets: [PluginSecretField] = []
+        secrets: [PluginSecretField] = [],
+        role: PluginRole = .standard
     ) {
         self.pluginID = pluginID
         self.version = version
         self.description = description
         self.secrets = secrets
+        self.role = role
     }
 
     public func encodedJSON() throws -> String {
@@ -92,6 +95,9 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
         ]
         if !secrets.isEmpty {
             derrick["secrets"] = secrets.map(\.jsonObject)
+        }
+        if role == .connector {
+            derrick["role"] = PluginRole.connector.rawValue
         }
         let object: [String: Any] = [
             "$schema": PluginContract.agentPluginSchema,
@@ -169,6 +175,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     public let testInputJSON: String
     public let skillFiles: [PluginFactorySkillFile]
     public let secrets: [PluginSecretField]
+    public let role: PluginRole
 
     public init(
         pluginID: String,
@@ -177,7 +184,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         swiftSource: String,
         testInputJSON: String = "{}",
         skillFiles: [PluginFactorySkillFile] = [],
-        secrets: [PluginSecretField] = []
+        secrets: [PluginSecretField] = [],
+        role: PluginRole = .standard
     ) {
         self.pluginID = pluginID
         self.version = version
@@ -186,6 +194,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         self.testInputJSON = testInputJSON
         self.skillFiles = skillFiles
         self.secrets = secrets
+        self.role = role
     }
 
     enum CodingKeys: String, CodingKey {
@@ -195,6 +204,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
         case secrets
+        case role
     }
 
     public init(from decoder: Decoder) throws {
@@ -206,6 +216,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
         secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
+        role = try container.decodeIfPresent(PluginRole.self, forKey: .role) ?? .standard
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -218,6 +229,9 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         try container.encode(skillFiles, forKey: .skillFiles)
         if !secrets.isEmpty {
             try container.encode(secrets, forKey: .secrets)
+        }
+        if role != .standard {
+            try container.encode(role, forKey: .role)
         }
     }
 
@@ -241,7 +255,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
                 pluginID: pluginID,
                 version: version,
                 description: description,
-                secrets: secrets
+                secrets: secrets,
+                role: role
             ),
             swiftSource: swiftSource,
             testInput: input,

@@ -287,6 +287,8 @@ struct ContentView: View {
     @ObservedObject private var debugLogStore = DebugLogStore.shared
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
+    @StateObject private var messaging = MessagingStore()
+    @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
         SecretStore(account: "\(selectedProvider.rawValue)-api-key")
@@ -376,7 +378,9 @@ struct ContentView: View {
             if let helperModelSettings = helperModelSettings {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
-                    chatSessions: chatSessions
+                    chatSessions: chatSessions,
+                    messaging: messaging,
+                    workspace: $workspace
                 )
                     .frame(width: 296)
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
@@ -386,9 +390,23 @@ struct ContentView: View {
             }
 
             VStack(spacing: 0) {
-                ChatTabBarView(store: chatSessions)
-                mainPanel
+                if workspace == .messaging {
+                    MessagingTabBarView(store: messaging)
+                } else {
+                    ChatTabBarView(store: chatSessions)
+                }
+                if workspace == .messaging {
+                    MessagingConversationView(store: messaging)
+                } else {
+                    mainPanel
+                }
             }
+        }
+        .onChange(of: workspace) { _, newValue in
+            messaging.setWorkspaceActive(newValue == .messaging)
+        }
+        .onAppear {
+            messaging.setWorkspaceActive(workspace == .messaging)
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -640,6 +658,7 @@ struct ContentView: View {
                 sessionReady = true
                 bootstrapStatus.markReady()
                 await chatSessions.configure(repository: repo)
+                await messaging.configure(repository: repo)
                 await DerrickNotificationService.shared.activateSession(repository: repo)
                 if isDebugEnabled {
                     debugLogStore.log(
@@ -704,6 +723,7 @@ struct ContentView: View {
             sessionReady = true
             await PluginFactoryListStore.shared.configure(repository: repo)
             await chatSessions.configure(repository: repo)
+            await messaging.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
             if isDebugEnabled {
                 debugLogStore.log("UI client session synced after bootstrap ready")

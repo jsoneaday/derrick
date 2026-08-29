@@ -26,6 +26,22 @@ extension DBRepository {
         return try body(handle)
     }
 
+    /// One writer at a time across UI and derrickd. Rolls back on any throw.
+    static func withImmediateTransaction<T>(
+        on handle: OpaquePointer,
+        _ body: () throws -> T
+    ) throws -> T {
+        try execute("BEGIN IMMEDIATE;", on: handle)
+        do {
+            let value = try body()
+            try execute("COMMIT;", on: handle)
+            return value
+        } catch {
+            try? execute("ROLLBACK;", on: handle)
+            throw error
+        }
+    }
+
     /// Safe defaults for multi-process access (UI + AgentService + JobService, etc.).
     /// - WAL: concurrent readers + one writer without blocking the whole DB.
     /// - busy_timeout: wait for locks instead of failing with "database is locked".

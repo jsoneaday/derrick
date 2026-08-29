@@ -257,6 +257,43 @@ import Testing
         #expect(draft.manifestJSON.contains("slack_connection") == false)
     }
 
+    @Test func builderWritesConnectorRoleIntoCanonicalManifest() throws {
+        let response = PluginFactoryBuilderResponse(
+            pluginID: "slack-connection",
+            version: "1.0.0",
+            description: "Slack send and receive.",
+            swiftSource: "import Foundation\nprint(\"[]\")",
+            role: .connector
+        )
+        let draft = try response.draft()
+        let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
+        #expect(manifest.isConnector)
+        #expect(manifest.derrick?.role == .connector)
+    }
+
+    @Test func missingRoleDefaultsToStandard() throws {
+        let json = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift"}}}
+        """
+        let manifest = try AgentPluginManifest.decode(Data(json.utf8))
+        #expect(manifest.derrick?.role == .standard)
+        #expect(!manifest.isConnector)
+    }
+
+    @Test func invalidRoleIsRejected() {
+        let json = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift","role":"slack"}}}
+        """
+        do {
+            _ = try AgentPluginManifest.decode(Data(json.utf8))
+            Issue.record("Expected invalid role rejection")
+        } catch let error as PluginManifestError {
+            #expect(error == .invalidRole("slack"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test func invalidManifestIsBuilderCorrectable() {
         #expect(PluginFactoryError.invalidManifest("Invalid plugin id 'slack_connection'.").isBuilderCorrectable)
     }

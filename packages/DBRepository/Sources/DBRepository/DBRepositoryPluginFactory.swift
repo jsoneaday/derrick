@@ -130,6 +130,46 @@ public extension DBRepository {
         }
     }
 
+    func listLatestPluginFactoryManifests() throws -> [(pluginID: String, version: String, manifestJSON: String, reviewSummary: String)] {
+        try withDatabaseHandle { handle in
+            let sql = """
+            SELECT plugin_id, version, manifest_json, review_summary
+            FROM plugin_factory_releases r
+            WHERE created_at = (
+                SELECT MAX(created_at)
+                FROM plugin_factory_releases r2
+                WHERE r2.plugin_id = r.plugin_id
+            )
+            ORDER BY plugin_id ASC;
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                throw Self.sqliteError(handle: handle, fallback: "Failed to prepare latest plugin factory manifests.")
+            }
+            defer { sqlite3_finalize(statement) }
+            var rows: [(pluginID: String, version: String, manifestJSON: String, reviewSummary: String)] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard
+                    let id = sqlite3_column_text(statement, 0),
+                    let version = sqlite3_column_text(statement, 1),
+                    let manifest = sqlite3_column_text(statement, 2),
+                    let review = sqlite3_column_text(statement, 3)
+                else {
+                    continue
+                }
+                rows.append(
+                    (
+                        pluginID: String(cString: id),
+                        version: String(cString: version),
+                        manifestJSON: String(cString: manifest),
+                        reviewSummary: String(cString: review)
+                    )
+                )
+            }
+            return rows
+        }
+    }
+
     func deletePluginFactoryRelease(pluginID: String, version: String? = nil) throws {
         let versionClause = version.map {
             " AND version = \(quoted($0))"

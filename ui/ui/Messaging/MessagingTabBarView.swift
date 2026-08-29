@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct ChatTabBarView: View {
-    @ObservedObject var store: ChatSessionStore
+struct MessagingTabBarView: View {
+    @ObservedObject var store: MessagingStore
 
     private let stripColor = Color(red: 236.0 / 255.0, green: 236.0 / 255.0, blue: 233.0 / 255.0)
     private let selectedFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
@@ -25,23 +25,27 @@ struct ChatTabBarView: View {
         }
     }
 
-    private func browserTab(_ tab: ChatTab) -> some View {
-        let isSelected = store.selectedSessionID == tab.id
+    private func browserTab(_ tab: MessagingTab) -> some View {
+        let isSelected = store.selectedThreadID == tab.id
         return HStack(spacing: 6) {
             Button {
-                store.selectSession(id: tab.id)
+                Task { await store.selectThread(id: tab.id) }
             } label: {
                 HStack(spacing: 6) {
-                    if tab.isStreaming {
-                        ProgressView()
-                            .controlSize(.mini)
+                    if tab.muted {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
                     Text(tab.title)
                         .lineLimit(1)
                         .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    if tab.unreadCount > 0 {
+                        MessagingUnreadBadge(count: tab.unreadCount)
+                    }
                 }
-                .frame(maxWidth: 200, alignment: .leading)
+                .frame(maxWidth: 220, alignment: .leading)
             }
             .buttonStyle(.plain)
 
@@ -67,32 +71,20 @@ struct ChatTabBarView: View {
             BrowserTabShape(cornerRadius: tabCorner)
                 .fill(isSelected ? selectedFill : Color.primary.opacity(0.03))
         }
-        // Sit on top of the strip hairline so the selected tab merges into the pane.
         .padding(.bottom, isSelected ? -1 : 0)
         .zIndex(isSelected ? 1 : 0)
     }
 }
 
-/// Browser-style tab: rounded on the top only.
-struct BrowserTabShape: Shape {
-    var cornerRadius: CGFloat
+struct MessagingUnreadBadge: View {
+    let count: Int
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let r = min(cornerRadius, rect.height / 2, rect.width / 2)
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + r, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + r),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
+    var body: some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Color.accentColor, in: Capsule())
     }
 }
