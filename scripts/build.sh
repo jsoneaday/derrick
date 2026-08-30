@@ -35,7 +35,11 @@ if [[ "$run_tests" == "test" ]]; then
   echo "== Test Swift packages =="
   for pkg in packages/*/Package.swift; do
     dir="$(dirname "$pkg")"
-  name="$(basename "$dir")"
+    if ! grep -q 'testTarget' "$pkg"; then
+      echo "Skipping $dir (no test target)"
+      continue
+    fi
+    name="$(basename "$dir")"
     echo "--- $name ---"
     (cd "$dir" && swift test) || exit 1
   done

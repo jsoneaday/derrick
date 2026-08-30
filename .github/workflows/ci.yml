@@ -42,7 +42,13 @@ jobs:
       - name: Test Swift packages
         run: |
           for pkg in packages/*/Package.swift; do
-            (cd "$(dirname "$pkg")" && swift test)
+            dir="$(dirname "$pkg")"
+            if ! grep -q 'testTarget' "$pkg"; then
+              echo "Skipping $dir (no test target)"
+              continue
+            fi
+            echo "== Testing $dir =="
+            (cd "$dir" && swift test)
           done
       - name: Test ui scheme
         run: |
