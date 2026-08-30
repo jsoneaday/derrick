@@ -66,7 +66,7 @@ struct PolicyEngineTests {
         let engine = PolicyEngine(rules: [
             ToolRule.confirm(ToolNameMatcher(.exact("writeFile")))
         ])
-        let interceptor = PolicyToolCallInterceptor(interceptor: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: true))
+        let interceptor = PolicyToolCallInterceptor(engine: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: true))
         let adapter = PolicyToolCallInterceptorAdapter(interceptor: interceptor)
 
         let result: String = try await adapter.intercept(
@@ -84,7 +84,7 @@ struct PolicyEngineTests {
         let engine = PolicyEngine(rules: [
             ToolRule.confirm(ToolNameMatcher(.exact("writeFile")))
         ])
-        let interceptor = PolicyToolCallInterceptor(interceptor: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: false))
+        let interceptor = PolicyToolCallInterceptor(engine: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: false))
 
         do {
             _ = try await interceptor.intercept(
