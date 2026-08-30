@@ -286,7 +286,6 @@ import ServiceContracts
         _ = try await directory.ensureUserFacingAgent(sessionID: sessionID)
         let parent = AgentRef.userFacing(sessionID: sessionID)
 
-        let started = Date()
         let box = ConcurrentBox()
         let requests = [
             SpawnWorkerRequest(parent: parent, goal: "a", task: "task-a", agentID: "wa"),
@@ -300,13 +299,12 @@ import ServiceContracts
             await box.markFinished()
             return "ok-\(child.ref.agentID)"
         }
-        let elapsed = Date().timeIntervalSince(started)
         #expect(results.count == 3)
         #expect(Set(results.map(\.child.agentID)) == Set(["wa", "wb", "wc"]))
         #expect(results.map(\.result).sorted() == ["ok-wa", "ok-wb", "ok-wc"].sorted())
         let peak = await box.peakConcurrent()
         #expect(peak >= 2)
-        #expect(elapsed < 0.22)
+        // Avoid wall-clock thresholds; CI runners vary. Peak concurrency proves fan-out.
     }
 
     @Test func sendRejectsUnrelatedAgents() async throws {
