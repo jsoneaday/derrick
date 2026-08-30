@@ -866,7 +866,7 @@ struct ContentView: View {
 
     private var emptyState: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text("dave returns!")
+            Text("What can Derrick help with?")
                 .font(.system(size: 36, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color(nsColor: .labelColor))
         }

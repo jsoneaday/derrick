@@ -1,0 +1,8 @@
+// Copy to Config/Signing.xcconfig and set your Apple Developer Team ID.
+// Then run: ./scripts/configure-signing.sh
+//
+// DERRICK_TEAM_ID = ABCDE12345
+// DERRICK_APP_GROUP = ABCDE12345.derrick.shared
+
+DERRICK_TEAM_ID = YOUR_TEAM_ID_HERE
+DERRICK_APP_GROUP = YOUR_TEAM_ID_HERE.derrick.shared

@@ -18,7 +18,7 @@
 
 See [adr-headless-backend.md](adr-headless-backend.md).
 
-**Packaging (locked):** UI embeds **DockerRunnerHelper** XPC + **JobKeepAlive** LoginItem (`derrickd`). Agent/Job/MCP run **in-process** inside derrickd. UI talks only to the daemon Mach service (`VUSK4B2YKQ.derrick.shared.daemon`). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
+**Packaging (locked):** UI embeds **DockerRunnerHelper** XPC + **JobKeepAlive** LoginItem (`derrickd`). Agent/Job/MCP run **in-process** inside derrickd. UI talks only to the daemon Mach service (`<TEAM_ID>.derrick.shared.daemon`). Does not prevent sleep; overdue jobs start late with `status_detail`, interrupted `running` jobs fail with a clear code.
 
 ## Call rules
 

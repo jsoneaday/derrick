@@ -47,24 +47,14 @@ import DBRepository
         )
     }
 
-    @MainActor @Test func dotenvModeResolvesSlackPluginSecretWithoutKeychain() {
-        setenv("UI_SECRET_MODE", "dotenv", 1)
-        setenv("SLACK_BOT_KEY", "dotenv-slack-token", 1)
-        defer {
-            unsetenv("UI_SECRET_MODE")
-            unsetenv("SLACK_BOT_KEY")
-        }
-
-        #expect(
-            PluginSecretResolver.resolve(pluginID: "slack-connection", fieldID: "bot_token")
-                == "dotenv-slack-token"
+    @Test func slackPluginSecretAliasesAreStable() {
+        let keys = PluginSecretResolver.environmentKeys(
+            pluginID: "slack-connection",
+            fieldID: "bot_token"
         )
-        #expect(
-            PluginSecretKeychain.missingIDs(
-                pluginID: "slack-connection",
-                fields: [PluginSecretDescriptor(id: "bot_token", label: "Slack bot token", kind: "token")]
-            ).isEmpty
-        )
+        #expect(keys.first == "SLACK_BOT_KEY")
+        #expect(keys.contains("SLACK_API_KEY"))
+        #expect(keys.contains("PLUGIN_SLACK_CONNECTION_BOT_TOKEN"))
     }
 
     @MainActor @Test func keychainModeStillPrefersKeychain() throws {

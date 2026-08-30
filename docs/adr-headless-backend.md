@@ -16,7 +16,7 @@ The UI + multiple embedded XPC services (Agent, Job, MCP) + JobKeepAlive created
 | **`derrick.ui.DockerRunnerHelper`** | Remains external constrained runner for `script_exec` and plugin execution (see [adr-swift-script-runtime.md](adr-swift-script-runtime.md)) |
 | Docker Engine | Remains external |
 
-- UI ↔ Daemon: **XPC** over Mach service `VUSK4B2YKQ.derrick.shared.daemon` (app-group child — required for sandboxed UI `mach-lookup`)
+- UI ↔ Daemon: **XPC** over Mach service `<TEAM_ID>.derrick.shared.daemon` (app-group child — required for sandboxed UI `mach-lookup`)
 - Daemon ↔ Docker helper: **XPC** (existing)
 - Inside Daemon: **in-process** modules (no XPC between agent/job/mcp)
 - LaunchAgent **Label** remains `derrick.ui.Daemon`; embedded SM plist is `derrick.ui.Daemon.plist`

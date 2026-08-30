@@ -2,7 +2,7 @@
 //  ConfigureScriptReviewer.swift
 //  ui
 //
-//  Created by David Choi on 7/21/26.
+//  Derrick
 //
 
 import Foundation

@@ -100,8 +100,8 @@ struct SidebarView: View {
                         .overlay(Text("D").foregroundStyle(.white))
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("dave")
-                        Text("Free plan")
+                        Text("Account")
+                        Text("Local")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

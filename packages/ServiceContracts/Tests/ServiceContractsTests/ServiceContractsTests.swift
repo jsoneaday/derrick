@@ -570,7 +570,7 @@ import Testing
         #expect(url.lastPathComponent == "derrick.ui.Daemon.session.plist")
         #expect(DerrickServiceID.daemonSessionLaunchdLabel == "derrick.ui.Daemon.session")
         #expect(DerrickServiceID.daemonSessionLaunchdLabel != DerrickServiceID.daemon.rawValue)
-        #expect(DerrickServiceID.daemon.machServiceName == "VUSK4B2YKQ.derrick.shared.daemon")
+        #expect(DerrickServiceID.daemon.machServiceName == "\(DerrickServiceID.appGroupID).daemon")
     }
 
     @Test func derrickDaemonHygieneDetectsOrphanPath() {

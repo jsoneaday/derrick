@@ -22,6 +22,10 @@ DerivedData/
 # Local secrets / signing
 .env
 .env.*
+!.env.example
+Config/Signing.xcconfig
+ui/ui/Resources/.env
+**/Resources/.env
 *.pem
 *.p8
 *.key

@@ -12,7 +12,7 @@ final class uiUITests: XCTestCase {
         app.launchEnvironment["GEMINI_API_KEY"] = "ui-test-placeholder"
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["dave returns!"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["What can Derrick help with?"].waitForExistence(timeout: 10))
 
         XCTAssertTrue(app.exists)
     }

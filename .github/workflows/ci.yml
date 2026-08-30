@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  secrets:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify no secrets in git history
+        run: chmod +x scripts/verify-no-secrets.sh && ./scripts/verify-no-secrets.sh --history
+
+  build-and-test:
+    runs-on: macos-latest
+    needs: secrets
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -workspace derrick.xcworkspace -scheme ui
+      - name: Build ui scheme
+        run: |
+          xcodebuild build \
+            -workspace derrick.xcworkspace \
+            -scheme ui \
+            -destination 'platform=macOS' \
+            -configuration Debug
+      - name: Test Swift packages
+        run: |
+          for pkg in packages/*/Package.swift; do
+            (cd "$(dirname "$pkg")" && swift test)
+          done
+      - name: Test ui scheme
+        run: |
+          xcodebuild test \
+            -workspace derrick.xcworkspace \
+            -scheme ui \
+            -destination 'platform=macOS' \
+            -configuration Debug

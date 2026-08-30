@@ -2,7 +2,7 @@
 //  PromptView.swift
 //  ui
 //
-//  Created by David Choi on 7/4/26.
+//  Derrick
 //
 
 import SwiftUI
