@@ -11,9 +11,13 @@ let package = Package(
             targets: ["PolicyEngine"]
         )
     ],
+    dependencies: [
+        .package(path: "../MemorySystem"),
+    ],
     targets: [
         .target(
             name: "PolicyEngine",
+            dependencies: ["MemorySystem"],
             path: "Sources/PolicyEngine"
         ),
         .testTarget(
