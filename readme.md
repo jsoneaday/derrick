@@ -1,6 +1,6 @@
 # Derrick
 
-A native Swift macOS desktop agent harness: chat with LLM providers, run isolated sandboxed agent actions in Docker, build connector plugins, schedule background jobs, and manage messaging connectors — with human-in-the-loop approvals and a security-first execution model.
+A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isolated sandboxed agent actions in Docker, build connector plugins, schedule background jobs, and manage messaging connectors — with human-in-the-loop approvals and a security-first execution model.
 
 **License:** [Apache 2.0](LICENSE)
 
@@ -118,7 +118,7 @@ Connector plugins declare `role: connector` in the manifest. The host calls vend
 
 ### Prerequisites
 
-- macOS with **Xcode 27** (Swift 6.4+)
+- macOS 27 with **Xcode 27** (Swift 6.4+)
 - Docker Desktop
 - Apple Developer account (for signing entitlements)
 
