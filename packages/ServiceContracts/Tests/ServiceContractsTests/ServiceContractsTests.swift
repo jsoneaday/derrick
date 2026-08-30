@@ -227,6 +227,18 @@ import Testing
         #expect(dDecoded.actor == "user")
     }
 
+    @Test func slackMessageDecodingUsesTimestamp() {
+        let message = SlackWebAPI.decodeMessage([
+            "ts": "1710000000.123456",
+            "user": "U123",
+            "text": "hello",
+        ])
+        #expect(message?.timestamp == "1710000000.123456")
+        #expect(message?.text == "hello")
+        #expect(message?.userID == "U123")
+        #expect(SlackMessage.date(fromSlackTimestamp: "1710000000.123456") != nil)
+    }
+
     @Test func pluginSecretEnvironmentKeysIncludeSlackAliases() {
         let keys = PluginSecretResolver.environmentKeys(
             pluginID: "slack-connection",

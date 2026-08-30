@@ -166,6 +166,23 @@ final class MessagingSessionStore: ObservableObject {
         visibleMessages = []
     }
 
+    func setLastError(_ message: String?) {
+        lastError = message
+    }
+
+    func reloadThreadsForSelectedConnector(autoOpenMostRecent: Bool) async {
+        await reloadThreads(autoOpenMostRecent: autoOpenMostRecent)
+    }
+
+    func reloadMessagesForSelectedThread() async {
+        await loadNewestWindow()
+    }
+
+    func reloadMessagesForThread(id: String) async {
+        guard selectedThreadID == id else { return }
+        await loadNewestWindow()
+    }
+
     private func reloadThreads(autoOpenMostRecent: Bool) async {
         guard let repository, let pluginID = selectedPluginID else {
             threads = []

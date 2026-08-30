@@ -3,6 +3,8 @@ import SwiftUI
 
 struct MessagingConversationView: View {
     @ObservedObject var store: MessagingStore
+    @State private var draft = ""
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
@@ -34,11 +36,29 @@ struct MessagingConversationView: View {
         VStack(spacing: 10) {
             Text(store.selectedConnector?.displayName ?? "Messaging")
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-            Text("No conversations yet. Incoming messages will open tabs here.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
+            if store.isSlackSyncing {
+                ProgressView("Loading Slack channels…")
+                    .font(.callout)
+            } else {
+                Text("No conversations yet. Derrick will list channels the bot has joined.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                if store.selectedPluginID == MessagingSlackRuntime.pluginID {
+                    Button("Refresh channels") {
+                        Task { await store.refreshSlackConnector() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
         }
     }
 
@@ -130,25 +150,54 @@ struct MessagingConversationView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Sending and live receive are not connected yet. Conversations will fill in as messages arrive.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Text("Message")
+        VStack(alignment: .leading, spacing: 8) {
+            if store.isSlackSyncing {
+                Text("Syncing with Slack…")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .font(.system(size: 13))
-                Spacer()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-            )
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Message", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .focused($composerFocused)
+                    .disabled(!store.canSendInSelectedThread)
+                    .onSubmit { submitDraft() }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+
+                Button {
+                    submitDraft()
+                } label: {
+                    Image(systemName: store.isSending ? "hourglass" : "paperplane.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!store.canSendInSelectedThread || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 16)
+    }
+
+    private func submitDraft() {
+        let text = draft
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        draft = ""
+        Task {
+            await store.sendMessage(text)
+            composerFocused = true
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {

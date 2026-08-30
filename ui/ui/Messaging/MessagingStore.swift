@@ -8,8 +8,13 @@ import ServiceContracts
 final class MessagingStore: ObservableObject {
     let catalog: MessagingCatalogStore
     let session: MessagingSessionStore
+    @Published var isSlackSyncing = false
+    @Published var isSending = false
+
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
+    private let slackRuntime = MessagingSlackRuntime()
+    private var workspaceActive = false
 
     init() {
         catalog = MessagingCatalogStore()
@@ -39,6 +44,12 @@ final class MessagingStore: ObservableObject {
     }
     var selectedThread: MessagingThreadDTO? { session.selectedThread }
     var currentRoute: MessagingRoute { session.currentRoute }
+    var canSendInSelectedThread: Bool {
+        selectedPluginID == MessagingSlackRuntime.pluginID
+            && selectedThread != nil
+            && !isSending
+            && !isSlackSyncing
+    }
 
     func configure(repository: DBRepository) async {
         self.repository = repository
@@ -48,7 +59,14 @@ final class MessagingStore: ObservableObject {
     }
 
     func setWorkspaceActive(_ active: Bool) {
+        workspaceActive = active
         session.setWorkspaceActive(active)
+        guard let repository else { return }
+        if active, selectedPluginID == MessagingSlackRuntime.pluginID {
+            slackRuntime.resumePolling(store: self, repository: repository)
+        } else {
+            slackRuntime.stopPolling()
+        }
     }
 
     func syncConnectorsFromFactory() async {
@@ -68,6 +86,38 @@ final class MessagingStore: ObservableObject {
             )
         }
         await session.openConnector(pluginID: pluginID)
+        guard let repository, pluginID == MessagingSlackRuntime.pluginID else { return }
+        await slackRuntime.bootstrap(store: self, repository: repository, session: session)
+        if workspaceActive {
+            slackRuntime.resumePolling(store: self, repository: repository)
+        }
+    }
+
+    func refreshSlackConnector() async {
+        guard let repository, selectedPluginID == MessagingSlackRuntime.pluginID else { return }
+        await slackRuntime.bootstrap(store: self, repository: repository, session: session)
+    }
+
+    func sendMessage(_ text: String) async {
+        guard let repository,
+              let thread = selectedThread,
+              selectedPluginID == MessagingSlackRuntime.pluginID else {
+            return
+        }
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await slackRuntime.send(
+                text: text,
+                thread: thread,
+                repository: repository,
+                store: self,
+                session: session
+            )
+            session.setLastError(nil)
+        } catch {
+            session.setLastError(error.localizedDescription)
+        }
     }
 
     func selectThread(id: String) async {

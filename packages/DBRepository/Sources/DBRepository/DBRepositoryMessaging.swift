@@ -59,6 +59,7 @@ public extension DBRepository {
     /// Creates a thread if needed. Never overwrites mute or unread on conflict.
     func upsertMessagingThread(_ thread: MessagingThreadDTO) throws {
         try withDatabaseHandle { handle in
+            try requireMessagingConnector(pluginID: thread.pluginID, on: handle)
             try ensureMessagingThread(thread, on: handle)
         }
     }
