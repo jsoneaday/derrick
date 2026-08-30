@@ -90,20 +90,22 @@ scan_history() {
     fail "A .env file appears in git history. Rotate secrets and rewrite history."
   fi
 
-  local needles=(
-    'sk-proj-'
-    'xoxb-'
-    'xoxp-'
-    'xoxe.xox'
-    'BEGIN RSA PRIVATE KEY'
-    'BEGIN OPENSSH PRIVATE KEY'
+  # Match full token shapes in historical diffs, not doc examples like `xoxb-`.
+  local history_patterns=(
+    'sk-proj-[A-Za-z0-9_-]{10,}'
+    'xoxb-[A-Za-z0-9-]{10,}'
+    'xoxp-[A-Za-z0-9-]{10,}'
+    'xoxe\.[A-Za-z0-9._-]{10,}'
+    'AIza[0-9A-Za-z_-]{20,}'
+    'AQ\.[A-Za-z0-9_-]{20,}'
+    'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'
   )
 
-  for needle in "${needles[@]}"; do
-    if git log --all -S"$needle" --oneline -- . ':(exclude)scripts/verify-no-secrets.sh' | head -1 | grep -q .; then
-      local hits
-      hits="$(git log --all -S"$needle" --oneline -- . ':(exclude)scripts/verify-no-secrets.sh' | head -3)"
-      fail "History contains '$needle'. Review and rotate if real:\n$hits"
+  for pattern in "${history_patterns[@]}"; do
+    local hits
+    hits="$(git log --all -G"$pattern" --oneline -- . ':(exclude)scripts/verify-no-secrets.sh' | head -3 || true)"
+    if [[ -n "$hits" ]]; then
+      fail "History contains token matching '$pattern'. Review and rotate if real:\n$hits"
     fi
   done
 
