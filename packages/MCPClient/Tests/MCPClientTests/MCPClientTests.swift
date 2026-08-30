@@ -45,16 +45,16 @@ private struct InMemoryBackend: MCPBackend {
     }
 
     func callTool(named name: String, arguments: [String : Value]) async throws -> MCPToolResult {
-        MCPToolResult(content: "\(name): \(arguments.count)")
+        MCPToolResult(content: [.text("\(name): \(arguments.count)")], isError: false)
     }
 
     func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {
         let results = request.invocations.map { invocation in
-            MCPToolResult(content: "\(invocation.toolName): \(invocation.arguments.count)")
+            MCPToolResult(content: [.text("\(invocation.toolName): \(invocation.arguments.count)")], isError: false)
         }
         return MCPToolBatchResult(
             results: results,
-            combinedContent: results.map(\.content).joined(separator: "\n"),
+            combinedContent: results.map(\.text).joined(separator: "\n"),
             isError: false
         )
     }
