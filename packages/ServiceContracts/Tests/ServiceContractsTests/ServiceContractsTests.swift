@@ -3,10 +3,20 @@ import Testing
 @testable import ServiceContracts
 
 @Suite struct ServiceContractsTests {
-    private var hasSharedAppGroupContainer: Bool {
-        FileManager.default.containerURL(
+    private func appGroupCrossProcessStorageIsAvailable() -> Bool {
+        guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier
-        ) != nil
+        ) else {
+            return false
+        }
+        let probe = container.appendingPathComponent("servicecontracts_ci_probe.txt")
+        do {
+            try Data("probe".utf8).write(to: probe, options: .atomic)
+            try FileManager.default.removeItem(at: probe)
+            return true
+        } catch {
+            return false
+        }
     }
 
     @Test func toolExecutionOutcomeRoundTripsOutputAndDiagnostics() throws {
@@ -509,7 +519,7 @@ import Testing
     }
 
     @Test func derrickNotificationLaunchDetectsPendingPresentationIntent() {
-        guard hasSharedAppGroupContainer else { return }
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
         let id = "FE1AB9C3-C51F-4A8D-AB94-0C01E9357D19"
         DerrickJobResultPresentationWake.post(resultID: id)
         defer { _ = DerrickJobResultPresentationWake.takePendingResultID() }
@@ -518,7 +528,7 @@ import Testing
     }
 
     @Test func derrickUISessionPresenceTracksLivePID() {
-        guard hasSharedAppGroupContainer else { return }
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
         DerrickUISessionPresence.clearInteractiveSession()
         defer { DerrickUISessionPresence.clearInteractiveSession() }
         #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
