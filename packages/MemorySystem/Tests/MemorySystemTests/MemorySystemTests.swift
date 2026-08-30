@@ -55,6 +55,7 @@ import Testing
     @Test func memoryBudgetUsesModelSpecificWorkingSetLimits() {
         #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-2.5-flash-lite") == 50_000)
         #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-3.1-flash-lite") == 50_000)
+        #expect(MemoryBudget.maxTokenCount(forProvider: "gemini", modelName: "gemini-3.7-flash") == 50_000)
         #expect(MemoryBudget.maxTokenCount(forProvider: "openai", modelName: "gpt-5.6-luna") == 25_000)
     }
 

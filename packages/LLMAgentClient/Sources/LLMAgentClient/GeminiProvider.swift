@@ -3,6 +3,7 @@ import Foundation
 public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
     case gemini25FlashLite = "gemini-2.5-flash-lite"
     case gemini31FlashLite = "gemini-3.1-flash-lite"
+    case gemini37Flash = "gemini-3.7-flash"
 
     public var id: AgentModelID {
         .init(provider: "gemini", name: rawValue)
@@ -10,9 +11,7 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
 
     public var maxSupportedContextTokens: Int {
         switch self {
-        case .gemini25FlashLite:
-            return 1_048_576
-        case .gemini31FlashLite:
+        case .gemini25FlashLite, .gemini31FlashLite, .gemini37Flash:
             return 1_048_576
         }
     }
@@ -21,7 +20,7 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
         switch self {
         case .gemini25FlashLite:
             return 64_000
-        case .gemini31FlashLite:
+        case .gemini31FlashLite, .gemini37Flash:
             return 128_000
         }
     }
@@ -31,6 +30,8 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
         switch self {
         case .gemini25FlashLite, .gemini31FlashLite:
             return ModelTokenPricing(inputUSDPer1MTokens: 0.10, outputUSDPer1MTokens: 0.40)
+        case .gemini37Flash:
+            return ModelTokenPricing(inputUSDPer1MTokens: 1.50, outputUSDPer1MTokens: 7.50)
         }
     }
 }

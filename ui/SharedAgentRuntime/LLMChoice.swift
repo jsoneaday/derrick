@@ -44,7 +44,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
     var defaultModel: LLMModelChoice {
         switch self {
         case .google:
-            return .gemini(.gemini31FlashLite)
+            return .gemini(.gemini37Flash)
         case .openai:
             return .openai(.gpt56Luna)
         }
@@ -56,8 +56,9 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
     case openai(OpenAIModel)
 
     static let allCases: [LLMModelChoice] = [
-        .gemini(.gemini25FlashLite),
+        .gemini(.gemini37Flash),
         .gemini(.gemini31FlashLite),
+        .gemini(.gemini25FlashLite),
         .openai(.gpt54Mini),
         .openai(.gpt54),
         .openai(.gpt55),

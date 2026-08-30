@@ -13,6 +13,7 @@ struct ModelTests {
         #expect(GeminiModel.gemini31FlashLite.id.provider == "gemini")
         #expect(GeminiModel.gemini31FlashLite.id.rawValue == "gemini-3.1-flash-lite")
         #expect(GeminiModel.gemini31FlashLite.maxSupportedContextTokens > GeminiModel.gemini31FlashLite.maxIdealContextTokens)
+        #expect(GeminiModel.gemini37Flash.rawValue == "gemini-3.7-flash")
     }
 
     @Test func requestPromptBuildsMessages() {
