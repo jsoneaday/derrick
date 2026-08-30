@@ -122,6 +122,11 @@ struct SidebarView: View {
         }
         .task {
             await pluginFactoryList.reload()
+            await messaging.syncConnectorsFromFactory()
+        }
+        .onChange(of: workspace) { _, newValue in
+            guard newValue == .messaging else { return }
+            Task { await messaging.syncConnectorsFromFactory() }
         }
         .onChange(of: chatSessions.selectedTab?.turns.count ?? 0) { _, _ in
             Task {

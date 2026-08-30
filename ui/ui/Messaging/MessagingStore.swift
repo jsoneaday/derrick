@@ -8,6 +8,7 @@ import ServiceContracts
 final class MessagingStore: ObservableObject {
     let catalog: MessagingCatalogStore
     let session: MessagingSessionStore
+    private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -40,6 +41,7 @@ final class MessagingStore: ObservableObject {
     var currentRoute: MessagingRoute { session.currentRoute }
 
     func configure(repository: DBRepository) async {
+        self.repository = repository
         await catalog.configure(repository: repository)
         session.configure(repository: repository, catalog: catalog)
         session.dropSelectionIfConnectorMissing()
@@ -59,6 +61,12 @@ final class MessagingStore: ObservableObject {
     }
 
     func openConnector(pluginID: String) async {
+        if let repository {
+            _ = await MessagingConnectorCredentials.ensureIfNeeded(
+                pluginID: pluginID,
+                repository: repository
+            )
+        }
         await session.openConnector(pluginID: pluginID)
     }
 

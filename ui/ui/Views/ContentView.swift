@@ -1158,13 +1158,46 @@ struct ContentView: View {
         prompt = ""
         promptFocusToken += 1
 
-        chatSessions.sendPrompt(
-            currentPrompt,
-            apiKey: resolveAPIKey() ?? "",
-            model: selectedModel
-        ) { message in
-            errorMessage = message
+        Task { @MainActor in
+            if let pluginID = Self.slashPluginID(from: currentPrompt),
+               await isMessagingConnector(pluginID) {
+                await routeToMessagingConnector(pluginID)
+                return
+            }
+
+            chatSessions.sendPrompt(
+                currentPrompt,
+                apiKey: resolveAPIKey() ?? "",
+                model: selectedModel
+            ) { message in
+                errorMessage = message
+            }
         }
+    }
+
+    private func routeToMessagingConnector(_ pluginID: String) async {
+        await messaging.syncConnectorsFromFactory()
+        workspace = .messaging
+        await messaging.openConnector(pluginID: pluginID)
+    }
+
+    private func isMessagingConnector(_ pluginID: String) async -> Bool {
+        guard let repository else { return false }
+        let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
+        guard let row = manifests.first(where: { $0.pluginID == pluginID }) else { return false }
+        return AgentPluginManifest.isConnector(manifestJSON: row.manifestJSON)
+    }
+
+    private static func slashPluginID(from prompt: String) -> String? {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return nil }
+        let parts = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        guard let first = parts.first else { return nil }
+        let pluginID = String(first.dropFirst())
+        guard !pluginID.isEmpty, pluginID != "create-plugin", pluginID != "edit-plugin" else {
+            return nil
+        }
+        return pluginID
     }
 
     private func attachFiles() {

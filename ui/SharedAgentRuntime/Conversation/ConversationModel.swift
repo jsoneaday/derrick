@@ -420,6 +420,7 @@ final class ConversationModel {
     ) async -> Bool {
         let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: fields)
         guard !missing.isEmpty else { return true }
+        if PluginSecretResolver.usesDotenvOnly { return false }
         guard let approvalPresenter else { return false }
         let payload = PluginCredentialPromptPayload(pluginID: pluginID, secrets: missing)
         guard let data = try? JSONEncoder().encode(payload) else { return false }

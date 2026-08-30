@@ -29,12 +29,13 @@ final class MessagingCatalogStore: ObservableObject {
                 try await repository.upsertMessagingConnector(
                     MessagingConnectorDTO(
                         pluginID: row.pluginID,
-                        displayName: Self.displayName(pluginID: row.pluginID, manifestJSON: row.manifestJSON)
+                        displayName: Self.displayName(pluginID: row.pluginID)
                     )
                 )
             }
             let stored = try await repository.listMessagingConnectors()
-            connectors = stored.filter { connectorIDs.contains($0.pluginID) }
+            let storedByID = Dictionary(uniqueKeysWithValues: stored.map { ($0.pluginID, $0) })
+            connectors = connectorIDs.compactMap { storedByID[$0] }
         } catch {
             lastError = error.localizedDescription
         }
@@ -59,13 +60,13 @@ final class MessagingCatalogStore: ObservableObject {
         connectors.contains { $0.pluginID == pluginID }
     }
 
-    private static func displayName(pluginID: String, manifestJSON: String) -> String {
-        guard let data = manifestJSON.data(using: .utf8),
-              let manifest = try? AgentPluginManifest.decode(data)
-        else {
-            return pluginID
-        }
-        let trimmed = manifest.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? pluginID : trimmed
+    private static func displayName(pluginID: String) -> String {
+        pluginID
+            .split(separator: "-")
+            .map { part in
+                let lower = part.lowercased()
+                return lower.prefix(1).uppercased() + lower.dropFirst()
+            }
+            .joined(separator: " ")
     }
 }

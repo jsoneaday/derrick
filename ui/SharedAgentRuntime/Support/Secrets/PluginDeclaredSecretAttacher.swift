@@ -15,7 +15,7 @@ public struct PluginDeclaredSecretAttacher: HostHTTPSecretAttacher {
 
         var values: [String: String] = [:]
         for field in fields {
-            if let value = try? PluginSecretKeychain.load(pluginID: pluginID, fieldID: field.id),
+            if let value = PluginSecretResolver.resolve(pluginID: pluginID, fieldID: field.id),
                !value.isEmpty {
                 values[field.id] = value
             }

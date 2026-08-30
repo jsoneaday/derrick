@@ -2,6 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
+import ServiceContracts
 import Testing
 import DBRepository
 @testable import ui
@@ -43,6 +44,26 @@ import DBRepository
                 account: "gemini-3.1-flash-lite",
                 environmentKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
             ) == "dotenv-gemini"
+        )
+    }
+
+    @MainActor @Test func dotenvModeResolvesSlackPluginSecretWithoutKeychain() {
+        setenv("UI_SECRET_MODE", "dotenv", 1)
+        setenv("SLACK_BOT_KEY", "dotenv-slack-token", 1)
+        defer {
+            unsetenv("UI_SECRET_MODE")
+            unsetenv("SLACK_BOT_KEY")
+        }
+
+        #expect(
+            PluginSecretResolver.resolve(pluginID: "slack-connection", fieldID: "bot_token")
+                == "dotenv-slack-token"
+        )
+        #expect(
+            PluginSecretKeychain.missingIDs(
+                pluginID: "slack-connection",
+                fields: [PluginSecretDescriptor(id: "bot_token", label: "Slack bot token", kind: "token")]
+            ).isEmpty
         )
     }
 

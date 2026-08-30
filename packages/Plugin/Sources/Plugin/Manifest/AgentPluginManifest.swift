@@ -246,8 +246,20 @@ extension AgentPluginManifest {
         guard let data = manifestJSON.data(using: .utf8),
               let manifest = try? decode(data)
         else {
-            return false
+            return connectorRoleFromRawJSON(manifestJSON) == PluginRole.connector.rawValue
         }
         return manifest.isConnector
+    }
+
+    private static func connectorRoleFromRawJSON(_ manifestJSON: String) -> String? {
+        guard let data = manifestJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let extensions = object["extensions"] as? [String: Any],
+              let derrick = extensions[PluginContract.derrickExtensionNamespace] as? [String: Any],
+              let role = derrick["role"] as? String
+        else {
+            return nil
+        }
+        return role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

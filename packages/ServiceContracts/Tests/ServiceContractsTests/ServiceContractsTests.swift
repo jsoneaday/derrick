@@ -227,6 +227,16 @@ import Testing
         #expect(dDecoded.actor == "user")
     }
 
+    @Test func pluginSecretEnvironmentKeysIncludeSlackAliases() {
+        let keys = PluginSecretResolver.environmentKeys(
+            pluginID: "slack-connection",
+            fieldID: "bot_token"
+        )
+        #expect(keys.first == "SLACK_BOT_KEY")
+        #expect(keys.contains("SLACK_API_KEY"))
+        #expect(keys.contains("PLUGIN_SLACK_CONNECTION_BOT_TOKEN"))
+    }
+
     @Test func pluginSecretKeychainAccountIsStable() {
         #expect(
             PluginSecretKeychain.account(pluginID: "slack-connection", fieldID: "password")

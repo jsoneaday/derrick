@@ -8,6 +8,10 @@ public enum PluginSecretKeychain: Sendable {
     }
 
     public static func load(pluginID: String, fieldID: String) throws -> String? {
+        PluginSecretResolver.resolve(pluginID: pluginID, fieldID: fieldID)
+    }
+
+    public static func loadFromKeychain(pluginID: String, fieldID: String) throws -> String? {
         let account = account(pluginID: pluginID, fieldID: fieldID)
         for service in services() {
             if let value = try read(service: service, account: account) {
@@ -32,7 +36,7 @@ public enum PluginSecretKeychain: Sendable {
 
     public static func missingIDs(pluginID: String, fields: [PluginSecretDescriptor]) -> [PluginSecretDescriptor] {
         fields.filter { field in
-            let value = try? load(pluginID: pluginID, fieldID: field.id)
+            let value = PluginSecretResolver.resolve(pluginID: pluginID, fieldID: field.id)
             return value == nil || value?.isEmpty == true
         }
     }
