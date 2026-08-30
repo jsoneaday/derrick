@@ -100,10 +100,9 @@ scan_history() {
   )
 
   for needle in "${needles[@]}"; do
-    if git log --all -S"$needle" --oneline | head -1 | grep -q .; then
-      # Allow test fixtures only if clearly fake — still flag for manual review.
+    if git log --all -S"$needle" --oneline -- . ':(exclude)scripts/verify-no-secrets.sh' | head -1 | grep -q .; then
       local hits
-      hits="$(git log --all -S"$needle" --oneline | head -3)"
+      hits="$(git log --all -S"$needle" --oneline -- . ':(exclude)scripts/verify-no-secrets.sh' | head -3)"
       fail "History contains '$needle'. Review and rotate if real:\n$hits"
     fi
   done
