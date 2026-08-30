@@ -3,6 +3,12 @@ import Testing
 @testable import ServiceContracts
 
 @Suite struct ServiceContractsTests {
+    private var hasSharedAppGroupContainer: Bool {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier
+        ) != nil
+    }
+
     @Test func toolExecutionOutcomeRoundTripsOutputAndDiagnostics() throws {
         let outcome = ToolExecutionOutcome.failure(
             status: .blocked,
@@ -503,6 +509,7 @@ import Testing
     }
 
     @Test func derrickNotificationLaunchDetectsPendingPresentationIntent() {
+        guard hasSharedAppGroupContainer else { return }
         let id = "FE1AB9C3-C51F-4A8D-AB94-0C01E9357D19"
         DerrickJobResultPresentationWake.post(resultID: id)
         defer { _ = DerrickJobResultPresentationWake.takePendingResultID() }
@@ -511,6 +518,7 @@ import Testing
     }
 
     @Test func derrickUISessionPresenceTracksLivePID() {
+        guard hasSharedAppGroupContainer else { return }
         DerrickUISessionPresence.clearInteractiveSession()
         defer { DerrickUISessionPresence.clearInteractiveSession() }
         #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
