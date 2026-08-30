@@ -60,6 +60,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
 
 struct LLMModelSettingsView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    private let credentialResolver = AppSecretResolver()
     @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @ObservedObject private var usageLimits = UsageLimitsService.shared
     @ObservedObject private var containerLifecycle = ContainerLifecycleSettingsService.shared
@@ -564,7 +565,14 @@ struct LLMModelSettingsView: View {
     ) -> some View {
         Picker(accessibilityLabel, selection: selection) {
             ForEach(LLMModelChoice.allCases) { model in
-                Text(model.helperDisplayName).tag(model)
+                Text(model.helperDisplayName)
+                    .tag(model)
+                    .disabled(
+                        !LLMProviderCredentialGate.hasAPIKey(
+                            for: model.provider,
+                            resolver: credentialResolver
+                        )
+                    )
             }
         }
         .pickerStyle(.menu)

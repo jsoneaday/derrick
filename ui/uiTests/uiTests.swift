@@ -98,6 +98,28 @@ import DBRepository
         #expect(LLMProviderChoice.openai.apiKeyEnvironmentKeys.contains("OPENAI_API_KEY"))
     }
 
+    @MainActor @Test func llmProviderCredentialGateDetectsConfiguredProviders() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let uiFolder = root.appendingPathComponent("ui", isDirectory: true)
+        try FileManager.default.createDirectory(at: uiFolder, withIntermediateDirectories: true)
+        try "UI_SECRET_MODE=dotenv\nOPENAI_API_KEY=openai-test\n".write(
+            to: uiFolder.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolver = AppSecretResolver(
+            environment: [:],
+            currentDirectoryURL: root,
+            bundleURL: root,
+            keychainLoader: { _ in nil }
+        )
+
+        #expect(LLMProviderCredentialGate.hasAPIKey(for: .openai, resolver: resolver))
+        #expect(!LLMProviderCredentialGate.hasAPIKey(for: .google, resolver: resolver))
+        #expect(LLMProviderCredentialGate.configuredProviders(resolver: resolver) == [.openai])
+    }
+
     @Test func llmFailureClassifierDetectsCreditErrors() {
         let creditErrors = [
             "You exceeded your current quota.",

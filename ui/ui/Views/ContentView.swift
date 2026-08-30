@@ -300,6 +300,8 @@ struct ContentView: View {
     @State private var prompt = ""
     @State private var errorMessage: String?
     @State private var isPresentingAPIKeyPrompt = false
+    @State private var isPresentingProviderSetupModal = false
+    @State private var didPresentProviderSetupThisSession = false
     @State private var isPresentingDockerRequiredAlert = false
     @State private var dockerRequiredMessage = ""
     @State private var apiKeyDraft = ""
@@ -318,11 +320,38 @@ struct ContentView: View {
 
     private var canSendPrompt: Bool {
         sessionReady
+            && hasAPIKey(for: selectedProvider)
             && !chatSessions.isSelectedTabStreaming
             && (
                 !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || !pendingAttachments.isEmpty
             )
+    }
+
+    private var configuredProviders: [LLMProviderChoice] {
+        LLMProviderCredentialGate.configuredProviders(resolver: secretResolver)
+    }
+
+    private func hasAPIKey(for provider: LLMProviderChoice) -> Bool {
+        LLMProviderCredentialGate.hasAPIKey(for: provider, resolver: secretResolver)
+    }
+
+    private func syncSelectedProviderWithCredentials() {
+        guard !hasAPIKey(for: selectedProvider) else { return }
+        guard let provider = configuredProviders.first else { return }
+        selectedProvider = provider
+        selectedModel = provider.defaultModel
+    }
+
+    private func refreshProviderCredentialUI() {
+        syncSelectedProviderWithCredentials()
+        guard configuredProviders.isEmpty else {
+            isPresentingProviderSetupModal = false
+            return
+        }
+        guard !didPresentProviderSetupThisSession else { return }
+        isPresentingProviderSetupModal = true
+        didPresentProviderSetupThisSession = true
     }
 
     private var pendingAttachments: [ChatFileAttachment] {
@@ -407,6 +436,10 @@ struct ContentView: View {
         }
         .onAppear {
             messaging.setWorkspaceActive(workspace == .messaging)
+            refreshProviderCredentialUI()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshProviderCredentialUI()
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -416,6 +449,45 @@ struct ContentView: View {
         } message: {
             Text(dockerRequiredMessage)
         }
+        .modalPopup(
+            isPresented: isPresentingProviderSetupModal
+                && !bootstrapStatus.isModalPresented,
+            minWidth: 400,
+            minHeight: 0,
+            maxWidth: 480,
+            maxHeight: 420,
+            onBackdropDismiss: { isPresentingProviderSetupModal = false },
+            onEscape: { isPresentingProviderSetupModal = false },
+            header: {
+                Text("LLM Provider Setup")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+            },
+            body: {
+                LLMProviderSetupModalBody {
+                    isPresentingProviderSetupModal = false
+                    isPresentingAPIKeyPrompt = true
+                }
+                .padding(.horizontal, 20)
+            },
+            footer: {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("OK") {
+                        isPresentingProviderSetupModal = false
+                        refreshProviderCredentialUI()
+                    }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                .padding(.top, 4)
+            }
+        )
         .modalPopup(
             isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented,
             minWidth: 380,
@@ -692,9 +764,7 @@ struct ContentView: View {
                 }
             }
 
-            if resolveAPIKey() == nil {
-                isPresentingAPIKeyPrompt = true
-            }
+            refreshProviderCredentialUI()
     }
 
     /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
@@ -971,7 +1041,9 @@ struct ContentView: View {
                     Menu {
                         Picker("Provider", selection: $selectedProvider) {
                             ForEach(LLMProviderChoice.allCases) { provider in
-                                Text(provider.displayName).tag(provider)
+                                Text(provider.displayName)
+                                    .tag(provider)
+                                    .disabled(!hasAPIKey(for: provider))
                             }
                         }
                     } label: {
@@ -981,13 +1053,17 @@ struct ContentView: View {
                                 .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                             Text(selectedProvider.displayName)
                                 .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(Color(nsColor: .labelColor))
+                                .foregroundStyle(
+                                    hasAPIKey(for: selectedProvider)
+                                        ? Color(nsColor: .labelColor)
+                                        : Color(nsColor: .tertiaryLabelColor)
+                                )
                         }
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .disabled(isActiveTabStreaming)
+                    .disabled(isActiveTabStreaming || configuredProviders.isEmpty)
 
                     Menu {
                         Picker("Model", selection: $selectedModel) {
@@ -1002,13 +1078,17 @@ struct ContentView: View {
                                 .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                             Text(selectedModel.displayName)
                                 .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(Color(nsColor: .labelColor))
+                                .foregroundStyle(
+                                    hasAPIKey(for: selectedProvider)
+                                        ? Color(nsColor: .labelColor)
+                                        : Color(nsColor: .tertiaryLabelColor)
+                                )
                         }
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .disabled(isActiveTabStreaming)
+                    .disabled(isActiveTabStreaming || !hasAPIKey(for: selectedProvider))
 
                     Button {
                         if isActiveTabStreaming {
@@ -1152,7 +1232,7 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
-        guard canSendPrompt else { return }
+        guard canSendPrompt, hasAPIKey(for: selectedProvider) else { return }
 
         let currentPrompt = prompt
         prompt = ""
@@ -1272,6 +1352,7 @@ struct ContentView: View {
                         try? store.save(apiKeyDraft)
                         apiKeyDraft = ""
                         isPresentingAPIKeyPrompt = false
+                        refreshProviderCredentialUI()
                     }
                 }
             }
