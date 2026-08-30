@@ -3,7 +3,8 @@ import ServiceContracts
 import Testing
 @testable import ui
 
-@Suite struct ExecutionContextRegistryTests {
+@Suite(.serialized)
+struct ExecutionContextRegistryTests {
     @Test func concurrentContextsDoNotStomp() {
         let registry = ExecutionContextRegistry.shared
         registry.resetForTesting()
