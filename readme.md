@@ -1,6 +1,6 @@
 # Derrick
 
-A native macOS desktop agent harness: chat with LLM providers, run sandboxed Swift tools in Docker, build connector plugins, schedule background jobs, and manage messaging connectors — with human-in-the-loop approvals and a security-first execution model.
+A native Swift macOS desktop agent harness: chat with LLM providers, run isolated sandboxed agent actions in Docker, build connector plugins, schedule background jobs, and manage messaging connectors — with human-in-the-loop approvals and a security-first execution model.
 
 **License:** [Apache 2.0](LICENSE)
 
@@ -10,7 +10,7 @@ A native macOS desktop agent harness: chat with LLM providers, run sandboxed Swi
 |------|-------------|
 | **Chat** | Multi-tab conversations with OpenAI, Gemini, and other configured models |
 | **Tools (MCP)** | Model Context Protocol tool host inside the headless daemon |
-| **Scripts** | User-generated Swift executed in isolated Docker containers |
+| **Scripts** | Agent-generated Swift executed in isolated Docker containers  Includes secondary agent code reviewer and approvals flow.|
 | **Plugin factory** | LLM-assisted creation of versioned, reviewed connector plugins |
 | **Jobs** | Scheduled and deferred tool/agent runs that survive app quit |
 | **Messaging** | Connector plugins (e.g. Slack) with threads, history, and live sync |
