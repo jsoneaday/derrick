@@ -115,6 +115,7 @@ final class ChatSessionStore: ObservableObject {
         _ prompt: String,
         apiKey: String,
         model: LLMModelChoice,
+        thinking: ModelThinkingOption,
         onError: @escaping (String) -> Void
     ) {
         if let selected = selectedSessionID, JobSessionID.isJobSession(selected) {
@@ -165,11 +166,13 @@ final class ChatSessionStore: ObservableObject {
             do {
                 try await AgentServiceClient.shared.ensureReadyForTurn()
                 let modelJSON = try JSONEncoder().encode(model)
+                let thinkingJSON = try JSONEncoder().encode(thinking)
                 let request = AgentTurnRequest(
                     sessionID: sessionID,
                     prompt: agentPrompt,
                     apiKey: apiKey,
-                    modelJSON: modelJSON
+                    modelJSON: modelJSON,
+                    thinkingJSON: thinkingJSON
                 )
                 let stream = AgentServiceClient.shared.streamTurn(request)
                 let streamStarted = Date()

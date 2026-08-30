@@ -63,7 +63,8 @@ public struct OpenAIProvider: AgentProvider {
                         model: model.rawValue,
                         messages: request.messages,
                         temperature: request.temperature,
-                        responseSchema: request.responseSchema
+                        responseSchema: request.responseSchema,
+                        thinking: request.thinking
                     ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
@@ -101,6 +102,7 @@ struct OpenAIStreamRequest: Encodable {
     let messages: [OpenAIMessage]
     let stream: Bool
     let temperature: Double?
+    let reasoningEffort: String?
     let responseFormat: OpenAIResponseFormat?
     let streamOptions: OpenAIStreamOptions?
 
@@ -109,23 +111,36 @@ struct OpenAIStreamRequest: Encodable {
         case messages
         case stream
         case temperature
+        case reasoningEffort = "reasoning_effort"
         case responseFormat = "response_format"
         case streamOptions = "stream_options"
     }
 
-    init(model: String, messages: [AgentMessage], temperature: Double?, responseSchema: AgentSchema?) {
+    init(
+        model: String,
+        messages: [AgentMessage],
+        temperature: Double?,
+        responseSchema: AgentSchema?,
+        thinking: ModelThinkingOption?
+    ) {
         self.model = model
         self.messages = messages.map(OpenAIMessage.init)
         self.stream = true
         self.streamOptions = OpenAIStreamOptions(includeUsage: true)
-        
+
         // OpenAI's reasoning-class models (GPT-5 series) lock temperature internally and reject manual settings with HTTP 400.
         if model.contains("gpt-5") {
             self.temperature = nil
         } else {
             self.temperature = temperature
         }
-        
+
+        if case .openAIReasoningEffort(let effort) = thinking?.wire {
+            self.reasoningEffort = effort
+        } else {
+            self.reasoningEffort = nil
+        }
+
         if let responseSchema {
             self.responseFormat = OpenAIResponseFormat(
                 type: "json_schema",

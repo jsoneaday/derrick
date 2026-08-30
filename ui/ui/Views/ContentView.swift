@@ -308,7 +308,9 @@ struct ContentView: View {
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .openai(.gpt56Luna)
+    @State private var selectedThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
     @State private var helperModelSettings: LLMModelSettings?
+    @State private var modelThinkingSettings: LLMModelThinkingSettings?
     @State private var promptFocusToken = 0
     @State private var shouldAutoScroll = true
     @State private var isDebugPanelVisible = false
@@ -362,6 +364,18 @@ struct ContentView: View {
         sessionReady
             && !isActiveTabStreaming
             && pendingAttachments.count < ChatFileAttachmentPolicy.maximumFileCount
+    }
+
+    private var visibleThinkingOptions: [ModelThinkingOption] {
+        selectedModel.thinkingOptions
+    }
+
+    private func syncSelectedThinkingForModel() {
+        if let settings = modelThinkingSettings {
+            selectedThinking = settings.thinking(for: selectedModel)
+        } else {
+            selectedThinking = selectedModel.defaultThinkingOption
+        }
     }
 
     private var visibleModels: [LLMModelChoice] {
@@ -653,6 +667,10 @@ struct ContentView: View {
             if selectedProvider != newModel.provider {
                 selectedProvider = newModel.provider
             }
+            syncSelectedThinkingForModel()
+        }
+        .onChange(of: selectedThinking) { _, newThinking in
+            modelThinkingSettings?.setThinking(newThinking, for: selectedModel)
         }
         .background(WindowConfigurator())
     }
@@ -785,6 +803,10 @@ struct ContentView: View {
         let settings = LLMModelSettings(repository: repo)
         await settings.loadSettings()
         helperModelSettings = settings
+        let thinkingSettings = LLMModelThinkingSettings(repository: repo)
+        await thinkingSettings.loadSettings()
+        modelThinkingSettings = thinkingSettings
+        syncSelectedThinkingForModel()
         return repo
     }
 
@@ -1090,6 +1112,31 @@ struct ContentView: View {
                     .fixedSize()
                     .disabled(isActiveTabStreaming || !hasAPIKey(for: selectedProvider))
 
+                    Menu {
+                        Picker("Thinking", selection: $selectedThinking) {
+                            ForEach(visibleThinkingOptions) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: bottomPromptIconSize, weight: .medium))
+                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            Text(selectedThinking.displayName)
+                                .font(.system(size: bottomPromptFontSize))
+                                .foregroundStyle(
+                                    hasAPIKey(for: selectedProvider)
+                                        ? Color(nsColor: .labelColor)
+                                        : Color(nsColor: .tertiaryLabelColor)
+                                )
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .disabled(isActiveTabStreaming || !hasAPIKey(for: selectedProvider))
+
                     Button {
                         if isActiveTabStreaming {
                             chatSessions.cancelSelectedTabStream()
@@ -1248,7 +1295,8 @@ struct ContentView: View {
             chatSessions.sendPrompt(
                 currentPrompt,
                 apiKey: resolveAPIKey() ?? "",
-                model: selectedModel
+                model: selectedModel,
+                thinking: selectedThinking
             ) { message in
                 errorMessage = message
             }

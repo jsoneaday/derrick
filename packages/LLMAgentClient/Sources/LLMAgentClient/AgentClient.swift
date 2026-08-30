@@ -71,20 +71,38 @@ public struct AgentRequest: Hashable, Sendable {
     public let messages: [AgentMessage]
     public let temperature: Double?
     public let responseSchema: AgentSchema?
+    public let thinking: ModelThinkingOption?
 
-    public init(messages: [AgentMessage], temperature: Double? = nil, responseSchema: AgentSchema? = nil) {
+    public init(
+        messages: [AgentMessage],
+        temperature: Double? = nil,
+        responseSchema: AgentSchema? = nil,
+        thinking: ModelThinkingOption? = nil
+    ) {
         self.messages = messages
         self.temperature = temperature
         self.responseSchema = responseSchema
+        self.thinking = thinking
     }
 
-    public static func prompt(_ content: String, system: String? = nil, temperature: Double? = nil, responseSchema: AgentSchema? = nil) -> Self {
+    public static func prompt(
+        _ content: String,
+        system: String? = nil,
+        temperature: Double? = nil,
+        responseSchema: AgentSchema? = nil,
+        thinking: ModelThinkingOption? = nil
+    ) -> Self {
         var messages: [AgentMessage] = []
         if let system {
             messages.append(.init(role: .system, content: system))
         }
         messages.append(.init(role: .user, content: content))
-        return Self(messages: messages, temperature: temperature, responseSchema: responseSchema)
+        return Self(
+            messages: messages,
+            temperature: temperature,
+            responseSchema: responseSchema,
+            thinking: thinking
+        )
     }
 }
 

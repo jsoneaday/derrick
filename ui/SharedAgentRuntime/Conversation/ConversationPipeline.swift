@@ -28,6 +28,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
     let mcpClient: (any ConversationToolClient)?
     let client: Client
     let model: Client.Model
+    let thinking: ModelThinkingOption?
     let ragInstructions: String
     let mcpToolInstructions: String
     let retrievalLimit: Int
@@ -40,6 +41,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         mcpClient: (any ConversationToolClient)? = nil,
         client: Client,
         model: Client.Model,
+        thinking: ModelThinkingOption? = nil,
         ragInstructions: String,
         mcpToolInstructions: String = "",
         retrievalLimit: Int = 5
@@ -51,6 +53,7 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         self.mcpClient = mcpClient
         self.client = client
         self.model = model
+        self.thinking = thinking
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
         self.retrievalLimit = retrievalLimit

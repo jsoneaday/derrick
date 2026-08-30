@@ -16,6 +16,8 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
     public let apiKey: String
     /// Encoded `LLMModelChoice` JSON (SharedAgentRuntime type).
     public let modelJSON: Data
+    /// Encoded `ModelThinkingOption` JSON from LLMAgentClient (optional).
+    public let thinkingJSON: Data?
     public let applicationName: String
     public let delivery: AgentTurnDelivery
     public let jobID: String?
@@ -27,6 +29,7 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         prompt: String,
         apiKey: String,
         modelJSON: Data,
+        thinkingJSON: Data? = nil,
         applicationName: String = DerrickAppSupport.defaultApplicationName,
         delivery: AgentTurnDelivery = .chatStream,
         jobID: String? = nil,
@@ -37,6 +40,7 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         self.prompt = prompt
         self.apiKey = apiKey
         self.modelJSON = modelJSON
+        self.thinkingJSON = thinkingJSON
         self.applicationName = applicationName
         self.delivery = delivery
         self.jobID = jobID

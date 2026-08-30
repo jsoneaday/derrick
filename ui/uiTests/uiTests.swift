@@ -213,6 +213,20 @@ import DBRepository
         #expect(LLMModelChoice.defaultHelperModel == .openai(.gpt56Luna))
     }
 
+    @MainActor @Test func modelThinkingSettingsPersistsPerModelSelection() async {
+        let repo = createTestRepository()
+        _ = try! await repo.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
+        let settings = LLMModelThinkingSettings(repository: repo)
+        let high = OpenAIModel.gpt56Sol.thinkingOptions.first { $0.id == "high" }!
+        settings.setThinking(high, for: .openai(.gpt56Sol))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        let reloaded = LLMModelThinkingSettings(repository: repo)
+        await reloaded.loadSettings()
+        #expect(reloaded.thinking(for: .openai(.gpt56Sol)).id == "high")
+        #expect(reloaded.thinking(for: .openai(.gpt56Luna)).id == "medium")
+    }
+
     @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("debug-\(UUID().uuidString)", isDirectory: true)

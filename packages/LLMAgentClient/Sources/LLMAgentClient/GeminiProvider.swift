@@ -58,7 +58,11 @@ public struct GeminiProvider: AgentProvider {
                     urlRequest.httpMethod = "POST"
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    urlRequest.httpBody = try encode(GeminiStreamRequest(messages: request.messages, temperature: request.temperature))
+                    urlRequest.httpBody = try encode(GeminiStreamRequest(
+                        messages: request.messages,
+                        temperature: request.temperature,
+                        thinking: request.thinking
+                    ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
                     try validate(response: response)
@@ -103,7 +107,8 @@ public struct GeminiProvider: AgentProvider {
                     urlRequest.httpBody = try encode(GeminiJSONStreamRequest(
                         messages: request.messages,
                         temperature: request.temperature,
-                        responseSchema: responseSchema
+                        responseSchema: responseSchema,
+                        thinking: request.thinking
                     ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
@@ -211,7 +216,7 @@ private struct GeminiStreamRequest: Encodable {
     let contents: [GeminiContent]
     let generationConfig: GeminiGenerationConfig?
 
-    init(messages: [AgentMessage], temperature: Double?) {
+    init(messages: [AgentMessage], temperature: Double?, thinking: ModelThinkingOption?) {
         let systemMessages = messages.filter { $0.role == .system }
         let chatMessages = messages.filter { $0.role != .system }
 
@@ -223,7 +228,11 @@ private struct GeminiStreamRequest: Encodable {
         }
 
         contents = chatMessages.map(GeminiContent.init)
-        generationConfig = temperature.map { GeminiGenerationConfig(temperature: $0) }
+        if temperature != nil || thinking != nil {
+            generationConfig = GeminiGenerationConfig(temperature: temperature, thinking: thinking)
+        } else {
+            generationConfig = nil
+        }
     }
 }
 
@@ -232,7 +241,12 @@ struct GeminiJSONStreamRequest: Encodable {
     let contents: [GeminiContent]
     let generationConfig: GeminiJSONGenerationConfig
 
-    init(messages: [AgentMessage], temperature: Double?, responseSchema: AgentSchema?) {
+    init(
+        messages: [AgentMessage],
+        temperature: Double?,
+        responseSchema: AgentSchema?,
+        thinking: ModelThinkingOption?
+    ) {
         let systemMessages = messages.filter { $0.role == .system }
         let chatMessages = messages.filter { $0.role != .system }
 
@@ -244,7 +258,11 @@ struct GeminiJSONStreamRequest: Encodable {
         }
 
         contents = chatMessages.map(GeminiContent.init)
-        generationConfig = GeminiJSONGenerationConfig(temperature: temperature, responseSchema: responseSchema)
+        generationConfig = GeminiJSONGenerationConfig(
+            temperature: temperature,
+            responseSchema: responseSchema,
+            thinking: thinking
+        )
     }
 }
 
@@ -252,11 +270,13 @@ struct GeminiJSONGenerationConfig: Encodable {
     let temperature: Double?
     let responseMimeType: String
     let responseSchema: AgentSchema?
+    let thinkingConfig: GeminiThinkingConfig?
 
-    init(temperature: Double?, responseSchema: AgentSchema?) {
+    init(temperature: Double?, responseSchema: AgentSchema?, thinking: ModelThinkingOption?) {
         self.temperature = temperature
         self.responseMimeType = "application/json"
         self.responseSchema = responseSchema
+        self.thinkingConfig = GeminiThinkingConfig(thinking: thinking)
     }
 }
 
@@ -265,7 +285,32 @@ struct GeminiSystemInstruction: Encodable {
 }
 
 private struct GeminiGenerationConfig: Encodable {
-    let temperature: Double
+    let temperature: Double?
+    let thinkingConfig: GeminiThinkingConfig?
+
+    init(temperature: Double?, thinking: ModelThinkingOption?) {
+        self.temperature = temperature
+        self.thinkingConfig = GeminiThinkingConfig(thinking: thinking)
+    }
+}
+
+struct GeminiThinkingConfig: Encodable {
+    let thinkingLevel: String?
+    let thinkingBudget: Int?
+
+    init(thinking: ModelThinkingOption?) {
+        switch thinking?.wire {
+        case .geminiThinkingLevel(let level):
+            thinkingLevel = level
+            thinkingBudget = nil
+        case .geminiThinkingBudget(let budget):
+            thinkingLevel = nil
+            thinkingBudget = budget
+        case .openAIReasoningEffort, .none:
+            thinkingLevel = nil
+            thinkingBudget = nil
+        }
+    }
 }
 
 struct GeminiContent: Encodable {

@@ -57,7 +57,8 @@ extension ConversationPipeline {
                             workingPrompt,
                             system: systemPrompt(from: retrieval, toolCatalog: toolCatalog),
                             temperature: 0.1,
-                            responseSchema: responseSchema
+                            responseSchema: responseSchema,
+                            thinking: thinking
                         )
                         let promptBuildMS = PipelineTiming.elapsedMS(from: promptBuildStarted)
                         let systemChars = (request.messages.first { $0.role == .system }?.content.utf8.count) ?? 0

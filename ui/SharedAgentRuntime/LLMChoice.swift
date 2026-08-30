@@ -128,6 +128,32 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         }
     }
 
+    var thinkingOptions: [ModelThinkingOption] {
+        switch self {
+        case .gemini(let model):
+            return model.thinkingOptions
+        case .openai(let model):
+            return model.thinkingOptions
+        }
+    }
+
+    var defaultThinkingOption: ModelThinkingOption {
+        switch self {
+        case .gemini(let model):
+            return model.defaultThinkingOption
+        case .openai(let model):
+            return model.defaultThinkingOption
+        }
+    }
+
+    func resolvedThinkingOption(id: String?) -> ModelThinkingOption {
+        guard let id,
+              let match = thinkingOptions.first(where: { $0.id == id }) else {
+            return defaultThinkingOption
+        }
+        return match
+    }
+
     /// Wire format for MCPService / cross-process helper model handoff.
     var helperModelWire: HelperModelWire {
         switch self {

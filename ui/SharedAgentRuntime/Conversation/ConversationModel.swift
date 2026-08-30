@@ -197,6 +197,7 @@ final class ConversationModel {
         prompt: String,
         apiKey: String,
         model: LLMModelChoice,
+        thinking: ModelThinkingOption? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws {
@@ -332,6 +333,7 @@ final class ConversationModel {
                         prompt: envelope.body,
                         apiKey: apiKey,
                         model: model,
+                        thinking: thinking,
                         sessionKey: sessionKey,
                         memoryCoordinator: memoryCoordinator,
                         policyStore: policyStore,
@@ -559,6 +561,7 @@ final class ConversationModel {
         prompt: String,
         apiKey: String,
         model: LLMModelChoice,
+        thinking: ModelThinkingOption? = nil,
         sessionKey: MemorySessionKey,
         memoryCoordinator: MemoryCoordinator,
         policyStore: (any PolicyStore)?,
@@ -581,6 +584,7 @@ final class ConversationModel {
                 mcpClient: mcpClient,
                 client: client,
                 model: geminiModel,
+                thinking: thinking,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5
@@ -603,6 +607,7 @@ final class ConversationModel {
                 mcpClient: mcpClient,
                 client: client,
                 model: openAIModel,
+                thinking: thinking,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
                 retrievalLimit: 5

@@ -162,6 +162,9 @@ actor AgentServiceTurnHost {
                 agentIDOverride: agentOverride
             )
             let llmModel = try JSONDecoder().decode(LLMModelChoice.self, from: request.modelJSON)
+            let thinking = try request.thinkingJSON.map {
+                try JSONDecoder().decode(ModelThinkingOption.self, from: $0)
+            }
             let turnID = request.turnID
             let prompt = request.prompt
             let apiKey = request.apiKey
@@ -178,6 +181,7 @@ actor AgentServiceTurnHost {
                     prompt: prompt,
                     apiKey: apiKey,
                     model: llmModel,
+                    thinking: thinking,
                     connectionContext: connectionContext,
                     delivery: delivery,
                     jobID: jobID,
@@ -266,6 +270,7 @@ actor AgentServiceTurnHost {
         prompt: String,
         apiKey: String,
         model: LLMModelChoice,
+        thinking: ModelThinkingOption?,
         connectionContext: AgentServiceConnectionContext,
         delivery: AgentTurnDelivery,
         jobID: String?,
@@ -371,6 +376,7 @@ actor AgentServiceTurnHost {
                                     prompt: prompt,
                                     apiKey: apiKey,
                                     model: model,
+                                    thinking: thinking,
                                     approvalPresenter: approvalPresenter
                                 ) { chunk in
                                     let n = counter.increment()

@@ -166,7 +166,8 @@ struct ModelTests {
                 .init(role: .user, content: "Update status")
             ],
             temperature: 0.7,
-            responseSchema: schema
+            responseSchema: schema,
+            thinking: GeminiModel.gemini37Flash.defaultThinkingOption
         )
 
         let encoder = JSONEncoder()
@@ -180,6 +181,44 @@ struct ModelTests {
         #expect(jsonString.contains("STRING"))
         #expect(jsonString.contains("Type of message"))
         #expect(jsonString.contains("System status"))
+        #expect(jsonString.contains("thinkingLevel"))
+        #expect(jsonString.contains("MEDIUM"))
+    }
+
+    @Test func openAIReasoningEffortSerialization() throws {
+        let request = OpenAIStreamRequest(
+            model: "gpt-5.6-sol",
+            messages: [.init(role: .user, content: "hello")],
+            temperature: 0.1,
+            responseSchema: nil,
+            thinking: OpenAIModel.gpt56Sol.thinkingOptions.first { $0.id == "high" }
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let jsonString = String(decoding: data, as: UTF8.self)
+        #expect(jsonString.contains("reasoning_effort"))
+        #expect(jsonString.contains("high"))
+    }
+
+    @Test func geminiThinkingBudgetSerialization() throws {
+        let request = GeminiJSONStreamRequest(
+            messages: [.init(role: .user, content: "hello")],
+            temperature: nil,
+            responseSchema: nil,
+            thinking: GeminiModel.gemini25FlashLite.thinkingOptions.first { $0.id == "dynamic" }
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let jsonString = String(decoding: data, as: UTF8.self)
+        #expect(jsonString.contains("thinkingBudget"))
+        #expect(jsonString.contains("-1"))
+    }
+
+    @Test func modelThinkingOptionsDifferByModel() {
+        #expect(OpenAIModel.gpt56Sol.thinkingOptions.count > OpenAIModel.gpt56Luna.thinkingOptions.count)
+        #expect(GeminiModel.gemini37Flash.thinkingOptions.contains { $0.id == "medium" })
+        #expect(!GeminiModel.gemini37Flash.thinkingOptions.contains { $0.id == "minimal" })
+        #expect(GeminiModel.gemini31FlashLite.thinkingOptions.contains { $0.id == "minimal" })
     }
 
     @Test func openAIJSONStreamRequestSerialization() throws {
@@ -199,7 +238,8 @@ struct ModelTests {
                 .init(role: .user, content: "Update status")
             ],
             temperature: 0.1,
-            responseSchema: schema
+            responseSchema: schema,
+            thinking: nil
         )
 
         let encoder = JSONEncoder()
@@ -259,7 +299,8 @@ struct ModelTests {
             model: "gpt-5.6-luna",
             messages: [.init(role: .user, content: "test")],
             temperature: 0.1,
-            responseSchema: schema
+            responseSchema: schema,
+            thinking: nil
         )
 
         let encoder = JSONEncoder()
