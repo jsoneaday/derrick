@@ -8,7 +8,14 @@ public enum PluginSecretKeychain: Sendable {
     }
 
     public static func load(pluginID: String, fieldID: String) throws -> String? {
-        PluginSecretResolver.resolve(pluginID: pluginID, fieldID: fieldID)
+        try loadFromKeychain(pluginID: pluginID, fieldID: fieldID)
+    }
+
+    public static func hasStoredValue(pluginID: String, fieldID: String) -> Bool {
+        guard let value = try? loadFromKeychain(pluginID: pluginID, fieldID: fieldID) else {
+            return false
+        }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public static func loadFromKeychain(pluginID: String, fieldID: String) throws -> String? {
@@ -35,10 +42,7 @@ public enum PluginSecretKeychain: Sendable {
     }
 
     public static func missingIDs(pluginID: String, fields: [PluginSecretDescriptor]) -> [PluginSecretDescriptor] {
-        fields.filter { field in
-            let value = PluginSecretResolver.resolve(pluginID: pluginID, fieldID: field.id)
-            return value == nil || value?.isEmpty == true
-        }
+        fields.filter { !hasStoredValue(pluginID: pluginID, fieldID: $0.id) }
     }
 
     public static func deleteForTesting(pluginID: String, fieldID: String) {

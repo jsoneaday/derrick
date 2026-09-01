@@ -255,21 +255,32 @@ import Testing
         #expect(SlackMessage.date(fromSlackTimestamp: "1710000000.123456") != nil)
     }
 
-    @Test func pluginSecretEnvironmentKeysIncludeSlackAliases() {
-        let keys = PluginSecretResolver.environmentKeys(
-            pluginID: "slack-connection",
-            fieldID: "bot_token"
+    @Test func pluginSecretResolverReadsKeychainOnly() throws {
+        try PluginSecretKeychain.save(
+            pluginID: "test-plugin-keychain",
+            fieldID: "bot_token",
+            value: "test-token"
         )
-        #expect(keys.first == "SLACK_BOT_KEY")
-        #expect(keys.contains("SLACK_API_KEY"))
-        #expect(keys.contains("PLUGIN_SLACK_CONNECTION_BOT_TOKEN"))
+        defer {
+            PluginSecretKeychain.deleteForTesting(
+                pluginID: "test-plugin-keychain",
+                fieldID: "bot_token"
+            )
+        }
+        #expect(
+            PluginSecretResolver.resolve(pluginID: "test-plugin-keychain", fieldID: "bot_token") == "test-token"
+        )
     }
 
-    @Test func dotenvModeDoesNotReadPluginSecretsFromKeychain() throws {
+    @Test func pluginSecretResolverIgnoresDotEnv() throws {
+        PluginSecretKeychain.deleteForTesting(
+            pluginID: "test-plugin-dotenv",
+            fieldID: "bot_token"
+        )
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
-        try DotEnvTestFixtures.fileBody().write(
+        try DotEnvTestFixtures.fileBody(extraLines: ["PLUGIN_TEST_PLUGIN_DOTENV_BOT_TOKEN=ignored"]).write(
             to: resources.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
@@ -279,25 +290,21 @@ import Testing
         FileManager.default.changeCurrentDirectoryPath(root.path)
         defer { FileManager.default.changeCurrentDirectoryPath(previousCWD) }
 
-        #expect(PluginSecretResolver.resolve(pluginID: "slack-connection", fieldID: "bot_token") == nil)
-        #expect(
-            PluginSecretResolver.missingDotenvMessage(pluginID: "slack-connection", fieldID: "bot_token")
-                .contains(DotEnvReader.repositoryRelativePath)
-        )
+        #expect(PluginSecretResolver.resolve(pluginID: "test-plugin-dotenv", fieldID: "bot_token") == nil)
     }
 
     @Test func dotenvReaderFindsRepositoryRelativePath() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
-        try DotEnvTestFixtures.fileBody(extraLines: ["SLACK_BOT_KEY=test"]).write(
+        try DotEnvTestFixtures.fileBody(extraLines: ["GEMINI_API_KEY=test"]).write(
             to: resources.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
         )
 
         let value = DotEnvReader.firstValue(
-            for: ["SLACK_BOT_KEY"],
+            for: ["GEMINI_API_KEY"],
             environment: [:],
             bundleURL: root,
             currentDirectoryURL: root

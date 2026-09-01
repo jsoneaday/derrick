@@ -31,14 +31,21 @@ final class PluginCredentialPanelPresenter {
     private func showPanel(for request: AgentApprovalRequestDTO) {
         dismissPanel(keepingContinuation: true)
         let payload = decodePayload(request.argumentsJSON)
-        let fields = payload?.secrets ?? []
+        let fields = payload?.fields ?? []
         let pluginID = payload?.pluginID ?? ""
+        let mode = payload?.mode ?? .requireMissing
 
-        let root = PluginCredentialCard(
+        let root = ConnectorCredentialForm(
             pluginID: pluginID,
             fields: fields,
+            mode: mode,
             onSave: { [weak self] values in
-                self?.saveAndFinish(request: request, pluginID: pluginID, values: values)
+                self?.saveAndFinish(
+                    request: request,
+                    pluginID: pluginID,
+                    fields: fields,
+                    values: values
+                )
             },
             onCancel: { [weak self] in
                 self?.finish(
@@ -89,12 +96,11 @@ final class PluginCredentialPanelPresenter {
     private func saveAndFinish(
         request: AgentApprovalRequestDTO,
         pluginID: String,
+        fields: [PluginCredentialFieldPresentation],
         values: [String: String]
     ) {
         do {
-            for (fieldID, value) in values {
-                try PluginSecretKeychain.save(pluginID: pluginID, fieldID: fieldID, value: value)
-            }
+            try ConnectorCredentialSaver.savePartial(pluginID: pluginID, fields: fields, drafts: values)
             finish(
                 AgentApprovalDecisionDTO(
                     approvalID: request.approvalID,
@@ -147,103 +153,4 @@ final class PluginCredentialPanelPresenter {
 private final class PluginCredentialKeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
-}
-
-private struct PluginCredentialCard: View {
-    let pluginID: String
-    let fields: [PluginSecretDescriptor]
-    let onSave: ([String: String]) -> Void
-    let onCancel: () -> Void
-
-    @State private var values: [String: String] = [:]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "key.fill")
-                    .font(ModalChrome.symbolFont)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color(red: 0.176, green: 0.286, blue: 0.576))
-                Text("Save plugin credentials")
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 8)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Derrick will store these in Keychain for \(pluginID). They are not sent into the plugin sandbox.")
-                    .font(.body)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(fields, id: \.id) { field in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(field.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if field.usesSecureField {
-                            SecureField(field.label, text: binding(for: field.id))
-                                .textFieldStyle(.roundedBorder)
-                        } else {
-                            TextField(field.label, text: binding(for: field.id))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
-
-            HStack(spacing: 10) {
-                Spacer(minLength: 0)
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                Button("Save in Keychain") {
-                    onSave(values)
-                }
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSave)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
-            .padding(.top, 4)
-        }
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(
-            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .padding(16)
-        .preferredColorScheme(.light)
-        .onAppear {
-            var initial: [String: String] = [:]
-            for field in fields {
-                initial[field.id] = ""
-            }
-            values = initial
-        }
-    }
-
-    private var canSave: Bool {
-        fields.allSatisfy { field in
-            !(values[field.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-    }
-
-    private func binding(for id: String) -> Binding<String> {
-        Binding(
-            get: { values[id] ?? "" },
-            set: { values[id] = $0 }
-        )
-    }
 }

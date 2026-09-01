@@ -40,6 +40,8 @@ final class LLMModelSettings: ObservableObject {
     private let username: String
     private let password: String
 
+    var settingsRepository: DBRepository { repository }
+
     init(repository: DBRepository, username: String = "ui", password: String = "ui") {
         self.repository = repository
         self.username = username

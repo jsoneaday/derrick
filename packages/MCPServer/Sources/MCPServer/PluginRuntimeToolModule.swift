@@ -141,7 +141,8 @@ public enum PluginRuntimeToolModule {
     private static func secretsRequiredJSON(_ error: PluginSecretsRequiredError) -> String {
         let payload = PluginCredentialPromptPayload(
             pluginID: error.pluginID,
-            secrets: error.fields.map(\.descriptor)
+            secrets: error.fields.map(\.descriptor),
+            mode: .requireMissing
         )
         if let data = try? JSONEncoder().encode(payload) {
             return String(decoding: data, as: UTF8.self)

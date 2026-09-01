@@ -48,14 +48,43 @@ import DBRepository
         )
     }
 
-    @Test func slackPluginSecretAliasesAreStable() {
-        let keys = PluginSecretResolver.environmentKeys(
-            pluginID: "slack-connection",
-            fieldID: "bot_token"
+    @Test func pluginFactoryConnectorDocsInjectsSlackGuide() {
+        #expect(PluginFactoryConnectorDocs.detectedVendor(for: "create a connector for slack") == .slack)
+        let prompt = PluginFactoryConnectorDocs.supplementalPrompt(for: "slack messaging connector")
+        #expect(prompt?.contains("ok") == true)
+        #expect(prompt?.contains("bot_token") == true)
+        #expect(prompt?.contains("invalid_auth") == true)
+    }
+
+    @Test func connectorCredentialSaverAllowsPartialUpdateWhenStored() {
+        let fields = [
+            PluginCredentialFieldPresentation(
+                id: "bot_token",
+                label: "Bot token",
+                kind: "token",
+                hasStoredValue: true
+            ),
+            PluginCredentialFieldPresentation(
+                id: "app_token",
+                label: "App token",
+                kind: "token",
+                hasStoredValue: false
+            ),
+        ]
+        #expect(
+            ConnectorCredentialSaver.canSave(
+                fields: fields,
+                drafts: ["app_token": "new"],
+                mode: .allowPartialUpdate
+            )
         )
-        #expect(keys.first == "SLACK_BOT_KEY")
-        #expect(keys.contains("SLACK_API_KEY"))
-        #expect(keys.contains("PLUGIN_SLACK_CONNECTION_BOT_TOKEN"))
+        #expect(
+            !ConnectorCredentialSaver.canSave(
+                fields: fields,
+                drafts: [:],
+                mode: .allowPartialUpdate
+            )
+        )
     }
 
     @MainActor @Test func keychainModeStillPrefersKeychain() throws {

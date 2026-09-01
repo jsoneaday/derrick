@@ -7,6 +7,7 @@ import MCPClient
 import MCPServer
 import MCPToolCatalog
 import MemorySystem
+import Plugin
 import PolicyRuntime
 import ServiceContracts
 
@@ -22,6 +23,7 @@ final class ConversationModel {
     let ragInstructions: String
     let mcpToolInstructions: String
     private let helperModelSettings: LLMModelSettings
+    private let repository: DBRepository
     let responseSchema: AgentSchema = AgentSchema(
         type: .object,
         properties: [
@@ -73,7 +75,8 @@ final class ConversationModel {
         toolClient: any ConversationToolClient,
         ragInstructions: String,
         mcpToolInstructions: String,
-        helperModelSettings: LLMModelSettings
+        helperModelSettings: LLMModelSettings,
+        repository: DBRepository
     ) {
         self.sessionKey = sessionKey
         self.orchestrator = orchestrator
@@ -84,6 +87,7 @@ final class ConversationModel {
         self.ragInstructions = ragInstructions
         self.mcpToolInstructions = mcpToolInstructions
         self.helperModelSettings = helperModelSettings
+        self.repository = repository
     }
 
     static func makeDefault(
@@ -155,7 +159,8 @@ final class ConversationModel {
             toolClient: toolClient,
             ragInstructions: ragInstructions,
             mcpToolInstructions: mcpToolInstructions,
-            helperModelSettings: helperModelSettings
+            helperModelSettings: helperModelSettings,
+            repository: repository
         )
     }
 
@@ -201,6 +206,14 @@ final class ConversationModel {
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws {
+        if let edit = Self.pluginFactoryEditGoal(from: prompt) {
+            try await runPluginFactoryEdit(
+                edit,
+                approvalPresenter: approvalPresenter,
+                onChunk: onChunk
+            )
+            return
+        }
         if let factoryGoal = Self.pluginFactoryGoal(from: prompt) {
             onChunk(
                 AgentResponseNextChunk(
@@ -227,6 +240,7 @@ final class ConversationModel {
                 let ready = await collectPluginCredentialsIfNeeded(
                     pluginID: pluginID,
                     fields: secrets,
+                    mode: .requireMissing,
                     approvalPresenter: approvalPresenter
                 )
                 if !ready {
@@ -369,6 +383,131 @@ final class ConversationModel {
         return goal.isEmpty ? "Help me design a useful Agent Plugin. Ask for the missing goal in the result." : goal
     }
 
+    private struct PluginFactoryEditRequest {
+        let pluginID: String
+        let goal: String
+
+        var credentialsOnly: Bool {
+            let lower = goal.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return lower.isEmpty
+                || lower == "credentials"
+                || lower == "credential"
+                || lower.hasPrefix("credentials ")
+        }
+    }
+
+    private static func pluginFactoryEditGoal(from prompt: String) -> PluginFactoryEditRequest? {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = "/edit-plugin"
+        guard trimmed == command || trimmed.hasPrefix(command + " ") else {
+            return nil
+        }
+        let remainder = String(trimmed.dropFirst(command.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remainder.isEmpty else {
+            return PluginFactoryEditRequest(pluginID: "", goal: "credentials")
+        }
+        let parts = remainder.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let pluginID = String(parts[0])
+        let goal = parts.count > 1 ? String(parts[1]) : "credentials"
+        return PluginFactoryEditRequest(pluginID: pluginID, goal: goal)
+    }
+
+    private func runPluginFactoryEdit(
+        _ edit: PluginFactoryEditRequest,
+        approvalPresenter: (any ApprovalConfirmationPresenting)?,
+        onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
+    ) async throws {
+        guard !edit.pluginID.isEmpty,
+              edit.pluginID != "create-plugin",
+              edit.pluginID != "edit-plugin"
+        else {
+            onChunk(
+                AgentResponseNextChunk(
+                    status: .complete,
+                    chunk: "Usage: `/edit-plugin <plugin-id> [goal]` or `/edit-plugin <plugin-id> credentials` to update Keychain secrets.",
+                    toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+                )
+            )
+            return
+        }
+
+        if edit.credentialsOnly {
+            let secrets = await PluginCredentialCatalog.secretDescriptors(
+                pluginID: edit.pluginID,
+                repository: repository
+            )
+            guard !secrets.isEmpty else {
+                onChunk(
+                    AgentResponseNextChunk(
+                        status: .complete,
+                        chunk: "Plugin **\(edit.pluginID)** does not declare any credentials in its manifest.",
+                        toolName: PluginCredentialPrompt.toolName
+                    )
+                )
+                return
+            }
+            let ready = await collectPluginCredentialsIfNeeded(
+                pluginID: edit.pluginID,
+                fields: secrets,
+                mode: .allowPartialUpdate,
+                approvalPresenter: approvalPresenter
+            )
+            onChunk(
+                AgentResponseNextChunk(
+                    status: .complete,
+                    chunk: ready
+                        ? "Credentials for **\(edit.pluginID)** were saved to Keychain."
+                        : "Credential update for **\(edit.pluginID)** was cancelled.",
+                    toolName: PluginCredentialPrompt.toolName
+                )
+            )
+            return
+        }
+
+        let factoryGoal = "Edit plugin \(edit.pluginID): \(edit.goal)"
+        onChunk(
+            AgentResponseNextChunk(
+                status: .toolCall,
+                chunk: nil,
+                toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+            )
+        )
+        let progressTask = Self.startPluginFactoryProgress(onChunk: onChunk)
+        let result: MCPToolResult
+        do {
+            result = try await toolClient.callTool(
+                named: AllowedMCPTool.pluginFactoryBuild.rawValue,
+                arguments: ["goal": .string(factoryGoal)]
+            )
+        } catch {
+            progressTask.cancel()
+            throw error
+        }
+        progressTask.cancel()
+
+        if !result.isError,
+           let pluginID = Self.pluginID(fromFactoryResult: result.text) {
+            let secrets = Self.secrets(fromFactoryResult: result.text)
+            if !secrets.isEmpty {
+                _ = await collectPluginCredentialsIfNeeded(
+                    pluginID: pluginID,
+                    fields: secrets,
+                    mode: .requireMissing,
+                    approvalPresenter: approvalPresenter
+                )
+            }
+        }
+
+        onChunk(
+            AgentResponseNextChunk(
+                status: .complete,
+                chunk: result.text,
+                toolName: AllowedMCPTool.pluginFactoryBuild.rawValue
+            )
+        )
+    }
+
     private static func startPluginFactoryProgress(
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) -> Task<Void, Never> {
@@ -418,25 +557,31 @@ final class ConversationModel {
     private func collectPluginCredentialsIfNeeded(
         pluginID: String,
         fields: [PluginSecretDescriptor],
+        mode: PluginCredentialCollectionMode = .requireMissing,
         approvalPresenter: (any ApprovalConfirmationPresenting)?
     ) async -> Bool {
-        let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: fields)
-        guard !missing.isEmpty else { return true }
-        if PluginSecretResolver.usesDotenvOnly { return false }
+        guard !fields.isEmpty else { return true }
+        if mode == .requireMissing {
+            let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: fields)
+            guard !missing.isEmpty else { return true }
+        }
         guard let approvalPresenter else { return false }
-        let payload = PluginCredentialPromptPayload(pluginID: pluginID, secrets: missing)
+        let payload = PluginCredentialPromptPayload(pluginID: pluginID, secrets: fields, mode: mode)
         guard let data = try? JSONEncoder().encode(payload) else { return false }
         let decision = await approvalPresenter.confirm(
             ApprovalConfirmationRequest(
                 sessionID: sessionKey.sessionID,
                 toolName: PluginCredentialPrompt.toolName,
                 argumentsJSON: String(decoding: data, as: UTF8.self),
-                requiredFields: missing.map(\.id)
+                requiredFields: fields.map(\.id)
             )
         )
         switch decision {
         case .approved:
-            return PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: missing).isEmpty
+            if mode == .requireMissing {
+                return PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: fields).isEmpty
+            }
+            return true
         case .cancelled:
             return false
         }
@@ -452,9 +597,16 @@ final class ConversationModel {
             arguments: arguments
         )
         if let required = Self.secretsRequired(fromInvokeResult: result.text) {
+            let resolvedID = required.pluginID.isEmpty ? pluginID : required.pluginID
+            let allFields = await PluginCredentialCatalog.secretDescriptors(
+                pluginID: resolvedID,
+                repository: repository
+            )
+            let fields = allFields.isEmpty ? required.secrets : allFields
             let ready = await collectPluginCredentialsIfNeeded(
-                pluginID: required.pluginID.isEmpty ? pluginID : required.pluginID,
-                fields: required.secrets,
+                pluginID: resolvedID,
+                fields: fields,
+                mode: .requireMissing,
                 approvalPresenter: approvalPresenter
             )
             if ready {

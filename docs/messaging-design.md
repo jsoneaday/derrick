@@ -103,7 +103,26 @@ Unread badges on the vendor row and on conversation tabs. Mute is per conversati
 | **4.2** | Echo suppression | Skip re-importing outbound messages the host already persisted on send |
 | **4.3** | DM + channel polish | DMs, thread titles, channel picker on first connect |
 | **5** | **Second connector** | Telegram long-poll adapter to prove the ingress pattern |
+| **6** | **Connector plugin deletion** | When the **last** factory release for a connector `plugin_id` is deleted, prompt the user (see below) |
 
 Skip inbound Docker ports, skip mixing threads with chat sessions, skip treating every plugin as a connector.
 
 A plugin appears under Messaging only when `extensions.app.derrick.role` is `"connector"`. Rebuild older connectors so the factory writes that field.
+
+### Connector plugin deletion (locked)
+
+Trigger: user deletes factory releases until **no versions remain** for a `plugin_id` that was (or is) a **connector** (`role: connector` on the deleted manifest, or a row still exists in `messaging_connectors`).
+
+Show a modal:
+
+> Delete message history for **&lt;connector&gt;** too?
+
+| Choice | DB / behavior | Messaging UI |
+|--------|----------------|--------------|
+| **Yes — delete messages** | Remove `messaging_messages`, `messaging_threads`, and `messaging_connectors` for that `plugin_id`. Delete connector Keychain secrets. | Remove connector row from Messaging sidebar; no threads or messages shown. |
+| **No — keep history** | **Archive** connector: keep threads/messages in SQLite; mark connector `archived` / `send_disabled` (exact column TBD). Stop ingress/listening. | Connector row **stays** in Messaging for read-only history. **Disable send** (composer off, `canSend` false). Show archived/disconnected affordance. Do not accept further outbound messages. |
+
+Notes:
+- Prompt once per connector removal event, not per version delete (only when the last release goes away).
+- If user deletes one version but others remain, no modal.
+- Recreating the same `plugin_id` later is a new connector install; archived rows should not silently merge unless we explicitly support “reconnect”.

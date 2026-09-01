@@ -10,7 +10,6 @@ final class MessagingStore: ObservableObject {
     let session: MessagingSessionStore
     @Published var isSlackSyncing = false
     @Published var isSending = false
-    @Published var dotenvSecretMessage: String?
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
@@ -81,7 +80,6 @@ final class MessagingStore: ObservableObject {
     }
 
     func openConnector(pluginID: String) async {
-        dotenvSecretMessage = nil
         if let repository {
             switch await MessagingConnectorCredentials.ensureIfNeeded(
                 pluginID: pluginID,
@@ -90,10 +88,6 @@ final class MessagingStore: ObservableObject {
             case .ok:
                 break
             case .cancelled:
-                return
-            case .dotenvMissing(let message):
-                dotenvSecretMessage = message
-                session.setLastError(message)
                 return
             }
             try? await repository.setMessagingConnectorListening(pluginID: pluginID, listening: true)
@@ -104,8 +98,18 @@ final class MessagingStore: ObservableObject {
         await slackRuntime.bootstrap(store: self, repository: repository, session: session)
     }
 
-    func dismissDotenvSecretMessage() {
-        dotenvSecretMessage = nil
+    func updateCredentials(pluginID: String) async -> Bool {
+        guard let repository else { return false }
+        let secrets = await ConnectorCredentialService.secretDescriptors(
+            pluginID: pluginID,
+            repository: repository
+        )
+        guard !secrets.isEmpty else { return true }
+        return await ConnectorCredentialService.present(
+            pluginID: pluginID,
+            secrets: secrets,
+            mode: .allowPartialUpdate
+        ) == .ok
     }
 
     func refreshSlackConnector() async {

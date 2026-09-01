@@ -16,7 +16,7 @@ enum LLMProviderCredentialGate {
     }
 
     static func usesDotenvSecrets() -> Bool {
-        PluginSecretResolver.usesDotenvOnly
+        DotEnvReader.usesDotenvOnly
     }
 
     static func configurationHint(for provider: LLMProviderChoice) -> String {

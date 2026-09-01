@@ -146,9 +146,10 @@ actor MCPServiceToolHost {
                         fields: secrets.map(\.descriptor)
                     )
                     if !missing.isEmpty {
-                        throw PluginSecretsRequiredError(pluginID: release.pluginID, fields: secrets.filter { field in
-                            missing.contains(where: { $0.id == field.id })
-                        })
+                        throw PluginSecretsRequiredError(
+                            pluginID: release.pluginID,
+                            fields: secrets
+                        )
                     }
                     HostHTTPCallContext.shared.setPluginSecrets(
                         pluginID: release.pluginID,

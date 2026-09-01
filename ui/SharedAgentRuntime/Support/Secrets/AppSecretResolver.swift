@@ -31,15 +31,24 @@ struct AppSecretResolver: Sendable {
 
     var usesDotenvOnly: Bool { mode == .dotenv }
 
-    func resolve(account: String, environmentKeys: [String]) -> String? {
-        switch mode {
-        case .keychain:
+    func resolve(
+        account: String,
+        environmentKeys: [String],
+        policy: SecretResolutionPolicy = .appDefault
+    ) -> String? {
+        switch policy {
+        case .keychainOnly:
             return keychainValue(for: account)
-                ?? environmentValue(for: environmentKeys)
-                ?? dotEnvValue(for: environmentKeys)
-        case .dotenv:
-            return dotEnvValue(for: environmentKeys)
-                ?? environmentValue(for: environmentKeys)
+        case .appDefault:
+            switch mode {
+            case .keychain:
+                return keychainValue(for: account)
+                    ?? environmentValue(for: environmentKeys)
+                    ?? dotEnvValue(for: environmentKeys)
+            case .dotenv:
+                return dotEnvValue(for: environmentKeys)
+                    ?? environmentValue(for: environmentKeys)
+            }
         }
     }
 

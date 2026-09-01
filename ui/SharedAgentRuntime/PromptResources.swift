@@ -21,6 +21,10 @@ public enum PromptResources {
         try load(named: "memory_summarizer_instructions", from: resourceRoot)
     }
 
+    public static func connectorVendorSlack(from resourceRoot: URL? = nil) throws -> String {
+        try DerrickBundledText.load("connector_vendor_slack.md", from: resourceRoot)
+    }
+
     public static func mcpToolInstructions(from resourceRoot: URL? = nil) throws -> String {
         try load(named: "mcp_tool_instructions", from: resourceRoot)
     }

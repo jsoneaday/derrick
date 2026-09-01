@@ -175,6 +175,19 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     If skill_files is not needed, return an empty array. Every skill file path must be exactly
     skills/<name>/SKILL.md, where <name> is one safe path component using letters, numbers,
     hyphens, or underscores.
+    For messaging connector plugins (role connector) that call a vendor HTTP API:
+    - Declare secrets in the manifest only (bot_token, api_key, username/password as documented).
+      Never hard-code vendor env var names.
+    - Parse each http_results body as JSON when the vendor returns JSON.
+    - For APIs that return {"ok": true|false, "error": "..."} (Slack Web API), treat success only
+      when ok is boolean true; surface error strings on failure; never report success on ok:false.
+    - Check HTTP status from http_results; non-2xx is failure.
+    - Paginate with vendor cursors when listing conversations or messages; merge pages with stable
+      sort and de-duplication, or do not claim complete lists.
+    - test_input_json http_results must include success, auth/API failure, send, read, and
+      pagination fixtures when the code paginates — all matched by request_id.
+    When vendor documentation is supplied in the user prompt, follow it exactly for secrets,
+    endpoints, error handling, and test fixtures.
     """
 
     private static let builderResponseSchema = AgentSchema(
@@ -239,6 +252,9 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         }
         if let feedback = request.feedback {
             sections.append("Factory feedback to correct before the next attempt:\n\(feedback)")
+        }
+        if let connectorDoc = PluginFactoryConnectorDocs.supplementalPrompt(for: request.userGoal) {
+            sections.append(connectorDoc)
         }
         return sections.joined(separator: "\n\n")
     }
@@ -355,6 +371,9 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     - Source-derived headline titles may be fragments; only generated explanatory summaries must be complete sentences when the manifest requires prose.
     - `result.emit.html` is an allowed output format. Derrick sanitizes it with an allowlist before rendering. Reject executable script behavior or a deliberate sanitizer bypass, not ordinary safe HTML tags.
     - Reject missing source-grounded parsing or claims that the direct test output does not support.
+    - For Slack Web API connector plugins: reject code that treats JSON as success without ok==true,
+      ignores error fields like invalid_auth, or lists channels/messages without cursor pagination
+      while implying completeness. Reject tests that omit auth-failure and send/read fixtures.
     Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
     """
 

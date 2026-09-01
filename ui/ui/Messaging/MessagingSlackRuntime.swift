@@ -68,18 +68,6 @@ final class MessagingSlackRuntime {
             pluginID: Self.pluginID,
             fieldID: "bot_token"
         ), !token.isEmpty else {
-            if PluginSecretResolver.usesDotenvOnly {
-                throw NSError(
-                    domain: "MessagingSlackRuntime",
-                    code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: PluginSecretResolver.missingDotenvMessage(
-                            pluginID: Self.pluginID,
-                            fieldID: "bot_token"
-                        ),
-                    ]
-                )
-            }
             throw SlackWebAPI.APIError.missingToken
         }
         return token
