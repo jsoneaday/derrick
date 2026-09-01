@@ -10,11 +10,12 @@ final class MessagingStore: ObservableObject {
     let session: MessagingSessionStore
     @Published var isSlackSyncing = false
     @Published var isSending = false
+    @Published var dotenvSecretMessage: String?
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
     private let slackRuntime = MessagingSlackRuntime()
-    private var workspaceActive = false
+    private var inboundObserver: DerrickDarwinNotifyObserver?
 
     init() {
         catalog = MessagingCatalogStore()
@@ -25,6 +26,14 @@ final class MessagingStore: ObservableObject {
         session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
+        inboundObserver = DerrickDarwinNotifyObserver(
+            darwinName: DerrickMessagingInboundSignal.darwinName
+        ) { [weak self] in
+            Task { @MainActor in
+                await self?.refreshFromDaemonInbound()
+            }
+        }
+        inboundObserver?.start()
     }
 
     var connectors: [MessagingConnectorDTO] { catalog.connectors }
@@ -59,14 +68,7 @@ final class MessagingStore: ObservableObject {
     }
 
     func setWorkspaceActive(_ active: Bool) {
-        workspaceActive = active
         session.setWorkspaceActive(active)
-        guard let repository else { return }
-        if active, selectedPluginID == MessagingSlackRuntime.pluginID {
-            slackRuntime.resumePolling(store: self, repository: repository)
-        } else {
-            slackRuntime.stopPolling()
-        }
     }
 
     func syncConnectorsFromFactory() async {
@@ -79,18 +81,31 @@ final class MessagingStore: ObservableObject {
     }
 
     func openConnector(pluginID: String) async {
+        dotenvSecretMessage = nil
         if let repository {
-            _ = await MessagingConnectorCredentials.ensureIfNeeded(
+            switch await MessagingConnectorCredentials.ensureIfNeeded(
                 pluginID: pluginID,
                 repository: repository
-            )
+            ) {
+            case .ok:
+                break
+            case .cancelled:
+                return
+            case .dotenvMissing(let message):
+                dotenvSecretMessage = message
+                session.setLastError(message)
+                return
+            }
+            try? await repository.setMessagingConnectorListening(pluginID: pluginID, listening: true)
+            DerrickMessagingIngressSignal.postPoll()
         }
         await session.openConnector(pluginID: pluginID)
         guard let repository, pluginID == MessagingSlackRuntime.pluginID else { return }
         await slackRuntime.bootstrap(store: self, repository: repository, session: session)
-        if workspaceActive {
-            slackRuntime.resumePolling(store: self, repository: repository)
-        }
+    }
+
+    func dismissDotenvSecretMessage() {
+        dotenvSecretMessage = nil
     }
 
     func refreshSlackConnector() async {
@@ -142,5 +157,13 @@ final class MessagingStore: ObservableObject {
 
     func jumpToLatest() async {
         await session.jumpToLatest()
+    }
+
+    func refreshFromDaemonInbound() async {
+        await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
+        if let threadID = selectedThreadID {
+            await session.reloadMessagesForThread(id: threadID)
+        }
+        await catalog.refreshBadges()
     }
 }

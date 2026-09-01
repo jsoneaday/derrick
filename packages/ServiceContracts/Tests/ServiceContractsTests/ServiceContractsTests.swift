@@ -265,6 +265,67 @@ import Testing
         #expect(keys.contains("PLUGIN_SLACK_CONNECTION_BOT_TOKEN"))
     }
 
+    @Test func dotenvModeDoesNotReadPluginSecretsFromKeychain() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try DotEnvTestFixtures.fileBody().write(
+            to: resources.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let previousCWD = FileManager.default.currentDirectoryPath
+        FileManager.default.changeCurrentDirectoryPath(root.path)
+        defer { FileManager.default.changeCurrentDirectoryPath(previousCWD) }
+
+        #expect(PluginSecretResolver.resolve(pluginID: "slack-connection", fieldID: "bot_token") == nil)
+        #expect(
+            PluginSecretResolver.missingDotenvMessage(pluginID: "slack-connection", fieldID: "bot_token")
+                .contains(DotEnvReader.repositoryRelativePath)
+        )
+    }
+
+    @Test func dotenvReaderFindsRepositoryRelativePath() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try DotEnvTestFixtures.fileBody(extraLines: ["SLACK_BOT_KEY=test"]).write(
+            to: resources.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let value = DotEnvReader.firstValue(
+            for: ["SLACK_BOT_KEY"],
+            environment: [:],
+            bundleURL: root,
+            currentDirectoryURL: root
+        )
+        #expect(value == "test")
+    }
+
+    @Test func hostUIApplicationURLFromEmbeddedLoginItemDaemon() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let host = root.appendingPathComponent("Derrick.app", isDirectory: true)
+        let daemon = host
+            .appendingPathComponent("Contents/Library/LoginItems/JobKeepAlive.app", isDirectory: true)
+        let hostInfo = host.appendingPathComponent("Contents/Info.plist")
+        try FileManager.default.createDirectory(at: hostInfo.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+        <key>CFBundleIdentifier</key><string>\(DerrickAppSupport.hostAppBundleIdentifier)</string>
+        </dict></plist>
+        """.write(to: hostInfo, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: daemon, withIntermediateDirectories: true)
+
+        let resolved = DerrickAppSupport.hostUIApplicationURL(bundleURL: daemon)
+        #expect(resolved?.standardizedFileURL.path == host.standardizedFileURL.path)
+    }
+
     @Test func pluginSecretKeychainAccountIsStable() {
         #expect(
             PluginSecretKeychain.account(pluginID: "slack-connection", fieldID: "password")

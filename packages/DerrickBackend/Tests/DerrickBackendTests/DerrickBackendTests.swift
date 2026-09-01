@@ -30,4 +30,9 @@ import Testing
         #expect(decoded.kind == .hitlApproval)
         #expect(decoded.userInfo[UserNotificationUserInfoKey.approvalID.rawValue] == "approval-1")
     }
+
+    @Test func messagingIngressSignalNamesAreStable() {
+        #expect(DerrickMessagingIngressSignal.darwinName == "derrickd.pollMessagingIngress")
+        #expect(DerrickMessagingInboundSignal.darwinName == "derrick.ui.messagingInbound")
+    }
 }

@@ -8,6 +8,7 @@ import UserNotifications
 public enum DaemonModuleID: String, Sendable, CaseIterable {
     case events
     case notifications
+    case ingress
     case jobs
     case agent
     case mcp
@@ -33,6 +34,8 @@ public actor DaemonRuntime {
             Task {
                 await NotificationPostingService.shared.prepare()
                 HITLApprovalPollService.shared.start()
+                MessagingIngressService.shared.start()
+                await markModuleReady(.ingress)
             }
             // Job/Agent/MCP now run in-process — no UI job-worker wake.
             await DaemonJobWatchdog.shared.stop()

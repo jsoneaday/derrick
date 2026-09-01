@@ -24,16 +24,17 @@ import DBRepository
 
     @MainActor @Test func dotenvModeBypassesKeychainAndUsesRootUiDotEnv() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let uiFolder = root.appendingPathComponent("ui", isDirectory: true)
-        try FileManager.default.createDirectory(at: uiFolder, withIntermediateDirectories: true)
-        try "UI_SECRET_MODE=dotenv\nGEMINI_API_KEY=dotenv-gemini\n".write(
-            to: uiFolder.appendingPathComponent(".env"),
+        let resources = root
+            .appendingPathComponent("ui/ui/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try "GEMINI_API_KEY=dotenv-gemini\n".write(
+            to: resources.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
         )
 
         let resolver = AppSecretResolver(
-            environment: [:],
+            environment: [DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue],
             currentDirectoryURL: root,
             bundleURL: root,
             keychainLoader: { _ in "keychain-gemini" }
@@ -61,14 +62,14 @@ import DBRepository
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let uiFolder = root.appendingPathComponent("ui", isDirectory: true)
         try FileManager.default.createDirectory(at: uiFolder, withIntermediateDirectories: true)
-        try "UI_SECRET_MODE=dotenv\nGEMINI_API_KEY=dotenv-gemini\n".write(
+        try "GEMINI_API_KEY=dotenv-gemini\n".write(
             to: uiFolder.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
         )
 
         let resolver = AppSecretResolver(
-            environment: ["UI_SECRET_MODE": "keychain"],
+            environment: [DotEnvReader.secretModeKey: "keychain"],
             currentDirectoryURL: root,
             bundleURL: root,
             keychainLoader: { _ in "keychain-gemini" }
@@ -100,16 +101,17 @@ import DBRepository
 
     @MainActor @Test func llmProviderCredentialGateDetectsConfiguredProviders() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let uiFolder = root.appendingPathComponent("ui", isDirectory: true)
-        try FileManager.default.createDirectory(at: uiFolder, withIntermediateDirectories: true)
-        try "UI_SECRET_MODE=dotenv\nOPENAI_API_KEY=openai-test\n".write(
-            to: uiFolder.appendingPathComponent(".env"),
+        let resources = root
+            .appendingPathComponent("ui/ui/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try "OPENAI_API_KEY=test\n".write(
+            to: resources.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
         )
 
         let resolver = AppSecretResolver(
-            environment: [:],
+            environment: [DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue],
             currentDirectoryURL: root,
             bundleURL: root,
             keychainLoader: { _ in nil }

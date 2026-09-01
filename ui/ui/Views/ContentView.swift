@@ -503,6 +503,44 @@ struct ContentView: View {
             }
         )
         .modalPopup(
+            isPresented: messaging.dotenvSecretMessage != nil
+                && !bootstrapStatus.isModalPresented,
+            minWidth: 400,
+            minHeight: 0,
+            maxWidth: 480,
+            maxHeight: 420,
+            onBackdropDismiss: { messaging.dismissDotenvSecretMessage() },
+            onEscape: { messaging.dismissDotenvSecretMessage() },
+            header: {
+                Text("Connector Secret Missing")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+            },
+            body: {
+                Text(messaging.dotenvSecretMessage ?? "")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+            },
+            footer: {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("OK") {
+                        messaging.dismissDotenvSecretMessage()
+                    }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                .padding(.top, 4)
+            }
+        )
+        .modalPopup(
             isPresented: policyEventPresenter.isPresented && !bootstrapStatus.isModalPresented,
             minWidth: 380,
             minHeight: 0,

@@ -33,8 +33,8 @@ public extension DBRepository {
         }
     }
 
-    func listMessagingConnectors() throws -> [MessagingConnectorDTO] {
-        try withDatabaseHandle { handle in
+    func listMessagingConnectors(listeningOnly: Bool = false) throws -> [MessagingConnectorDTO] {
+        let rows = try withDatabaseHandle { handle in
             let sql = """
             SELECT c.plugin_id, c.display_name, c.listening, c.created_at, c.updated_at,
                    COALESCE(SUM(t.unread_count), 0)
@@ -53,6 +53,25 @@ public extension DBRepository {
                 rows.append(try decodeMessagingConnector(statement: statement))
             }
             return rows
+        }
+        guard listeningOnly else { return rows }
+        return rows.filter(\.listening)
+    }
+
+    func setMessagingConnectorListening(pluginID: String, listening: Bool) throws {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw DBRepositoryError.sqliteOperationFailed("Messaging connector id is required.")
+        }
+        try withDatabaseHandle { handle in
+            try requireMessagingConnector(pluginID: trimmed, on: handle)
+            let updated = Self.iso8601Formatter().string(from: Date())
+            try Self.execute("""
+            UPDATE messaging_connectors
+            SET listening = \(listening ? 1 : 0),
+                updated_at = \(quoted(updated))
+            WHERE plugin_id = \(quoted(trimmed));
+            """, on: handle)
         }
     }
 

@@ -1,6 +1,6 @@
 # Messaging design notes
 
-Saved from chat on 24 Aug 2026 so it survives reboot. Inbound UX locked 27 Aug 2026. Not implemented yet.
+Saved from chat on 24 Aug 2026 so it survives reboot. Inbound UX locked 27 Aug 2026. Daemon ingress + live UI refresh added 31 Aug 2026.
 
 The menu, thread tabs, and archive are the right product. A Docker webhook that Slack/Telegram push into is the wrong receive path for this app.
 
@@ -84,11 +84,25 @@ Unread badges on the vendor row and on conversation tabs. Mute is per conversati
 
 ## Order to build
 
-1. Connector mark in the manifest + Messaging sidebar + empty thread tabs — **in code**
-2. DB archive + load history — **in code** (live ingress not yet)
-3. Send from a thread (plugin invoke + Keychain HTTP)
-4. Swift ingress (Telegram poll is simpler than Slack Socket Mode)
-5. Live UI updates when a message lands
+1. Connector mark in the manifest + Messaging sidebar + empty thread tabs — **done**
+2. DB archive + load history — **done**
+3. Send from a thread (host HTTP + secrets) — **done** (Slack direct API; plugin invoke in step 6)
+4. Daemon ingress (`MessagingIngressService` in derrickd) — **done** (Slack poll adapter; Socket Mode in 4.1)
+5. Live UI updates when a message lands — **done** (Darwin `derrick.ui.messagingInbound`)
+
+### Remaining roadmap
+
+| Step | Work | Notes |
+|------|------|-------|
+| **2** | **OS notifications** | Wire `messagingMessage` banners; debounce bursts; skip when viewing thread |
+| **2.1** | Route reporting | UI reports `MessagingRoute` to daemon so banners suppress correctly |
+| **2.2** | Banner tap → conversation | `DaemonNotificationCenterDelegate` + launch args |
+| **3** | **Listening toggle** | Per-connector on/off UI; start/stop ingress loops |
+| **4** | **Plugin invoke path** | Replace direct vendor API calls with `plugin.invoke` so connectors stay vendor-agnostic guests |
+| **4.1** | Slack Socket Mode | Replace history poll in ingress with outbound WebSocket |
+| **4.2** | Echo suppression | Skip re-importing outbound messages the host already persisted on send |
+| **4.3** | DM + channel polish | DMs, thread titles, channel picker on first connect |
+| **5** | **Second connector** | Telegram long-poll adapter to prove the ingress pattern |
 
 Skip inbound Docker ports, skip mixing threads with chat sessions, skip treating every plugin as a connector.
 

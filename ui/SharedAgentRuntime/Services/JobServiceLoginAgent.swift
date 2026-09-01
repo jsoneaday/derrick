@@ -121,6 +121,7 @@ public enum JobServiceLoginAgent {
 
         let loaded = isLaunchdJobLoaded()
         if loaded {
+            kickstartRegisteredDaemon()
             return Result(
                 method: smEnabled ? .both : .userLaunchAgent,
                 statusDescription: "launchd loaded",
@@ -129,22 +130,18 @@ public enum JobServiceLoginAgent {
             )
         }
 
-        if smEnabled {
-            return Result(
-                method: .smAppService,
-                statusDescription: smStatusDescription,
-                isRunningOrEnabled: true,
-                detail: "\(smDetail); mach=\(DerrickServiceID.daemon.machServiceName) (demand-start via SM)"
-            )
-        }
-
-        // Opening JobKeepAlive.app does not register MachServices. The unsandboxed
-        // helper must `launchctl bootstrap` a session label BTM does not own.
+        // SMAppService can report enabled while the session job is not loaded. The
+        // unsandboxed helper installs `derrick.ui.Daemon.session` (BTM-safe).
         do {
             try runHelperInstall(executable: paths.executable)
         } catch {
             fputs("[derrickd] helper --install-launchd failed: \(error.localizedDescription)\n", stderr)
-            throw error
+            if smEnabled {
+                reloadRegisteredDaemon()
+            }
+            guard isLaunchdJobLoaded() else {
+                throw error
+            }
         }
         guard isLaunchdJobLoaded() else {
             throw AgentError.registerFailed(
@@ -152,7 +149,7 @@ public enum JobServiceLoginAgent {
             )
         }
         return Result(
-            method: .userLaunchAgent,
+            method: smEnabled ? .both : .userLaunchAgent,
             statusDescription: "launchd loaded",
             isRunningOrEnabled: true,
             detail: "\(smDetail); helper --install-launchd ok; label=\(DerrickServiceID.daemonSessionLaunchdLabel); mach=\(DerrickServiceID.daemon.machServiceName)"
@@ -409,6 +406,9 @@ public enum JobServiceLoginAgent {
 
     // MARK: - Helper install
 
+    /// `DaemonLaunchAgentInstaller` can spend ~30s on bootstrap + kickstart.
+    static let helperInstallTimeoutSeconds: TimeInterval = 60
+
     private static func runHelperInstall(executable: URL) throws {
         let process = Process()
         process.executableURL = executable
@@ -418,7 +418,7 @@ public enum JobServiceLoginAgent {
         process.standardError = err
         process.standardOutput = out
         try process.run()
-        let deadline = Date().addingTimeInterval(25)
+        let deadline = Date().addingTimeInterval(helperInstallTimeoutSeconds)
         while process.isRunning, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
         }
@@ -428,7 +428,9 @@ public enum JobServiceLoginAgent {
             if process.isRunning {
                 kill(process.processIdentifier, SIGKILL)
             }
-            throw AgentError.registerFailed("daemon --install-launchd timed out after 25s")
+            throw AgentError.registerFailed(
+                "daemon --install-launchd timed out after \(Int(helperInstallTimeoutSeconds))s"
+            )
         }
         let errText = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if !errText.isEmpty {

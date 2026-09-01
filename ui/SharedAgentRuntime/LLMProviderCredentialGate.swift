@@ -22,7 +22,7 @@ enum LLMProviderCredentialGate {
     static func configurationHint(for provider: LLMProviderChoice) -> String {
         let keys = provider.apiKeyEnvironmentKeys.joined(separator: " or ")
         if usesDotenvSecrets() {
-            return "Set \(keys) in your `.env` file."
+            return "Set \(keys) in `\(DotEnvReader.repositoryRelativePath)`."
         }
         return "Save your key to Keychain account `\(provider.secretAccount)`, or set \(keys) in the environment."
     }

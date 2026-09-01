@@ -208,6 +208,18 @@ final class DBMessagingTests: XCTestCase {
         XCTAssertEqual(results.map(\.thread.unreadCount).max(), 1)
     }
 
+    func testSetMessagingConnectorListening() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack", listening: false)
+        )
+        try await repository.setMessagingConnectorListening(pluginID: "slack-connection", listening: true)
+        let connectors = try await repository.listMessagingConnectors(listeningOnly: true)
+        XCTAssertEqual(connectors.map(\.pluginID), ["slack-connection"])
+        XCTAssertTrue(connectors.first?.listening == true)
+    }
+
     private func makeRepository() throws -> DBRepository {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
