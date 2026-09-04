@@ -81,16 +81,26 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
         let argumentsJSON = try toolArgumentsToJSON(arguments)
         let reviewerModelJSON = await helperReviewerModelJSONProvider()
         let activePrincipal = effectivePrincipal()
+        let executionContextJSON = makeExecutionContextJSON(principal: activePrincipal)
         let request = MCPToolCallRequest(
             principal: activePrincipal,
             toolName: name,
             argumentsJSON: argumentsJSON,
             helperAPIKey: helperAPIKeyProvider(),
-            helperReviewerModelJSON: reviewerModelJSON
+            helperReviewerModelJSON: reviewerModelJSON,
+            pluginFactoryCreationActive: executionContextJSON != nil
+                && TurnProcessContext.effectivePluginFactoryCreationActive,
+            executionContextJSON: executionContextJSON
         )
         await MainActor.run {
+            let longRunning = MCPToolCallTimeouts.nanoseconds(forToolName: name)
+                == MCPToolCallTimeouts.longRunningNanoseconds
             debugLog(
-                "MCPService XPC callTool tool=\(name) principal=\(activePrincipal.logLabel) argKeys=\(arguments.keys.sorted().joined(separator: ",")) reviewerModel=\(reviewerModelJSON ?? "default")"
+                "MCPService XPC callTool tool=\(name) principal=\(activePrincipal.logLabel) " +
+                "argKeys=\(arguments.keys.sorted().joined(separator: ",")) " +
+                "reviewerModel=\(reviewerModelJSON ?? "default") " +
+                "pluginFactory=\(request.pluginFactoryCreationActive) " +
+                "timeoutSec=\(longRunning ? 915 : 15)"
             )
         }
         let dto = try await MCPServiceClient.shared.callTool(request)
@@ -101,6 +111,32 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             )
         }
         return MCPToolResult(content: [.text(dto.text)], isError: dto.isError || !dto.ok)
+    }
+
+    private func makeExecutionContextJSON(principal: ServicePrincipal) -> String? {
+        guard TurnProcessContext.effectivePluginFactoryCreationActive else { return nil }
+        let sessionID: String
+        switch principal {
+        case .agent(let sid, _):
+            sessionID = sid
+        default:
+            return nil
+        }
+        let agentID: String
+        if case .agent(_, let aid) = principal {
+            agentID = aid
+        } else {
+            agentID = "ui"
+        }
+        let wire = ExecutionContextWire(
+            sessionID: sessionID,
+            principal: principal,
+            agentID: agentID,
+            workflow: WorkflowContextWire(kind: .pluginFactoryCreate),
+            delivery: .liveChat,
+            capabilities: [.syncWebCrawl, .hostReviewRetry]
+        )
+        return try? wire.encodedJSON()
     }
 
     public func batchCallTools(_ request: MCPToolBatchRequest) async throws -> MCPToolBatchResult {

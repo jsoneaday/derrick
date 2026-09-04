@@ -41,6 +41,9 @@
       location = "group:packages/MemorySystem">
    </FileRef>
    <FileRef
+      location = "group:packages/Contract">
+   </FileRef>
+   <FileRef
       location = "group:packages/Plugin">
    </FileRef>
    <FileRef

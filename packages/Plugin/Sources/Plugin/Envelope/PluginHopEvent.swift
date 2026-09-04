@@ -1,4 +1,5 @@
 import Foundation
+import Contract
 
 public struct PluginHopEvent: Codable, Sendable, Hashable {
     public var kind: PluginEventKind
@@ -20,5 +21,10 @@ public struct PluginHopEvent: Codable, Sendable, Hashable {
         case kind
         case httpResults = "http_results"
         case params
+    }
+
+    public static func decodeValidated(_ data: Data) throws -> PluginHopEvent {
+        try GuestContractValidation.validateHopEventJSON(data)
+        return try JSONDecoder().decode(PluginHopEvent.self, from: data)
     }
 }

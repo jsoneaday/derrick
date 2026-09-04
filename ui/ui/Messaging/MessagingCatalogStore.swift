@@ -33,6 +33,7 @@ final class MessagingCatalogStore: ObservableObject {
                     )
                 )
             }
+            try await repository.pruneMessagingConnectors(keeping: Set(connectorIDs))
             let stored = try await repository.listMessagingConnectors()
             let storedByID = Dictionary(uniqueKeysWithValues: stored.map { ($0.pluginID, $0) })
             connectors = connectorIDs.compactMap { storedByID[$0] }

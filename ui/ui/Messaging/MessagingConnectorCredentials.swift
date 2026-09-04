@@ -16,6 +16,7 @@ enum MessagingConnectorCredentials {
             pluginID: pluginID,
             repository: repository
         )
+        migrateLegacyCredentialsIfNeeded(pluginID: pluginID, secrets: secrets)
         guard !secrets.isEmpty else { return .ok }
 
         let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: secrets)
@@ -33,5 +34,17 @@ enum MessagingConnectorCredentials {
         case .cancelled:
             return .cancelled
         }
+    }
+
+    private static func migrateLegacyCredentialsIfNeeded(
+        pluginID: String,
+        secrets: [PluginSecretDescriptor]
+    ) {
+        guard pluginID == "slack-connector" else { return }
+        PluginSecretKeychain.migrateStoredFields(
+            from: "slack-connection",
+            to: pluginID,
+            fields: secrets
+        )
     }
 }

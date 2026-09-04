@@ -25,6 +25,7 @@ public enum DockerHostLaunch: Sendable {
     public static let allowedDockerSubcommands: Set<String> = [
         "version",
         "pull",
+        "build",
         "create",
         "start",
         "exec",

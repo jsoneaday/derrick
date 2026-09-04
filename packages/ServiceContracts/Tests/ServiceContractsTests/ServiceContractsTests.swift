@@ -189,7 +189,8 @@ import Testing
             toolName: "script_exec",
             argumentsJSON: #"{"script":"print(1)"}"#,
             helperAPIKey: "sk-test",
-            helperReviewerModelJSON: wireJSON
+            helperReviewerModelJSON: wireJSON,
+            pluginFactoryCreationActive: true
         )
         let data = try MCPServiceXPCCodec.encodeToolCallRequest(request)
         let decoded = try MCPServiceXPCCodec.decodeToolCallRequest(data)
@@ -197,6 +198,7 @@ import Testing
         #expect(decoded.principal.logLabel.contains("agent:"))
         #expect(decoded.helperAPIKey == "sk-test")
         #expect(decoded.helperReviewerModelJSON == wireJSON)
+        #expect(decoded.pluginFactoryCreationActive == true)
         let decodedWire = try HelperModelWire.decodeJSON(decoded.helperReviewerModelJSON!)
         #expect(decodedWire.provider == "openai")
         #expect(decodedWire.model == "gpt-5.6-luna")
@@ -206,6 +208,33 @@ import Testing
         let rDecoded = try MCPServiceXPCCodec.decodeToolCallResult(rData)
         #expect(rDecoded.ok == true)
         #expect(rDecoded.text == "ok")
+    }
+
+    @Test func mcpToolCallTimeouts() {
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "web.crawl")
+            == MCPToolCallTimeouts.longRunningNanoseconds)
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin_factory_build")
+            == MCPToolCallTimeouts.longRunningNanoseconds)
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin.invoke")
+            == MCPToolCallTimeouts.pluginInvokeNanoseconds)
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "memory_search")
+            == MCPToolCallTimeouts.standardNanoseconds)
+    }
+
+    @Test func connectorMessagingXPCCodecRoundTrip() throws {
+        let submit = ConnectorOperationRequest(
+            operationID: "op-1",
+            pluginID: "slack-connector",
+            kind: .send,
+            vendorThreadID: "C1",
+            threadID: "thread-1",
+            text: "hello"
+        )
+        #expect(
+            try ConnectorMessagingXPCCodec.decodeSubmit(
+                try ConnectorMessagingXPCCodec.encodeSubmit(submit)
+            ) == submit
+        )
     }
 
     @Test func mcpServiceIDAndSearchRoundTrip() throws {
@@ -241,18 +270,6 @@ import Testing
         let dDecoded = try AgentServiceXPCCodec.decodeApprovalDecision(dData)
         #expect(dDecoded.approved == true)
         #expect(dDecoded.actor == "user")
-    }
-
-    @Test func slackMessageDecodingUsesTimestamp() {
-        let message = SlackWebAPI.decodeMessage([
-            "ts": "1710000000.123456",
-            "user": "U123",
-            "text": "hello",
-        ])
-        #expect(message?.timestamp == "1710000000.123456")
-        #expect(message?.text == "hello")
-        #expect(message?.userID == "U123")
-        #expect(SlackMessage.date(fromSlackTimestamp: "1710000000.123456") != nil)
     }
 
     @Test func pluginSecretResolverReadsKeychainOnly() throws {
@@ -339,6 +356,26 @@ import Testing
                 == "plugin-secret:slack-connection/password"
         )
         #expect(PluginCredentialPrompt.toolName == "plugin.credentials")
+    }
+
+    @Test func pluginSecretKeychainMigratesRetiredPluginFields() throws {
+        try PluginSecretKeychain.save(
+            pluginID: "slack-connection",
+            fieldID: "bot_token",
+            value: "legacy-token"
+        )
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: "slack-connection", fieldID: "bot_token")
+            PluginSecretKeychain.deleteForTesting(pluginID: "slack-connector", fieldID: "bot_token")
+        }
+        let fields = [PluginSecretDescriptor(id: "bot_token", label: "Bot token", kind: "token")]
+        PluginSecretKeychain.migrateStoredFields(
+            from: "slack-connection",
+            to: "slack-connector",
+            fields: fields
+        )
+        #expect(PluginSecretKeychain.hasStoredValue(pluginID: "slack-connector", fieldID: "bot_token"))
+        #expect(try PluginSecretKeychain.load(pluginID: "slack-connector", fieldID: "bot_token") == "legacy-token")
     }
 
     @Test func messageSigningRoundTrip() {
@@ -732,11 +769,19 @@ import Testing
 
     @Test func shouldRetireConnectedDaemonOnFingerprintOrRuntimeMismatch() {
         #expect(
-            !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+            DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+                reportedFingerprint: "a",
+                expectedFingerprint: "a",
+                reportedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
             )
         )
         #expect(
@@ -744,7 +789,7 @@ import Testing
                 reportedFingerprint: "old",
                 expectedFingerprint: "new",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
             )
         )
         #expect(
@@ -752,7 +797,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: "stale-guest:old",
-                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
             )
         )
         #expect(
@@ -760,15 +805,15 @@ import Testing
                 reportedFingerprint: nil,
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
             )
         )
         #expect(
-            !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
+            DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: nil,
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
             )
         )
     }
@@ -940,5 +985,99 @@ import Testing
         let fromMinutes = ContainerLifecycleSettings.fromMinutes(12)
         #expect(fromMinutes.containerRunMaxTTLSeconds == 12 * 60)
         #expect(fromMinutes.containerRunMaxTTLMinutes == 12)
+    }
+
+    @Test func effectorAdmissionAllowsWorkflowCrawl() {
+        let context = ExecutionContextWire(
+            sessionID: "s1",
+            principal: .agent(sessionID: "s1", agentID: "a1"),
+            workflow: WorkflowContextWire(workflowID: "w1", kind: .pluginFactoryCreate),
+            capabilities: [.syncWebCrawl, .hostReviewRetry]
+        )
+        #expect(
+            EffectorAdmissionPolicy.allowsSyncWebCrawl(
+                context: context,
+                principal: .agent(sessionID: "s1", agentID: "a1")
+            )
+        )
+    }
+
+    @Test func effectorAdmissionDeniesLiveChatWithoutContext() {
+        #expect(
+            EffectorAdmissionPolicy.allowsSyncWebCrawl(
+                context: nil,
+                principal: .agent(sessionID: "s1", agentID: "a1")
+            ) == false
+        )
+    }
+
+    @Test func effectorAdmissionAllowsJobsWithoutContext() {
+        #expect(
+            EffectorAdmissionPolicy.allowsSyncWebCrawl(
+                context: nil,
+                principal: .job(jobID: "j1")
+            )
+        )
+    }
+
+    @Test func executionContextWireRoundTrip() throws {
+        let context = ExecutionContextWire(
+            sessionID: "s1",
+            principal: .agent(sessionID: "s1", agentID: "ui"),
+            turnID: "turn-1",
+            agentID: "ui",
+            workflow: WorkflowContextWire(
+                workflowID: "wf-1",
+                kind: .pluginFactoryCreate,
+                stepKind: "crawl_vendor_docs"
+            ),
+            delivery: .liveChat,
+            capabilities: [.syncWebCrawl, .hostReviewRetry]
+        )
+        let json = try context.encodedJSON()
+        let decoded = try ExecutionContextWire.decodeJSON(json)
+        #expect(decoded.sessionID == "s1")
+        #expect(decoded.workflow?.workflowID == "wf-1")
+        #expect(decoded.workflow?.kind == .pluginFactoryCreate)
+        #expect(decoded.capabilities.contains(.syncWebCrawl))
+        #expect(decoded.resolvedPrincipal.logLabel == context.resolvedPrincipal.logLabel)
+    }
+
+    @Test func workflowRuntimeXPCCodecRoundTrip() throws {
+        let start = WorkflowStartRequest(
+            kind: .pluginFactoryCreate,
+            sessionID: "s1",
+            turnID: "t1",
+            agentID: "ui",
+            inputJSON: "slack connector",
+            principal: .agent(sessionID: "s1", agentID: "ui")
+        )
+        let decodedStart = try WorkflowRuntimeXPCCodec.decodeStart(
+            try WorkflowRuntimeXPCCodec.encodeStart(start)
+        )
+        #expect(decodedStart == start)
+
+        let handle = WorkflowHandleDTO(
+            workflowID: "wf-1",
+            kind: .pluginFactoryCreate,
+            status: .running,
+            deduplicated: false
+        )
+        #expect(
+            try WorkflowRuntimeXPCCodec.decodeHandle(try WorkflowRuntimeXPCCodec.encodeHandle(handle)) == handle
+        )
+    }
+
+    @Test func workflowChatProgressMapsFactoryStages() {
+        #expect(
+            WorkflowChatProgress.factoryProgressMessage(
+                from: "[plugin_factory] attempt=2/3 draft_started"
+            ) == "Generating plugin draft (attempt 2 of 3)…"
+        )
+        #expect(
+            WorkflowChatProgress.shouldSurfaceWorkflowMessage(
+                "The direct test output exercises only poll_inbox."
+            ) == false
+        )
     }
 }

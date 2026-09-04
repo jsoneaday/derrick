@@ -137,18 +137,24 @@ final class MCPServiceCallContext: @unchecked Sendable {
     private var _helperAPIKey: String?
     private var _helperReviewerModelJSON: String?
     private var _memorySessionKey: MemorySessionKey?
+    private var _pluginFactoryCreationActive = false
+    private var _workflowID: String?
 
     private init() {}
 
     func install(
         helperAPIKey: String?,
         helperReviewerModelJSON: String?,
-        memorySessionKey: MemorySessionKey
+        memorySessionKey: MemorySessionKey,
+        pluginFactoryCreationActive: Bool = false,
+        workflowID: String? = nil
     ) {
         lock.lock()
         _helperAPIKey = helperAPIKey
         _helperReviewerModelJSON = helperReviewerModelJSON
         _memorySessionKey = memorySessionKey
+        _pluginFactoryCreationActive = pluginFactoryCreationActive
+        _workflowID = workflowID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         lock.unlock()
     }
 
@@ -157,6 +163,8 @@ final class MCPServiceCallContext: @unchecked Sendable {
         _helperAPIKey = nil
         _helperReviewerModelJSON = nil
         _memorySessionKey = nil
+        _pluginFactoryCreationActive = false
+        _workflowID = nil
         lock.unlock()
     }
 
@@ -180,4 +188,21 @@ final class MCPServiceCallContext: @unchecked Sendable {
         return _memorySessionKey
     }
 
+    var pluginFactoryCreationActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _pluginFactoryCreationActive
+    }
+
+    var workflowID: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _workflowID
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }

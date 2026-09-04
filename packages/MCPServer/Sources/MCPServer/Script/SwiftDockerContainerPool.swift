@@ -82,7 +82,7 @@ public enum SwiftDockerContainerPoolError: Error, LocalizedError, Equatable, Sen
     public var errorDescription: String? {
         switch self {
         case .imageUnavailable(let detail):
-            return "Swift runtime image is unavailable: \(detail)"
+            return "Guest runtime image is unavailable: \(detail)"
         }
     }
 }

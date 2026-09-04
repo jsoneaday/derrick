@@ -12,7 +12,7 @@ final class JobMCPClient: @unchecked Sendable {
     private var connection: NSXPCConnection?
     private var peerEndpoint: NSXPCListenerEndpoint?
     /// A web crawl may run for the full fifteen-minute tool limit.
-    private let callTimeoutNanoseconds: UInt64 = 915_000_000_000
+    private let callTimeoutNanoseconds: UInt64 = MCPToolCallTimeouts.longRunningNanoseconds
 
     private init() {}
 

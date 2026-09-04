@@ -73,4 +73,14 @@ extension DBRepository {
         }
         return .sqliteOperationFailed(message)
     }
+
+    static func deleteDatabaseFiles(at databaseURL: URL) throws {
+        let fm = FileManager.default
+        for suffix in ["", "-wal", "-shm"] {
+            let url = URL(fileURLWithPath: databaseURL.path + suffix)
+            if fm.fileExists(atPath: url.path) {
+                try fm.removeItem(at: url)
+            }
+        }
+    }
 }

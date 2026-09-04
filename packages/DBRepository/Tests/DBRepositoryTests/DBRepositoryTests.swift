@@ -63,192 +63,18 @@ final class DBRepositoryTests: XCTestCase {
 
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
-        XCTAssertTrue(try tableExists(named: "memory_records", at: url))
-        XCTAssertTrue(try tableExists(named: "egress_allowed_domain_suffixes", at: url))
-        XCTAssertTrue(try tableExists(named: "content_sensitivity_grants", at: url))
+        XCTAssertTrue(try tableExists(named: "plugin_factory_releases", at: url))
+        XCTAssertTrue(try tableExists(named: "messaging_connectors", at: url))
+        XCTAssertTrue(try tableExists(named: "workflow_runs", at: url))
         XCTAssertFalse(try tableExists(named: "plugins", at: url))
-        XCTAssertFalse(try tableExists(named: "plugin_versions", at: url))
-        XCTAssertFalse(try tableExists(named: "plugin_grants", at: url))
-        XCTAssertFalse(try tableExists(named: "plugin_invokes", at: url))
-        XCTAssertFalse(try tableExists(named: "pending_plugin_waits", at: url))
-        XCTAssertTrue(try tableExists(named: "egress_blacklist", at: url))
-        XCTAssertTrue(try tableExists(named: "egress_blacklist_exceptions", at: url))
-        XCTAssertFalse(try tableExists(named: "factory_sessions", at: url))
-        XCTAssertTrue(try tableExists(named: "policy_approvals", at: url))
 
-        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 23)
-        XCTAssertEqual(try schemaVersion(at: url), 23)
-        XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
-        XCTAssertFalse(try tableExists(named: "plugins", at: url))
-    }
-
-    func testRetiredFactoryMemoryIsPurgedByMigration() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let configuration = DBRepositoryConfiguration(
-            applicationName: "ui",
-            databaseName: "derrick",
-            databaseDirectoryURL: directory,
-            username: "app-user",
-            password: "app-secret"
-        )
-        let repository = DBRepository(configuration: configuration)
-        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
-        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 22)
-
-        let record = makeRecord(
-            sessionID: "factory-retired",
-            createdAt: .now,
-            prompt: "old factory instruction"
-        )
-        try await repository.upsert(record)
-        let beforePurge = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "factory-retired", agentID: "ui")
-        )
-        XCTAssertEqual(beforePurge.count, 1)
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 0)
+        XCTAssertEqual(try schemaVersion(at: url), 0)
+        XCTAssertFalse(try tableExists(named: "memory_sessions", at: url))
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
-        let afterPurge = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "factory-retired", agentID: "ui")
-        )
-        XCTAssertTrue(afterPurge.isEmpty)
-    }
-
-    func testLegacyScriptRuntimeDataIsPurgedIdempotently() async throws {
-        let repository = try makeRepository()
-        let url = try await repository.createEmptyDatabaseIfNeeded(
-            username: "app-user",
-            password: "app-secret"
-        )
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret",
-            to: 25
-        )
-
-        try await repository.upsert(
-            makeRecord(
-                sessionID: "legacy-script",
-                createdAt: .now,
-                prompt: #"{"tool":"script_exec","script":"function handle() {} // legacy source"}"#
-            )
-        )
-        try await repository.upsert(
-            makeRecord(
-                sessionID: "swift-script",
-                createdAt: .now,
-                prompt: #"{"tool":"script_exec","script":"let data = readLine()"}"#
-            )
-        )
-
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret"
-        )
-        let legacyRecords = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "legacy-script", agentID: "ui")
-        )
-        let swiftRecords = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "swift-script", agentID: "ui")
-        )
-        XCTAssertTrue(legacyRecords.isEmpty)
-        XCTAssertEqual(swiftRecords.count, 1)
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret"
-        )
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
-    }
-
-    func testLegacyToolOutcomesArePurgedByMigration() async throws {
-        let repository = try makeRepository()
-        let url = try await repository.createEmptyDatabaseIfNeeded(
-            username: "app-user",
-            password: "app-secret"
-        )
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret",
-            to: 26
-        )
-
-        let legacyOutcome = #"{"status":"blocked","failureStage":"llmReview","reviewerAssessment":{},"phaseTiming":{}}"#
-        try await repository.upsert(
-            makeRecord(
-                sessionID: "legacy-outcome-tool-call",
-                createdAt: .now,
-                prompt: "preserve this conversation",
-                toolCalls: [
-                    ToolCallRecord(
-                        name: "script_exec",
-                        result: legacyOutcome
-                    )
-                ]
-            )
-        )
-        try await repository.upsert(
-            makeRecord(
-                sessionID: "legacy-outcome-completion",
-                createdAt: .now,
-                prompt: "remove this old result",
-                completion: legacyOutcome
-            )
-        )
-
-        let timestamp = "2026-01-01T00:00:00Z"
-        try execute(
-            """
-            INSERT INTO jobs (id, status, principal_json, source, created_at, updated_at)
-            VALUES ('legacy-outcome-job', 'failed', '{}', 'test', '\(timestamp)', '\(timestamp)');
-            INSERT INTO job_steps (
-                id, job_id, step_index, kind, status, payload_json, result_json
-            ) VALUES (
-                'legacy-outcome-step', 'legacy-outcome-job', 0, 'tool', 'failed', '{}',
-                \(sqlLiteral(legacyOutcome))
-            );
-            INSERT INTO job_results (
-                id, job_id, job_session_id, response_text, created_at
-            ) VALUES (
-                'legacy-outcome-result', 'legacy-outcome-job', 'legacy-outcome-session',
-                \(sqlLiteral(legacyOutcome)), '\(timestamp)'
-            );
-            INSERT INTO service_logs (
-                id, service, level, code, message, detail_json, created_at
-            ) VALUES (
-                'legacy-outcome-log', 'mcp', 'debug', 'legacy', 'old result',
-                \(sqlLiteral(legacyOutcome)), '\(timestamp)'
-            );
-            """,
-            at: url
-        )
-
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret"
-        )
-
-        let preserved = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "legacy-outcome-tool-call", agentID: "ui")
-        )
-        XCTAssertEqual(preserved.count, 1)
-        XCTAssertTrue(preserved.first?.pair.toolCalls.isEmpty == true)
-        let removedCompletion = try await repository.records(
-            sessionKey: MemorySessionKey(sessionID: "legacy-outcome-completion", agentID: "ui")
-        )
-        XCTAssertTrue(removedCompletion.isEmpty)
-
-        let job = try await repository.fetchJob(id: "legacy-outcome-job")
-        XCTAssertNil(job?.1.first?.resultJSON)
-        let jobResult = try await repository.fetchJobResult(id: "legacy-outcome-result")
-        XCTAssertNil(jobResult)
-        let logs = try await repository.recentServiceLogs(limit: 100)
-        XCTAssertFalse(logs.contains { $0.message == "old result" })
-        XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
-
-        _ = try await repository.migrateSessionMemory(
-            username: "app-user",
-            password: "app-secret"
-        )
+        XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
     }
 
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
@@ -259,7 +85,7 @@ final class DBRepositoryTests: XCTestCase {
         let files: [String: Data] = [
             "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
             "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.swift": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
             "app.derrick/plugin": artifact,
             "skills/weather/SKILL.md": Data("# Weather".utf8),
         ]
@@ -268,7 +94,7 @@ final class DBRepositoryTests: XCTestCase {
             version: "1.0.0",
             manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
             runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
-            swiftSource: "print(\"[]\")",
+            guestSource: "print(\"[]\")",
             compiledArtifact: artifact,
             skillFiles: skillFiles,
             contentHash: PluginContentHash.hash(files: files),
@@ -284,6 +110,59 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded?.contentHash, release.contentHash)
         XCTAssertEqual(loaded?.skillFiles, skillFiles)
         XCTAssertTrue(loaded?.verifyIntegrity() == true)
+    }
+
+    func testPluginFactoryReleaseRejectsStaleContentHash() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let repository = DBRepository(
+            configuration: DBRepositoryConfiguration(
+                applicationName: "ui",
+                databaseName: "derrick",
+                databaseDirectoryURL: directory,
+                username: "app-user",
+                password: "app-secret"
+            )
+        )
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let artifact = Data("compiled".utf8)
+        let skillFiles = ["skills/weather/SKILL.md": "# Weather"]
+        let files: [String: Data] = [
+            "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
+            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
+            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin": artifact,
+            "skills/weather/SKILL.md": Data("# Weather".utf8),
+        ]
+        let release = PluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
+            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
+            guestSource: "print(\"[]\")",
+            compiledArtifact: artifact,
+            skillFiles: skillFiles,
+            contentHash: PluginContentHash.hash(files: files),
+            reviewSummary: "approved"
+        )
+        try await repository.savePluginFactoryRelease(release)
+
+        let url = directory.appendingPathComponent("derrick.sqlite3")
+        try execute(
+            """
+            UPDATE plugin_factory_releases
+            SET content_hash = '0000000000000000000000000000000000000000000000000000000000000000'
+            WHERE plugin_id = 'weather-tool' AND version = '1.0.0';
+            """,
+            at: url
+        )
+
+        do {
+            _ = try await repository.pluginFactoryRelease(pluginID: "weather-tool", version: "1.0.0")
+            XCTFail("Expected integrity verification failure")
+        } catch DBRepositoryError.sqliteOperationFailed(let message) {
+            XCTAssertTrue(message.contains("integrity verification"))
+        }
     }
 
     func testContentSensitivityGrantCRUD() async throws {
@@ -608,6 +487,42 @@ final class DBRepositoryTests: XCTestCase {
 
         let rows = try await uiRepo.records(sessionKey: MemorySessionKey(sessionID: "s-0", agentID: "ui"))
         XCTAssertEqual(rows.count, 1)
+    }
+
+    func testServiceLogsTailAfterTimestamp() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let repository = DBRepository(
+            configuration: DBRepositoryConfiguration(
+                applicationName: "ui",
+                databaseName: "derrick",
+                databaseDirectoryURL: directory,
+                username: "app-user",
+                password: "app-secret"
+            )
+        )
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        let second = first.addingTimeInterval(5)
+        let third = first.addingTimeInterval(10)
+
+        try await repository.appendServiceLog(
+            ServiceLogEntry(service: "ui", level: .info, message: "first", createdAt: first)
+        )
+        try await repository.appendServiceLog(
+            ServiceLogEntry(service: "ui", level: .info, message: "second", createdAt: second)
+        )
+        try await repository.appendServiceLog(
+            ServiceLogEntry(service: "agent", level: .info, message: "agent-only", createdAt: third)
+        )
+
+        let tail = try await repository.serviceLogs(createdAfter: second, service: nil, limit: 10)
+        XCTAssertEqual(tail.map(\.message), ["agent-only"])
+
+        let uiTail = try await repository.serviceLogs(createdAfter: first, service: "ui", limit: 10)
+        XCTAssertEqual(uiTail.map(\.message), ["second"])
     }
 
     private func journalMode(at url: URL) throws -> String {

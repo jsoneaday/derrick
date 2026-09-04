@@ -12,20 +12,19 @@ public extension DBRepository {
             throw DBRepositoryError.unsupportedMigrationVersion(target)
         }
 
-        return try withDatabaseHandle { handle in
-            var currentVersion = try Self.schemaVersion(on: handle)
-
-            // Repair: older buggy statement-splitter skipped `ALTER TABLE ... schedule_id`
-            // when the statement chunk started with a `--` comment, then failed on the index
-            // (or left a half-applied version). Re-run from 10 if jobs lacks schedule_id.
-            if currentVersion >= 11, try Self.jobsTableMissingScheduleID(on: handle) {
+        if FileManager.default.fileExists(atPath: databaseURL.path) {
+            let storedVersion = try? withDatabaseHandle { try Self.schemaVersion(on: $0) }
+            if let storedVersion, storedVersion != 0, storedVersion != target {
                 fputs(
-                    "[DBRepository] repair: user_version=\(currentVersion) but jobs.schedule_id missing; rewinding to 10\n",
+                    "[DBRepository] dev reset: schema version \(storedVersion) != \(target); recreating database\n",
                     stderr
                 )
-                try Self.execute("PRAGMA user_version = 10;", on: handle)
-                currentVersion = 10
+                try Self.deleteDatabaseFiles(at: databaseURL)
             }
+        }
+
+        try withDatabaseHandle { handle in
+            var currentVersion = try Self.schemaVersion(on: handle)
 
             if currentVersion < target {
                 for version in (currentVersion + 1)...target {
@@ -36,8 +35,8 @@ public extension DBRepository {
                     try Self.applyMemoryMigration(version: version, isUp: false, on: handle)
                 }
             }
-            return databaseURL
         }
+        return databaseURL
     }
 
     func currentMemorySchemaVersion(username: String, password: String) throws -> Int {
@@ -355,26 +354,6 @@ extension DBRepository {
             _ = try? Self.execute("ROLLBACK;", on: handle)
             throw error
         }
-    }
-
-    /// `true` when `jobs` exists but lacks `schedule_id` (broken 0011 apply).
-    static func jobsTableMissingScheduleID(on handle: OpaquePointer) throws -> Bool {
-        var statement: OpaquePointer?
-        let sql = "PRAGMA table_info(jobs);"
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            return false
-        }
-        defer { sqlite3_finalize(statement) }
-        var sawJobs = false
-        var hasScheduleID = false
-        while sqlite3_step(statement) == SQLITE_ROW {
-            sawJobs = true
-            if let cName = sqlite3_column_text(statement, 1) {
-                let name = String(cString: cName)
-                if name == "schedule_id" { hasScheduleID = true }
-            }
-        }
-        return sawJobs && !hasScheduleID
     }
 
     static func score(record: MemoryRecord, tokens: [String]) -> Int {

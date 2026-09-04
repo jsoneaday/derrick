@@ -32,31 +32,11 @@ final class PluginFactoryListStore: ObservableObject {
     func reload() async {
         guard let repository else { return }
         lastError = nil
-        let userReleases = (try? await repository.listPluginFactoryReleaseSummaries()) ?? []
-        let systemReleases = [
-            PluginFactoryReleaseSummary(
-                pluginID: "create-plugin",
-                version: "system",
-                contentHash: "",
-                reviewSummary: "Starts the plugin creation flow.",
-                isSystem: true
-            ),
-            PluginFactoryReleaseSummary(
-                pluginID: "edit-plugin",
-                version: "system",
-                contentHash: "",
-                reviewSummary: "Edits an existing plugin through the factory.",
-                isSystem: true
-            ),
-        ]
-        let systemIDs = Set(systemReleases.map(\.pluginID))
-        let userReleaseList = userReleases.filter { !systemIDs.contains($0.pluginID) }
-        releases = systemReleases.sorted { $0.pluginID < $1.pluginID }
-            + userReleaseList
+        releases = (try? await repository.listPluginFactoryReleaseSummaries()) ?? []
     }
 
     func delete(_ release: PluginFactoryReleaseSummary) async {
-        guard !release.isSystem, let repository else { return }
+        guard let repository else { return }
         do {
             try await repository.deletePluginFactoryRelease(
                 pluginID: release.pluginID,

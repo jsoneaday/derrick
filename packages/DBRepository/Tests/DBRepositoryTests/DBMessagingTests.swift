@@ -19,10 +19,10 @@ final class DBMessagingTests: XCTestCase {
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
 
         try await repository.upsertMessagingConnector(
-            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector")
         )
         let thread = MessagingThreadDTO(
-            pluginID: "slack-connection",
+            pluginID: "test-connector",
             vendorThreadID: "C123",
             title: "#general"
         )
@@ -78,12 +78,12 @@ final class DBMessagingTests: XCTestCase {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         try await repository.upsertMessagingConnector(
-            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector")
         )
 
         let first = try await repository.persistMessagingInbound(
             MessagingInboundRecord(
-                pluginID: "slack-connection",
+                pluginID: "test-connector",
                 vendorThreadID: "C123",
                 threadTitle: "#general",
                 vendorMessageID: "ts-1",
@@ -100,7 +100,7 @@ final class DBMessagingTests: XCTestCase {
 
         let renamed = try await repository.persistMessagingInbound(
             MessagingInboundRecord(
-                pluginID: "slack-connection",
+                pluginID: "test-connector",
                 vendorThreadID: "C123",
                 threadTitle: "#general-renamed",
                 vendorMessageID: "ts-2",
@@ -117,7 +117,7 @@ final class DBMessagingTests: XCTestCase {
 
         let duplicate = try await repository.persistMessagingInbound(
             MessagingInboundRecord(
-                pluginID: "slack-connection",
+                pluginID: "test-connector",
                 vendorThreadID: "C123",
                 threadTitle: "#general-renamed",
                 vendorMessageID: "ts-2",
@@ -136,12 +136,12 @@ final class DBMessagingTests: XCTestCase {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         try await repository.upsertMessagingConnector(
-            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector")
         )
         let stamp = Date(timeIntervalSince1970: 1_700_000_000)
         let first = try await repository.persistMessagingInbound(
             MessagingInboundRecord(
-                pluginID: "slack-connection",
+                pluginID: "test-connector",
                 vendorThreadID: "C123",
                 threadTitle: "#general",
                 vendorMessageID: "a",
@@ -152,7 +152,7 @@ final class DBMessagingTests: XCTestCase {
         )
         _ = try await repository.persistMessagingInbound(
             MessagingInboundRecord(
-                pluginID: "slack-connection",
+                pluginID: "test-connector",
                 vendorThreadID: "C123",
                 threadTitle: "#general",
                 vendorMessageID: "b",
@@ -188,11 +188,11 @@ final class DBMessagingTests: XCTestCase {
         let secondRepo = DBRepository(configuration: configuration)
         _ = try await firstRepo.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         try await firstRepo.upsertMessagingConnector(
-            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector")
         )
 
         let record = MessagingInboundRecord(
-            pluginID: "slack-connection",
+            pluginID: "test-connector",
             vendorThreadID: "C123",
             threadTitle: "#general",
             vendorMessageID: "same-event",
@@ -212,12 +212,37 @@ final class DBMessagingTests: XCTestCase {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         try await repository.upsertMessagingConnector(
-            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack", listening: false)
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector", listening: false)
         )
-        try await repository.setMessagingConnectorListening(pluginID: "slack-connection", listening: true)
+        try await repository.setMessagingConnectorListening(pluginID: "test-connector", listening: true)
         let connectors = try await repository.listMessagingConnectors(listeningOnly: true)
-        XCTAssertEqual(connectors.map(\.pluginID), ["slack-connection"])
+        XCTAssertEqual(connectors.map(\.pluginID), ["test-connector"])
         XCTAssertTrue(connectors.first?.listening == true)
+    }
+
+    func testPruneMessagingConnectorsRemovesOrphansAndKeepsFactoryConnectors() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Legacy Slack")
+        )
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connector", displayName: "Slack Connector")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C1",
+                title: "#general"
+            )
+        )
+
+        try await repository.pruneMessagingConnectors(keeping: ["slack-connector"])
+
+        let connectors = try await repository.listMessagingConnectors()
+        XCTAssertEqual(connectors.map(\.pluginID), ["slack-connector"])
+        let threads = try await repository.listMessagingThreads(pluginID: "slack-connection")
+        XCTAssertTrue(threads.isEmpty)
     }
 
     private func makeRepository() throws -> DBRepository {

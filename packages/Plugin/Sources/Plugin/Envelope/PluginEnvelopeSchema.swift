@@ -1,10 +1,15 @@
+import Contract
 import Foundation
 import ServiceContracts
 
-/// Canonical JSON Schema for standalone Swift program stdout.
+/// Canonical JSON Schema for guest stdout (envelope list).
 public enum PluginEnvelopeSchema {
     public static var jsonSchema: String {
-        DerrickBundledText.registerSearchRoot(Bundle.module.resourceURL ?? Bundle.module.bundleURL)
-        return DerrickBundledText.mustLoad("guest/handle-return.schema.json")
+        (try? GuestContract.loadSchemaText(.envelopeList))
+            ?? fallbackSchema
     }
+
+    private static let fallbackSchema = """
+    {"title":"Guest stdout envelope list","type":"array"}
+    """
 }

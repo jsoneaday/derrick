@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionContextWire",
+  "type": "object",
+  "required": ["schema_version", "session_id", "principal"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "turn_id": { "type": "string" },
+    "agent_id": { "type": "string" },
+    "principal": { "type": "string", "minLength": 1 },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "workflow_id": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "plugin_factory_create",
+            "plugin_factory_edit",
+            "job_step",
+            "interactive_tool",
+            "none"
+          ]
+        },
+        "step_id": { "type": "string" },
+        "step_kind": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "string",
+      "enum": ["live_chat", "notification", "silent"]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["sync_web_crawl", "host_review_retry"]
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -2,12 +2,12 @@ import Foundation
 
 public typealias PluginFactoryLogger = @Sendable (String) async -> Void
 
-/// The factory creates Agent Plugin packages whose Derrick entrypoint is Swift.
-/// A draft is always a standalone file: the container runs it with `swift file.swift`.
-/// A released version is run only from the optimized artifact returned by `swiftc -O`.
+/// The factory creates Agent Plugin packages whose Derrick entrypoint is Python.
+/// A draft is a standalone file: the container runs it with `python3 /tmp/guest.py`.
+/// A released version stores UTF-8 source as the packaged artifact.
 public struct PluginFactoryDraft: Sendable, Hashable {
     public let manifestJSON: String
-    public let swiftSource: String
+    public let guestSource: String
     public let testInput: Data
     public let skillFiles: [String: String]
     /// Original request context supplied only to the independent reviewer.
@@ -16,13 +16,13 @@ public struct PluginFactoryDraft: Sendable, Hashable {
 
     public init(
         manifestJSON: String,
-        swiftSource: String,
+        guestSource: String,
         testInput: Data = Data("{}".utf8),
         skillFiles: [String: String] = [:],
         userGoal: String? = nil
     ) {
         self.manifestJSON = manifestJSON
-        self.swiftSource = swiftSource
+        self.guestSource = guestSource
         self.testInput = testInput
         self.skillFiles = skillFiles
         self.userGoal = userGoal
@@ -30,14 +30,14 @@ public struct PluginFactoryDraft: Sendable, Hashable {
 
     public init(
         manifest: PluginFactoryManifestInput,
-        swiftSource: String,
+        guestSource: String,
         testInput: Data = Data("{}".utf8),
         skillFiles: [String: String] = [:],
         userGoal: String? = nil
     ) throws {
         self.init(
             manifestJSON: try manifest.encodedJSON(),
-            swiftSource: swiftSource,
+            guestSource: guestSource,
             testInput: testInput,
             skillFiles: skillFiles,
             userGoal: userGoal
@@ -47,7 +47,7 @@ public struct PluginFactoryDraft: Sendable, Hashable {
     public func withUserGoal(_ userGoal: String) -> PluginFactoryDraft {
         PluginFactoryDraft(
             manifestJSON: manifestJSON,
-            swiftSource: swiftSource,
+            guestSource: guestSource,
             testInput: testInput,
             skillFiles: skillFiles,
             userGoal: userGoal
@@ -91,7 +91,7 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
             throw PluginFactoryError.invalidManifest("Version is required.")
         }
         var derrick: [String: Any] = [
-            "entrypoint": "./app.derrick/plugin.swift",
+            "entrypoint": "./app.derrick/plugin.py",
         ]
         if !secrets.isEmpty {
             derrick["secrets"] = secrets.map(\.jsonObject)
@@ -171,7 +171,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     public let pluginID: String
     public let version: String
     public let description: String
-    public let swiftSource: String
+    public let guestSource: String
     public let testInputJSON: String
     public let skillFiles: [PluginFactorySkillFile]
     public let secrets: [PluginSecretField]
@@ -181,7 +181,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         pluginID: String,
         version: String,
         description: String,
-        swiftSource: String,
+        guestSource: String,
         testInputJSON: String = "{}",
         skillFiles: [PluginFactorySkillFile] = [],
         secrets: [PluginSecretField] = [],
@@ -190,7 +190,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         self.pluginID = pluginID
         self.version = version
         self.description = description
-        self.swiftSource = swiftSource
+        self.guestSource = guestSource
         self.testInputJSON = testInputJSON
         self.skillFiles = skillFiles
         self.secrets = secrets
@@ -200,7 +200,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case pluginID = "plugin_id"
         case version, description
-        case swiftSource = "swift_source"
+        case guestSource = "python_source"
+        case legacySwiftSource = "swift_source"
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
         case secrets
@@ -212,7 +213,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         pluginID = try container.decode(String.self, forKey: .pluginID)
         version = try container.decode(String.self, forKey: .version)
         description = try container.decode(String.self, forKey: .description)
-        swiftSource = try container.decode(String.self, forKey: .swiftSource)
+        guestSource = try container.decodeIfPresent(String.self, forKey: .guestSource)
+            ?? container.decode(String.self, forKey: .legacySwiftSource)
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
         secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
@@ -224,7 +226,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         try container.encode(pluginID, forKey: .pluginID)
         try container.encode(version, forKey: .version)
         try container.encode(description, forKey: .description)
-        try container.encode(swiftSource, forKey: .swiftSource)
+        try container.encode(guestSource, forKey: .guestSource)
         try container.encode(testInputJSON, forKey: .testInputJSON)
         try container.encode(skillFiles, forKey: .skillFiles)
         if !secrets.isEmpty {
@@ -258,7 +260,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
                 secrets: secrets,
                 role: role
             ),
-            swiftSource: swiftSource,
+            guestSource: guestSource,
             testInput: input,
             skillFiles: files
         )
@@ -280,9 +282,9 @@ public struct PluginFactoryExecutionResult: Sendable, Hashable {
 /// The host supplies this adapter. Its production implementation runs these
 /// commands inside the restricted Linux Swift Docker container.
 public protocol PluginFactoryExecutor: Sendable {
-    func runSwiftFile(source: String, input: Data) async throws -> PluginFactoryExecutionResult
-    func compileSwiftFile(source: String) async throws -> Data
-    func runCompiledArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult
+    func runGuestSource(source: String, input: Data) async throws -> PluginFactoryExecutionResult
+    func packageGuestSource(source: String) async throws -> Data
+    func runPackagedArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult
 }
 
 public enum PluginReviewDecision: String, Sendable, Hashable {
@@ -382,7 +384,7 @@ public struct PluginFactoryRelease: Sendable, Hashable {
     public let version: String
     public let manifestJSON: String
     public let runtimeJSON: String
-    public let swiftSource: String
+    public let guestSource: String
     public let compiledArtifact: Data
     public let skillFiles: [String: String]
     public let contentHash: PluginContentHash
@@ -393,7 +395,7 @@ public struct PluginFactoryRelease: Sendable, Hashable {
         version: String,
         manifestJSON: String,
         runtimeJSON: String,
-        swiftSource: String,
+        guestSource: String,
         compiledArtifact: Data,
         skillFiles: [String: String],
         contentHash: PluginContentHash,
@@ -403,7 +405,7 @@ public struct PluginFactoryRelease: Sendable, Hashable {
         self.version = version
         self.manifestJSON = manifestJSON
         self.runtimeJSON = runtimeJSON
-        self.swiftSource = swiftSource
+        self.guestSource = guestSource
         self.compiledArtifact = compiledArtifact
         self.skillFiles = skillFiles
         self.contentHash = contentHash
@@ -429,7 +431,7 @@ public struct PluginFactoryRelease: Sendable, Hashable {
         var files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.swift": Data(swiftSource.utf8),
+            "app.derrick/plugin.py": Data(guestSource.utf8),
             "app.derrick/plugin": compiledArtifact,
         ]
         for (path, body) in skillFiles {
@@ -446,16 +448,16 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
     case invalidSource(String)
     case directRunFailed(String)
     case invalidDirectOutput(String)
-    case reviewRejected(String)
-    case compileFailed(String)
-    case compiledRunFailed(String)
-    case invalidCompiledOutput(String)
+    case reviewRejected(summary: String, findings: [String])
+    case packageFailed(String)
+    case packagedRunFailed(String)
+    case invalidPackagedOutput(String)
 
     public var isBuilderCorrectable: Bool {
         switch self {
         case .directRunFailed, .invalidDirectOutput:
             return true
-        case .invalidSkillPath, .invalidManifest:
+        case .invalidSkillPath, .invalidManifest, .invalidSource:
             return true
         case .reviewRejected:
             return true
@@ -470,13 +472,17 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         case .invalidSkillPath(let path):
             return "Invalid skill path '\(path)'. Skill path must be skills/<name>/SKILL.md."
         case .reservedPluginID(let id): return "The plugin id '\(id)' is reserved by Derrick."
-        case .invalidSource(let message): return "Invalid Swift plugin source: \(message)"
-        case .directRunFailed(let message): return "Swift draft test failed: \(message)"
-        case .invalidDirectOutput(let message): return "Swift draft returned invalid plugin output: \(message)"
-        case .reviewRejected(let message): return "Plugin review rejected the draft: \(message)"
-        case .compileFailed(let message): return "Swift plugin compilation failed: \(message)"
-        case .compiledRunFailed(let message): return "Compiled plugin test failed: \(message)"
-        case .invalidCompiledOutput(let message): return "Compiled plugin returned invalid output: \(message)"
+        case .invalidSource(let message): return "Invalid Python guest source: \(message)"
+        case .directRunFailed(let message): return "Python draft test failed: \(message)"
+        case .invalidDirectOutput(let message): return "Python draft returned invalid plugin output: \(message)"
+        case .reviewRejected(let summary, let findings):
+            let detail = findings.isEmpty
+                ? summary
+                : "\(summary) \(findings.joined(separator: " "))"
+            return "Plugin review rejected the draft: \(detail)"
+        case .packageFailed(let message): return "Python plugin packaging failed: \(message)"
+        case .packagedRunFailed(let message): return "Packaged plugin test failed: \(message)"
+        case .invalidPackagedOutput(let message): return "Packaged plugin returned invalid output: \(message)"
         }
     }
 }
@@ -559,12 +565,12 @@ public struct PluginFactory: Sendable {
         logger: @escaping PluginFactoryLogger = { _ in }
     ) async throws -> PluginFactoryRelease {
         let manifest = try validatedManifest(from: draft.manifestJSON)
-        try validateSource(draft.swiftSource)
+        try validateSource(draft.guestSource)
 
         let direct: PluginFactoryExecutionResult
         do {
-            direct = try await executor.runSwiftFile(
-                source: draft.swiftSource,
+            direct = try await executor.runGuestSource(
+                source: draft.guestSource,
                 input: draft.testInput
             )
         } catch {
@@ -598,59 +604,60 @@ public struct PluginFactory: Sendable {
             "finding_count=\(review.findings.count) summary=\(pluginFactoryLogValue(review.summary))"
         )
         guard review.approved else {
-            let findings = review.findings
-                .map { "\($0.severity.rawValue): \($0.message)" }
-                .joined(separator: " ")
-            let detail = findings.isEmpty
+            let findingMessages = review.findings.map(\.message)
+            let detail = findingMessages.isEmpty
                 ? review.summary
-                : "\(review.summary) \(findings)"
+                : "\(review.summary) \(findingMessages.joined(separator: " "))"
             await logger("[plugin_factory] review rejected=\(pluginFactoryLogValue(detail))")
-            throw PluginFactoryError.reviewRejected(detail)
+            throw PluginFactoryError.reviewRejected(
+                summary: review.summary,
+                findings: findingMessages
+            )
         }
 
         let artifact: Data
         do {
-            artifact = try await executor.compileSwiftFile(source: draft.swiftSource)
+            artifact = try await executor.packageGuestSource(source: draft.guestSource)
         } catch {
-            await logger("[plugin_factory] compile failed=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.compileFailed(error.localizedDescription)
+            await logger("[plugin_factory] package failed=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw PluginFactoryError.packageFailed(error.localizedDescription)
         }
-        await logger("[plugin_factory] compile succeeded artifact_bytes=\(artifact.count)")
+        await logger("[plugin_factory] package succeeded artifact_bytes=\(artifact.count)")
         guard !artifact.isEmpty else {
-            await logger("[plugin_factory] compile rejected=swiftc returned an empty artifact")
-            throw PluginFactoryError.compileFailed("swiftc returned an empty artifact.")
+            await logger("[plugin_factory] package rejected=empty guest source artifact")
+            throw PluginFactoryError.packageFailed("Guest source artifact is empty.")
         }
 
-        let compiled: PluginFactoryExecutionResult
+        let packaged: PluginFactoryExecutionResult
         do {
-            compiled = try await executor.runCompiledArtifact(
+            packaged = try await executor.runPackagedArtifact(
                 artifact,
                 input: draft.testInput
             )
         } catch {
-            await logger("[plugin_factory] compiled_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.compiledRunFailed(error.localizedDescription)
+            await logger("[plugin_factory] packaged_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw PluginFactoryError.packagedRunFailed(error.localizedDescription)
         }
         await logger(
-            "[plugin_factory] compiled_test exit=\(compiled.exitCode) " +
-            "stdout_chars=\(compiled.stdout.count) stderr_chars=\(compiled.stderr.count)"
+            "[plugin_factory] packaged_test exit=\(packaged.exitCode) " +
+            "stdout_chars=\(packaged.stdout.count) stderr_chars=\(packaged.stderr.count)"
         )
-        guard compiled.exitCode == 0 else {
-            await logger("[plugin_factory] compiled_test rejected=\(pluginFactoryLogValue(outputSummary(compiled)))")
-            throw PluginFactoryError.compiledRunFailed(outputSummary(compiled))
+        guard packaged.exitCode == 0 else {
+            await logger("[plugin_factory] packaged_test rejected=\(pluginFactoryLogValue(outputSummary(packaged)))")
+            throw PluginFactoryError.packagedRunFailed(outputSummary(packaged))
         }
         do {
-            try validateOutput(compiled.stdout)
+            try validateOutput(packaged.stdout)
         } catch {
-            await logger("[plugin_factory] compiled_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.invalidCompiledOutput(error.localizedDescription)
+            await logger("[plugin_factory] packaged_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
+            throw PluginFactoryError.invalidPackagedOutput(error.localizedDescription)
         }
 
         let runtimeJSON = try runtimeJSON(for: manifest)
         var files: [String: Data] = [
             "plugin.json": Data(draft.manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.swift": Data(draft.swiftSource.utf8),
+            "app.derrick/plugin.py": Data(draft.guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
         for (path, body) in draft.skillFiles {
@@ -666,7 +673,7 @@ public struct PluginFactory: Sendable {
             version: version,
             manifestJSON: draft.manifestJSON,
             runtimeJSON: runtimeJSON,
-            swiftSource: draft.swiftSource,
+            guestSource: draft.guestSource,
             compiledArtifact: artifact,
             skillFiles: draft.skillFiles,
             contentHash: PluginContentHash.hash(files: files),
@@ -681,9 +688,9 @@ public struct PluginFactory: Sendable {
         do {
             let manifest = try AgentPluginManifest.decode(data)
             guard let entrypoint = manifest.derrick?.entrypoint,
-                  entrypoint.hasSuffix(".swift") else {
+                  entrypoint.hasSuffix(".py") else {
                 throw PluginFactoryError.invalidManifest(
-                    "extensions.app.derrick.entrypoint must point to a Swift file."
+                    "extensions.app.derrick.entrypoint must point to a Python file."
                 )
             }
             guard !["create-plugin", "edit-plugin"].contains(manifest.name.rawValue) else {
@@ -698,23 +705,18 @@ public struct PluginFactory: Sendable {
     }
 
     private func validateSource(_ source: String) throws {
-        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw PluginFactoryError.invalidSource("Source is empty.")
-        }
-        // Generated code must not escape the Docker runner or replace host policy.
-        let forbidden = ["Process(", "FileHandle.standardError", "URLSession", "Darwin."]
-        if let token = forbidden.first(where: { source.contains($0) }) {
-            throw PluginFactoryError.invalidSource("Forbidden host escape API: \(token)")
+        let findings = GuestPythonSourceValidator.validate(source: source)
+        if let first = findings.first {
+            throw PluginFactoryError.invalidSource(first)
         }
     }
 
     private func runtimeJSON(for manifest: AgentPluginManifest) throws -> String {
         guard let entrypoint = manifest.derrick?.entrypoint else {
-            throw PluginFactoryError.invalidManifest("A Swift entrypoint is required.")
+            throw PluginFactoryError.invalidManifest("A Python entrypoint is required.")
         }
         let object: [String: String] = [
-            "language": "swift",
+            "language": "python",
             "entrypoint": entrypoint,
         ]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

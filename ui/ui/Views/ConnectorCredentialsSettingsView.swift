@@ -20,13 +20,13 @@ struct ConnectorCredentialsSettingsView: View {
             Text("Connectors")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Messaging connector credentials are stored in Keychain. Update a token or password here, or use `/edit-plugin <id> credentials` in chat.")
+            Text("Messaging connector credentials are stored in Keychain. Update a token or password here when a connector plugin is installed.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             if rows.isEmpty {
-                Text("No connector plugins are installed yet. Create one with `/create-plugin` and set `role` to connector.")
+                Text("No connector plugins are installed yet.")
                     .font(.body)
                     .foregroundStyle(.secondary)
             } else {

@@ -62,7 +62,7 @@ public actor DaemonRuntime {
             service: .daemon,
             status: ok ? .ok : .degraded,
             detail: ok ? nil : "not bootstrapped",
-            guestRuntimeImage: DerrickGuestRuntime.swiftPluginDockerImage,
+            guestRuntimeImage: DerrickGuestRuntime.pythonGuestDockerImage,
             executableFingerprint: DaemonSelfRetirement.launchedFingerprint
         )
     }

@@ -20,7 +20,11 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "script": .object([
                     "type": .string("string"),
-                    "description": .string("Standalone Swift source. It reads one JSON event from standard input and writes a JSON array of Derrick envelopes to standard output. Use http.request envelopes for host HTTP and result.emit/message.post for terminal output.")
+                    "description": .string("Standalone Python source (default) or Swift when language is swift. Reads one JSON event from standard input and writes a JSON array of Derrick envelopes to standard output. Use http.request envelopes for host HTTP and result.emit/message.post for terminal output.")
+                ]),
+                "language": .object([
+                    "type": .string("string"),
+                    "description": .string("Guest language: python (default) or swift (legacy). Omit to auto-detect from source.")
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),
@@ -28,7 +32,7 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "dependencies": .object([
                     "type": .string("object"),
-                    "description": .string("Must be empty. Swift script dependencies are not supported.")
+                    "description": .string("Must be empty. Guest script dependencies are not supported.")
                 ]),
                 "timeout_seconds": .object([
                     "type": .string("number"),

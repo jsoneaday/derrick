@@ -10,8 +10,8 @@
    - Pass tool `arguments` as a **stringified JSON object** under the `arguments` key (schema requirement). Prefer short Swift source and avoid embedding unescaped double quotes in the script body.
 6. Users should not have to name tools. Choose tools autonomously from intent.
 7. Use `files.extract` for attached PDFs, Office documents, HTML, CSV, and Excel. Use `script_exec` for other scripting/automation. Use `web.crawl` for live website access.
-   1. For `script_exec`, use standalone **Swift**. Read one JSON event from standard input and write a JSON **array** of envelopes to standard output. Do not use URLSession, sockets, Process, shell commands, credentials, or package dependencies.
-   2. The container has no network. Emit `http.request` envelopes; the host performs HTTP and invokes the Swift program again with an `http_results` event.
+   1. For `script_exec`, use standalone **Python** (default) or Swift when needed. Read one JSON event from standard input and write a JSON **array** of envelopes to standard output. Do not use sockets, urllib/requests, subprocess, shell commands, credentials, or package dependencies.
+   2. The container has no network. Emit `http.request` envelopes; the host performs HTTP and invokes the guest program again with an `http_results` event.
    3. On the first hop emit `{"verb":"http.request","request_id":"…","method":"GET","url":"…"}`. On `http_results`, parse the supplied UTF-8 body and emit `result.emit` or `message.post`.
    4. The script must complete the user's requested extraction or summary, not only prove that a fetch happened. Never emit `String(describing: http_results)` or copy an entire fetched body into `content` unless the user explicitly requested the raw source. For HTML/XML, remove scripts and styles, extract the relevant visible fields, normalize the text, and cap the result. If raw HTML is explicitly requested, emit it in `html`; the host sanitizes that field.
    5. Prefer content sites. Do **not** scrape Google/Bing/Yahoo SERP HTML.

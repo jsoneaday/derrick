@@ -8,7 +8,7 @@ public protocol PluginHopHandler: Sendable {
     func handleSecretRequest(payload: [String: PluginJSON]) async -> PluginHopEvent?
 }
 
-/// Runs standalone Swift source and dispatches host-owned capability hops.
+/// Runs standalone guest source (Python primary, Swift legacy) and dispatches host-owned capability hops.
 public enum ScriptExecutionRuntime {
     public static func run(
         arguments: [String: Value],
@@ -21,10 +21,12 @@ public enum ScriptExecutionRuntime {
     ) async throws -> String {
         let started = Date()
         let parsed = try parse(arguments)
-        logger("[script_exec] Swift source chars=\(parsed.script.count)")
+        let language = GuestScriptLanguage.resolve(arguments: arguments, script: parsed.script)
+        logger("[script_exec] \(language.rawValue) source chars=\(parsed.script.count)")
 
         let staticStarted = Date()
-        let staticFindings = SwiftScriptVerifier.validate(
+        let staticFindings = staticValidate(
+            language: language,
             source: parsed.script,
             dependencies: parsed.dependencies
         )
@@ -34,7 +36,8 @@ public enum ScriptExecutionRuntime {
                 findings: staticFindings,
                 stage: .staticValidation,
                 started: started,
-                parsed: parsed
+                parsed: parsed,
+                verifier: language.verifierID
             ), logger: logger)
         }
 
@@ -46,7 +49,8 @@ public enum ScriptExecutionRuntime {
                     findings: ["script_exec requires configured reviewer"],
                     stage: .llmReview,
                     started: started,
-                    parsed: parsed
+                    parsed: parsed,
+                    verifier: language.verifierID
                 ), logger: logger)
             }
             let reviewArgs = ScriptExecutionArguments(
@@ -66,7 +70,8 @@ public enum ScriptExecutionRuntime {
                     findings: extraStatic,
                     stage: .staticValidation,
                     started: started,
-                    parsed: parsed
+                    parsed: parsed,
+                    verifier: language.verifierID
                 ), logger: logger)
             }
             do {
@@ -87,7 +92,8 @@ public enum ScriptExecutionRuntime {
                         stage: .llmReview,
                         started: started,
                         parsed: parsed,
-                        assessment: outcome.assessment
+                        assessment: outcome.assessment,
+                        verifier: language.verifierID
                     ), logger: logger)
                 }
             } catch {
@@ -95,7 +101,8 @@ public enum ScriptExecutionRuntime {
                     findings: ["Reviewer failed: \(error.localizedDescription)"],
                     stage: .llmReview,
                     started: started,
-                    parsed: parsed
+                    parsed: parsed,
+                    verifier: language.verifierID
                 ), logger: logger)
             }
         } else {
@@ -105,19 +112,46 @@ public enum ScriptExecutionRuntime {
         let timeout = SwiftScriptPreparer.effectiveScriptTimeoutSeconds(
             requested: parsed.timeoutSeconds
         )
-        let executor = SwiftDockerExecutor(executor: stdinExecutor)
         let invokeID = UUID().uuidString
         do {
-            let artifact = try await executor.compile(source: parsed.script)
-            let result = try await hopLoop(
-                artifact: artifact,
-                executor: executor,
-                initialEvent: initialEvent,
-                invokeID: invokeID,
-                timeoutSeconds: timeout,
-                logger: logger,
-                hopHandler: hopHandler
-            )
+            let result: ScriptExecutionResult
+            switch language {
+            case .python:
+                let executor = PythonGuestDockerExecutor(executor: stdinExecutor)
+                result = try await GuestHopLoop.run(
+                    initialEvent: initialEvent,
+                    invokeID: invokeID,
+                    timeoutSeconds: timeout,
+                    verifier: language.verifierID,
+                    execute: { input in
+                        try await executor.runSource(
+                            source: parsed.script,
+                            input: input,
+                            timeoutSeconds: timeout
+                        )
+                    },
+                    logger: logger,
+                    hopHandler: hopHandler
+                )
+            case .swift:
+                let executor = SwiftDockerExecutor(executor: stdinExecutor)
+                let artifact = try await executor.compile(source: parsed.script)
+                result = try await GuestHopLoop.run(
+                    initialEvent: initialEvent,
+                    invokeID: invokeID,
+                    timeoutSeconds: timeout,
+                    verifier: language.verifierID,
+                    execute: { input in
+                        try await executor.runArtifact(
+                            artifact,
+                            input: input,
+                            timeoutSeconds: timeout
+                        )
+                    },
+                    logger: logger,
+                    hopHandler: hopHandler
+                )
+            }
             let metrics = ScriptPhaseTiming.scriptMetrics(parsed.script)
             var phaseTiming = result.phaseTiming ?? ScriptPhaseTiming()
             phaseTiming.staticValidateMS = staticValidateMS
@@ -129,7 +163,7 @@ public enum ScriptExecutionRuntime {
                 status: result.status,
                 decision: result.decision,
                 failureStage: result.failureStage,
-                verifier: "swift-check-v1",
+                verifier: language.verifierID,
                 validationFindings: result.validationFindings,
                 reviewerAssessment: reviewerAssessment,
                 stdout: result.stdout,
@@ -148,203 +182,49 @@ public enum ScriptExecutionRuntime {
             default:
                 stage = .execution
             }
-            logger("[script_exec] Swift runtime failed stage=\(stage.rawValue): \(error.localizedDescription)")
+            logger("[script_exec] guest runtime failed stage=\(stage.rawValue): \(error.localizedDescription)")
             return finish(runtimeFailure(
                 findings: [error.localizedDescription],
                 stage: stage,
                 started: started,
                 parsed: parsed,
-                assessment: reviewerAssessment
+                assessment: reviewerAssessment,
+                verifier: language.verifierID
             ), logger: logger)
-        } catch {
-            logger("[script_exec] Swift runtime failed: \(error.localizedDescription)")
+        } catch let error as PythonGuestDockerExecutorError {
+            logger("[script_exec] guest runtime failed: \(error.localizedDescription)")
             return finish(runtimeFailure(
                 findings: [error.localizedDescription],
                 stage: .execution,
                 started: started,
                 parsed: parsed,
-                assessment: reviewerAssessment
+                assessment: reviewerAssessment,
+                verifier: language.verifierID
+            ), logger: logger)
+        } catch {
+            logger("[script_exec] guest runtime failed: \(error.localizedDescription)")
+            return finish(runtimeFailure(
+                findings: [error.localizedDescription],
+                stage: .execution,
+                started: started,
+                parsed: parsed,
+                assessment: reviewerAssessment,
+                verifier: language.verifierID
             ), logger: logger)
         }
     }
 
-    private static func hopLoop(
-        artifact: Data,
-        executor: SwiftDockerExecutor,
-        initialEvent: PluginHopEvent,
-        invokeID: String,
-        timeoutSeconds: Int,
-        logger: @escaping @Sendable (String) -> Void,
-        hopHandler: (any PluginHopHandler)?
-    ) async throws -> ScriptExecutionResult {
-        var event = initialEvent
-        var posts: [String] = []
-        var lastTitle = ""
-        var lastSummary = ""
-
-        for _ in 0..<PluginContract.maxHops {
-            let input = try JSONEncoder().encode(event)
-            let hopResult = try await executor.runArtifact(
-                artifact,
-                input: input,
-                timeoutSeconds: timeoutSeconds
-            )
-            let stdout = String(decoding: hopResult.stdout, as: UTF8.self)
-            let stderr = String(decoding: hopResult.stderr, as: UTF8.self)
-            guard hopResult.exitCode == 0 else {
-                return ScriptExecutionResult.runnerOutcome(
-                    timedOut: false,
-                    exitCode: hopResult.exitCode,
-                    stdout: stdout,
-                    stderr: stderr,
-                    durationMS: 0,
-                    phaseTiming: nil,
-                    verifier: "swift-check-v1"
-                )
-            }
-
-            let envelopes = try PluginEnvelopeList.decode(hopResult.stdout)
-            let requests = envelopes.filter { $0.verb == .httpRequest }
-            let uiPresents = envelopes.filter { $0.verb == .uiPresent }
-            let secretRequests = envelopes.filter { $0.verb == .secretRequest }
-            let terminals = envelopes.filter { $0.verb.classification == .terminal }
-
-            for envelope in envelopes where envelope.verb == .log {
-                logger("[script_exec] \(envelope.payload["message"]?.stringValue ?? "")")
-            }
-            for envelope in envelopes where envelope.verb == .messagePost {
-                if let text = envelope.payload["text"]?.stringValue {
-                    posts.append(text)
-                }
-            }
-            for envelope in envelopes where envelope.verb == .resultEmit {
-                if let title = envelope.payload["title"]?.stringValue, !title.isEmpty {
-                    lastTitle = title
-                }
-                lastSummary = envelope.payload["summary"]?.stringValue
-                    ?? envelope.payload["content"]?.stringValue
-                    ?? envelope.payload["html"]?.stringValue
-                    ?? envelope.payload["text"]?.stringValue
-                    ?? envelope.payload["title"]?.stringValue
-                    ?? lastSummary
-            }
-
-            if !requests.isEmpty {
-                guard let nextData = await PluginHostHopDispatcher.httpResultEvent(
-                    for: envelopes,
-                    invokeID: invokeID,
-                    params: event.params
-                ) else {
-                    return ScriptExecutionResult(
-                        status: .failed,
-                        decision: .allow,
-                        failureStage: .execution,
-                        verifier: "swift-check-v1",
-                        validationFindings: ["Host could not prepare HTTP results."],
-                        reviewerAssessment: nil,
-                        stdout: stdout,
-                        stderr: stderr,
-                        exitCode: -1,
-                        timedOut: false,
-                        durationMS: 0,
-                        phaseTiming: nil
-                    )
-                }
-                event = try JSONDecoder().decode(PluginHopEvent.self, from: nextData)
-                continue
-            }
-
-            if !uiPresents.isEmpty {
-                if let next = await hopHandler?.handleUIPresent(payload: uiPresents[0].payload) {
-                    event = next
-                    continue
-                }
-                let cardText = uiPresentText(uiPresents[0].payload)
-                return ScriptExecutionResult.runnerOutcome(
-                    timedOut: false,
-                    exitCode: 0,
-                    stdout: terminalStdout(
-                        posts: posts,
-                        title: lastTitle,
-                        summary: lastSummary,
-                        extra: cardText
-                    ),
-                    stderr: stderr,
-                    durationMS: 0,
-                    phaseTiming: nil,
-                    verifier: "swift-check-v1"
-                )
-            }
-
-            if !secretRequests.isEmpty {
-                if let next = await hopHandler?.handleSecretRequest(payload: secretRequests[0].payload) {
-                    event = next
-                    continue
-                }
-                return ScriptExecutionResult(
-                    status: .failed,
-                    decision: .allow,
-                    failureStage: .execution,
-                    verifier: "swift-check-v1",
-                    validationFindings: [
-                        "Script requested a secret. Add it in Settings, then run again."
-                    ],
-                    reviewerAssessment: nil,
-                    stdout: stdout,
-                    stderr: stderr,
-                    exitCode: -1,
-                    timedOut: false,
-                    durationMS: 0,
-                    phaseTiming: nil
-                )
-            }
-
-            if !terminals.isEmpty {
-                return ScriptExecutionResult.runnerOutcome(
-                    timedOut: false,
-                    exitCode: 0,
-                    stdout: terminalStdout(
-                        posts: posts,
-                        title: lastTitle,
-                        summary: lastSummary
-                    ),
-                    stderr: stderr,
-                    durationMS: 0,
-                    phaseTiming: nil,
-                    verifier: "swift-check-v1"
-                )
-            }
-
-            return ScriptExecutionResult(
-                status: .failed,
-                decision: .allow,
-                failureStage: .execution,
-                verifier: "swift-check-v1",
-                validationFindings: ["Swift script returned no terminal envelope."],
-                reviewerAssessment: nil,
-                stdout: stdout,
-                stderr: stderr,
-                exitCode: -1,
-                timedOut: false,
-                durationMS: 0,
-                phaseTiming: nil
-            )
+    private static func staticValidate(
+        language: GuestScriptLanguage,
+        source: String,
+        dependencies: [String: String]
+    ) -> [String] {
+        switch language {
+        case .python:
+            return PythonScriptVerifier.validate(source: source, dependencies: dependencies)
+        case .swift:
+            return SwiftScriptVerifier.validate(source: source, dependencies: dependencies)
         }
-
-        return ScriptExecutionResult(
-            status: .failed,
-            decision: .allow,
-            failureStage: .execution,
-            verifier: "swift-check-v1",
-            validationFindings: ["Hop budget exceeded."],
-            reviewerAssessment: nil,
-            stdout: "",
-            stderr: "",
-            exitCode: -1,
-            timedOut: false,
-            durationMS: 0,
-            phaseTiming: nil
-        )
     }
 
     private struct Parsed {
@@ -369,7 +249,7 @@ public enum ScriptExecutionRuntime {
                 code: 400,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "script_exec requires description, reason, and Swift script."
+                        "script_exec requires description, reason, and guest script source."
                 ]
             )
         }
@@ -398,13 +278,14 @@ public enum ScriptExecutionRuntime {
         stage: ScriptFailureStage,
         started: Date,
         parsed: Parsed,
-        assessment: ScriptReviewAssessment? = nil
+        assessment: ScriptReviewAssessment? = nil,
+        verifier: String
     ) -> ScriptExecutionResult {
         ScriptExecutionResult(
             status: .blocked,
             decision: .deny,
             failureStage: stage,
-            verifier: "swift-check-v1",
+            verifier: verifier,
             validationFindings: findings,
             reviewerAssessment: assessment,
             stdout: "",
@@ -421,13 +302,14 @@ public enum ScriptExecutionRuntime {
         stage: ScriptFailureStage,
         started: Date,
         parsed: Parsed,
-        assessment: ScriptReviewAssessment?
+        assessment: ScriptReviewAssessment?,
+        verifier: String
     ) -> ScriptExecutionResult {
         ScriptExecutionResult(
             status: .failed,
             decision: .allow,
             failureStage: stage,
-            verifier: "swift-check-v1",
+            verifier: verifier,
             validationFindings: findings,
             reviewerAssessment: assessment,
             stdout: "",
@@ -440,36 +322,6 @@ public enum ScriptExecutionRuntime {
                 scriptLineCount: ScriptPhaseTiming.scriptMetrics(parsed.script).lines
             )
         )
-    }
-
-    private static func terminalStdout(
-        posts: [String],
-        title: String,
-        summary: String,
-        extra: String = ""
-    ) -> String {
-        var parts: [String] = []
-        if !title.isEmpty, !summary.localizedCaseInsensitiveContains(title) {
-            parts.append("**\(title)**")
-        }
-        parts.append(contentsOf: posts)
-        if !extra.isEmpty {
-            parts.append(extra)
-        }
-        if !summary.isEmpty {
-            parts.append(summary)
-        }
-        return parts.filter { !$0.isEmpty }.joined(separator: "\n\n")
-    }
-
-    private static func uiPresentText(_ payload: [String: PluginJSON]) -> String {
-        let title = payload["title"]?.stringValue ?? "Plugin"
-        let body = payload["markdown"]?.stringValue
-            ?? payload["summary"]?.stringValue
-            ?? payload["text"]?.stringValue
-            ?? payload["html"]?.stringValue
-            ?? ""
-        return body.isEmpty ? title : "\(title)\n\(body)"
     }
 
     private static func finish(

@@ -217,10 +217,11 @@ final class AppBootstrapStatus: ObservableObject {
             )
         }
         if lower.contains("failed to pull")
+            || lower.contains("guest runtime image is unavailable")
             || lower.contains("swift runtime image is unavailable") {
             return ClassifiedFailure(
                 title: "Environment Image Setup Failed",
-                message: "Derrick could not build or download the Swift runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
+                message: "Derrick could not build or download the guest runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
             )
         }
         if lower.contains("invalid reference format") {

@@ -20,4 +20,19 @@ public enum InProcessServiceBridges: Sendable {
     /// Installed by derrickd: banner-based network approval before scheduled script jobs.
     nonisolated(unsafe) public static var jobNetworkPreflight: JobNetworkPreflight?
 
+    public typealias StartWorkflow = @Sendable (WorkflowStartRequest) async throws -> WorkflowHandleDTO
+    public typealias PollWorkflow = @Sendable (WorkflowPollRequest) async throws -> WorkflowPollResultDTO
+    public typealias CancelWorkflow = @Sendable (WorkflowCancelRequest) async throws -> ServiceAckDTO
+
+    nonisolated(unsafe) public static var workflowStart: StartWorkflow?
+    nonisolated(unsafe) public static var workflowPoll: PollWorkflow?
+    nonisolated(unsafe) public static var workflowCancel: CancelWorkflow?
+
+    public typealias SubmitConnectorOperation =
+        @Sendable (ConnectorOperationRequest) async throws -> ConnectorOperationAckDTO
+    public typealias PollConnectorOperation =
+        @Sendable (ConnectorOperationPollRequest) async throws -> ConnectorOperationPollResult
+
+    nonisolated(unsafe) public static var connectorSubmit: SubmitConnectorOperation?
+    nonisolated(unsafe) public static var connectorPoll: PollConnectorOperation?
 }

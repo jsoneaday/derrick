@@ -16,8 +16,8 @@ import Foundation
     func removeEgressBlacklist(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
-/// Full daemon surface: control + in-process Agent / Job / MCP methods on one Mach connection.
-@objc public protocol DerrickDaemonServiceXPC: DerrickDaemonXPC, AgentServiceXPC, JobServiceXPC, MCPServiceXPC {}
+/// Full daemon surface: control + in-process Agent / Job / MCP / Workflow methods on one Mach connection.
+@objc public protocol DerrickDaemonServiceXPC: DerrickDaemonXPC, AgentServiceXPC, JobServiceXPC, MCPServiceXPC, WorkflowRuntimeXPC, ConnectorMessagingXPC {}
 
 public struct DerrickDaemonBootstrapResult: Codable, Sendable, Hashable {
     public let ok: Bool

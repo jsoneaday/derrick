@@ -4,9 +4,7 @@ Use the `web.crawl` MCP tool for website crawling. Do not generate a crawler
 script with `script_exec`.
 
 Submit every crawl through `jobs_create` so the user receives the result in a
-notification banner. Freeze `web.crawl` as the job tool, set `wake_after` to
-true, and use a short `wake_prompt` such as: "Present the crawl result and
-cite the pages visited."
+notification banner.
 
 Required `web.crawl` arguments:
 

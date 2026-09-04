@@ -1,6 +1,7 @@
 import Combine
 import DBRepository
 import Foundation
+import Plugin
 import ServiceContracts
 
 /// UI facade: catalog and conversation stay separate objects.
@@ -8,12 +9,12 @@ import ServiceContracts
 final class MessagingStore: ObservableObject {
     let catalog: MessagingCatalogStore
     let session: MessagingSessionStore
-    @Published var isSlackSyncing = false
+    @Published private(set) var isConnectorSyncing = false
     @Published var isSending = false
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
-    private let slackRuntime = MessagingSlackRuntime()
+    private lazy var connectorRuntime = ConnectorMessagingRuntime()
     private var inboundObserver: DerrickDarwinNotifyObserver?
 
     init() {
@@ -53,10 +54,14 @@ final class MessagingStore: ObservableObject {
     var selectedThread: MessagingThreadDTO? { session.selectedThread }
     var currentRoute: MessagingRoute { session.currentRoute }
     var canSendInSelectedThread: Bool {
-        selectedPluginID == MessagingSlackRuntime.pluginID
-            && selectedThread != nil
+        selectedThread != nil
+            && selectedConnector?.listening == true
             && !isSending
-            && !isSlackSyncing
+            && !isConnectorSyncing
+    }
+
+    func setConnectorSyncing(_ syncing: Bool) {
+        isConnectorSyncing = syncing
     }
 
     func configure(repository: DBRepository) async {
@@ -94,8 +99,12 @@ final class MessagingStore: ObservableObject {
             DerrickMessagingIngressSignal.postPoll()
         }
         await session.openConnector(pluginID: pluginID)
-        guard let repository, pluginID == MessagingSlackRuntime.pluginID else { return }
-        await slackRuntime.bootstrap(store: self, repository: repository, session: session)
+        guard let repository, catalog.contains(pluginID: pluginID) else { return }
+        await connectorRuntime.bootstrap(
+            pluginID: pluginID,
+            store: self,
+            session: session
+        )
     }
 
     func updateCredentials(pluginID: String) async -> Bool {
@@ -112,21 +121,26 @@ final class MessagingStore: ObservableObject {
         ) == .ok
     }
 
-    func refreshSlackConnector() async {
-        guard let repository, selectedPluginID == MessagingSlackRuntime.pluginID else { return }
-        await slackRuntime.bootstrap(store: self, repository: repository, session: session)
+    func refreshConnector(pluginID: String) async {
+        guard let repository, selectedPluginID == pluginID else { return }
+        await connectorRuntime.bootstrap(
+            pluginID: pluginID,
+            store: self,
+            session: session
+        )
     }
 
     func sendMessage(_ text: String) async {
         guard let repository,
-              let thread = selectedThread,
-              selectedPluginID == MessagingSlackRuntime.pluginID else {
+              let pluginID = selectedPluginID,
+              let thread = selectedThread else {
             return
         }
         isSending = true
         defer { isSending = false }
         do {
-            try await slackRuntime.send(
+            try await connectorRuntime.send(
+                pluginID: pluginID,
                 text: text,
                 thread: thread,
                 repository: repository,
@@ -135,7 +149,23 @@ final class MessagingStore: ObservableObject {
             )
             session.setLastError(nil)
         } catch {
-            session.setLastError(error.localizedDescription)
+            let detail = error.localizedDescription
+            session.setLastError(detail)
+            Task {
+                await ServiceLogRecorder.shared.record(
+                    service: "messaging",
+                    level: .error,
+                    code: "send_failed",
+                    message: "Messaging send failed pluginID=\(pluginID) threadID=\(thread.id): \(detail)",
+                    detailJSON: Self.messagingDetailJSON(
+                        pluginID: pluginID,
+                        threadID: thread.id,
+                        vendorThreadID: thread.vendorThreadID,
+                        text: text,
+                        error: detail
+                    )
+                )
+            }
         }
     }
 
@@ -169,5 +199,24 @@ final class MessagingStore: ObservableObject {
             await session.reloadMessagesForThread(id: threadID)
         }
         await catalog.refreshBadges()
+    }
+
+    private static func messagingDetailJSON(
+        pluginID: String,
+        threadID: String,
+        vendorThreadID: String?,
+        text: String,
+        error: String
+    ) -> String? {
+        let payload: [String: String] = [
+            "pluginID": pluginID,
+            "threadID": threadID,
+            "vendorThreadID": vendorThreadID ?? "",
+            "textLength": "\(text.count)",
+            "textPreview": String(text.prefix(120)),
+            "error": error
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }

@@ -1,1 +1,0 @@
--- Data purge migrations are intentionally irreversible.

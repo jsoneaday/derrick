@@ -164,6 +164,18 @@ struct WebCrawlerTests {
     }
 
     @Test
+    func validatedRequestAcceptsExplicitAllowedHosts() throws {
+        let validated = try WebCrawlerRequest(
+            startURL: "https://api.slack.com/web",
+            goal: "Read Slack API docs",
+            allowedHosts: ["api.slack.com", "docs.slack.dev"]
+        ).validated()
+
+        #expect(validated.allowedHosts.contains("api.slack.com"))
+        #expect(validated.allowedHosts.contains("docs.slack.dev"))
+    }
+
+    @Test
     func stopsWhenTimeoutElapses() async throws {
         let server = try LoopbackHTTPServer(
             pages: [
@@ -194,14 +206,20 @@ private final class LoopbackHTTPServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "derrick.webcrawler.test.http")
     private let pages: [String: String]
+    private let redirects: [String: String]
     private let delayMilliseconds: Int
 
     var port: Int {
         Int(listener.port?.rawValue ?? 0)
     }
 
-    init(pages: [String: String], delayMilliseconds: Int = 0) throws {
+    init(
+        pages: [String: String] = [:],
+        redirects: [String: String] = [:],
+        delayMilliseconds: Int = 0
+    ) throws {
         self.pages = pages
+        self.redirects = redirects
         self.delayMilliseconds = delayMilliseconds
         listener = try NWListener(using: .tcp, on: .any)
     }
@@ -240,6 +258,23 @@ private final class LoopbackHTTPServer: @unchecked Sendable {
                 Thread.sleep(forTimeInterval: Double(self.delayMilliseconds) / 1_000)
             }
             let path = Self.path(from: request)
+            if let redirect = self.redirects[path] {
+                let location = redirect.hasPrefix("http") ? redirect : redirect
+                let response = """
+                HTTP/1.1 302 Found\r
+                Location: \(location)\r
+                Content-Length: 0\r
+                Connection: close\r
+                \r
+                """
+                connection.send(
+                    content: Data(response.utf8),
+                    completion: .contentProcessed { _ in
+                        connection.cancel()
+                    }
+                )
+                return
+            }
             let body = self.pages[path] ?? "<html><body>not found</body></html>"
             let status = self.pages[path] == nil ? "404 Not Found" : "200 OK"
             let response = """

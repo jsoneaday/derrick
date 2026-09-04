@@ -233,6 +233,92 @@ final class DaemonUnifiedExportedObject: NSObject, DerrickDaemonServiceXPC, @unc
     func searchTools(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
         mcp.searchTools(requestJSON: requestJSON, withReply: reply)
     }
+
+    // MARK: - Workflow runtime
+
+    func startWorkflow(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try WorkflowRuntimeXPCCodec.decodeStart(payload)
+                let handle = try await WorkflowRuntimeEngine.shared.startWorkflow(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+                reply((try WorkflowRuntimeXPCCodec.encodeHandle(handle)) as NSData)
+            } catch {
+                fputs("[derrickd] startWorkflow failed: \(error.localizedDescription)\n", stderr)
+                reply(Data() as NSData)
+            }
+        }
+    }
+
+    func pollWorkflowUpdate(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try WorkflowRuntimeXPCCodec.decodePollRequest(payload)
+                let result = try await WorkflowRuntimeEngine.shared.pollWorkflowUpdate(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+                reply((try WorkflowRuntimeXPCCodec.encodePollResult(result)) as NSData)
+            } catch {
+                fputs("[derrickd] pollWorkflowUpdate failed: \(error.localizedDescription)\n", stderr)
+                reply(Data() as NSData)
+            }
+        }
+    }
+
+    func cancelWorkflow(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try WorkflowRuntimeXPCCodec.decodeCancel(payload)
+                let ack = try await WorkflowRuntimeEngine.shared.cancelWorkflow(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+                reply((try DerrickDaemonXPCCodec.encodeAck(ack)) as NSData)
+            } catch {
+                let ack = ServiceAckDTO(ok: false, message: error.localizedDescription)
+                reply((try? DerrickDaemonXPCCodec.encodeAck(ack)) as NSData? ?? Data() as NSData)
+            }
+        }
+    }
+
+    // MARK: - Connector messaging commands
+
+    func submitConnectorOperation(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try ConnectorMessagingXPCCodec.decodeSubmit(payload)
+                let ack = try await ConnectorMessagingCommandService.shared.submit(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+                reply((try ConnectorMessagingXPCCodec.encodeAck(ack)) as NSData)
+            } catch {
+                let ack = ConnectorOperationAckDTO(
+                    operationID: (try? ConnectorMessagingXPCCodec.decodeSubmit(payload))?.operationID ?? "",
+                    accepted: false,
+                    message: error.localizedDescription
+                )
+                reply((try? ConnectorMessagingXPCCodec.encodeAck(ack)) as NSData? ?? Data() as NSData)
+            }
+        }
+    }
+
+    func pollConnectorOperation(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        nonisolated(unsafe) let payload = requestJSON as Data
+        Task {
+            do {
+                let request = try ConnectorMessagingXPCCodec.decodePollRequest(payload)
+                let result = try await ConnectorMessagingCommandService.shared.poll(request)
+                reply((try ConnectorMessagingXPCCodec.encodePollResult(result)) as NSData)
+            } catch {
+                fputs("[derrickd] pollConnectorOperation failed: \(error.localizedDescription)\n", stderr)
+                reply(Data() as NSData)
+            }
+        }
+    }
 }
 
 final class DaemonUnifiedListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {

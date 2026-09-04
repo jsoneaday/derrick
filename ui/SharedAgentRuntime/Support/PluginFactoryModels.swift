@@ -114,81 +114,46 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         return text
     }
 
-    private static let builderSystemPrompt = """
-    You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
-    Return exactly one JSON object with these keys:
-    plugin_id (string), version (string), description (string), swift_source (string),
-    test_input_json (string), skill_files (array of objects with path and body),
-    secrets (array of objects with id, label, and kind; optional),
-    role (string, optional: "connector" or "standard").
-    plugin_id must use lowercase letters, numbers, hyphens, and dots only
-    (for example slack-connection). Never use underscores in plugin_id.
-    If the plugin needs a username, password, token, or API key, declare them in secrets.
-    kind must be username, password, token, or api_key. id is a stable Keychain key
-    such as username or bot_token. label is the text shown when the user saves the value.
-    Never put real credentials in swift_source.
-    Set role to "connector" when the plugin sends and receives messages with an external
-    messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
-    The host lists connector plugins under Messaging. Do not guess this from the plugin_id.
-    Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
-    including the exact `$schema` field for Agent Plugin 1.0 and the fixed
-    extensions.app.derrick.entrypoint ./app.derrick/plugin.swift. The Swift source is a standalone executable run as:
-    swift /tmp/plugin.swift
-    It reads one JSON event from stdin and writes a JSON array of Derrick envelopes to stdout.
-    To request host HTTP, emit {"verb":"http.request","request_id":"...","method":"GET","url":"https://..."}.
-    The host will invoke the program again with {"kind":"http_results","http_results":[
-    {"request_id":"...","status":200,"body":"...","error":null}]}.
-    Only the host performs HTTP; the Swift container has no network.
-    Use only the Derrick contract types shown in the source comments and never use Process, URLSession,
-    sockets, shell commands, or credentials. Keep the draft small and deterministic.
-    Before returning the draft, self-check the implementation:
-    - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
-      Never use response arrival order, Set iteration order, current time, randomness, or UUIDs
-      to determine user-visible output.
-    - Match host responses by the emitted request_id. If a malformed fixture contains duplicate
-      matches, choose by a stable comparison of response fields rather than taking the first one.
-      Do not iterate a Dictionary when applying transformations; use an ordered array of rules.
-    - Do not claim that data is recent, current, complete, or filtered unless the source actually
-      enforces that claim from data supplied by the host. Publication dates may be displayed as
-      source data; do not compare them with the wall clock.
-    - Keep source-derived titles as titles, but make generated explanatory summaries complete
-      sentences. Remove feed markup before placing it in text or Markdown fields.
-      Decode entities with an explicit, fixed-order rule list. Escape untrusted Markdown text,
-      and only create links after validating an http or https URL. Never let feed content provide
-      Markdown syntax, HTML, or a URL scheme.
-    - Use the `html` field only for HTML output; the host sanitizes it before rendering.
-    - Check Swift control flow before returning: every `guard` `else` branch must return,
-      throw, or otherwise exit after emitting an envelope, and every bound value must be used.
-      The draft must compile without relying on warnings being ignored.
-    Implement the user's goal directly in the plugin. Never generate prompts, model instructions,
-    or a plan for Chat/another model to perform the core function. For news goals, the plugin must
-    fetch and parse the requested public feed data and emit a source-grounded result from that data.
-    The direct test input must exercise the terminal result path with a matching http_results fixture,
-    not only verify that request envelopes were emitted.
-    The current Derrick response view supports plain text, Markdown, CSV, and sanitized HTML.
-    For HTML output, put the markup in the result.emit `html` field; use `summary`, `content`, or
-    `text` for plain text, Markdown, or CSV. HTML is sanitized by the host before native rendering,
-    and only safe structure and http(s) links are retained. When parsing HTML or RSS, unwrap CDATA,
-    strip untrusted tags, decode entities, and normalize whitespace before emitting user-facing text,
-    using the same safety behavior as Derrick's shared markup sanitizer. Keep the plugin's result
-    payload in its original supported format; the host does not rewrite it.
-    If skill_files is not needed, return an empty array. Every skill file path must be exactly
-    skills/<name>/SKILL.md, where <name> is one safe path component using letters, numbers,
-    hyphens, or underscores.
-    For messaging connector plugins (role connector) that call a vendor HTTP API:
-    - Declare secrets in the manifest only (bot_token, api_key, username/password as documented).
-      Never hard-code vendor env var names.
-    - Parse each http_results body as JSON when the vendor returns JSON.
-    - For APIs that return {"ok": true|false, "error": "..."} (Slack Web API), treat success only
-      when ok is boolean true; surface error strings on failure; never report success on ok:false.
-    - Check HTTP status from http_results; non-2xx is failure.
-    - Paginate with vendor cursors when listing conversations or messages; merge pages with stable
-      sort and de-duplication, or do not claim complete lists.
-    - test_input_json http_results must include success, auth/API failure, send, read, and
-      pagination fixtures when the code paginates — all matched by request_id.
-    When vendor documentation is supplied in the user prompt, follow it exactly for secrets,
-    endpoints, error handling, and test fixtures.
-    """
+    private static let builderSystemPrompt: String = {
+        """
+        You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
+        Return exactly one JSON object with these keys:
+        plugin_id (string), version (string), description (string), python_source (string),
+        test_input_json (string containing valid JSON — a serialized object, not prose),
+        skill_files (array of objects with path and body),
+        secrets (array of objects with id, label, and kind; optional),
+        role (string, optional: "connector" or "standard").
+        plugin_id must use lowercase letters, numbers, hyphens, and dots only
+        (for example my-connector). Never use underscores in plugin_id.
+        If the plugin needs a username, password, token, or API key, declare them in secrets.
+        kind must be username, password, token, or api_key. id is a stable Keychain key
+        such as username or bot_token. label is the text shown when the user saves the value.
+        Never put real credentials in python_source.
+        Set role to "connector" when the plugin sends and receives messages with an external
+        messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
+        The host lists connector plugins under Messaging. Do not guess this from the plugin_id.
+        Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
+        including the exact `$schema` field for Agent Plugin 1.0 and the fixed
+        extensions.app.derrick.entrypoint ./app.derrick/plugin.py.
+        \(DerrickGuestPython.modelContract)
+        \(ConnectorMessagingContract.hostContract)
+        Before returning the draft, self-check the implementation:
+        - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
+        - Match host responses by the emitted request_id.
+        - Use only the Python standard library (no pip, requests, urllib, socket, or subprocess).
+        - The direct test input must exercise the terminal result path with matching http_results fixtures.
+        If skill_files is not needed, return an empty array. Every skill file path must be exactly
+        skills/<name>/SKILL.md.
+        For messaging connector plugins (role connector) that call a vendor HTTP API:
+        - Declare secrets in the manifest only. Never hard-code credentials.
+        - Parse each http_results body as JSON when the vendor returns JSON.
+        - Paginate with vendor cursors when listing conversations or messages.
+        - test_input_json http_results must exercise success, auth failure, send, read, and pagination
+          when the vendor API supports those operations.
+        - test_input_json must be a single JSON object serialized as a string (valid JSON.parse input).
+        When vendor documentation is supplied in the user prompt, follow it exactly.
+        """
+    }()
 
     private static let builderResponseSchema = AgentSchema(
         type: .object,
@@ -196,7 +161,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             "plugin_id": AgentSchema(type: .string),
             "version": AgentSchema(type: .string),
             "description": AgentSchema(type: .string),
-            "swift_source": AgentSchema(type: .string),
+            "python_source": AgentSchema(type: .string),
             "test_input_json": AgentSchema(type: .string),
             "skill_files": AgentSchema(
                 type: .array,
@@ -224,7 +189,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             "role": AgentSchema(type: .string),
         ],
         required: [
-            "plugin_id", "version", "description", "swift_source",
+            "plugin_id", "version", "description", "python_source",
             "test_input_json", "skill_files",
         ]
     )
@@ -248,13 +213,10 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             )
         }
         if let previous = request.previousDraft {
-            sections.append("Previous draft:\n\(previous.swiftSource)")
+            sections.append("Previous draft:\n\(previous.guestSource)")
         }
         if let feedback = request.feedback {
             sections.append("Factory feedback to correct before the next attempt:\n\(feedback)")
-        }
-        if let connectorDoc = PluginFactoryConnectorDocs.supplementalPrompt(for: request.userGoal) {
-            sections.append(connectorDoc)
         }
         return sections.joined(separator: "\n\n")
     }
@@ -360,7 +322,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
 
     private static let reviewerSystemPrompt = """
     You are Derrick's independent plugin alignment and safety reviewer.
-    Review the user's goal, manifest, exact Swift source, and direct test output.
+    Review the user's goal, manifest, exact Python source, and direct test output.
     Return exactly one JSON object:
     {"decision":"approved|rejected","summary":"...","findings":[
       {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
@@ -371,10 +333,11 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     - Source-derived headline titles may be fragments; only generated explanatory summaries must be complete sentences when the manifest requires prose.
     - `result.emit.html` is an allowed output format. Derrick sanitizes it with an allowlist before rendering. Reject executable script behavior or a deliberate sanitizer bypass, not ordinary safe HTML tags.
     - Reject missing source-grounded parsing or claims that the direct test output does not support.
-    - For Slack Web API connector plugins: reject code that treats JSON as success without ok==true,
-      ignores error fields like invalid_auth, or lists channels/messages without cursor pagination
-      while implying completeness. Reject tests that omit auth-failure and send/read fixtures.
+    - For connector plugins: reject code that ignores documented auth/error fields, skips required
+      pagination while implying completeness, or uses test fixtures that do not cover the vendor
+      operations declared in the user goal.
     Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
+    Reject Swift source, socket/urllib/requests usage, or missing stdin reads.
     """
 
     private static let reviewerResponseSchema = AgentSchema(
@@ -410,8 +373,8 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
         Manifest:
         \(draft.manifestJSON)
 
-        Swift source:
-        \(draft.swiftSource)
+        Python source:
+        \(draft.guestSource)
 
         Direct test output:
         \(output)

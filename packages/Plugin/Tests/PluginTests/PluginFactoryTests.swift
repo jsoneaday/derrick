@@ -3,8 +3,39 @@ import Testing
 @testable import Plugin
 
 @Suite struct PluginFactoryTests {
+    private func guestPythonSource(emit: String = #"[]"#) -> String {
+        """
+        import json, sys
+        _ = json.load(sys.stdin)
+        json.dump(\(emit), sys.stdout)
+        """
+    }
+
+    @Test func guestLanguageIsAlwaysPython() {
+        let release = PluginFactoryRelease(
+            pluginID: "slack-connection",
+            version: "1.0.0",
+            manifestJSON: "{}",
+            runtimeJSON: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#,
+            guestSource: guestPythonSource(),
+            compiledArtifact: Data(),
+            skillFiles: [:],
+            contentHash: try! PluginContentHash(hex: String(repeating: "b", count: 64)),
+            reviewSummary: "ok"
+        )
+        #expect(release.guestLanguage == .python)
+    }
+
+    @Test func pluginFactoryRuntimeDecodesPythonEntrypoint() {
+        let runtime = PluginFactoryRuntime.decode(
+            from: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#
+        )
+        #expect(runtime?.language == .python)
+        #expect(runtime?.entrypoint.hasSuffix(".py") == true)
+    }
+
     @Test func envelopeDecoderFlattensNestedResultAliases() throws {
-        let raw = "[{\"verb\":\"result\",\"result\":{\"emit\":{\"content\":\"## News digest\"}}}]"
+        let raw = "[{\"verb\":\"result.emit\",\"result\":{\"emit\":{\"content\":\"## News digest\"}}}]"
         let envelopes = try PluginEnvelopeList.decode(Data(raw.utf8))
 
         #expect(envelopes.count == 1)
@@ -17,7 +48,7 @@ import Testing
         let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON(),
-            swiftSource: "import Foundation\nprint(\"[]\")",
+            guestSource: guestPythonSource(),
             testInput: Data(#"{"kind":"manual"}"#.utf8),
             skillFiles: ["skills/weather/SKILL.md": "# Weather\n\nReturn weather."]
         )
@@ -30,20 +61,20 @@ import Testing
 
         #expect(release.pluginID == "weather-tool")
         #expect(release.version == "1.2.3")
-        #expect(release.runtimeJSON.contains("\"language\":\"swift\""))
-        #expect(release.runtimeJSON.contains("plugin.swift"))
+        #expect(release.runtimeJSON.contains("\"language\":\"python\""))
+        #expect(release.runtimeJSON.contains("plugin.py"))
         #expect(!release.contentHash.rawValue.isEmpty)
         #expect(release.verifyIntegrity())
         var tampered = release.packageFiles()
-        tampered["app.derrick/plugin.swift"] = Data("changed".utf8)
+        tampered["app.derrick/plugin.py"] = Data("changed".utf8)
         #expect(!PluginFactoryRelease.verifyIntegrity(files: tampered, expected: release.contentHash))
         #expect(await executor.draftRunCount == 1)
-        #expect(await executor.compileCount == 1)
-        #expect(await executor.compiledRunCount == 1)
+        #expect(await executor.packageCount == 1)
+        #expect(await executor.packagedRunCount == 1)
         #expect(await reviewer.callCount == 1)
     }
 
-    @Test func rejectedReviewStopsBeforeCompilation() async throws {
+    @Test func rejectedReviewStopsBeforePackaging() async throws {
         let executor = RecordingFactoryExecutor()
         let reviewer = RecordingFactoryReviewer(
             result: PluginFactoryReview(approved: false, summary: "source is not safe")
@@ -53,16 +84,16 @@ import Testing
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifestJSON(),
-                    swiftSource: "import Foundation\nprint(\"[]\")"
+                    guestSource: guestPythonSource()
                 ),
                 executor: executor,
                 reviewer: reviewer
             )
             Issue.record("Expected review rejection")
         } catch let error as PluginFactoryError {
-            #expect(error == .reviewRejected("source is not safe"))
-            #expect(await executor.compileCount == 0)
-            #expect(await executor.compiledRunCount == 0)
+            #expect(error == .reviewRejected(summary: "source is not safe", findings: []))
+            #expect(await executor.packageCount == 0)
+            #expect(await executor.packagedRunCount == 0)
         }
     }
 
@@ -79,7 +110,11 @@ import Testing
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifestJSON(),
-                    swiftSource: "print(\"not a plugin envelope\")"
+                    guestSource: """
+                    import json, sys
+                    _ = json.load(sys.stdin)
+                    print("not a plugin envelope")
+                    """
                 ),
                 executor: executor,
                 reviewer: reviewer
@@ -112,7 +147,7 @@ import Testing
 
         #expect(release.pluginID == "weather-tool")
         #expect(await executor.draftRunCount == 2)
-        #expect(await executor.compileCount == 1)
+        #expect(await executor.packageCount == 1)
         let requests = await builder.requests
         #expect(requests.count == 2)
         #expect(requests[1].feedback?.contains("compile error") == true)
@@ -149,7 +184,7 @@ import Testing
         #expect(release.pluginID == "weather-tool")
         #expect(await reviewer.callCount == 2)
         #expect(await executor.draftRunCount == 2)
-        #expect(await executor.compileCount == 1)
+        #expect(await executor.packageCount == 1)
         let requests = await builder.requests
         #expect(requests.count == 2)
         #expect(requests[1].feedback?.contains("Sort the returned items") == true)
@@ -173,10 +208,10 @@ import Testing
             )
             Issue.record("Expected review rejection")
         } catch let error as PluginFactoryError {
-            #expect(error == .reviewRejected("The draft remains unsafe."))
+            #expect(error == .reviewRejected(summary: "The draft remains unsafe.", findings: []))
             #expect(await reviewer.callCount == 3)
             #expect(await executor.draftRunCount == 3)
-            #expect(await executor.compileCount == 0)
+            #expect(await executor.packageCount == 0)
             #expect(await builder.requests.count == 3)
         }
     }
@@ -184,7 +219,7 @@ import Testing
     @Test func reservedSystemPluginIDsCannotBeCreated() async {
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON().replacingOccurrences(of: "weather-tool", with: "create-plugin"),
-            swiftSource: "import Foundation\nprint(\"[]\")"
+            guestSource: guestPythonSource(),
         )
         do {
             _ = try await PluginFactory().build(
@@ -204,13 +239,13 @@ import Testing
 
     @Test func missingSchemaIsRejectedAtTheFactoryBoundary() async {
         let manifest = """
-        {"name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift"}}}
+        {"name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
         """
         do {
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifest,
-                    swiftSource: "import Foundation\nprint(\"[]\")"
+                    guestSource: guestPythonSource()
                 ),
                 executor: RecordingFactoryExecutor(),
                 reviewer: RecordingFactoryReviewer(
@@ -230,12 +265,12 @@ import Testing
             pluginID: "weather-tool",
             version: "1.0.0",
             description: "Weather summaries.",
-            swiftSource: "import Foundation\nprint(\"[]\")"
+            guestSource: guestPythonSource(),
         )
         let draft = try response.draft()
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.schema == PluginContract.agentPluginSchema)
-        #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.swift")
+        #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.py")
     }
 
     @Test func builderNormalizesUnderscorePluginIDAndWritesSecretLabels() throws {
@@ -243,7 +278,7 @@ import Testing
             pluginID: "slack_connection",
             version: "1.0.0",
             description: "Slack send and receive.",
-            swiftSource: "import Foundation\nprint(\"[]\")",
+            guestSource: guestPythonSource(),
             secrets: [
                 try PluginSecretField(id: "username", label: "Slack username", kind: .username),
                 try PluginSecretField(id: "password", label: "Slack password", kind: .password),
@@ -262,7 +297,7 @@ import Testing
             pluginID: "slack-connection",
             version: "1.0.0",
             description: "Slack send and receive.",
-            swiftSource: "import Foundation\nprint(\"[]\")",
+            guestSource: guestPythonSource(),
             role: .connector
         )
         let draft = try response.draft()
@@ -273,7 +308,7 @@ import Testing
 
     @Test func missingRoleDefaultsToStandard() throws {
         let json = """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(json.utf8))
         #expect(manifest.derrick?.role == .standard)
@@ -282,7 +317,7 @@ import Testing
 
     @Test func invalidRoleIsRejected() {
         let json = """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift","role":"slack"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"slack"}}}
         """
         do {
             _ = try AgentPluginManifest.decode(Data(json.utf8))
@@ -294,6 +329,12 @@ import Testing
         }
     }
 
+    @Test func invalidSourceIsBuilderCorrectable() {
+        #expect(
+            PluginFactoryError.invalidSource("test_input_json must be valid JSON.").isBuilderCorrectable
+        )
+    }
+
     @Test func invalidManifestIsBuilderCorrectable() {
         #expect(PluginFactoryError.invalidManifest("Invalid plugin id 'slack_connection'.").isBuilderCorrectable)
     }
@@ -303,7 +344,7 @@ import Testing
             pluginID: "weather-tool",
             version: "1.0.0",
             description: "Weather summaries.",
-            swiftSource: "import Foundation\nprint(\"[]\")",
+            guestSource: guestPythonSource(),
             skillFiles: [
                 PluginFactorySkillFile(path: "SKILL.md", body: "Invalid layout.")
             ]
@@ -323,14 +364,14 @@ import Testing
     private func draft() -> PluginFactoryDraft {
         PluginFactoryDraft(
             manifestJSON: manifestJSON(),
-            swiftSource: "import Foundation\nprint(\"[]\")",
+            guestSource: guestPythonSource(),
             testInput: Data(#"{"kind":"manual"}"#.utf8)
         )
     }
 
     private func manifestJSON() -> String {
         """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.2.3","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.swift"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.2.3","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
         """
     }
 }
@@ -339,8 +380,8 @@ private actor RecordingFactoryExecutor: PluginFactoryExecutor {
     let draftResult: PluginFactoryExecutionResult
     let firstDraftResult: PluginFactoryExecutionResult?
     private(set) var draftRunCount = 0
-    private(set) var compileCount = 0
-    private(set) var compiledRunCount = 0
+    private(set) var packageCount = 0
+    private(set) var packagedRunCount = 0
 
     init(
         draftResult: PluginFactoryExecutionResult = PluginFactoryExecutionResult(
@@ -353,23 +394,23 @@ private actor RecordingFactoryExecutor: PluginFactoryExecutor {
         self.firstDraftResult = firstDraftResult
     }
 
-    func runSwiftFile(source: String, input: Data) async throws -> PluginFactoryExecutionResult {
+    func runGuestSource(source: String, input: Data) async throws -> PluginFactoryExecutionResult {
         _ = source
         _ = input
         draftRunCount += 1
         return draftRunCount == 1 ? (firstDraftResult ?? draftResult) : draftResult
     }
 
-    func compileSwiftFile(source: String) async throws -> Data {
+    func packageGuestSource(source: String) async throws -> Data {
         _ = source
-        compileCount += 1
-        return Data("compiled-swift-binary".utf8)
+        packageCount += 1
+        return Data(source.utf8)
     }
 
-    func runCompiledArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult {
+    func runPackagedArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult {
         _ = artifact
         _ = input
-        compiledRunCount += 1
+        packagedRunCount += 1
         return PluginFactoryExecutionResult(
             exitCode: 0,
             stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8)

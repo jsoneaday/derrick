@@ -47,6 +47,7 @@ extension ConversationPipeline {
             debugLog("Tool request JSON: \(Self.debugPayload(event.argumentsJSON))")
         }
 
+
         let effectiveInterceptor = makeToolInterceptor(override: interceptor)
         await MainActor.run {
             debugLog("Policy rule processing: evaluating \(name)")
@@ -184,13 +185,28 @@ extension ConversationPipeline {
                     }
                     await MainActor.run {
                         debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
-                        debugLog("Tool result content: \(Self.debugPayload(result.text))")
+                        ToolOutcomeLogger.log(
+                            toolName: interceptedEvent.toolName,
+                            rawText: result.text
+                        )
+                        if interceptedEvent.toolName != AllowedMCPTool.pluginFactoryBuild.rawValue
+                            && interceptedEvent.toolName != AllowedMCPTool.webCrawl.rawValue {
+                            debugLog("Tool result content: \(Self.debugPayload(result.text))")
+                        }
                     }
                     await Self.publishJobSchedulingFailureIfNeeded(
                         toolName: interceptedEvent.toolName,
                         resultText: result.text,
                         sessionID: sessionID
                     )
+                    if interceptedEvent.toolName == AllowedMCPTool.pluginFactoryBuild.rawValue {
+                        return try await self.resolvePluginFactoryBuildResult(
+                            initialResult: result,
+                            arguments: interceptedArguments,
+                            userPrompt: userPrompt,
+                            mcpClient: mcpClient
+                        )
+                    }
                     return result
                 }
             )
@@ -368,6 +384,25 @@ extension ConversationPipeline {
                 decision: decision,
                 actor: actor
             )
+        )
+    }
+
+    private func resolvePluginFactoryBuildResult(
+        initialResult: MCPToolResult,
+        arguments: [String: Value],
+        userPrompt: String?,
+        mcpClient: any ConversationToolClient
+    ) async throws -> MCPToolResult {
+        _ = arguments
+        _ = userPrompt
+        _ = mcpClient
+        return MCPToolResult(
+            content: [
+                MCPToolContent.text(
+                    PluginFactoryUserFacingFormatter.displayText(from: initialResult.text)
+                ),
+            ],
+            isError: initialResult.isError
         )
     }
 

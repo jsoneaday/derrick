@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "DockerRunnerXPC",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     products: [
         .library(
@@ -13,14 +13,18 @@ let package = Package(
             targets: ["DockerRunnerXPC"]
         )
     ],
+    dependencies: [
+        .package(path: "../ServiceContracts"),
+    ],
     targets: [
         .target(
             name: "DockerRunnerXPC",
+            dependencies: ["ServiceContracts"],
             path: "Sources/DockerRunnerXPC"
         ),
         .testTarget(
             name: "DockerRunnerXPCTests",
-            dependencies: ["DockerRunnerXPC"],
+            dependencies: ["DockerRunnerXPC", "ServiceContracts"],
             path: "Tests/DockerRunnerXPCTests"
         )
     ]

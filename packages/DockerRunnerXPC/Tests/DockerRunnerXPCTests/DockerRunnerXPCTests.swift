@@ -1,4 +1,5 @@
 import Foundation
+import ServiceContracts
 import Testing
 @testable import DockerRunnerXPC
 
@@ -210,10 +211,28 @@ struct DockerRunnerXPCTests {
             ["version"],
             ["image", "inspect", "img"],
             ["pull", "img"],
+            ["exec", "-i", "c", "python3", "/tmp/guest.py"],
+            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py"],
             ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
             ["exec", "-i", "c", "/tmp/plugin"],
             ["exec", "-i", "c", "/usr/local/bin/derrick-web-crawler"],
             ["create", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
+            [
+                "create",
+                "--network", "none",
+                "--name", "derrick-guest-runtime-test",
+                "--env", "HOME=/tmp",
+                "--read-only",
+                "--tmpfs", "/tmp:rw,exec,nosuid,size=128m",
+                "--pids-limit", "128",
+                "--cpus", "2.0",
+                "--memory", "1g",
+                "--security-opt", "no-new-privileges",
+                "--cap-drop", "ALL",
+                "python:3.14.7",
+                "/bin/sleep",
+                "infinity",
+            ],
             ["start", "c"],
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"],
@@ -233,6 +252,45 @@ struct DockerRunnerXPCTests {
             let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
             #expect(DockerRunRequestValidator.validate(r) == nil, "expected allow for \(args)")
         }
+    }
+
+    @Test func rejectsInvalidPythonGuestExecCommands() {
+        for args in [
+            ["exec", "-i", "c", "python3", "/tmp/other.py"],
+            ["exec", "-i", "c", "python3", "/tmp/guest.py", "extra"],
+            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/other.py"],
+            ["exec", "-i", "c", "sh", "-c", "rm -rf /"],
+            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py", "extra"],
+        ] as [[String]] {
+            let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+            #expect(DockerRunRequestValidator.validate(r) != nil, "expected reject for \(args)")
+        }
+    }
+
+    @Test func allowsTrustedWebCrawlerProductImageBuild() {
+        guard let root = DerrickRepositoryRoot.locate() else { return }
+        let dockerfile = root
+            .appendingPathComponent(DockerProductImagePolicy.webCrawlerDockerfileRelativePath)
+            .path
+        let args = [
+            "build",
+            "-f", dockerfile,
+            "-t", DockerProductImagePolicy.webCrawlerImage,
+            root.path,
+        ]
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+        #expect(DockerRunRequestValidator.validate(r) == nil)
+    }
+
+    @Test func rejectsUntrustedDockerBuild() {
+        let args = [
+            "build",
+            "-f", "/tmp/evil/Dockerfile",
+            "-t", "malicious:latest",
+            "/tmp",
+        ]
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+        #expect(DockerRunRequestValidator.validate(r) != nil)
     }
 
     @Test func rejectsTimeoutOutOfRange() {

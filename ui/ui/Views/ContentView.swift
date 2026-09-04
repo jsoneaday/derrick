@@ -57,60 +57,6 @@ struct ChatTurn: Identifiable, Hashable {
     }
 }
 
-private struct SelectableDebugLogView: NSViewRepresentable {
-    let text: String
-
-    private func makeAttributedString() -> NSAttributedString {
-        let lines = text.components(separatedBy: .newlines)
-        var combined = AttributedString()
-        
-        for (index, line) in lines.enumerated() {
-            var lineAttr = (try? AttributedString(markdown: line)) ?? AttributedString(line)
-            if index < lines.count - 1 {
-                lineAttr.append(AttributedString("\n"))
-            }
-            combined.append(lineAttr)
-        }
-        
-        combined.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        combined.foregroundColor = Color(NSColor.labelColor)
-        return NSAttributedString(combined)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = true
-        textView.backgroundColor = .textBackgroundColor
-        textView.drawsBackground = true
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
-        
-        let nsAttributed = makeAttributedString()
-        textView.textStorage?.setAttributedString(nsAttributed)
-        return scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else {
-            return
-        }
-        
-        let nsAttributed = makeAttributedString()
-        if textView.attributedString() != nsAttributed {
-            textView.textStorage?.setAttributedString(nsAttributed)
-        }
-    }
-}
-
 private final class ScrollObserverToken: @unchecked Sendable {
     private var notificationObserver: NSObjectProtocol?
 
@@ -423,7 +369,8 @@ struct ContentView: View {
                     helperModelSettings: helperModelSettings,
                     chatSessions: chatSessions,
                     messaging: messaging,
-                    workspace: $workspace
+                    workspace: $workspace,
+                    isDebugEnabled: isDebugEnabled
                 )
                     .frame(width: 296)
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
@@ -435,12 +382,15 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else {
+                } else if workspace != .debugLogs {
                     ChatTabBarView(store: chatSessions)
                 }
-                if workspace == .messaging {
+                switch workspace {
+                case .messaging:
                     MessagingConversationView(store: messaging)
-                } else {
+                case .debugLogs:
+                    DebugLogsView(repository: repository)
+                default:
                     mainPanel
                 }
             }
@@ -454,6 +404,16 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshProviderCredentialUI()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .derrickOpenMessagingConnector)) { notification in
+            guard let pluginID = notification.userInfo?[PluginFactoryTurnNavigation.pluginIDUserInfoKey] as? String,
+                  !pluginID.isEmpty
+            else {
+                return
+            }
+            Task { @MainActor in
+                await routeToMessagingConnector(pluginID)
+            }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -603,7 +563,7 @@ struct ContentView: View {
                     if bootstrapStatus.isInitializing {
                         Text(
                             bootstrapStatus.phase == .preparingImage
-                                ? "First install prepares the Swift runtime image. Keep Docker Desktop running."
+                                ? "First install prepares the guest runtime image. Keep Docker Desktop running."
                                 : "This may take a minute the first time while Docker images and containers are prepared."
                         )
                             .font(.caption)
@@ -695,6 +655,7 @@ struct ContentView: View {
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
                 let repo = try await ensureSessionStoreLoaded()
+                await ServiceLogRecorder.shared.configure(repository: repo)
                 await EgressAllowlistService.shared.configure(repository: repo)
                 await ContentSensitivityGrantService.shared.configure(repository: repo)
                 await UsageLimitsService.shared.configure(repository: repo)
@@ -817,6 +778,7 @@ struct ContentView: View {
 
         do {
             let repo = try await ensureSessionStoreLoaded()
+            await ServiceLogRecorder.shared.configure(repository: repo)
             sessionReady = true
             await PluginFactoryListStore.shared.configure(repository: repo)
             await chatSessions.configure(repository: repo)
@@ -1259,10 +1221,10 @@ struct ContentView: View {
                 Text("Debug").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Button("Copy Log") {
-                    copyToPasteboard(debugLogStore.entries.map { "[\(debugLogStore.formattedTimestamp(for: $0))] \($0.message)" }.joined(separator: "\n"))
+                    copyToPasteboard(debugLogStore.fullText)
                 }
             }
-            SelectableDebugLogView(text: debugLogStore.entries.map { "[\(debugLogStore.formattedTimestamp(for: $0))] \($0.message)" }.joined(separator: "\n"))
+            DebugLogTextView(text: debugLogStore.fullText)
                 .frame(maxHeight: maxHeight)
         }
         .padding(16)
@@ -1322,9 +1284,7 @@ struct ContentView: View {
         let parts = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace)
         guard let first = parts.first else { return nil }
         let pluginID = String(first.dropFirst())
-        guard !pluginID.isEmpty, pluginID != "create-plugin", pluginID != "edit-plugin" else {
-            return nil
-        }
+        guard !pluginID.isEmpty else { return nil }
         return pluginID
     }
 

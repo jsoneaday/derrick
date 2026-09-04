@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DatabaseSchema {
-    public static let latestVersion = 28
+    public static let latestVersion = 1
 
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
@@ -23,61 +23,7 @@ public enum DatabaseSchema {
     private static func migrationFileBaseName(for version: Int) -> String {
         switch version {
         case 1:
-            return "memory_sessions"
-        case 2:
-            return "memory_records"
-        case 3:
-            return "policy_rules"
-        case 4:
-            return "policy_approvals"
-        case 5:
-            return "policy_audit_log"
-        case 6:
-            return "configuration"
-        case 7:
-            return "egress_allowed_suffixes"
-        case 8:
-            return "content_sensitivity_grants"
-        case 9:
-            return "service_logs"
-        case 10:
-            return "jobs"
-        case 11:
-            return "job_schedules"
-        case 12:
-            return "job_failure_detail"
-        case 13:
-            return "job_results"
-        case 14:
-            return "pending_hitl_approvals"
-        case 15:
-            return "job_results_notify"
-        case 16:
-            return "hitl_job_context"
-        case 17:
-            return "chat_orchestration"
-        case 18:
-            return "plugins"
-        case 19:
-            return "plugin_source"
-        case 20:
-            return "policy_approvals_fk"
-        case 21:
-            return "plugin_hooks"
-        case 22:
-            return "drop_factory_sessions"
-        case 23:
-            return "purge_retired_factory_data"
-        case 24:
-            return "drop_plugin_system"
-        case 25:
-            return "plugin_factory_releases"
-        case 26:
-            return "purge_legacy_script_runtime_data"
-        case 27:
-            return "purge_legacy_tool_outcomes"
-        case 28:
-            return "messaging"
+            return "initial_schema"
         default:
             return "unknown"
         }

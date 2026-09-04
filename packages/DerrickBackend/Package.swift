@@ -32,7 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DerrickBackendTests",
-            dependencies: ["DerrickBackend"],
+            dependencies: ["DerrickBackend", "DBRepository", "Plugin", "ServiceContracts"],
             path: "Tests/DerrickBackendTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

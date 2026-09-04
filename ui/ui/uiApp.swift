@@ -2,6 +2,7 @@ import AppKit
 import ServiceContracts
 import ServiceEnsureUp
 import SwiftUI
+import DBRepository
 
 @main
 struct uiApp: App {
@@ -20,10 +21,17 @@ struct uiApp: App {
             JobResultPanelSession.allowsTermination = false
         }
         RuntimeLog.shared.addSink { message in
-            Task { @MainActor in
-                DebugLogStore.shared.log(message)
+            Task {
+                await ServiceLogRecorder.shared.record(
+                    service: DerrickServiceID.ui.shortName,
+                    level: .debug,
+                    code: "runtime",
+                    message: message,
+                    echoToStderr: false
+                )
             }
         }
+        DebugLogStore.shared.configureLiveUpdates()
     }
 
     var body: some Scene {

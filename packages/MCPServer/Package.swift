@@ -19,7 +19,8 @@ let package = Package(
         .package(path: "../EgressProxy"),
         .package(path: "../MCPToolCatalog"),
         .package(path: "../ServiceContracts"),
-        .package(path: "../Plugin")
+        .package(path: "../Plugin"),
+        .package(path: "../WebCrawler"),
     ],
     targets: [
         .target(
@@ -32,13 +33,14 @@ let package = Package(
                 "EgressProxy",
                 "MCPToolCatalog",
                 "ServiceContracts",
-                "Plugin"
+                "Plugin",
+                "WebCrawler",
             ],
             path: "Sources/MCPServer"
         ),
         .testTarget(
             name: "MCPServerTests",
-            dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC"],
+            dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC", "WebCrawler"],
             path: "Tests/MCPServerTests"
         )
     ]

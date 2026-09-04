@@ -2,6 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
+import MCPToolCatalog
 import MemorySystem
 import PartialJSON
 import Lib
@@ -456,6 +457,17 @@ extension ConversationPipeline {
                             let parseStarted = Date()
                             let parsedTool = Self.parseToolPayload(agentResponse)
                             let parseToolMS = PipelineTiming.elapsedMS(from: parseStarted)
+                            if case .single(let single) = parsedTool,
+                               let progress = Self.longRunningToolProgressMessage(for: single.toolName) {
+                                continuation.yield(
+                                    AgentResponseNextChunk(
+                                        status: .toolCall,
+                                        chunk: "\n\n\(progress)\n\n",
+                                        toolName: single.toolName,
+                                        isProgress: true
+                                    )
+                                )
+                            }
                             let schedulingToolNames = Self.jobSchedulingToolNames(in: agentResponse)
                             if parsedTool == nil {
                                 await MainActor.run {
@@ -861,6 +873,17 @@ extension ConversationPipeline {
                 "\(key): \(describe(value: object[key] ?? .null))"
             }
             return "{\(pairs.joined(separator: ", "))}"
+        }
+    }
+
+    private static func longRunningToolProgressMessage(for toolName: String) -> String? {
+        switch toolName {
+        case AllowedMCPTool.webCrawl.rawValue:
+            return "Crawling vendor documentation. This may take a few minutes…"
+        case AllowedMCPTool.pluginFactoryBuild.rawValue:
+            return "Building the plugin (code generation, Docker tests, and safety review). This may take several minutes…"
+        default:
+            return nil
         }
     }
 }

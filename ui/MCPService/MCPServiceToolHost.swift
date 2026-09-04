@@ -39,7 +39,7 @@ actor MCPServiceToolHost {
             LLMModelSettings(repository: repo)
         }
         await factorySettings.loadSettings()
-        let factoryExecutor = SwiftPluginFactoryDockerExecutor(
+        let factoryExecutor = PythonPluginFactoryDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let webCrawlerExecutor = WebCrawlerDockerExecutor(
@@ -59,6 +59,9 @@ actor MCPServiceToolHost {
                     message: message,
                     code: "plugin_factory"
                 )
+                if let progress = WorkflowProgressPublisher.userFacingFactoryProgress(from: message) {
+                    await WorkflowProgressPublisher.publish(stage: "factory", message: progress)
+                }
             },
             apiKeyProvider: {
                 MCPServiceCallContext.shared.helperAPIKey
@@ -87,11 +90,13 @@ actor MCPServiceToolHost {
                         )
                         return release
                     } catch {
+                        let detail = pluginFactoryFailureDetail(for: error)
                         await MCPServiceStore.shared.log(
                             level: .error,
-                            message: "plugin factory failed: \(error.localizedDescription)",
+                            message: "plugin factory failed: \(detail)",
                             code: "plugin_factory_failed"
                         )
+                        fputs("[MCPService] plugin factory failed: \(detail)\n", stderr)
                         throw error
                     }
                 }
@@ -158,10 +163,10 @@ actor MCPServiceToolHost {
                     defer {
                         HostHTTPCallContext.shared.setPluginSecrets(pluginID: "", fields: [])
                     }
-                    return try await self.runApprovedPlugin(
-                        release.compiledArtifact,
+                    return try await GuestPluginRunner.run(
+                        release: release,
                         input: input,
-                        executor: factoryExecutor
+                        dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
                     )
                 }
             )
@@ -224,7 +229,11 @@ actor MCPServiceToolHost {
             )
         }
         if toolName == AllowedMCPTool.webCrawl.rawValue,
-           !isJobPrincipal(request.principal) {
+           !EffectorAdmissionPolicy.allowsSyncWebCrawl(
+               context: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)
+                   ?? legacyExecutionContext(from: request),
+               principal: request.principal
+           ) {
             let outcome = ToolExecutionOutcome.failure(
                 status: .blocked,
                 stage: .validation,
@@ -255,7 +264,12 @@ actor MCPServiceToolHost {
         MCPServiceCallContext.shared.install(
             helperAPIKey: request.helperAPIKey,
             helperReviewerModelJSON: request.helperReviewerModelJSON,
-            memorySessionKey: sessionKey
+            memorySessionKey: sessionKey,
+            pluginFactoryCreationActive: request.pluginFactoryCreationActive
+                || EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+                    .capabilities.contains(.syncWebCrawl) == true,
+            workflowID: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+                .workflow?.workflowID
         )
         let jobID: String?
         if case .job(let id) = request.principal { jobID = id } else { jobID = nil }
@@ -332,23 +346,40 @@ actor MCPServiceToolHost {
         )
     }
 
-    private func runApprovedPlugin(
-        _ artifact: Data,
-        input: Data,
-        executor: SwiftPluginFactoryDockerExecutor
-    ) async throws -> PluginFactoryExecutionResult {
-        try await PluginHostHopDispatcher.run(
-            initialInput: input,
-            execute: { nextInput in
-                try await executor.runCompiledArtifact(artifact, input: nextInput)
-            }
-        )
-    }
-
     private func isJobPrincipal(_ principal: ServicePrincipal) -> Bool {
         if case .job = principal {
             return true
         }
         return false
     }
+
+    private func legacyExecutionContext(from request: MCPToolCallRequest) -> ExecutionContextWire? {
+        let active = request.pluginFactoryCreationActive
+            || MCPServiceCallContext.shared.pluginFactoryCreationActive
+            || TurnProcessContext.effectivePluginFactoryCreationActive
+        guard active else { return nil }
+        switch request.principal {
+        case .agent(let sessionID, let agentID):
+            return ExecutionContextWire(
+                sessionID: sessionID,
+                principal: request.principal,
+                agentID: agentID,
+                capabilities: [.syncWebCrawl, .hostReviewRetry]
+            )
+        default:
+            return ExecutionContextWire(
+                sessionID: "legacy-mcp",
+                principal: request.principal,
+                agentID: "legacy",
+                capabilities: [.syncWebCrawl, .hostReviewRetry]
+            )
+        }
+    }
+}
+
+private func pluginFactoryFailureDetail(for error: Error) -> String {
+    if let factoryError = error as? PluginFactoryError {
+        return factoryError.localizedDescription
+    }
+    return error.localizedDescription
 }

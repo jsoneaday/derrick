@@ -1,5 +1,6 @@
 import Foundation
 import ServiceContracts
+import DBRepository
 
 /// UI-side reverse XPC object: turn chunks + approval requests from AgentService.
 public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, @unchecked Sendable {
@@ -122,9 +123,14 @@ public final class AgentServiceClientSink: NSObject, AgentServiceClientSinkXPC, 
         let onLog = handlers.onLog
         lock.unlock()
         onLog?(line)
-        // UI process: surface Agent runtime/tool path in the debug panel (not only service_logs).
-        Task { @MainActor in
-            DebugLogStore.shared.log("[AgentService] \(line)")
+        Task {
+            await ServiceLogRecorder.shared.record(
+                service: DerrickServiceID.agent.shortName,
+                level: .debug,
+                code: "relay",
+                message: line,
+                echoToStderr: false
+            )
         }
     }
 

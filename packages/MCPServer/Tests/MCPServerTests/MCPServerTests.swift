@@ -4,6 +4,7 @@ import Testing
 import MCPClient
 import ServiceContracts
 import Plugin
+import WebCrawler
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
@@ -204,6 +205,57 @@ import Plugin
         #expect(args.contains("DERRICK_EGRESS_PROXY_TOKEN=token"))
         #expect(entrypointIndex! < imageIndex!)
         #expect(sleepIndex! < imageIndex!)
+    }
+
+    @Test func webCrawlerInputPreparerAddsRedirectHosts() async throws {
+        let input = try JSONEncoder().encode(
+            WebCrawlerRequest(
+                startURL: "https://api.slack.com/web",
+                goal: "Read Slack API docs",
+                maxPages: 3,
+                maxDepth: 1,
+                timeoutSeconds: 120
+            )
+        )
+
+        let prepared = try await WebCrawlerDockerInputPreparer.enrich(input)
+        let object = try JSONSerialization.jsonObject(with: prepared.data) as? [String: Any]
+        let allowed = object?["allowed_hosts"] as? [String]
+
+        #expect(prepared.leaseHosts.contains("api.slack.com"))
+        #expect(prepared.leaseHosts.contains("docs.slack.dev"))
+        #expect(allowed?.contains("docs.slack.dev") == true)
+    }
+
+    @Test func dockerProductImagePrewarmerSkipsBuildWhenImagePresent() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        #expect(await recorder.calls == [["image", "inspect", DockerProductImagePolicy.webCrawlerImage]])
+    }
+
+    @Test func dockerProductImagePrewarmerBuildsWhenImageMissing() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "image" {
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            if args.first == "build" {
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        let calls = await recorder.calls
+        #expect(calls.count == 2)
+        #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.webCrawlerImage])
+        #expect(calls[1].first == "build")
+        #expect(calls[1].contains(DockerProductImagePolicy.webCrawlerImage))
     }
 
     @Test func fileExtractorContainerCreateUsesJobBindMountsAndOverridesEntrypoint() {
@@ -495,7 +547,10 @@ import Plugin
         let bridge = try await MCPLocalBridge.make { server in
             await server.register(
                 PluginFactoryToolModule.makeRegistration { _ in
-                    throw PluginFactoryError.reviewRejected("The draft did not satisfy the contract.")
+                    throw PluginFactoryError.reviewRejected(
+                        summary: "The draft did not satisfy the contract.",
+                        findings: ["blocking: poll_inbox is incomplete."]
+                    )
                 }
             )
         }
@@ -509,7 +564,9 @@ import Plugin
         let outcome = try #require(ToolExecutionOutcome.decode(from: result.text))
         #expect(outcome.status == .blocked)
         #expect(outcome.stage == .review)
-        #expect(outcome.diagnostics.first?.message.contains("did not satisfy") == true)
+        #expect(outcome.retry?.allowed == true)
+        #expect(outcome.diagnostics.contains { $0.message.contains("did not satisfy") })
+        #expect(outcome.diagnostics.contains { $0.message.contains("poll_inbox") })
     }
 
     @Test func phaseTimingScriptMetricsCountLinesAndChars() {
@@ -580,6 +637,92 @@ import Plugin
         #expect(results?.first?["json"] == nil)
     }
 
+    @Test func pythonGuestRuntimeUsesPinnedImage() {
+        #expect(DerrickGuestRuntime.pythonGuestDockerImage == "python:3.14.7")
+        #expect(PythonGuestDockerExecutor.containerPrefix == "derrick-guest-runtime")
+    }
+
+    @Test func pythonSourceVerifierRejectsNetworkAndDependencies() {
+        let findings = PythonScriptVerifier.validate(
+            source: "import sys\nimport requests",
+            dependencies: ["example": "1.0.0"]
+        )
+        #expect(findings.contains("Direct network access is not allowed; emit http.request envelopes."))
+        #expect(findings.contains("Guest plugin dependencies are not supported; use the standard library."))
+    }
+
+    @Test func pythonSourceVerifierRequiresStdin() {
+        let findings = PythonScriptVerifier.validate(source: "print('[]')")
+        #expect(findings.contains("Python source must read its JSON event from standard input."))
+    }
+
+    @Test func pythonExecutorUsesReadOnlyOfflineContainer() async throws {
+        let recorder = DockerCallRecorder()
+        let runner = PythonGuestDockerExecutor(
+            image: "python:3.14.7",
+            executor: { arguments, _, _ in
+                await recorder.append(arguments)
+                if arguments.contains("/tmp/guest.py"),
+                   !arguments.contains("cat") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
+                        stderr: Data()
+                    )
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+        )
+        _ = try await runner.runSource(
+            source: "import json, sys\njson.dump([], sys.stdout)",
+            input: Data(#"{"kind":"script"}"#.utf8)
+        )
+
+        let calls = await recorder.calls
+        let create = calls.first(where: { $0.first == "create" }) ?? []
+        #expect(create.contains("--network"))
+        #expect(create.contains("none"))
+        #expect(create.contains("--read-only"))
+        let exec = calls.first(where: { $0.contains("python3") }) ?? []
+        #expect(exec.contains("/tmp/guest.py"))
+    }
+
+    @Test func pythonGuestDockerCommandsPassXPCValidation() async throws {
+        let recorder = DockerCallRecorder()
+        let runner = PythonGuestDockerExecutor(
+            image: "python:3.14.7",
+            executor: { arguments, _, _ in
+                await recorder.append(arguments)
+                if let error = DockerRunRequestValidator.validate(
+                    DockerHostLaunch.makeRequest(dockerArguments: arguments, timeoutSeconds: 60)
+                ) {
+                    return DockerCLIResult(
+                        exitCode: 1,
+                        stdout: Data(),
+                        stderr: Data(error.launchErrorMessage.utf8)
+                    )
+                }
+                if arguments.contains("/tmp/guest.py"),
+                   !arguments.contains("cat") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
+                        stderr: Data()
+                    )
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+        )
+        let result = try await runner.runSource(
+            source: "import json, sys\njson.dump([], sys.stdout)",
+            input: Data(#"{"kind":"script"}"#.utf8)
+        )
+        #expect(result.exitCode == 0)
+        let calls = await recorder.calls
+        #expect(calls.contains { $0.contains("sh") && $0.contains("cat > /tmp/guest.py") })
+        #expect(calls.contains { $0.contains("python3") && $0.contains("/tmp/guest.py") })
+    }
+
     @Test func swiftRuntimeUsesPinnedImage() {
         #expect(SwiftScriptPreparer.image == DerrickGuestRuntime.swiftPluginDockerImage)
         #expect(SwiftScriptPreparer.containerPrefix == "derrick-swift-runtime")
@@ -620,7 +763,7 @@ import Plugin
         #expect(create.contains { $0.contains("exec") })
     }
 
-    @Test func swiftSourceVerifierRejectsHostEscapeAndDependencies() {
+    @Test func guestSourceVerifierRejectsHostEscapeAndDependencies() {
         let findings = SwiftScriptVerifier.validate(
             source: "import Foundation\nlet _ = URLSession.shared",
             dependencies: ["example": "1.0.0"]
@@ -629,7 +772,7 @@ import Plugin
         #expect(findings.contains("Swift script dependencies are not supported; use the standard library and Foundation."))
     }
 
-    @Test func swiftSourceVerifierAllowsStandaloneInput() {
+    @Test func guestSourceVerifierAllowsStandaloneInput() {
         let findings = SwiftScriptVerifier.validate(
             source: "import Foundation\nlet data = FileHandle.standardInput.readDataToEndOfFile()"
         )
@@ -721,6 +864,42 @@ import Plugin
     @Test func swiftRuntimeErrorUsesSwiftLanguage() {
         let error = SwiftDockerExecutorError.commandFailed("swiftc", "compile failed")
         #expect(error.localizedDescription.contains("swiftc"))
+    }
+
+    @Test func guestPluginRunnerRunsPythonRelease() async throws {
+        let recorder = DockerCallRecorder()
+        let release = PluginFactoryRelease(
+            pluginID: "slack-connection",
+            version: "1.0.0",
+            manifestJSON: "{}",
+            runtimeJSON: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#,
+            guestSource: "import json, sys\njson.dump([{\"verb\":\"result.emit\",\"summary\":\"ok\"}], sys.stdout)",
+            compiledArtifact: Data(),
+            skillFiles: [:],
+            contentHash: try PluginContentHash(hex: String(repeating: "c", count: 64)),
+            reviewSummary: "ok"
+        )
+        let result = try await GuestPluginRunner.run(
+            release: release,
+            input: Data(#"{"kind":"manual"}"#.utf8),
+            dockerExecutor: { arguments, _, _ in
+                await recorder.append(arguments)
+                if arguments.contains("/tmp/guest.py"),
+                   !arguments.contains("cat") {
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
+                        stderr: Data()
+                    )
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+        )
+        #expect(result.exitCode == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self).contains("result.emit"))
+        let calls = await recorder.calls
+        #expect(calls.contains { $0.contains("python3") })
+        #expect(!calls.contains { $0.contains("swift") })
     }
 
     @Test func hostHopDispatcherStopsAtTerminalEnvelope() async throws {
@@ -921,7 +1100,7 @@ import Plugin
     }
 }
 
-private actor DockerCallRecorder {
+actor DockerCallRecorder {
     private(set) var calls: [[String]] = []
 
     func append(_ arguments: [String]) {

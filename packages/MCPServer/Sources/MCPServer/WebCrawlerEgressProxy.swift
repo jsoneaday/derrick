@@ -32,13 +32,26 @@ public actor WebCrawlerEgressProxy {
     public init() {}
 
     public func lease(for host: String) async throws -> WebCrawlerProxyLease {
-        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard EgressHostExtractor.isPlausibleHostname(normalizedHost) else {
+        try await lease(forHosts: [host])
+    }
+
+    public func lease(forHosts hosts: [String]) async throws -> WebCrawlerProxyLease {
+        let normalizedHosts = hosts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !normalizedHosts.isEmpty else {
             throw WebCrawlerProxyError.invalidHost
         }
+        for host in normalizedHosts {
+            guard EgressHostExtractor.isPlausibleHostname(host) else {
+                throw WebCrawlerProxyError.invalidHost
+            }
+        }
 
-        let suffix = EgressHostExtractor.permanentSuffix(for: normalizedHost)
-        activeSuffixes[suffix, default: 0] += 1
+        let suffixes = Set(normalizedHosts.map { EgressHostExtractor.permanentSuffix(for: $0) })
+        for suffix in suffixes {
+            activeSuffixes[suffix, default: 0] += 1
+        }
         policy.setAllowedDomainSuffixes(activeSuffixes.keys.sorted())
 
         do {
@@ -53,7 +66,9 @@ public actor WebCrawlerEgressProxy {
                 server = proxy
             }
         } catch {
-            releaseSuffix(suffix)
+            for suffix in suffixes {
+                releaseSuffix(suffix)
+            }
             throw error
         }
 
@@ -65,9 +80,19 @@ public actor WebCrawlerEgressProxy {
     }
 
     public func release(for host: String) {
-        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let suffix = EgressHostExtractor.permanentSuffix(for: normalizedHost)
-        releaseSuffix(suffix)
+        release(forHosts: [host])
+    }
+
+    public func release(forHosts hosts: [String]) {
+        let suffixes = Set(
+            hosts
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+                .map { EgressHostExtractor.permanentSuffix(for: $0) }
+        )
+        for suffix in suffixes {
+            releaseSuffix(suffix)
+        }
     }
 
     private func releaseSuffix(_ suffix: String) {

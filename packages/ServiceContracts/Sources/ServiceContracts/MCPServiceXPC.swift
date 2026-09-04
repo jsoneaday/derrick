@@ -45,6 +45,11 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
     /// JSON `HelperModelWire` for script security reviewer model selection.
     /// When nil, MCPService uses the default helper model.
     public let helperReviewerModelJSON: String?
+    /// When true, MCPService allows synchronous `web.crawl` (interactive `/create-plugin` turns).
+    /// Deprecated: use `executionContextJSON` (ExecutionContextWire).
+    public let pluginFactoryCreationActive: Bool
+    /// JSON `ExecutionContextWire` for cross-boundary policy and effector admission.
+    public let executionContextJSON: String?
 
     public init(
         requestID: String = UUID().uuidString,
@@ -52,7 +57,9 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
         toolName: String,
         argumentsJSON: String,
         helperAPIKey: String? = nil,
-        helperReviewerModelJSON: String? = nil
+        helperReviewerModelJSON: String? = nil,
+        pluginFactoryCreationActive: Bool = false,
+        executionContextJSON: String? = nil
     ) {
         self.requestID = requestID
         self.principal = principal
@@ -60,6 +67,8 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
         self.argumentsJSON = argumentsJSON
         self.helperAPIKey = helperAPIKey
         self.helperReviewerModelJSON = helperReviewerModelJSON
+        self.pluginFactoryCreationActive = pluginFactoryCreationActive
+        self.executionContextJSON = executionContextJSON
     }
 }
 

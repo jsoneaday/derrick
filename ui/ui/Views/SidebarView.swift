@@ -10,6 +10,7 @@ struct SidebarView: View {
     @ObservedObject var chatSessions: ChatSessionStore
     @ObservedObject var messaging: MessagingStore
     @Binding var workspace: AppWorkspace
+    var isDebugEnabled: Bool = false
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
@@ -78,12 +79,26 @@ struct SidebarView: View {
                     workspace = .messaging
                     Task { await messaging.syncConnectorsFromFactory() }
                 }
+                if isDebugEnabled {
+                    SidebarActionRow(
+                        row: SidebarRow(
+                            id: "debug-logs",
+                            icon: "ladybug.fill",
+                            title: "Debug Logs",
+                            isProminent: workspace == .debugLogs
+                        )
+                    ) {
+                        workspace = .debugLogs
+                    }
+                }
             }
 
             if workspace == .plugins {
                 pluginsList
             } else if workspace == .messaging {
                 messagingList
+            } else if workspace == .debugLogs {
+                debugLogsHint
             } else {
                 recentsList
             }
@@ -141,6 +156,19 @@ struct SidebarView: View {
                 await messaging.syncConnectorsFromFactory()
             }
         }
+    }
+
+    private var debugLogsHint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Diagnostics")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Logs are stored in the local database and include UI, daemon, agent, MCP, and connector activity.")
+                .font(.system(size: sideMenuRecentsFontSize))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 4)
     }
 
     private var recentsList: some View {
@@ -229,37 +257,6 @@ struct SidebarView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
-
-                                if messaging.selectedPluginID == connector.pluginID {
-                                    ForEach(messaging.threads) { thread in
-                                        Button {
-                                            workspace = .messaging
-                                            Task { await messaging.selectThread(id: thread.id) }
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                if thread.muted {
-                                                    Image(systemName: "bell.slash")
-                                                        .font(.system(size: 9, weight: .semibold))
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                Text(thread.title)
-                                                    .font(.system(size: sideMenuRecentsFontSize))
-                                                    .lineLimit(1)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                    .foregroundStyle(
-                                                        messaging.selectedThreadID == thread.id
-                                                            ? Color.primary
-                                                            : Color.primary.opacity(0.9)
-                                                    )
-                                                if thread.unreadCount > 0 {
-                                                    MessagingUnreadBadge(count: thread.unreadCount)
-                                                }
-                                            }
-                                            .padding(.leading, 16)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
                             }
                         }
                     }
@@ -275,10 +272,7 @@ struct SidebarView: View {
     }
 
     private var pluginsList: some View {
-        let systemGroups = pluginFactoryList.groups.filter { $0.latest?.isSystem == true }
-        let userGroups = pluginFactoryList.groups.filter { $0.latest?.isSystem != true }
-
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if pluginFactoryList.releases.isEmpty {
@@ -286,14 +280,7 @@ struct SidebarView: View {
                             .font(.system(size: sideMenuRecentsFontSize))
                             .foregroundStyle(.secondary)
                     } else {
-                        if !systemGroups.isEmpty {
-                            pluginSectionTitle("System")
-                            pluginGroupRows(systemGroups)
-                        }
-                        if !userGroups.isEmpty {
-                            pluginSectionTitle("User")
-                            pluginGroupRows(userGroups)
-                        }
+                        pluginGroupRows(pluginFactoryList.groups)
                     }
                     if let error = pluginFactoryList.lastError {
                         Text(error)
@@ -336,7 +323,7 @@ struct SidebarView: View {
                                 .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
                                 .lineLimit(1)
                             Text(group.releases.count == 1
-                                ? (group.latest?.isSystem == true ? "system" : "v\(group.latest?.version ?? "")")
+                                ? "v\(group.latest?.version ?? "")"
                                 : "\(group.releases.count) versions")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -351,7 +338,7 @@ struct SidebarView: View {
                     ForEach(group.releases) { release in
                         HStack(alignment: .top, spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(release.isSystem ? "system" : "v\(release.version)")
+                                Text("v\(release.version)")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 Text(release.reviewSummary)
@@ -360,17 +347,15 @@ struct SidebarView: View {
                                     .lineLimit(2)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            if !release.isSystem {
-                                Button {
-                                    Task { await pluginFactoryList.delete(release) }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Delete \(release.pluginID) \(release.version)")
+                            Button {
+                                Task { await pluginFactoryList.delete(release) }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
                             }
+                            .buttonStyle(.plain)
+                            .help("Delete \(release.pluginID) \(release.version)")
                         }
                         .padding(.leading, 18)
                     }

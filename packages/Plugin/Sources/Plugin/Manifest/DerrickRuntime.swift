@@ -1,6 +1,6 @@
 import Foundation
 
-/// Derrick runtime metadata (`app.derrick/runtime.json`) for a standalone Swift entrypoint.
+/// Derrick runtime metadata (`app.derrick/runtime.json`) for a standalone Python entrypoint.
 public struct DerrickRuntime: Codable, Sendable, Hashable {
     public var entrypoint: String
     public var dependencies: [String: String]
@@ -66,7 +66,7 @@ public struct DerrickRuntime: Codable, Sendable, Hashable {
         if trimmed.hasPrefix("./") {
             return try PluginPath.validateRuntimeEntrypoint(trimmed)
         }
-        guard trimmed.hasSuffix(".swift"),
+        guard trimmed.hasSuffix(".py"),
               !trimmed.contains("/"),
               !trimmed.contains("\\") else {
             throw PluginManifestError.invalidEntrypoint(raw)

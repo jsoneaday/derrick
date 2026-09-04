@@ -45,6 +45,21 @@ public enum PluginSecretKeychain: Sendable {
         fields.filter { !hasStoredValue(pluginID: pluginID, fieldID: $0.id) }
     }
 
+    /// Copies stored secrets from a retired plugin id when the destination field is empty.
+    public static func migrateStoredFields(
+        from sourcePluginID: String,
+        to destinationPluginID: String,
+        fields: [PluginSecretDescriptor]
+    ) {
+        guard sourcePluginID != destinationPluginID else { return }
+        for field in fields {
+            guard !hasStoredValue(pluginID: destinationPluginID, fieldID: field.id),
+                  let value = try? load(pluginID: sourcePluginID, fieldID: field.id)
+            else { continue }
+            try? save(pluginID: destinationPluginID, fieldID: field.id, value: value)
+        }
+    }
+
     public static func deleteForTesting(pluginID: String, fieldID: String) {
         let account = account(pluginID: pluginID, fieldID: fieldID)
         for service in services() {

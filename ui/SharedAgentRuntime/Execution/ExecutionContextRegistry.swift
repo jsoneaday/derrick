@@ -58,6 +58,17 @@ public final class ExecutionContextRegistry: @unchecked Sendable {
         return slotsByID[active]
     }
 
+    public func setPluginFactoryCreationActive(forSession sessionID: String, active: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let contextID = activeBySession[sessionID],
+              var slots = slotsByID[contextID] else {
+            return
+        }
+        slots.pluginFactoryCreationActive = active
+        slotsByID[contextID] = slots
+    }
+
     public func resolve(
         contextID: ExecutionContextID?,
         caller: AgentRef? = nil

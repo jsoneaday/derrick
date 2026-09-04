@@ -29,19 +29,22 @@ public struct WebCrawlerRequest: Codable, Sendable, Hashable {
     public let maxPages: Int
     public let maxDepth: Int
     public let timeoutSeconds: Int
+    public let allowedHosts: [String]?
 
     public init(
         startURL: String,
         goal: String,
         maxPages: Int = WebCrawlerLimits.defaultMaxPages,
         maxDepth: Int = WebCrawlerLimits.defaultMaxDepth,
-        timeoutSeconds: Int = WebCrawlerLimits.defaultTimeoutSeconds
+        timeoutSeconds: Int = WebCrawlerLimits.defaultTimeoutSeconds,
+        allowedHosts: [String]? = nil
     ) {
         self.startURL = startURL
         self.goal = goal
         self.maxPages = maxPages
         self.maxDepth = maxDepth
         self.timeoutSeconds = timeoutSeconds
+        self.allowedHosts = allowedHosts
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +57,7 @@ public struct WebCrawlerRequest: Codable, Sendable, Hashable {
             ?? WebCrawlerLimits.defaultMaxDepth
         self.timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
             ?? WebCrawlerLimits.defaultTimeoutSeconds
+        self.allowedHosts = try container.decodeIfPresent([String].self, forKey: .allowedHosts)
     }
 
     public func validated() throws -> ValidatedWebCrawlerRequest {
@@ -94,8 +98,21 @@ public struct WebCrawlerRequest: Codable, Sendable, Hashable {
             goal: trimmedGoal,
             maxPages: maxPages,
             maxDepth: maxDepth,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            allowedHosts: resolvedAllowedHosts(startURLHost: host, explicit: allowedHosts)
         )
+    }
+
+    private func resolvedAllowedHosts(startURLHost: String, explicit: [String]?) -> Set<String> {
+        var hosts = Set<String>()
+        hosts.insert(startURLHost.lowercased())
+        for host in explicit ?? [] {
+            let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !normalized.isEmpty {
+                hosts.insert(normalized)
+            }
+        }
+        return hosts
     }
 
     enum CodingKeys: String, CodingKey {
@@ -104,6 +121,7 @@ public struct WebCrawlerRequest: Codable, Sendable, Hashable {
         case maxPages = "max_pages"
         case maxDepth = "max_depth"
         case timeoutSeconds = "timeout_seconds"
+        case allowedHosts = "allowed_hosts"
     }
 }
 
@@ -113,19 +131,22 @@ public struct ValidatedWebCrawlerRequest: Sendable, Hashable {
     public let maxPages: Int
     public let maxDepth: Int
     public let timeoutSeconds: Int
+    public let allowedHosts: Set<String>
 
     public init(
         startURL: URL,
         goal: String,
         maxPages: Int,
         maxDepth: Int,
-        timeoutSeconds: Int
+        timeoutSeconds: Int,
+        allowedHosts: Set<String>
     ) {
         self.startURL = startURL
         self.goal = goal
         self.maxPages = maxPages
         self.maxDepth = maxDepth
         self.timeoutSeconds = timeoutSeconds
+        self.allowedHosts = allowedHosts
     }
 }
 
@@ -312,12 +333,18 @@ public enum WebCrawlerEngine {
         proxyPort: Int? = nil,
         proxyToken: String? = nil
     ) async throws -> WebCrawlerResult {
+        let hostScope = WebCrawlerHostScope(initialHosts: request.allowedHosts)
         let fetcher = try AsyncHTTPFetcher(
+            hostScope: hostScope,
             proxyHost: proxyHost,
             proxyPort: proxyPort,
             proxyToken: proxyToken
         )
-        let delegate = WebCrawlerDelegate(request: request, fetcher: fetcher)
+        let delegate = WebCrawlerDelegate(
+            request: request,
+            fetcher: fetcher,
+            hostScope: hostScope
+        )
         let crawler = Crawler(delegate: delegate)
 
         let result: WebCrawlerResult
@@ -384,12 +411,18 @@ private struct FetchedPage: Sendable {
 
 private actor AsyncHTTPFetcher {
     private let client: HTTPClient
+    private let hostScope: WebCrawlerHostScope
     private let proxyHost: String?
     private let proxyPort: Int?
     private let proxyToken: String?
     private var lastRequestAt: Date?
 
-    init(proxyHost: String?, proxyPort: Int?, proxyToken: String?) throws {
+    init(
+        hostScope: WebCrawlerHostScope,
+        proxyHost: String?,
+        proxyPort: Int?,
+        proxyToken: String?
+    ) throws {
         if proxyHost != nil && (proxyPort == nil || proxyToken == nil)
             || proxyHost == nil && (proxyPort != nil || proxyToken != nil) {
             throw WebCrawlerRuntimeError.invalidProxy
@@ -413,6 +446,7 @@ private actor AsyncHTTPFetcher {
             eventLoopGroupProvider: .singleton,
             configuration: configuration
         )
+        self.hostScope = hostScope
         self.proxyHost = proxyHost
         self.proxyPort = proxyPort
         self.proxyToken = proxyToken
@@ -458,10 +492,13 @@ private actor AsyncHTTPFetcher {
             guard let location = response.headers.first(name: "location"),
                   let redirectURL = URL(string: location, relativeTo: currentURL)?.absoluteURL,
                   WebCrawlerURL.isHTTP(redirectURL),
-                  WebCrawlerURL.isSameOrigin(currentURL, redirectURL)
+                  let redirectHost = redirectURL.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                  !redirectHost.isEmpty
             else {
                 throw WebCrawlerRuntimeError.redirectOutOfScope
             }
+
+            await hostScope.add(redirectHost)
 
             let normalizedRedirect = WebCrawlerURL.normalize(redirectURL)
             guard redirectedURLs.insert(WebCrawlerURL.key(normalizedRedirect)).inserted else {
@@ -495,7 +532,7 @@ private actor AsyncHTTPFetcher {
 private actor WebCrawlerDelegate: CrawlerDelegate {
     private let request: ValidatedWebCrawlerRequest
     private let fetcher: AsyncHTTPFetcher
-    private let startHost: String
+    private let hostScope: WebCrawlerHostScope
     private let deadline: Date
 
     private var queue: [(url: URL, depth: Int)] = []
@@ -510,10 +547,14 @@ private actor WebCrawlerDelegate: CrawlerDelegate {
     private var requestsMade = 0
     private var bytesRead = 0
 
-    init(request: ValidatedWebCrawlerRequest, fetcher: AsyncHTTPFetcher) {
+    init(
+        request: ValidatedWebCrawlerRequest,
+        fetcher: AsyncHTTPFetcher,
+        hostScope: WebCrawlerHostScope
+    ) {
         self.request = request
         self.fetcher = fetcher
-        self.startHost = request.startURL.host?.lowercased() ?? ""
+        self.hostScope = hostScope
         self.deadline = Date().addingTimeInterval(TimeInterval(request.timeoutSeconds))
     }
 
@@ -535,7 +576,9 @@ private actor WebCrawlerDelegate: CrawlerDelegate {
 
         let normalized = WebCrawlerURL.normalize(url)
         let key = WebCrawlerURL.key(normalized)
-        guard normalized.host?.lowercased() == startHost else {
+        guard let host = normalized.host?.lowercased(),
+              await hostScope.contains(host)
+        else {
             return .skip(.businessLogic("different origin"))
         }
         guard visitedKeys.insert(key).inserted else {
@@ -626,7 +669,8 @@ private actor WebCrawlerDelegate: CrawlerDelegate {
             guard stopReason == nil else { break }
             let normalized = WebCrawlerURL.normalize(link.url)
             let key = WebCrawlerURL.key(normalized)
-            guard normalized.host?.lowercased() == startHost,
+            guard let host = normalized.host?.lowercased(),
+                  await hostScope.contains(host),
                   WebCrawlerURL.isHTTP(normalized),
                   !visitedKeys.contains(key),
                   queuedKeys.insert(key).inserted
@@ -802,7 +846,7 @@ private actor WebCrawlerDelegate: CrawlerDelegate {
     }
 }
 
-private enum WebCrawlerURL {
+enum WebCrawlerURL {
     static func isHTTP(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"

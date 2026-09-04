@@ -1,3 +1,4 @@
+import Contract
 import Foundation
 
 /// One guest → host envelope. Extra verbs are rejected at decode.
@@ -84,6 +85,7 @@ public enum PluginEnvelopeError: Error, Equatable, LocalizedError {
 public enum PluginEnvelopeList {
     /// Swift guest stdout must be a JSON array of envelope objects. Strings and bare objects fail.
     public static func decode(_ data: Data) throws -> [PluginEnvelope] {
+        try GuestContractValidation.validateEnvelopeListJSON(data)
         let trimmed = data.drop(while: { $0 == 0x20 || $0 == 0x0a || $0 == 0x0d || $0 == 0x09 })
         guard !trimmed.isEmpty else {
             throw PluginEnvelopeError.notAnArray

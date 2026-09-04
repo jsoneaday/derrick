@@ -48,14 +48,6 @@ import DBRepository
         )
     }
 
-    @Test func pluginFactoryConnectorDocsInjectsSlackGuide() {
-        #expect(PluginFactoryConnectorDocs.detectedVendor(for: "create a connector for slack") == .slack)
-        let prompt = PluginFactoryConnectorDocs.supplementalPrompt(for: "slack messaging connector")
-        #expect(prompt?.contains("ok") == true)
-        #expect(prompt?.contains("bot_token") == true)
-        #expect(prompt?.contains("invalid_auth") == true)
-    }
-
     @Test func connectorCredentialSaverAllowsPartialUpdateWhenStored() {
         let fields = [
             PluginCredentialFieldPresentation(

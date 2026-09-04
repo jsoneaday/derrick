@@ -57,10 +57,17 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
         fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
     }
 
-    /// Prewarm the shared Swift runtime image.
-    func prewarmSwiftRuntime() async throws {
+    /// Prewarm the shared offline guest runtime image.
+    func prewarmGuestRuntime() async throws {
         try await SwiftDockerContainerPool.shared.prewarm(
-            image: SwiftScriptPreparer.image,
+            image: DerrickGuestRuntime.pythonGuestDockerImage,
+            executor: makeStdinCLIExecutor()
+        )
+    }
+
+    /// Build or verify the trusted web crawler product image.
+    func prewarmWebCrawlerImage() async throws {
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(
             executor: makeStdinCLIExecutor()
         )
     }

@@ -15,7 +15,7 @@ public final class MCPServiceClient: @unchecked Sendable {
     private let lock = NSLock()
     private var connection: NSXPCConnection?
     private var peerEndpoint: NSXPCListenerEndpoint?
-    private let callTimeoutNanoseconds: UInt64 = 15_000_000_000
+    private let standardCallTimeoutNanoseconds: UInt64 = MCPToolCallTimeouts.standardNanoseconds
 
     private init() {}
 
@@ -58,7 +58,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         for attempt in 0..<max(1, retries) {
             do {
                 nonisolated(unsafe) let proxy = try remoteProxy()
-                let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: callTimeoutNanoseconds) {
+                let boot: DerrickDaemonBootstrapResult = try await invoke(timeout: standardCallTimeoutNanoseconds) {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<DerrickDaemonBootstrapResult, Error>) in
                         proxy.bootstrap { data in
                             do {
@@ -77,7 +77,7 @@ public final class MCPServiceClient: @unchecked Sendable {
                 guard boot.ok else {
                     throw MCPServiceClientError.bootstrapFailed(boot.message)
                 }
-                let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
+                let report: ServiceHealthReport = try await invoke(timeout: standardCallTimeoutNanoseconds) {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ServiceHealthReport, Error>) in
                         proxy.health { data in
                             do {
@@ -113,7 +113,7 @@ public final class MCPServiceClient: @unchecked Sendable {
             from: .ui,
             to: .mcp
         ) as NSData
-        return try await invoke(timeout: callTimeoutNanoseconds) {
+        return try await invoke(timeout: standardCallTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSXPCListenerEndpoint, Error>) in
                 proxy.peerListenerEndpoint(authJSON: auth) { endpoint in
                     cont.resume(returning: endpoint)
@@ -130,7 +130,7 @@ public final class MCPServiceClient: @unchecked Sendable {
             from: .ui,
             to: .mcp
         ) as NSData
-        try await invoke(timeout: callTimeoutNanoseconds) {
+        try await invoke(timeout: standardCallTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 proxy.setDockerHelperPeerEndpoint(endpoint, authJSON: auth) { data in
                     do {
@@ -156,13 +156,14 @@ public final class MCPServiceClient: @unchecked Sendable {
     }
 
     public func callTool(_ request: MCPToolCallRequest) async throws -> MCPToolCallResultDTO {
+        let timeout = MCPToolCallTimeouts.nanoseconds(forToolName: request.toolName)
         if DerrickProcessRole.isDaemon, let call = InProcessServiceBridges.mcpCallTool {
             return try await call(request)
         }
         nonisolated(unsafe) let proxy = try remoteProxy()
         // Signed ServiceMessage envelope (HMAC) — Agent → MCP runTool.
         let payload = try MCPServiceXPCCodec.encodeSignedToolCallRequest(request) as NSData
-        return try await invoke(timeout: callTimeoutNanoseconds) {
+        return try await invoke(timeout: timeout) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.callTool(requestJSON: payload) { data in
                     do {
@@ -182,7 +183,7 @@ public final class MCPServiceClient: @unchecked Sendable {
         nonisolated(unsafe) let proxy = try remoteProxy()
         let request = MCPToolSearchRequest(principal: principal, query: query)
         let payload = try MCPServiceXPCCodec.encodeSignedToolSearchRequest(request) as NSData
-        return try await invoke(timeout: callTimeoutNanoseconds) {
+        return try await invoke(timeout: standardCallTimeoutNanoseconds) {
             try await withCheckedThrowingContinuation { cont in
                 proxy.searchTools(requestJSON: payload) { data in
                     do {

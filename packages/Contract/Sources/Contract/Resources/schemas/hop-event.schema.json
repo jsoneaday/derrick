@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/hop-event.json",
+  "title": "Guest stdin hop event",
+  "description": "JSON object read from stdin when the host invokes an offline guest. Canonical contract for all guest languages.",
+  "type": "object",
+  "required": ["kind"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "schedule",
+        "message_in_room",
+        "http_results",
+        "ui_action",
+        "grant_ready",
+        "harness",
+        "script"
+      ]
+    },
+    "http_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["request_id", "status"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "status": { "type": "integer" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "body": { "type": "string" },
+          "error": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

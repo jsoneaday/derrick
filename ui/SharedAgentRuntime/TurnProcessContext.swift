@@ -28,12 +28,16 @@ public enum TurnProcessContext {
     /// Fire-and-forget policy notices (failure / informational modals) when UI is connected.
     @TaskLocal public static var policyNoticePublisher: PolicyNoticePublisher?
 
+    /// Active `/create-plugin` or `/edit-plugin` factory turn (enables sync `web.crawl`).
+    @TaskLocal public static var pluginFactoryCreationActive: Bool = false
+
     public static func install(
         for contextID: ExecutionContextID,
         apiKey: String?,
         networkAccessPrompt: NetworkPrompt?,
         policyDecisionPrompt: PolicyDecisionPrompt? = nil,
-        policyNoticePublisher: PolicyNoticePublisher? = nil
+        policyNoticePublisher: PolicyNoticePublisher? = nil,
+        pluginFactoryCreationActive: Bool = false
     ) {
         ExecutionContextRegistry.shared.install(
             contextID,
@@ -41,7 +45,8 @@ public enum TurnProcessContext {
                 apiKey: apiKey,
                 networkAccessPrompt: networkAccessPrompt,
                 policyDecisionPrompt: policyDecisionPrompt,
-                policyNoticePublisher: policyNoticePublisher
+                policyNoticePublisher: policyNoticePublisher,
+                pluginFactoryCreationActive: pluginFactoryCreationActive
             )
         )
     }
@@ -89,5 +94,12 @@ public enum TurnProcessContext {
             return publisher
         }
         return resolvedRegistrySlots()?.policyNoticePublisher
+    }
+
+    public static var effectivePluginFactoryCreationActive: Bool {
+        if pluginFactoryCreationActive {
+            return true
+        }
+        return resolvedRegistrySlots()?.pluginFactoryCreationActive == true
     }
 }

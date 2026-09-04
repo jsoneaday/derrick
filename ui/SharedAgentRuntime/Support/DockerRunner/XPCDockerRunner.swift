@@ -218,7 +218,7 @@ public final class XPCDockerRunner: @unchecked Sendable {
             code: 504,
             userInfo: [
                 NSLocalizedDescriptionKey:
-                    "Swift runtime setup timed out after \(Self.prewarmWaitCeilingSeconds)s."
+                    "Guest runtime setup timed out after \(Self.prewarmWaitCeilingSeconds)s."
             ]
         )
         try await prewarmState.wait(
@@ -280,15 +280,19 @@ public final class XPCDockerRunner: @unchecked Sendable {
                     ]
                 )
             }
-            await reportBootstrap(phase: .preparingImage, message: "Preparing Swift runtime…")
+            await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
             try await SwiftDockerContainerPool.shared.prewarm(
-                image: SwiftScriptPreparer.image,
+                image: DerrickGuestRuntime.pythonGuestDockerImage,
+                executor: makeDockerExecutor()
+            )
+            await reportBootstrap(phase: .preparingImage, message: "Preparing web crawler (first launch may take several minutes)…")
+            try await DockerProductImagePrewarmer.ensureWebCrawlerImage(
                 executor: makeDockerExecutor()
             )
             prewarmState.markCompleted()
-            await reportBootstrap(phase: .verifyingEnvironment, message: "Swift runtime ready.")
+            await reportBootstrap(phase: .verifyingEnvironment, message: "Guest runtime ready.")
         } catch {
-            debugLog("Swift runtime prewarming failed: \(error.localizedDescription)")
+            debugLog("Guest runtime prewarming failed: \(error.localizedDescription)")
             prewarmState.markFailed(error)
         }
     }

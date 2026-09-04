@@ -16,18 +16,18 @@ public struct SwiftPluginFactoryDockerExecutor: PluginFactoryExecutor, Sendable 
         runtime = SwiftDockerExecutor(image: image, executor: executor)
     }
 
-    public func runSwiftFile(
+    public func runGuestSource(
         source: String,
         input: Data
     ) async throws -> PluginFactoryExecutionResult {
         try await runtime.runSource(source: source, input: input)
     }
 
-    public func compileSwiftFile(source: String) async throws -> Data {
+    public func packageGuestSource(source: String) async throws -> Data {
         try await runtime.compile(source: source)
     }
 
-    public func runCompiledArtifact(
+    public func runPackagedArtifact(
         _ artifact: Data,
         input: Data
     ) async throws -> PluginFactoryExecutionResult {

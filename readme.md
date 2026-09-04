@@ -98,7 +98,7 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 
 ### Messaging
 
-Connector plugins declare `role: connector` in the manifest. The host calls vendor APIs (e.g. Slack Web API) directly; messages are persisted in SQLite with idempotent inbound writes. See [docs/messaging-design.md](docs/messaging-design.md).
+Connector plugins declare `role: connector` in the manifest. Messages are persisted in SQLite; connector plugins sync and send through the guest runtime. See [docs/messaging-design.md](docs/messaging-design.md).
 
 ## Repository layout
 
@@ -112,7 +112,7 @@ Connector plugins declare `role: connector` in the manifest. The host calls vend
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
 | `packages/PolicyEngine` | Policy evaluation |
 | `packages/LLMAgentClient` | Provider clients (OpenAI, Gemini, …) |
-| `packages/ServiceContracts` | Shared DTOs, XPC codecs, Slack API client |
+| `packages/ServiceContracts` | Shared DTOs and XPC codecs |
 
 ## Quick start
 

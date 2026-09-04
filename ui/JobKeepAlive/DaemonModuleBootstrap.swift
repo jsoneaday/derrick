@@ -1,6 +1,7 @@
 import Foundation
 import DerrickBackend
 import ServiceContracts
+import DBRepository
 
 /// Boots MCP / Agent / Jobs modules inside derrickd (in-process, no peer mesh).
 enum DaemonModuleBootstrap {
@@ -10,6 +11,8 @@ enum DaemonModuleBootstrap {
 
         do {
             _ = try await MCPServiceStore.shared.sharedRepository()
+            let daemonRepo = try await DaemonRuntime.shared.sharedRepository()
+            await ServiceLogRecorder.shared.configure(repository: daemonRepo)
             _ = try await MCPServiceToolHost.shared.ensureReady()
             InProcessServiceBridges.mcpEnsureReady = {
                 _ = try await MCPServiceToolHost.shared.ensureReady()
@@ -40,6 +43,29 @@ enum DaemonModuleBootstrap {
                     jobID: jobID,
                     repository: repo
                 )
+            }
+            InProcessServiceBridges.workflowStart = { request in
+                try await WorkflowRuntimeEngine.shared.startWorkflow(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+            }
+            InProcessServiceBridges.workflowPoll = { request in
+                try await WorkflowRuntimeEngine.shared.pollWorkflowUpdate(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+            }
+            InProcessServiceBridges.workflowCancel = { request in
+                try await WorkflowRuntimeEngine.shared.cancelWorkflow(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+            }
+            InProcessServiceBridges.connectorSubmit = { request in
+                try await ConnectorMessagingCommandService.shared.submit(request) {
+                    try await DaemonRuntime.shared.sharedRepository()
+                }
+            }
+            InProcessServiceBridges.connectorPoll = { request in
+                try await ConnectorMessagingCommandService.shared.poll(request)
             }
             await DaemonRuntime.shared.markModuleReady(.mcp)
             fputs("[derrickd] module mcp ready\n", stderr)
@@ -73,7 +99,8 @@ enum DaemonModuleBootstrap {
         guard DerrickProcessRole.isDaemon else { return }
         do {
             try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
-            try await MCPServiceDockerHelperRunner.shared.prewarmSwiftRuntime()
+            try await MCPServiceDockerHelperRunner.shared.prewarmGuestRuntime()
+            try await MCPServiceDockerHelperRunner.shared.prewarmWebCrawlerImage()
             fputs("[derrickd] embedded Docker helper verified\n", stderr)
         } catch {
             fputs("[derrickd] embedded Docker helper sync failed: \(error.localizedDescription)\n", stderr)

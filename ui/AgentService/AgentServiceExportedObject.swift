@@ -67,7 +67,7 @@ final class AgentServiceExportedObject: NSObject, AgentServiceXPC {
                 service: .agent,
                 status: .ok,
                 detail: "AgentService ready (DB+\(leaf))",
-                guestRuntimeImage: DerrickProcessRole.isDaemon ? DerrickGuestRuntime.swiftPluginDockerImage : nil
+                guestRuntimeImage: DerrickProcessRole.isDaemon ? DerrickGuestRuntime.pythonGuestDockerImage : nil
             )
             let data = (try? AgentServiceXPCCodec.encodeHealth(report)) ?? Data("{}".utf8)
             reply(data as NSData)

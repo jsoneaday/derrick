@@ -55,7 +55,7 @@ public extension DBRepository {
     }
 
     func recentServiceLogs(service: String? = nil, limit: Int = 100) throws -> [ServiceLogEntry] {
-        let cap = max(1, min(limit, 1000))
+        let cap = max(1, min(limit, 5000))
         return try withDatabaseHandle { handle in
             let sql: String
             if let service, !service.isEmpty {
@@ -74,6 +74,33 @@ public extension DBRepository {
                 LIMIT \(cap);
                 """
             }
+            return try Self.fetchServiceLogs(sql: sql, on: handle)
+        }
+    }
+
+    /// Returns logs at or after `createdAfter`, oldest first (for tailing the debug log view).
+    func serviceLogs(
+        createdAfter: Date?,
+        service: String? = nil,
+        limit: Int = 500
+    ) throws -> [ServiceLogEntry] {
+        let cap = max(1, min(limit, 5000))
+        return try withDatabaseHandle { handle in
+            var clauses: [String] = []
+            if let createdAfter {
+                let stamp = quoted(Self.iso8601Formatter().string(from: createdAfter))
+                clauses.append("created_at > \(stamp)")
+            }
+            if let service, !service.isEmpty {
+                clauses.append("service = \(quoted(service))")
+            }
+            let whereSQL = clauses.isEmpty ? "" : "WHERE \(clauses.joined(separator: " AND "))\n"
+            let sql = """
+            SELECT id, service, level, code, message, detail_json, created_at
+            FROM service_logs
+            \(whereSQL)ORDER BY created_at ASC
+            LIMIT \(cap);
+            """
             return try Self.fetchServiceLogs(sql: sql, on: handle)
         }
     }

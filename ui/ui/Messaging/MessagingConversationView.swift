@@ -24,7 +24,7 @@ struct MessagingConversationView: View {
         VStack(spacing: 10) {
             Text("Messaging")
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-            Text("Connector plugins show up here. Create a Slack, Telegram, or other messaging plugin to start.")
+            Text("Connector plugins show up here. Create a messaging connector plugin to start.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -36,21 +36,18 @@ struct MessagingConversationView: View {
         VStack(spacing: 10) {
             Text(store.selectedConnector?.displayName ?? "Messaging")
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-            if store.isSlackSyncing {
-                ProgressView("Loading Slack channels…")
+            if store.isConnectorSyncing {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Syncing channels and recent messages…")
                     .font(.callout)
+                    .foregroundStyle(.secondary)
             } else {
-                Text("No conversations yet. Derrick will list channels the bot has joined.")
+                Text("No conversations yet. Threads appear when a connector syncs them.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
-                if store.selectedPluginID == MessagingSlackRuntime.pluginID {
-                    Button("Refresh channels") {
-                        Task { await store.refreshSlackConnector() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
             }
             if let error = store.lastError {
                 Text(error)
@@ -151,10 +148,14 @@ struct MessagingConversationView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if store.isSlackSyncing {
-                Text("Syncing with Slack…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if store.isConnectorSyncing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Syncing connector…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message", text: $draft, axis: .vertical)

@@ -58,6 +58,21 @@ public extension DBRepository {
         return rows.filter(\.listening)
     }
 
+    /// Drops connector rows (and cascaded threads/messages) not in `pluginIDs`.
+    func pruneMessagingConnectors(keeping pluginIDs: Set<String>) throws {
+        try withDatabaseHandle { handle in
+            if pluginIDs.isEmpty {
+                try Self.execute("DELETE FROM messaging_connectors;", on: handle)
+                return
+            }
+            let quotedIDs = pluginIDs.map { quoted($0) }.joined(separator: ", ")
+            try Self.execute("""
+            DELETE FROM messaging_connectors
+            WHERE plugin_id NOT IN (\(quotedIDs));
+            """, on: handle)
+        }
+    }
+
     func setMessagingConnectorListening(pluginID: String, listening: Bool) throws {
         let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

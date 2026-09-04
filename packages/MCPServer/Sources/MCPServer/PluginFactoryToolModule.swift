@@ -74,34 +74,83 @@ public enum PluginFactoryToolModule: MCPToolModule {
     ) -> ToolExecutionOutcome {
         let status: ToolExecutionOutcome.Status
         let stage: ToolExecutionOutcome.Stage
+        let diagnostics: [ToolExecutionOutcome.Diagnostic]
+        let retryAllowed: Bool
         switch error {
         case .invalidManifest, .invalidSkillPath, .reservedPluginID, .invalidSource:
             status = .blocked
             stage = .validation
+            diagnostics = [diagnostic(for: error)]
+            retryAllowed = false
         case .directRunFailed, .invalidDirectOutput:
             status = .failed
             stage = .execution
-        case .reviewRejected:
+            diagnostics = [diagnostic(for: error)]
+            retryAllowed = false
+        case .reviewRejected(let summary, let findings):
             status = .blocked
             stage = .review
-        case .compileFailed:
+            diagnostics = reviewDiagnostics(summary: summary, findings: findings)
+            retryAllowed = true
+        case .packageFailed:
             status = .failed
             stage = .compilation
-        case .compiledRunFailed, .invalidCompiledOutput:
+            diagnostics = [diagnostic(for: error)]
+            retryAllowed = false
+        case .packagedRunFailed, .invalidPackagedOutput:
             status = .failed
             stage = .execution
+            diagnostics = [diagnostic(for: error)]
+            retryAllowed = false
         }
         return ToolExecutionOutcome.failure(
             status: status,
             stage: stage,
-            diagnostics: [
+            diagnostics: diagnostics,
+            retry: ToolExecutionOutcome.Retry(allowed: retryAllowed)
+        )
+    }
+
+    private static func diagnostic(for error: PluginFactoryError) -> ToolExecutionOutcome.Diagnostic {
+        ToolExecutionOutcome.Diagnostic(
+            code: "plugin_factory_failed",
+            message: error.localizedDescription
+        )
+    }
+
+    private static func reviewDiagnostics(
+        summary: String,
+        findings: [String]
+    ) -> [ToolExecutionOutcome.Diagnostic] {
+        var diagnostics: [ToolExecutionOutcome.Diagnostic] = []
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSummary.isEmpty {
+            diagnostics.append(
+                ToolExecutionOutcome.Diagnostic(
+                    code: "plugin_factory_review_summary",
+                    message: trimmedSummary
+                )
+            )
+        }
+        for finding in findings.prefix(12) {
+            let trimmed = finding.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            diagnostics.append(
+                ToolExecutionOutcome.Diagnostic(
+                    code: "plugin_factory_review_finding",
+                    message: trimmed
+                )
+            )
+        }
+        if diagnostics.isEmpty {
+            diagnostics.append(
                 ToolExecutionOutcome.Diagnostic(
                     code: "plugin_factory_failed",
-                    message: error.localizedDescription
+                    message: "Plugin review rejected the draft."
                 )
-            ],
-            retry: ToolExecutionOutcome.Retry(allowed: false)
-        )
+            )
+        }
+        return diagnostics
     }
 }
 

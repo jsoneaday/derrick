@@ -146,6 +146,10 @@ public enum DockerRunRequestValidator: Sendable {
            let error = validateExecArguments(dockerArgs) {
             return error
         }
+        if subcommand == "build",
+           let error = validateBuildArguments(dockerArgs) {
+            return error
+        }
         var index = 0
         while index < dockerArgs.count {
             let arg = dockerArgs[index]
@@ -224,8 +228,13 @@ public enum DockerRunRequestValidator: Sendable {
             guard args.count == 3,
                   args[1] == "-c",
                   (args[2] == "cat > /tmp/plugin.swift"
-                    || args[2] == "cat > /tmp/plugin")
+                    || args[2] == "cat > /tmp/plugin"
+                    || args[2] == "cat > /tmp/guest.py")
             else {
+                return .disallowedDockerFlag("exec \(command)")
+            }
+        case "python3":
+            guard args.count == 2, args[1] == "/tmp/guest.py" else {
                 return .disallowedDockerFlag("exec \(command)")
             }
         case "swift":
@@ -258,6 +267,32 @@ public enum DockerRunRequestValidator: Sendable {
             }
         default:
             return .disallowedDockerFlag("exec \(command)")
+        }
+        return nil
+    }
+
+    /// `docker build -f <dockerfile> -t <tag> <context>` for trusted product images only.
+    private static func validateBuildArguments(
+        _ dockerArgs: [String]
+    ) -> DockerRunRequestValidationError? {
+        var args = Array(dockerArgs.dropFirst())
+        guard args.count >= 5,
+              args[0] == "-f",
+              args[2] == "-t" else {
+            return .disallowedDockerFlag("build arguments")
+        }
+        let dockerfile = args[1]
+        let tag = args[3]
+        let context = args[4]
+        guard args.count == 5 else {
+            return .disallowedDockerFlag("build extra arguments")
+        }
+        guard DockerProductImagePolicy.isAllowedWebCrawlerBuild(
+            dockerfilePath: dockerfile,
+            imageTag: tag,
+            contextPath: context
+        ) else {
+            return .disallowedDockerFlag("build product image")
         }
         return nil
     }

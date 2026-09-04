@@ -144,6 +144,12 @@ enum ToolFollowUpFormatter {
             return response
         }
 
+        if response.contains("Tool failure details:")
+            || response.contains("**What went wrong**")
+            || response.contains("**Plugin creation could not finish**") {
+            return response
+        }
+
         let reasons = details.reasons
         let responseAlreadyIncludesReasons = reasons.allSatisfy { response.contains($0) }
         guard !responseAlreadyIncludesReasons else { return response }

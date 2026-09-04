@@ -1,5 +1,6 @@
 import Foundation
 import ServiceContracts
+import WebCrawler
 
 /// Runs the prebuilt crawler image in a fresh, resource-limited container.
 ///
@@ -24,17 +25,10 @@ public struct WebCrawlerDockerExecutor: Sendable {
         timeoutSeconds: Int
     ) async throws -> DockerCLIResult {
         let timeout = min(max(timeoutSeconds, 1), Self.maximumTimeoutSeconds)
-        let imageCheck = try await executor(
-            ["image", "inspect", Self.image],
-            Data(),
-            30
-        )
-        guard imageCheck.exitCode == 0 else {
-            throw WebCrawlerDockerExecutorError.imageUnavailable(Self.image)
-        }
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        let prepared = try await WebCrawlerDockerInputPreparer.enrich(input)
         let name = "\(Self.containerPrefix)-\(UUID().uuidString.lowercased())"
-        let startHost = try startHost(from: input)
-        let proxyLease = try await WebCrawlerEgressProxy.shared.lease(for: startHost)
+        let proxyLease = try await WebCrawlerEgressProxy.shared.lease(forHosts: prepared.leaseHosts)
         let createArguments = Self.createArguments(
             name: name,
             proxyHost: proxyLease.host,
@@ -61,32 +55,17 @@ public struct WebCrawlerDockerExecutor: Sendable {
 
             let result = try await executor(
                 ["exec", "-i", name, "/usr/local/bin/derrick-web-crawler"],
-                input,
+                prepared.data,
                 timeout
             )
             await remove(name)
-            await WebCrawlerEgressProxy.shared.release(for: startHost)
+            await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
             return result
         } catch {
             await remove(name)
-            await WebCrawlerEgressProxy.shared.release(for: startHost)
+            await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
             throw error
         }
-    }
-
-    private func startHost(from input: Data) throws -> String {
-        guard let object = try? JSONSerialization.jsonObject(with: input) as? [String: Any],
-              let rawURL = object["start_url"] as? String,
-              let url = URL(string: rawURL),
-              let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !host.isEmpty
-        else {
-            throw WebCrawlerDockerExecutorError.commandFailed(
-                "prepare crawler container",
-                "Crawler input did not contain a valid start_url."
-            )
-        }
-        return host
     }
 
     /// Idle-container create argv. The image ENTRYPOINT is the crawler binary,
