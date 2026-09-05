@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Production adapter for the Python factory.
 public struct PythonPluginFactoryDockerExecutor: PluginFactoryExecutor, Sendable {

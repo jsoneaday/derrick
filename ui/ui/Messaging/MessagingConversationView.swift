@@ -1,4 +1,4 @@
-import ServiceContracts
+import Structure
 import SwiftUI
 
 struct MessagingConversationView: View {

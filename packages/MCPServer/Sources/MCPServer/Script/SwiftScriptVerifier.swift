@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Conservative source checks for standalone Swift scripts.
 public enum SwiftScriptVerifier: Sendable {

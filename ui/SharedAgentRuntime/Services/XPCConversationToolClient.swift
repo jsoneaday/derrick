@@ -3,7 +3,7 @@ import Lib
 import MCP
 import MCPClient
 import AgentRuntime
-import ServiceContracts
+import Structure
 
 /// Effector tools → MCPService over XPC.
 /// Orchestration tools (`agents_*`, `jobs_*`) stay on a local MCP client.

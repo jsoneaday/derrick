@@ -1,5 +1,6 @@
 import Foundation
 import Plugin
+import Structure
 
 /// Host-owned dispatcher for capability hops emitted by Swift programs.
 public enum PluginHostHopDispatcher: Sendable {

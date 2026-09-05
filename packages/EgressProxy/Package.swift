@@ -13,9 +13,13 @@ let package = Package(
             targets: ["EgressProxy"]
         )
     ],
+    dependencies: [
+        .package(path: "../Structure"),
+    ],
     targets: [
         .target(
             name: "EgressProxy",
+            dependencies: ["Structure"],
             path: "Sources/EgressProxy",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
@@ -23,7 +27,7 @@ let package = Package(
         ),
         .testTarget(
             name: "EgressProxyTests",
-            dependencies: ["EgressProxy"],
+            dependencies: ["EgressProxy", "Structure"],
             path: "Tests/EgressProxyTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

@@ -1,7 +1,7 @@
 import AppEvents
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Routes policy decision prompts to the correct process.
 /// AgentService has no PolicyEventPresenter — never call local `AppEventBus.initDecision` there

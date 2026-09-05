@@ -1,7 +1,7 @@
 import Foundation
 import DockerRunnerXPC
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Shared Swift source, compiler, and artifact executor for all generated code.
 /// Every operation runs in the pinned Swift image with no network access.

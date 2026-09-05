@@ -8,6 +8,7 @@
 import Foundation
 import MCPServer
 import LLMAgentClient
+import Structure
 
 actor ConfiguredScriptReviewer: ScriptReviewer {
     nonisolated let name: String = "configured-script-reviewer"

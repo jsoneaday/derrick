@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Invokes approved connector plugins for messaging operations.
 public struct ConnectorPluginInvoker: Sendable {

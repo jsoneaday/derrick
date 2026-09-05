@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Background ingress for messaging connectors. Runs inside derrickd.
 public final class MessagingIngressService: @unchecked Sendable {

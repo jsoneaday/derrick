@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Runs an approved factory release through the offline Python guest runtime.
 public enum GuestPluginRunner: Sendable {

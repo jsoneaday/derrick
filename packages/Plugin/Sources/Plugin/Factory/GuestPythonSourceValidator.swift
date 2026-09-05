@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Conservative source checks for Python guest plugins and factory drafts.
 public enum GuestPythonSourceValidator: Sendable {

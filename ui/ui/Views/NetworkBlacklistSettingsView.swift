@@ -1,5 +1,5 @@
 import SwiftUI
-import ServiceContracts
+import Structure
 
 /// Settings → Network blacklist. Exact host or `*.domain` (subdomains only, not apex).
 struct NetworkBlacklistSettingsView: View {

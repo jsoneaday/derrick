@@ -1,7 +1,7 @@
 import SwiftUI
 import DBRepository
 import LLMAgentClient
-import ServiceContracts
+import Structure
 
 private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels

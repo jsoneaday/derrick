@@ -1,6 +1,7 @@
 import Foundation
 import Plugin
 import SQLite3
+import Structure
 
 public extension DBRepository {
     /// Persists an approved release exactly once. Repeating the same release is

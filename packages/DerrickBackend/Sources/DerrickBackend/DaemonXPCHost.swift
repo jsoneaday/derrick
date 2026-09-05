@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// NSXPC export for `DerrickDaemonXPC`.
 public final class DaemonExportedObject: NSObject, DerrickDaemonXPC, @unchecked Sendable {

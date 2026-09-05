@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Anonymous XPC peer listener so AgentService can call MCPService.
 /// Endpoint is handed to the UI over the Application XPC channel (`peerListenerEndpoint`),

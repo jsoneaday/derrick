@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import LLMAgentClient
 import DBRepository
+import Structure
 
 @MainActor
 final class LLMModelThinkingSettings: ObservableObject {

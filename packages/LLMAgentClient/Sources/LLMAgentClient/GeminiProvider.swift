@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
     case gemini25FlashLite = "gemini-2.5-flash-lite"

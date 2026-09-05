@@ -1,6 +1,7 @@
 import XCTest
 import MemorySystem
 @testable import PolicyRuntime
+import Structure
 
 final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
     func test_toolPolicy_loadsRelevantScopeAndDeniesMatch() async throws {

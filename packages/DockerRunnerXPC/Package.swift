@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 
 import PackageDescription
 
@@ -8,24 +8,22 @@ let package = Package(
         .macOS(.v15)
     ],
     products: [
-        .library(
-            name: "DockerRunnerXPC",
-            targets: ["DockerRunnerXPC"]
-        )
+        .library(name: "DockerRunnerXPC", targets: ["DockerRunnerXPC"])
     ],
     dependencies: [
-        .package(path: "../ServiceContracts"),
+        .package(path: "../Structure"),
     ],
     targets: [
         .target(
             name: "DockerRunnerXPC",
-            dependencies: ["ServiceContracts"],
+            dependencies: ["Structure"],
             path: "Sources/DockerRunnerXPC"
         ),
         .testTarget(
             name: "DockerRunnerXPCTests",
-            dependencies: ["DockerRunnerXPC", "ServiceContracts"],
+            dependencies: ["DockerRunnerXPC", "Structure"],
             path: "Tests/DockerRunnerXPCTests"
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

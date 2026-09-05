@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Production adapter for the Swift factory. The image is injected so releases
 /// can pin a known Swift toolchain instead of silently following `latest`.

@@ -1,7 +1,7 @@
 import AppKit
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Watches SQLite for due jobs and wakes a headless UI worker when the interactive app is gone.
 ///

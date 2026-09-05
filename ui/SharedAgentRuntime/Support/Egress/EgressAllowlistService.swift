@@ -4,7 +4,7 @@ import DBRepository
 import EgressProxy
 import AppEvents
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// App-owned egress allowlist: DB persistence + host HTTP preflight prompts.
 /// Not exposed as MCP. Not part of tool/content policy rules.

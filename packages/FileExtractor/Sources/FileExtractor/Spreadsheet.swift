@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 enum Spreadsheet {
     static func csvToXLSX(_ csv: String) throws -> Data {

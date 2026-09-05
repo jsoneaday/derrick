@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 enum JobServiceMapping {
     static func jobRecord(from job: JobRow, steps: [JobStepRow]) throws -> JobRecord {

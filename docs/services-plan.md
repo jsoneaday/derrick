@@ -93,7 +93,7 @@ WebhookService (future) ──► derrickd
 | Phase | Status | Deliverable |
 | --- | --- | --- |
 | **P0** | done | This ADR + locked decisions |
-| **P1** | partial | ServiceContracts; AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
+| **P1** | partial | Structure wire types (`AppLayerServices/`); AgentService XPC; bootstrap+DB; UI ensure-up; **turn stream via XPC**; **UI is client-only** (no local ConversationModel for chat) |
 | **P2** | partial | `service_logs` migration + writer; AgentService writes on bootstrap/health |
 | **P3** | done | MCPService XPC + UI ensure-up; peer handoff UI←MCP→Agent; effectors Agent→MCPService; `agents_*` local; script reviewer in MCPService; **egress preflight in Agent before callTool** (mid-flight remains backstop); **MCP docker via DockerRunnerHelper peer XPC** (UI prewarms + hands helper peer endpoint). |
 | **P4** | done | Job + Agent + MCP folded into **derrickd** (in-process); UI → daemon Mach only; peer mesh + job-worker/watchdog removed. Jobs UI / webhook still open. |

@@ -4,16 +4,20 @@ import PackageDescription
 
 let package = Package(
     name: "MemorySystem",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(
             name: "MemorySystem",
             targets: ["MemorySystem"]
         )
     ],
+    dependencies: [
+        .package(path: "../Structure"),
+    ],
     targets: [
         .target(
             name: "MemorySystem",
+            dependencies: ["Structure"],
             path: "Sources/MemorySystem",
             resources: [
                 .process("Resources")
@@ -21,7 +25,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MemorySystemTests",
-            dependencies: ["MemorySystem"],
+            dependencies: ["MemorySystem", "Structure"],
             path: "Tests/MemorySystemTests"
         )
     ]

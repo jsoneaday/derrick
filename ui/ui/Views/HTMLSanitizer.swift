@@ -1,5 +1,6 @@
 import Foundation
 import Plugin
+import Structure
 
 /// Sanitizes untrusted HTML before it reaches the native rich-text renderer.
 enum HTMLSanitizer {

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Lib
+import Structure
 
 @Suite struct ToolArgumentsJSONTests {
     @Test func emptyObjectIsValidArguments() throws {

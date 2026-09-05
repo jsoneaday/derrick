@@ -2,7 +2,7 @@ import Combine
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Connector catalog only. Does not own open tabs or the message window.
 @MainActor

@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Network allow/deny via SQLite + user notifications (same path as tool HITL).
 public enum HITLOfflineNetworkService {

@@ -1,20 +1,10 @@
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 import UserNotifications
 
 /// In-process module registry for the headless daemon.
-public enum DaemonModuleID: String, Sendable, CaseIterable {
-    case events
-    case notifications
-    case ingress
-    case jobs
-    case agent
-    case mcp
-}
-
-/// Owns shared SQLite, AppEventBus, and module lifecycle for `derrickd`.
 public actor DaemonRuntime {
     public static let shared = DaemonRuntime()
 
@@ -127,15 +117,5 @@ public actor DaemonRuntime {
         _ = try await repo.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
         repository = repo
         fputs("[derrickd] DB \(await repo.databaseURL.path)\n", stderr)
-    }
-}
-
-public enum DaemonRuntimeError: Error, LocalizedError, Sendable {
-    case databaseUnavailable
-
-    public var errorDescription: String? {
-        switch self {
-        case .databaseUnavailable: return "Daemon database unavailable"
-        }
     }
 }

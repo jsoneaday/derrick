@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import Structure
 
 public extension DBRepository {
     func saveConfig(key: String, value: String, username: String, password: String) throws {

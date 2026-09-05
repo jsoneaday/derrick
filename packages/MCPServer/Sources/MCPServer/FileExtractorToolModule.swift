@@ -1,7 +1,7 @@
 import Foundation
 import MCP
 import MCPToolCatalog
-import ServiceContracts
+import Structure
 
 public enum FileExtractorToolModule: MCPToolModule {
     public static let id: AllowedMCPTool = .filesExtract

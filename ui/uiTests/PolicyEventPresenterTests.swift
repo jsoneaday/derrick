@@ -3,6 +3,7 @@ import Testing
 import AppEvents
 import PolicyUserInteraction
 @testable import ui
+import Structure
 
 @Suite struct PolicyEventPresenterTests {
     @MainActor

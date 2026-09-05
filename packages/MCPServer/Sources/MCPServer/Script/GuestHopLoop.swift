@@ -1,5 +1,6 @@
 import Foundation
 import Plugin
+import Structure
 
 /// Shared host hop loop for offline guest programs (Python or Swift).
 public enum GuestHopLoop: Sendable {

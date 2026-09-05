@@ -1,5 +1,5 @@
 import XCTest
-import ServiceContracts
+import Structure
 @testable import DBRepository
 
 final class WorkflowRuntimePersistenceTests: XCTestCase {

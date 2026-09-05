@@ -1,7 +1,7 @@
 import AppKit
 import AppKit
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Process-wide reverse channel to the UI app.
 /// Job-sourced `startTurn` connections export a silent sink; we still stream those turns

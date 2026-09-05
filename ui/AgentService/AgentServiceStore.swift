@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Shared SQLite access for AgentService (same path as sandboxed UI + policy seed).
 actor AgentServiceStore {

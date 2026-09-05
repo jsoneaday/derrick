@@ -3,6 +3,7 @@ import DBRepository
 import LLMAgentClient
 import MCPServer
 import Plugin
+import Structure
 
 /// Application-facing composition root. The model roles are separate objects,
 /// and the factory session owns the bounded transition rules.

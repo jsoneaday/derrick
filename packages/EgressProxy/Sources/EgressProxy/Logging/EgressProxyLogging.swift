@@ -1,13 +1,6 @@
 import Foundation
+import Structure
 import os.log
-
-/// Observability for proxy decisions. Unauthorized attempts must be logged.
-public protocol EgressProxyLogging: Sendable {
-    func logInfo(_ message: String)
-    func logUnauthorizedAccess(destination: ProxyDestination, reason: String, clientDescription: String?)
-    func logAllowedAccess(destination: ProxyDestination, clientDescription: String?)
-    func logError(_ message: String)
-}
 
 public struct OSLogEgressProxyLogger: EgressProxyLogging {
     private let logger: Logger

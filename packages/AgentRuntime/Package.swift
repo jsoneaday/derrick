@@ -11,12 +11,12 @@ let package = Package(
         .library(name: "AgentRuntime", targets: ["AgentRuntime"])
     ],
     dependencies: [
-        .package(path: "../ServiceContracts")
+        .package(path: "../Structure"),
     ],
     targets: [
         .target(
             name: "AgentRuntime",
-            dependencies: ["ServiceContracts"],
+            dependencies: ["Structure"],
             path: "Sources/AgentRuntime",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
@@ -24,7 +24,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentRuntimeTests",
-            dependencies: ["AgentRuntime"],
+            dependencies: ["AgentRuntime", "Structure"],
             path: "Tests/AgentRuntimeTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 public enum DatabaseSchema {
     public static let latestVersion = 1

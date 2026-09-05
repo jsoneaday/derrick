@@ -1,17 +1,5 @@
 import Foundation
-
-/// User decision for a host that is not yet on the permanent/session allowlist.
-public enum HostAccessUserDecision: Sendable, Equatable {
-    case allowOnce
-    case allowAlways
-    case deny
-}
-
-/// Asks the controlling app (via reverse XPC) whether an unknown host may be reached.
-/// Used mid-flight when CONNECT targets a host preflight did not cover.
-public protocol HostAccessPrompter: Sendable {
-    func requestAccess(host: String) async -> HostAccessUserDecision
-}
+import Structure
 
 /// Always denies (tests / offline helper without an app peer).
 public struct DenyingHostAccessPrompter: HostAccessPrompter {

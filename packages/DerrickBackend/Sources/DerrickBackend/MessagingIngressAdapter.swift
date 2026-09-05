@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Vendor-specific messaging ingress. Host listens; adapters translate vendor APIs into DB rows.
 protocol MessagingIngressAdapter: Sendable {

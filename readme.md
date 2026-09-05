@@ -92,9 +92,11 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 - Plugin credential collection (Keychain save)
 - Policy events (usage limits, content sensitivity)
 
-### Policy engine
+### Policy
 
-`PolicyEngine` / `PolicyInterceptor` evaluate tool calls and agent behavior against stored rules before execution.
+- **`PolicyEngine`** — in-process tool-call rules for chat (`Structure/Policy/PolicyEngine`).
+- **`PolicyRuntime`** — persisted rules from SQLite (`Structure/Policy/PolicyRuntime`); implemented by `StoreBacked*` evaluators.
+- **`PolicyInterceptor`** / **`ToolRequestInterceptor`** (MemorySystem) — pipeline hooks that call those policies.
 
 ### Messaging
 
@@ -107,12 +109,13 @@ Connector plugins declare `role: connector` in the manifest. Messages are persis
 | `ui/` | macOS app, Login Item daemon, XPC services |
 | `packages/DBRepository` | SQLite schema, migrations, messaging tables |
 | `packages/MCPServer` | MCP bridge, script execution, plugin runtime |
-| `packages/Plugin` | Agent plugin manifest, factory, envelope protocol |
+| `packages/Structure` | Architecture map: wire types, protocols, JSON schemas (`AppLayerServices/`, `Policy/`, `Plugin/`, `Contract/`, …) |
+| `packages/Plugin` | Plugin factory runtime and bundled skill/reviewer resources |
 | `packages/DerrickBackend` | Daemon runtime, notifications, HITL polling |
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
-| `packages/PolicyEngine` | Policy evaluation |
+| `packages/PolicyEngine` | In-process conversation tool policy (`Structure/Policy/PolicyEngine`) |
+| `packages/PolicyRuntime` | Store-backed policy evaluators (`Structure/Policy/PolicyRuntime`) |
 | `packages/LLMAgentClient` | Provider clients (OpenAI, Gemini, …) |
-| `packages/ServiceContracts` | Shared DTOs and XPC codecs |
 
 ## Quick start
 

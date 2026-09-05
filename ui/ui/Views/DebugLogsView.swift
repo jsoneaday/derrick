@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 import DBRepository
-import ServiceContracts
+import Structure
 import SwiftUI
 
 @MainActor

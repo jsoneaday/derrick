@@ -1,5 +1,6 @@
 import Foundation
 import PolicyUserInteraction
+import Structure
 
 /// Structured payload for usage-limit raise modals (JSON in `PolicyUserEvent.payloadPreview`).
 struct UsageLimitRaiseMetadata: Codable, Sendable, Equatable {

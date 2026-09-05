@@ -38,7 +38,7 @@ See [docs/development.md](docs/development.md) for daemon bootstrap, Login Items
 
 The repo ships with the maintainer's Team ID for convenience. Forks should run `./scripts/configure-signing.sh` after editing `Config/Signing.xcconfig`.
 
-Files updated by the script include entitlements, `ServiceIdentity.swift`, `DerrickAppSupport.swift`, and `project.pbxproj`.
+Files updated by the script include entitlements, `Structure/.../ServiceIdentity.swift`, `Structure/.../DerrickAppSupport.swift`, and `project.pbxproj`.
 
 Do not commit provisioning profiles (`.mobileprovision`, `.p12`, `.pem`).
 

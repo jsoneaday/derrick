@@ -9,7 +9,7 @@ import MCPToolCatalog
 import AppEvents
 import PolicyUserInteraction
 import LLMAgentClient
-import ServiceContracts
+import Structure
 
 extension ConversationPipeline {
     func callToolWithPolicyInterception(
@@ -489,18 +489,5 @@ private final class TimingAccumulator: @unchecked Sendable {
         lock.lock()
         value += max(0, ms)
         lock.unlock()
-    }
-}
-
-public enum MCPClientError: Error, Sendable {
-    case toolExecutionDenied(toolName: String, reason: String)
-}
-
-extension MCPClientError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .toolExecutionDenied(let toolName, let reason):
-            return "\(toolName) \(reason)"
-        }
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 import AgentRuntime
 import MemorySystem
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Session-scoped multi-agent entry point (MA-1–MA-3).
 final class SessionOrchestrator: Sendable {

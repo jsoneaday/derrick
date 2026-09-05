@@ -1,17 +1,7 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 import SQLite3
-
-public struct MessagingMessageInsertResult: Sendable, Hashable {
-    public let inserted: Bool
-    public let message: MessagingMessageDTO
-
-    public init(inserted: Bool, message: MessagingMessageDTO) {
-        self.inserted = inserted
-        self.message = message
-    }
-}
 
 public extension DBRepository {
     func upsertMessagingConnector(_ connector: MessagingConnectorDTO) throws {

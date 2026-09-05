@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "MCPToolCatalog",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     products: [
         .library(
@@ -13,14 +13,17 @@ let package = Package(
             targets: ["MCPToolCatalog"]
         )
     ],
+    dependencies: [
+        .package(path: "../Structure"),
+    ],
     targets: [
         .target(
             name: "MCPToolCatalog",
-            path: "Sources/MCPToolCatalog"
+            dependencies: ["Structure"]
         ),
         .testTarget(
             name: "MCPToolCatalogTests",
-            dependencies: ["MCPToolCatalog"],
+            dependencies: ["MCPToolCatalog", "Structure"],
             path: "Tests/MCPToolCatalogTests"
         )
     ]

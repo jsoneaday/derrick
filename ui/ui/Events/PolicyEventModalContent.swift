@@ -1,5 +1,6 @@
 import SwiftUI
 import PolicyUserInteraction
+import Structure
 
 /// Shared chrome for policy / system modals (icons + actions) matching the app’s neutral UI.
 enum ModalChrome {

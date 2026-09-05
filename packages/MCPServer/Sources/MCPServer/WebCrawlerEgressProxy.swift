@@ -1,5 +1,6 @@
 import EgressProxy
 import Foundation
+import Structure
 
 public struct WebCrawlerProxyLease: Sendable, Hashable {
     public let host: String

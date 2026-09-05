@@ -1,7 +1,7 @@
 import Foundation
 import DockerRunnerXPC
 import DerrickBackend
-import ServiceContracts
+import Structure
 
 /// Unified Mach-XPC export: UI talks only to derrickd; Agent/Job/MCP run in-process.
 final class DaemonUnifiedExportedObject: NSObject, DerrickDaemonServiceXPC, @unchecked Sendable {

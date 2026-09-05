@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Ensures a continuation is resumed at most once across concurrent NW callbacks.
 final class ResumeGate: @unchecked Sendable {

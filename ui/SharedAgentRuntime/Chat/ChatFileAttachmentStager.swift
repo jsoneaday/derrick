@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 import UniformTypeIdentifiers
 
 struct ChatFileAttachmentStager: Sendable {

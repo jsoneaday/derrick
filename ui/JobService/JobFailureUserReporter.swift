@@ -1,7 +1,7 @@
 import DerrickBackend
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// On job failure: wake the agent with failure context → same notification/modal path as success.
 enum JobFailureUserReporter {

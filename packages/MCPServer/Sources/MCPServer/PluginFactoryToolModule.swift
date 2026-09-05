@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import MCPToolCatalog
 import Plugin
-import ServiceContracts
+import Structure
 
 /// MCP entrypoint for the factory. The model supplies only the user's goal;
 /// builder, runner, reviewer, compiler, and hash verification stay host-owned.

@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Holds the live XPC connection so turn streaming can re-resolve the reverse sink.
 final class AgentServiceConnectionContext: @unchecked Sendable {

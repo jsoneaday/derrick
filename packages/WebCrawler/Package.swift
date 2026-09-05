@@ -19,6 +19,7 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(path: "../Structure"),
         .package(
             path: "../Selenops"
         ),
@@ -35,6 +36,7 @@ let package = Package(
         .target(
             name: "WebCrawler",
             dependencies: [
+                "Structure",
                 .product(name: "Selenops", package: "selenops"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "SwiftSoup", package: "swiftsoup")
@@ -54,7 +56,7 @@ let package = Package(
         ),
         .testTarget(
             name: "WebCrawlerTests",
-            dependencies: ["WebCrawler"],
+            dependencies: ["WebCrawler", "Structure"],
             path: "Tests/WebCrawlerTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

@@ -1,6 +1,6 @@
 import Foundation
 import MCPToolCatalog
-import ServiceContracts
+import Structure
 
 /// Emits concise, UI-visible lines for high-signal tool outcomes.
 enum ToolOutcomeLogger {

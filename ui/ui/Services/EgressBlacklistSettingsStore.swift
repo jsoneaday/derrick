@@ -1,6 +1,6 @@
 import Foundation
 import Combine
-import ServiceContracts
+import Structure
 
 /// Settings-facing soft blacklist. Persist only through derrickd.
 @MainActor

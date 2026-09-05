@@ -1,7 +1,7 @@
 import Combine
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 struct MessagingTab: Identifiable, Hashable {
     let id: String

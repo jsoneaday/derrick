@@ -41,9 +41,6 @@
       location = "group:packages/MemorySystem">
    </FileRef>
    <FileRef
-      location = "group:packages/Contract">
-   </FileRef>
-   <FileRef
       location = "group:packages/Plugin">
    </FileRef>
    <FileRef
@@ -56,7 +53,7 @@
       location = "group:packages/PolicyUserInteraction">
    </FileRef>
    <FileRef
-      location = "group:packages/ServiceContracts">
+      location = "group:packages/Structure">
    </FileRef>
    <FileRef
       location = "group:AGENTS.md">

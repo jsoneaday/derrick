@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 enum TextExtract {
     static func htmlToText(_ html: String) -> String {

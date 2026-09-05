@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 final class JobServiceExportedObject: NSObject, JobServiceXPC {
     func health(withReply reply: @escaping @Sendable (NSData) -> Void) {

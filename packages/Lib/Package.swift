@@ -14,20 +14,21 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0")
+        .package(path: "../Structure"),
     ],
     targets: [
         .target(
             name: "Lib",
             dependencies: [
-                 .product(name: "MCP", package: "swift-sdk")
+                "Structure",
             ],
             path: "Sources/Lib"
         ),
         .testTarget(
             name: "LibTests",
-            dependencies: ["Lib"],
+            dependencies: ["Lib", "Structure"],
             path: "Tests/LibTests"
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

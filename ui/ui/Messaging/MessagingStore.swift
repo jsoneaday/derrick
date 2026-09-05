@@ -2,7 +2,7 @@ import Combine
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// UI facade: catalog and conversation stay separate objects.
 @MainActor

@@ -1,6 +1,7 @@
 import Foundation
 import MCP
 import MCPToolCatalog
+import Structure
 
 /// Catalog module for `session_memory_search`.
 public enum SessionMemorySearchToolModule: MCPToolModule {

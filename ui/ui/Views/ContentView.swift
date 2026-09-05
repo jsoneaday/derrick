@@ -6,7 +6,7 @@ import SwiftUI
 import DBRepository
 import Plugin
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 private let bottomPromptFontSize = CGFloat(11)
 private let bottomPromptIconSize = CGFloat(10)
 

@@ -1,12 +1,7 @@
 import Foundation
 import MCP
 import Plugin
-import ServiceContracts
-
-public protocol PluginHopHandler: Sendable {
-    func handleUIPresent(payload: [String: PluginJSON]) async -> PluginHopEvent?
-    func handleSecretRequest(payload: [String: PluginJSON]) async -> PluginHopEvent?
-}
+import Structure
 
 /// Runs standalone guest source (Python primary, Swift legacy) and dispatches host-owned capability hops.
 public enum ScriptExecutionRuntime {

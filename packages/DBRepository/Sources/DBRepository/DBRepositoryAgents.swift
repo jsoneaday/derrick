@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 import AgentRuntime
-import ServiceContracts
+import Structure
 
 public extension DBRepository {
     // MARK: - Chat sessions

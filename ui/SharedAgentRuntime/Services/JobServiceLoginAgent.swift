@@ -1,6 +1,6 @@
 import Foundation
 import ServiceManagement
-import ServiceContracts
+import Structure
 
 /// Registers the headless Derrick Daemon LoginAgent for the user session.
 ///

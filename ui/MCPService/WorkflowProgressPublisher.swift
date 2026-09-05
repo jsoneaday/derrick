@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Publishes in-flight tool progress into `workflow_run_events` for host workflows.
 enum WorkflowProgressPublisher {

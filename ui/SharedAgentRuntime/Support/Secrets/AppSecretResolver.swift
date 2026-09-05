@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 enum SecretSourceMode: String, Sendable {
     case keychain

@@ -8,6 +8,7 @@
 import Foundation
 import MemorySystem
 import LLMAgentClient
+import Structure
 
 actor ConfiguredMemorySummarizer: MemorySummarizer {
     private struct Payload: Decodable {

@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Process-wide reverse-XPC log fan-out: AgentService → UI debug panel.
 ///

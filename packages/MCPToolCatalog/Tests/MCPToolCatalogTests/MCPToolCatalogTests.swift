@@ -1,5 +1,5 @@
 import Testing
-@testable import MCPToolCatalog
+import Structure
 
 struct MCPToolCatalogTests {
     @Test func allCasesHaveStableRawValues() {

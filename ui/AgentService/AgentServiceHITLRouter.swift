@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Routes human-in-the-loop requests between live UI modals and notification delivery.
 enum AgentServiceHITLRouter {

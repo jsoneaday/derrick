@@ -2,7 +2,7 @@ import DBRepository
 import Foundation
 import Plugin
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Soft blacklist in front of host HTTP. Default allow. Prompt only on a hit.
 public actor BlacklistHTTPAccessGate: HostHTTPAccessGate {

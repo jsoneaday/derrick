@@ -1,23 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
-
-public enum WorkflowRuntimeError: Error, LocalizedError, Sendable {
-    case mcpUnavailable
-    case workflowNotFound
-    case unsupportedKind(WorkflowKind)
-
-    public var errorDescription: String? {
-        switch self {
-        case .mcpUnavailable:
-            return "MCP tool host is not available in-process."
-        case .workflowNotFound:
-            return "Workflow was not found."
-        case .unsupportedKind(let kind):
-            return "Unsupported workflow kind \(kind.rawValue)."
-        }
-    }
-}
+import Structure
 
 /// Durable workflow coordinator (Process Manager) running inside derrickd.
 public actor WorkflowRuntimeEngine {

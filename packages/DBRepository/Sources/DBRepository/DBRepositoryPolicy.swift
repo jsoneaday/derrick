@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import Structure
 @_exported import MemorySystem
 
 public extension DBRepository {

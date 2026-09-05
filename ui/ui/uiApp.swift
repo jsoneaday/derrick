@@ -1,5 +1,5 @@
 import AppKit
-import ServiceContracts
+import Structure
 import ServiceEnsureUp
 import SwiftUI
 import DBRepository

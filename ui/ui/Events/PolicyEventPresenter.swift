@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AppEvents
 import PolicyUserInteraction
+import Structure
 
 /// Main-actor UI bridge: listens on `AppEventBus` and drives a single ModalPopup.
 ///

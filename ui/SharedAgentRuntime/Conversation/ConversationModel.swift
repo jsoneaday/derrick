@@ -9,7 +9,7 @@ import MCPToolCatalog
 import MemorySystem
 import Plugin
 import PolicyRuntime
-import ServiceContracts
+import Structure
 
 @MainActor
 final class ConversationModel {

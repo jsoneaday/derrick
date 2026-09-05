@@ -1,7 +1,7 @@
 import SwiftUI
 import DBRepository
 import Plugin
-import ServiceContracts
+import Structure
 
 private let sideMenuRecentsFontSize = CGFloat(12)
 

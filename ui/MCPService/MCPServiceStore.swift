@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Shared SQLite for MCPService (same host-container path as UI / AgentService).
 actor MCPServiceStore {

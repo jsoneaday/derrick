@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Runs the prebuilt file extractor image with job-scoped `/data/in` and `/data/out` mounts.
 public struct FileExtractorDockerExecutor: Sendable {

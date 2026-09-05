@@ -106,7 +106,7 @@ Replace cross-process inference (`ExecutionContextRegistry`, bool flags on `MCPT
 
 ### Schema (v1)
 
-Stored in `packages/Contract/Resources/schemas/execution-context-wire.schema.json` and mirrored in Swift (`ServiceContracts`).
+Stored in `packages/Structure/Sources/Contract/Resources/schemas/execution-context-wire.schema.json` and mirrored in Swift (`Structure/AppLayerServices/SharedAgentRuntime/ExecutionContextWire.swift`).
 
 ```json
 {
@@ -548,11 +548,11 @@ JobService → wakeAgent with slim result
 
 | Piece | Package / target |
 |-------|------------------|
-| `ExecutionContextWire` schema | `packages/Contract` |
-| Wire Swift types + validation | `packages/ServiceContracts` |
-| `ToolRunCoordinator`, `WorkflowEngine` | `packages/DerrickBackend` or new `packages/WorkflowRuntime` |
+| `ExecutionContextWire` schema | `packages/Structure/Sources/Contract/Resources/schemas/` |
+| Wire Swift types + validation | `packages/Structure` (`AppLayerServices/`, `Policy/`, …) |
+| `ToolRunCoordinator`, `WorkflowEngine` | `packages/DerrickBackend` |
 | DB migrations | `packages/DBRepository` |
-| XPC DTOs | `packages/ServiceContracts` |
+| XPC DTOs | `packages/Structure/Sources/AppLayerServices/` |
 | UI projection | `ui/SharedAgentRuntime` |
 | Slash command entry | `ui/SharedAgentRuntime/Conversation/ConversationModel` |
 

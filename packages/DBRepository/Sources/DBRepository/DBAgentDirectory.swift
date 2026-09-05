@@ -1,6 +1,6 @@
 import Foundation
 import AgentRuntime
-import ServiceContracts
+import Structure
 
 /// DB-backed agent directory: persists registry rows via `DBRepository` and delegates
 /// runtime mailbox / turn concurrency to an in-memory `AgentDirectorying` implementation.

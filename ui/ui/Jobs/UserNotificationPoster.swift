@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 import UserNotifications
 
 /// Authorization helper for the main UI app (HITL banners are posted by derrickd).

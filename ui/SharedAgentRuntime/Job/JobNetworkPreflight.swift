@@ -4,26 +4,12 @@ import Foundation
 import MCPToolCatalog
 import Plugin
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Before a scheduled network tool runs, ensure hosts are allowlisted.
 /// Uncovered hosts use the HITL **banner** path (not live chat modals / schedule preflight).
 ///
 public enum JobNetworkPreflight {
-    public enum PreflightError: Error, LocalizedError {
-        case denied(host: String, actor: String?)
-        case hardBlocked(host: String)
-
-        public var errorDescription: String? {
-            switch self {
-            case .denied(let host, let actor):
-                return "Network access to \(host) was not approved (\(actor ?? "user"))."
-            case .hardBlocked(let host):
-                return "Network access to \(host) is permanently blocked."
-            }
-        }
-    }
-
     public static func approveScriptNetworkIfNeeded(
         toolName: String,
         argumentsJSON: String,
@@ -69,11 +55,11 @@ public enum JobNetworkPreflight {
             case .approvedPermanently:
                 try? await repository.deleteEgressBlacklistEntry(id: entry.id)
             case .denied(let actor):
-                throw PreflightError.denied(host: host, actor: actor)
+                throw JobNetworkPreflightError.denied(host: host, actor: actor)
             case .dismissed:
-                throw PreflightError.denied(host: host, actor: "system-dismissed")
+                throw JobNetworkPreflightError.denied(host: host, actor: "system-dismissed")
             case .timedOut:
-                throw PreflightError.denied(host: host, actor: "system-timeout")
+                throw JobNetworkPreflightError.denied(host: host, actor: "system-timeout")
             }
         }
 
@@ -83,7 +69,7 @@ public enum JobNetworkPreflight {
         var uncovered: [String] = []
         for host in hosts {
             if policy.isHardBlockedHostname(host) {
-                throw PreflightError.hardBlocked(host: host)
+                throw JobNetworkPreflightError.hardBlocked(host: host)
             }
             if policy.isHostCoveredByAllowlist(host) {
                 continue
@@ -142,11 +128,11 @@ public enum JobNetworkPreflight {
                     stderr
                 )
             case .denied(let actor):
-                throw PreflightError.denied(host: host, actor: actor)
+                throw JobNetworkPreflightError.denied(host: host, actor: actor)
             case .dismissed:
-                throw PreflightError.denied(host: host, actor: "system-dismissed")
+                throw JobNetworkPreflightError.denied(host: host, actor: "system-dismissed")
             case .timedOut:
-                throw PreflightError.denied(host: host, actor: "system-timeout")
+                throw JobNetworkPreflightError.denied(host: host, actor: "system-timeout")
             }
         }
 

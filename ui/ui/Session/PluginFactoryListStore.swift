@@ -2,6 +2,7 @@ import Combine
 import DBRepository
 import Foundation
 import Plugin
+import Structure
 
 @MainActor
 final class PluginFactoryListStore: ObservableObject {

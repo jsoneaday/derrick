@@ -1,5 +1,6 @@
 import Foundation
 import MemorySystem
+import Structure
 
 public final class ConversationToolGovernancePolicy: ToolGovernancePolicy {
     private let policyEngine: PolicyEngine

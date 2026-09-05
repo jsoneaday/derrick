@@ -1,19 +1,5 @@
 import Foundation
-import ServiceContracts
-
-public enum WorkflowRuntimeClientError: Error, LocalizedError, Sendable {
-    case unavailable
-    case decodeFailed
-
-    public var errorDescription: String? {
-        switch self {
-        case .unavailable:
-            return "Workflow runtime is not available."
-        case .decodeFailed:
-            return "Workflow runtime returned an invalid response."
-        }
-    }
-}
+import Structure
 
 /// UI / Agent → daemon workflow runtime (XPC from app; in-process when derrickd installs bridges).
 public final class WorkflowRuntimeClient: @unchecked Sendable {

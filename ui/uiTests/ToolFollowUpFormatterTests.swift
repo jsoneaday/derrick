@@ -1,6 +1,6 @@
 import Foundation
 import MemorySystem
-import ServiceContracts
+import Structure
 import Testing
 @testable import ui
 

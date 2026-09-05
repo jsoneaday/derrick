@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import ServiceContracts
+import Structure
 import UserNotifications
 
 /// Handles notification taps in the Daemon process (poster), then wakes the UI.

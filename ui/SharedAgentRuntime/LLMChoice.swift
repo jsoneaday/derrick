@@ -1,6 +1,6 @@
 import Foundation
 import LLMAgentClient
-import ServiceContracts
+import Structure
 
 enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
     case google

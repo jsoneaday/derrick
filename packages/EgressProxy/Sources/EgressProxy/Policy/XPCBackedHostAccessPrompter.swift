@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// HostAccessPrompter that calls out through a closure (wired to reverse XPC in the helper).
 public struct ClosureHostAccessPrompter: HostAccessPrompter {

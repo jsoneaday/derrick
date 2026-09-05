@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Single entry for UI-hosted daemon hygiene: evict stale copies, refresh registration, kickstart.
 enum DaemonBootstrapCoordinator {

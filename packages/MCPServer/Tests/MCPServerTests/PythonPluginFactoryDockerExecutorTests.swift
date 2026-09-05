@@ -2,6 +2,7 @@ import Foundation
 import MCPServer
 import Plugin
 import Testing
+import Structure
 
 @Suite struct PythonPluginFactoryDockerExecutorTests {
     @Test func packagesAndRunsPythonSource() async throws {

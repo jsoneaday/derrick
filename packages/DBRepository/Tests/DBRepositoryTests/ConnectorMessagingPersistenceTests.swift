@@ -1,6 +1,6 @@
 import XCTest
 import Plugin
-import ServiceContracts
+import Structure
 @testable import DBRepository
 
 final class ConnectorMessagingPersistenceTests: XCTestCase {

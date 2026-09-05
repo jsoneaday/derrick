@@ -1,7 +1,7 @@
 import Foundation
 import MemorySystem
 import MCPToolCatalog
-import ServiceContracts
+import Structure
 
 /// Builds slim tool payloads for the next agent turn.
 /// Full tool JSON stays in debug logs and `ToolCallRecord.result`; only this formatter shapes model context.

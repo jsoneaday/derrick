@@ -2,6 +2,7 @@ import XCTest
 import SQLite3
 import Plugin
 @testable import DBRepository
+import Structure
 
 final class DBRepositoryTests: XCTestCase {
     func testCreatesEmptySQLiteDatabaseFile() async throws {

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Structure
 
 /// Builds TCP listener parameters that bind only to a specific host (default loopback).
 public enum EgressProxyListenBinding: Sendable {

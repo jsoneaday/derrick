@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Runs claimed job steps. Tool execution uses peer-mesh MCP XPC callTool (signed).
 actor JobServiceExecutor {

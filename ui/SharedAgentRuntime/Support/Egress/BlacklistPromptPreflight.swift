@@ -3,6 +3,7 @@ import EgressProxy
 import Foundation
 import Plugin
 import PolicyUserInteraction
+import Structure
 
 /// Ask before the model runs when the user prompt already names a blacklisted host.
 public enum BlacklistPromptPreflight: Sendable {

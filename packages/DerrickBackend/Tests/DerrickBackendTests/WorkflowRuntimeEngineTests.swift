@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 import Testing
 @testable import DerrickBackend
 

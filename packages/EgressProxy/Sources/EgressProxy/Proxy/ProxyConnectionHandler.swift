@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Structure
 
 /// Handles one client connection (HTTP CONNECT or absolute-form HTTP).
 struct ProxyConnectionHandler: Sendable {

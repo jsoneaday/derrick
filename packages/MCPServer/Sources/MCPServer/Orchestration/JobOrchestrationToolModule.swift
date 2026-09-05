@@ -1,6 +1,7 @@
 import Foundation
 import MCP
 import MCPToolCatalog
+import Structure
 
 /// Local orchestration tools: agent places durable job/schedule orders (not MCPService effectors).
 public enum JobOrchestrationToolModule {

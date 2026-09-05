@@ -2,7 +2,7 @@ import AppKit
 import DBRepository
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 import UserNotifications
 
 /// UI presentation for notification taps (job results + HITL Allow/Deny).

@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import MemorySystem
+import Structure
 
 public extension DBRepository {
     func migrateSessionMemory(username: String, password: String, to targetVersion: Int? = nil) throws -> URL {

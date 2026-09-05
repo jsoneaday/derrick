@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import ServiceContracts
+import Structure
 import SwiftUI
 
 /// Collects plugin Keychain credentials using the labels from plugin.json.

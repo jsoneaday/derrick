@@ -11,12 +11,13 @@ let package = Package(
         .library(name: "PolicyUserInteraction", targets: ["PolicyUserInteraction"])
     ],
     dependencies: [
-        .package(path: "../AppEvents")
+        .package(path: "../Structure"),
+        .package(path: "../AppEvents"),
     ],
     targets: [
         .target(
             name: "PolicyUserInteraction",
-            dependencies: ["AppEvents"],
+            dependencies: ["Structure", "AppEvents"],
             path: "Sources/PolicyUserInteraction",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
@@ -24,7 +25,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PolicyUserInteractionTests",
-            dependencies: ["PolicyUserInteraction", "AppEvents"],
+            dependencies: ["PolicyUserInteraction", "AppEvents", "Structure"],
             path: "Tests/PolicyUserInteractionTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

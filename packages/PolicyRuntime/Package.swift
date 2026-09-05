@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "PolicyRuntime",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     products: [
         .library(
@@ -14,13 +14,15 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../MemorySystem")
+        .package(path: "../Structure"),
+        .package(path: "../MemorySystem"),
     ],
     targets: [
         .target(
             name: "PolicyRuntime",
             dependencies: [
-                "MemorySystem"
+                "Structure",
+                "MemorySystem",
             ],
             path: "Sources/PolicyRuntime"
         ),
@@ -28,7 +30,8 @@ let package = Package(
             name: "PolicyRuntimeTests",
             dependencies: [
                 "PolicyRuntime",
-                "MemorySystem"
+                "MemorySystem",
+                "Structure",
             ],
             path: "Tests/PolicyRuntimeTests"
         )

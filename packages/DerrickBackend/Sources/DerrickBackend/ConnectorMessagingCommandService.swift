@@ -1,30 +1,6 @@
 import DBRepository
-import DBRepository
 import Foundation
-import ServiceContracts
-
-public enum ConnectorMessagingCommandError: Error, LocalizedError, Sendable {
-    case duplicateOperationID
-    case operationNotFound
-    case invalidRequest(String)
-    case connectorUnavailable(String)
-    case credentialsMissing
-
-    public var errorDescription: String? {
-        switch self {
-        case .duplicateOperationID:
-            return "A connector operation with this id is already running."
-        case .operationNotFound:
-            return "Connector operation was not found."
-        case .invalidRequest(let detail):
-            return detail
-        case .connectorUnavailable(let pluginID):
-            return "Messaging connector '\(pluginID)' is not available."
-        case .credentialsMissing:
-            return "Connector credentials are missing."
-        }
-    }
-}
+import Structure
 
 /// Daemon-owned connector bootstrap and send. Runs `plugin.invoke` in-process and persists to SQLite.
 public actor ConnectorMessagingCommandService {

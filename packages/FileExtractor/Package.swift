@@ -18,9 +18,13 @@ let package = Package(
             targets: ["derrick-file-extractor"]
         )
     ],
+    dependencies: [
+        .package(path: "../Structure"),
+    ],
     targets: [
         .target(
             name: "FileExtractor",
+            dependencies: ["Structure"],
             path: "Sources/FileExtractor",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
@@ -36,7 +40,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FileExtractorTests",
-            dependencies: ["FileExtractor"],
+            dependencies: ["FileExtractor", "Structure"],
             path: "Tests/FileExtractorTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

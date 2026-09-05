@@ -34,7 +34,7 @@ Settings → **Multi-agent** edits persisted limits. **New chat sessions** pick 
 
 ## Code
 
-- Policy struct: `ServiceContracts/OrchestrationLimits.swift`
+- Policy struct: `Structure/Sources/AppLayerServices/AppServices/OrchestrationLimits.swift`
 - Runtime snapshot: `OrchestrationLimitsRuntime.current`
 - Enforcement: `packages/AgentRuntime/Sources/AgentRuntime/InMemoryAgentDirectory.swift`
 

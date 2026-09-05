@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Credential prompt when a messaging connector is opened.
 @MainActor

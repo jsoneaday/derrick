@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Client for JobService (create/cancel/list jobs + ensure-up).
 ///
@@ -517,28 +517,6 @@ public final class JobServiceClient: @unchecked Sendable {
             guard let first = try await group.next() else { throw JobServiceClientError.timeout }
             group.cancelAll()
             return first
-        }
-    }
-}
-
-public enum JobServiceClientError: Error, LocalizedError {
-    case unavailable
-    case bootstrapFailed(String)
-    case requestFailed(String)
-    case timeout
-    case peerEndpointMissing
-    case meshUnverified(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .unavailable: return "JobService is unavailable."
-        case .bootstrapFailed(let m): return "JobService bootstrap failed: \(m)"
-        case .requestFailed(let m): return "JobService request failed: \(m)"
-        case .timeout: return "JobService XPC call timed out."
-        case .peerEndpointMissing:
-            return "JobService peer endpoint not installed (UI handoff required for AgentService)."
-        case .meshUnverified(let m):
-            return "Agent→JobService mesh failed verification: \(m)"
         }
     }
 }

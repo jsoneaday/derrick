@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 actor WebCrawlerHostScope {
   private var allowedHosts: Set<String>

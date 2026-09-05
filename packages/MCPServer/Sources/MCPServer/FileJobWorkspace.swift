@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 public struct FileJobWorkspace: Sendable {
     public let jobID: String

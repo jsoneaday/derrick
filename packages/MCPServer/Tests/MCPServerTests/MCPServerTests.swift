@@ -2,7 +2,7 @@ import Foundation
 import DockerRunnerXPC
 import Testing
 import MCPClient
-import ServiceContracts
+import Structure
 import Plugin
 import WebCrawler
 @testable import MCPServer

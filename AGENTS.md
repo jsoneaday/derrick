@@ -11,14 +11,14 @@ Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27.
 
 The guest ↔ host boundary is **JSON Schema**, not Swift. Canonical schemas live in:
 
-`packages/Contract/Resources/schemas/`
+`packages/Structure/Sources/Contract/Resources/schemas/`
 
 | Schema | Direction | Swift types (must stay in sync) |
 |--------|-----------|----------------------------------|
 | `hop-event.schema.json` | Host → guest (stdin) | `PluginHopEvent`, `PluginEventKind` |
 | `envelope-list.schema.json` | Guest → host (stdout) | `PluginVerb`, `PluginEnvelope` |
 
-**When you change any schema file, you must update the matching Swift types and tests in the same change.** There is no Xcode codegen for this — edit both by hand. `GuestContractAlignmentTests` and `ContractTests` fail if schema enums and Swift enums drift.
+**When you change any schema file, you must update the matching Swift types and tests in the same change.** There is no Xcode codegen for this — edit both by hand. `GuestContractAlignmentTests` (Plugin) and `GuestContractTests` (Structure) fail if schema enums and Swift enums drift.
 
 Validate at boundaries with `GuestContractValidation` before decoding.
 
@@ -47,8 +47,8 @@ Do not add host-owned vendor API clients (e.g. Slack-specific Web API) for conne
 - Use GoF patterns and SOLID/protocol design. No monoliths.
 - Prefer Swift Package modules. Separate concerns.
 - Think in systems and code paths, not one-off patches.
-- `packages/Contract` — schemas + boundary validation only.
-- `packages/Plugin` — host-side envelope types, factory, manifest.
+- `packages/Structure` — architecture map: types, protocols, wire contracts (`AppLayerServices/`, `Policy/`, `Plugin/`, `Contract/`, …). Import `Structure` explicitly; packages do not re-export it.
+- `packages/Plugin` — plugin factory runtime, manifest resources (wire types live in Structure).
 
 ## Before finishing
 

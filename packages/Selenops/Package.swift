@@ -15,6 +15,7 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(path: "../Structure"),
         .package(
             url: "https://github.com/scinfu/SwiftSoup.git",
             from: "2.13.5"
@@ -24,6 +25,7 @@ let package = Package(
         .target(
             name: "Selenops",
             dependencies: [
+                "Structure",
                 .product(name: "SwiftSoup", package: "swiftsoup")
             ],
             path: "Sources/Selenops",

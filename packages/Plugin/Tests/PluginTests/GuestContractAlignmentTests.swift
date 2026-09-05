@@ -1,5 +1,5 @@
-import Contract
 import Foundation
+import Structure
 import Testing
 @testable import Plugin
 

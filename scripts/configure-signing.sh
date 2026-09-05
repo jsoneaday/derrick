@@ -37,8 +37,8 @@ replace_in() {
   sed -i '' "s/${OLD_TEAM}/${TEAM_ID}/g" "$file"
 }
 
-replace_in "packages/ServiceContracts/Sources/ServiceContracts/DerrickAppSupport.swift"
-replace_in "packages/ServiceContracts/Sources/ServiceContracts/ServiceIdentity.swift"
+replace_in "packages/Structure/Sources/AppLayerServices/AppServices/DerrickAppSupport.swift"
+replace_in "packages/Structure/Sources/AppLayerServices/AppServices/ServiceIdentity.swift"
 replace_in "ui/ui/ui.entitlements"
 replace_in "ui/JobKeepAlive/JobKeepAlive.entitlements"
 replace_in "ui/AgentService/AgentService.entitlements"

@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// System overlays for hierarchical roles (MA-2).
 public enum WorkerOverlays: Sendable {

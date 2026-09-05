@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 enum CRC32 {
     private static let table: [UInt32] = {

@@ -1,6 +1,6 @@
 import AgentRuntime
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Registry of per-session/agent execution contexts (replaces process-wide turn slots).
 public final class ExecutionContextRegistry: @unchecked Sendable {

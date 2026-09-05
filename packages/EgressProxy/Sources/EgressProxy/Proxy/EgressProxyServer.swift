@@ -1,13 +1,6 @@
 import Foundation
 import Network
-
-/// Lifecycle for an egress proxy process.
-public protocol EgressProxyServing: Sendable {
-    var isRunning: Bool { get async }
-    var listenPort: UInt16 { get async }
-    func start() async throws
-    func stop() async
-}
+import Structure
 
 /// HTTP CONNECT (and absolute-form HTTP) forward proxy with destination policy.
 public actor EgressProxyServer: EgressProxyServing {

@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Shared Swift runtime limits and container identity.
 public enum SwiftScriptPreparer: Sendable {

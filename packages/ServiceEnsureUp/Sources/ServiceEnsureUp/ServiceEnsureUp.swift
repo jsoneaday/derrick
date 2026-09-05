@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Shared library: connect or launch Derrick XPC services and verify health.
 /// Used by UI, JobService, and (later) WebhookService — single place for ensure-up.
@@ -234,26 +234,6 @@ public actor ServiceEnsureUp {
             defer { group.cancelAll() }
             guard let first = try await group.next() else { throw ServiceEnsureUpError.timeout }
             return first
-        }
-    }
-}
-
-public enum ServiceEnsureUpError: Error, LocalizedError {
-    case proxyUnavailable(String)
-    case unavailable(String)
-    case bootstrapFailed(String, String)
-    case timeout
-
-    public var errorDescription: String? {
-        switch self {
-        case .proxyUnavailable(let label):
-            return "\(label) XPC proxy unavailable."
-        case .unavailable(let label):
-            return "\(label) is unavailable."
-        case .bootstrapFailed(let label, let message):
-            return "\(label) bootstrap failed: \(message)"
-        case .timeout:
-            return "Service ensure-up timed out."
         }
     }
 }

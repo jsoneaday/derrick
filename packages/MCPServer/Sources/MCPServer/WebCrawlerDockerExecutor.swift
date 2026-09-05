@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 import WebCrawler
 
 /// Runs the prebuilt crawler image in a fresh, resource-limited container.

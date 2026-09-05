@@ -1,5 +1,6 @@
 import Foundation
 import DockerRunnerXPC
+import Structure
 
 /// Anonymous XPC peer listener so MCPService can call DockerRunnerHelper.
 /// Endpoint is handed to the UI over Application XPC (`peerListenerEndpoint`),

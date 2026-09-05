@@ -2,7 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
-import ServiceContracts
+import Structure
 import Testing
 import DBRepository
 @testable import ui

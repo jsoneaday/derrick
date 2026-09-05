@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import ServiceContracts
+import Structure
 
 public var ReviewerSystemPrompt: String {
     DerrickBundledText.mustLoad("script_reviewer_instructions.md")

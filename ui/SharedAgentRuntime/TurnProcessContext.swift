@@ -1,7 +1,7 @@
 import AgentRuntime
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Per-turn + execution-context slots for AgentService-hosted turns (API keys, network prompts).
 ///
@@ -9,9 +9,9 @@ import ServiceContracts
 /// that do not inherit task-locals. Registry slots keyed by `ExecutionContextID` cover that;
 /// TaskLocal still preferred when present.
 public enum TurnProcessContext {
-    public typealias NetworkPrompt = @Sendable (_ host: String, _ toolName: String) async -> PolicyUserDecision
-    public typealias PolicyDecisionPrompt = @Sendable (_ event: PolicyUserEvent) async -> PolicyUserDecision
-    public typealias PolicyNoticePublisher = @Sendable (_ event: PolicyUserEvent) async -> Void
+    public typealias NetworkPrompt = TurnProcessContextTypes.NetworkPrompt
+    public typealias PolicyDecisionPrompt = TurnProcessContextTypes.PolicyDecisionPrompt
+    public typealias PolicyNoticePublisher = TurnProcessContextTypes.PolicyNoticePublisher
 
     /// Active execution context for the current turn (preferred over process-wide lookup).
     @TaskLocal public static var executionContextID: ExecutionContextID?

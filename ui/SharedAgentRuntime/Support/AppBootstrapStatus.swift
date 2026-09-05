@@ -1,6 +1,6 @@
 import Foundation
 import Combine
-import ServiceContracts
+import Structure
 
 /// App-load initialization progress and failures for the bootstrap modal.
 @MainActor

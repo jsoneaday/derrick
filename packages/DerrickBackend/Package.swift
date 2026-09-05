@@ -11,19 +11,19 @@ let package = Package(
         .library(name: "DerrickBackend", targets: ["DerrickBackend"])
     ],
     dependencies: [
-        .package(path: "../ServiceContracts"),
+        .package(path: "../Structure"),
         .package(path: "../DBRepository"),
         .package(path: "../DockerRunnerXPC"),
-        .package(path: "../Plugin")
+        .package(path: "../Plugin"),
     ],
     targets: [
         .target(
             name: "DerrickBackend",
             dependencies: [
-                "ServiceContracts",
+                "Structure",
                 "DBRepository",
                 "DockerRunnerXPC",
-                "Plugin"
+                "Plugin",
             ],
             path: "Sources/DerrickBackend",
             swiftSettings: [
@@ -32,7 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DerrickBackendTests",
-            dependencies: ["DerrickBackend", "DBRepository", "Plugin", "ServiceContracts"],
+            dependencies: ["DerrickBackend", "DBRepository", "Plugin", "Structure"],
             path: "Tests/DerrickBackendTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

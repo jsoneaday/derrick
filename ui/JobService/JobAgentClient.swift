@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// JobService → AgentService: signed startTurn with a no-op reverse sink (no UI chat stream).
 /// Job wakes use `delivery: .jobResultModal` (no chat stream) and an isolated `job-` session.

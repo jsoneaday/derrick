@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Client API: post a user notification via the Daemon (or in-process when already the Daemon).
 public enum NotificationSender: Sendable {

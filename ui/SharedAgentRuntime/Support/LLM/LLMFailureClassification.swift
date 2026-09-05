@@ -3,6 +3,7 @@ import Combine
 import LLMAgentClient
 import AppEvents
 import PolicyUserInteraction
+import Structure
 
 enum LLMFailureContext: Equatable, Sendable {
     case outOfCredits(provider: String)

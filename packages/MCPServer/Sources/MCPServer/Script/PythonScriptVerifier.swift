@@ -1,5 +1,6 @@
 import Foundation
 import Plugin
+import Structure
 
 /// Conservative source checks for standalone Python guest scripts.
 public enum PythonScriptVerifier: Sendable {

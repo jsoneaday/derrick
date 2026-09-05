@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Ensures trusted product Docker images exist (pull or local build).
 public enum DockerProductImagePrewarmer: Sendable {

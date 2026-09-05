@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Create / cancel / query jobs and schedules in the shared DB.
 actor JobServiceHost {

@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 public struct ToolCallInterception<Input: Sendable, Output: Sendable>: Sendable {
     public let request: PolicyRequest

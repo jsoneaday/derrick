@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Receives crawler events and owns crawl-specific state.
 public protocol CrawlerDelegate: Sendable {

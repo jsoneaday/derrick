@@ -13,12 +13,12 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        .package(path: "../Structure"),
         .package(path: "../MCPClient"),
         .package(path: "../LLMAgentClient"),
         .package(path: "../DockerRunnerXPC"),
         .package(path: "../EgressProxy"),
         .package(path: "../MCPToolCatalog"),
-        .package(path: "../ServiceContracts"),
         .package(path: "../Plugin"),
         .package(path: "../WebCrawler"),
     ],
@@ -27,12 +27,12 @@ let package = Package(
             name: "MCPServer",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
+                "Structure",
                 "MCPClient",
                 "LLMAgentClient",
                 "DockerRunnerXPC",
                 "EgressProxy",
                 "MCPToolCatalog",
-                "ServiceContracts",
                 "Plugin",
                 "WebCrawler",
             ],
@@ -40,7 +40,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MCPServerTests",
-            dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC", "WebCrawler"],
+            dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC", "WebCrawler", "Structure"],
             path: "Tests/MCPServerTests"
         )
     ]

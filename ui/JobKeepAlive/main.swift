@@ -2,7 +2,7 @@ import AppKit
 import DerrickBackend
 import DockerRunnerXPC
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Headless Derrick backend (`derrick.ui.Daemon`) — LSUIElement app launched by launchd.
 ///

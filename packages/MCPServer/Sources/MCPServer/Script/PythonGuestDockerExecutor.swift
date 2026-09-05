@@ -1,7 +1,7 @@
 import Foundation
 import DockerRunnerXPC
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Offline Python guest executor for script_exec and future plugin.invoke paths.
 public struct PythonGuestDockerExecutor: Sendable {

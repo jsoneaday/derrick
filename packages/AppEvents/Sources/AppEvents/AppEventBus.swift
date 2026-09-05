@@ -1,7 +1,8 @@
 import Foundation
+import Structure
 
 /// Minimal in-process event bus with optional request/response for decisions.
-public actor AppEventBus {
+public actor AppEventBus: AppEventBusing {
     public static let shared = AppEventBus()
 
     public typealias Handler = @Sendable (AnyAppEvent) async -> Void

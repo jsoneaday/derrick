@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Turns `plugin.factory.build` MCP JSON into chat-friendly markdown.
 enum PluginFactoryUserFacingFormatter {

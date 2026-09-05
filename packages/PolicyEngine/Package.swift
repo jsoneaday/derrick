@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "PolicyEngine",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(
             name: "PolicyEngine",
@@ -12,17 +12,18 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(path: "../Structure"),
         .package(path: "../MemorySystem"),
     ],
     targets: [
         .target(
             name: "PolicyEngine",
-            dependencies: ["MemorySystem"],
+            dependencies: ["Structure", "MemorySystem"],
             path: "Sources/PolicyEngine"
         ),
         .testTarget(
             name: "PolicyEngineTests",
-            dependencies: ["PolicyEngine"],
+            dependencies: ["PolicyEngine", "Structure"],
             path: "Tests/PolicyEngineTests"
         )
     ]

@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 extension Crawler {
     /// Represents a link containing a URL, title, and similarity score.

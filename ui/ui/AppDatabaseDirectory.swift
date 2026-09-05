@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 enum AppDatabaseDirectory {
     /// Resolves the shared SQLite directory (same path as AgentService via `DerrickAppSupport`).

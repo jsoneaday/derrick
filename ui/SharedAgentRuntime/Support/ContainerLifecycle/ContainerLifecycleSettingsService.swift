@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Permanent container lifecycle settings (Settings modal) applied to Docker runners.
 @MainActor

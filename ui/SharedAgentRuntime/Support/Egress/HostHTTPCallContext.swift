@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Process-wide slot for the current host-HTTP invoke (TaskLocal does not cross MCP handlers).
 public final class HostHTTPCallContext: @unchecked Sendable {

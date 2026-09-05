@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Anonymous XPC peer listener so AgentService can call JobService.
 /// Endpoint is handed to the UI over Application XPC (`peerListenerEndpoint`),

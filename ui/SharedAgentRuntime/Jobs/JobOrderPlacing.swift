@@ -1,11 +1,5 @@
 import Foundation
-import ServiceContracts
-
-/// Port for placing durable job orders (SOLID: handlers depend on this, not a concrete client).
-public protocol JobOrderPlacing: Sendable {
-    func createJob(_ request: CreateJobRequest) async throws -> JobRecord
-    func createSchedule(_ request: CreateScheduleRequest) async throws -> JobScheduleRecord
-}
+import Structure
 
 /// Adapter: JobService XPC.
 public struct JobServiceClientOrderPlacer: JobOrderPlacing {

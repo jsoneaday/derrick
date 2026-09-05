@@ -4,7 +4,7 @@ import DBRepository
 import AppEvents
 import PolicyUserInteraction
 import LLMAgentClient
-import ServiceContracts
+import Structure
 
 /// Permanent usage limits (Settings) + session raises + daily/weekly token counters.
 @MainActor

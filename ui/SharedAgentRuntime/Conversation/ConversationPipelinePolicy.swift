@@ -8,7 +8,7 @@ import PartialJSON
 import Lib
 import AppEvents
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 extension ConversationPipeline {
     func streamWithPolicyInterception(

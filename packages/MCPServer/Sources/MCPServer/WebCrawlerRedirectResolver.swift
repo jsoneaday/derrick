@@ -1,5 +1,6 @@
 import Foundation
 import WebCrawler
+import Structure
 
 /// Host-side redirect discovery for crawler egress leases and allowed-host injection.
 enum WebCrawlerRedirectResolver: Sendable {

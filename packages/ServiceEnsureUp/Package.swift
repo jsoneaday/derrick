@@ -11,15 +11,15 @@ let package = Package(
         .library(name: "ServiceEnsureUp", targets: ["ServiceEnsureUp"])
     ],
     dependencies: [
-        .package(path: "../ServiceContracts"),
-        .package(path: "../DockerRunnerXPC")
+        .package(path: "../Structure"),
+        .package(path: "../DockerRunnerXPC"),
     ],
     targets: [
         .target(
             name: "ServiceEnsureUp",
             dependencies: [
-                "ServiceContracts",
-                "DockerRunnerXPC"
+                "Structure",
+                "DockerRunnerXPC",
             ],
             path: "Sources/ServiceEnsureUp",
             swiftSettings: [
@@ -28,7 +28,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ServiceEnsureUpTests",
-            dependencies: ["ServiceEnsureUp"],
+            dependencies: ["ServiceEnsureUp", "Structure"],
             path: "Tests/ServiceEnsureUpTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 import DBRepository
 
 /// UI-side reverse XPC object: turn chunks + approval requests from AgentService.

@@ -1,5 +1,6 @@
 import Foundation
 import FileExtractor
+import Structure
 
 let input = FileHandle.standardInput.readDataToEndOfFile()
 let decoder = JSONDecoder()

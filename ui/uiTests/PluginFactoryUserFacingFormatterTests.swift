@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 import Testing
 @testable import ui
 

@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// UI (and migration callers) → Daemon Mach service.
 public actor DaemonClient {
@@ -254,19 +254,5 @@ final class OnceResume<T: Sendable>: @unchecked Sendable {
         cont = nil
         lock.unlock()
         c?.resume(throwing: error)
-    }
-}
-
-public enum DaemonClientError: Error, LocalizedError, Sendable {
-    case unavailable
-    case timeout
-    case rejected(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .unavailable: return "Derrick daemon unavailable"
-        case .timeout: return "Derrick daemon call timed out"
-        case .rejected(let m): return m
-        }
     }
 }

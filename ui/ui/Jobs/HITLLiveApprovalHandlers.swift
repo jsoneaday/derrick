@@ -1,7 +1,7 @@
 import AppEvents
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Live-chat HITL: modal via PolicyEventPresenter (never notifications while UI is connected).
 @MainActor

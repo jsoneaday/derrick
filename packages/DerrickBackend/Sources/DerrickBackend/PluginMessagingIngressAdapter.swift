@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Vendor-agnostic connector ingress through `plugin.invoke`.
 final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unchecked Sendable {

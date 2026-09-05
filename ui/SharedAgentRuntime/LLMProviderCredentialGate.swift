@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Whether an LLM provider has a usable API key (Keychain or `.env`, per `AppSecretResolver`).
 @MainActor

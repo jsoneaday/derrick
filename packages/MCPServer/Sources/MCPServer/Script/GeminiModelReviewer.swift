@@ -7,6 +7,7 @@
 
 import Foundation
 import LLMAgentClient
+import Structure
 
 public struct GeminiScriptReviewer: ScriptReviewer {
     public let name: String

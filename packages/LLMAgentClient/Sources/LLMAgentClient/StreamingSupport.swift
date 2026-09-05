@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 struct SSEDecoder {
     let bytes: URLSession.AsyncBytes

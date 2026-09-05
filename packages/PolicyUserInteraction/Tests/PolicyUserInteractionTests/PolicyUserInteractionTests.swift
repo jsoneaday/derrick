@@ -1,6 +1,7 @@
 import Testing
 import AppEvents
 @testable import PolicyUserInteraction
+import Structure
 
 @Suite struct PolicyUserInteractionTests {
     @Test func factoryBuildsStaticFailure() {

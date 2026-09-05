@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// In-process agent registry + serial mailbox processing (MA-0/MA-1).
 public actor InMemoryAgentDirectory: AgentDirectorying {

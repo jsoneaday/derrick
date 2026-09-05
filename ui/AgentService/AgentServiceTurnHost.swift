@@ -3,7 +3,7 @@ import DBRepository
 import DerrickBackend
 import LLMAgentClient
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 private enum AgentServiceError: Error, LocalizedError {
     case notReady
@@ -304,7 +304,7 @@ actor AgentServiceTurnHost {
                 try await AgentServiceStore.shared.sharedRepository()
             }
         )
-        let networkPrompt: @Sendable (String, String) async -> PolicyUserInteraction.PolicyUserDecision = { host, toolName in
+        let networkPrompt: @Sendable (String, String) async -> PolicyUserDecision = { host, toolName in
             await AgentServiceHITLRouter.requestNetworkAccess(
                 host: host,
                 toolName: toolName,

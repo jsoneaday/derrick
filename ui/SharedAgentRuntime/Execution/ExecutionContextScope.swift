@@ -1,6 +1,6 @@
 import AgentRuntime
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Installs per-agent execution contexts for worker turns (forked from the parent user-facing turn).
 public enum ExecutionContextScope {

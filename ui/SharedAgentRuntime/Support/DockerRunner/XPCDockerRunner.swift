@@ -1,7 +1,7 @@
 import DockerRunnerXPC
 import Foundation
 import MCPServer
-import ServiceContracts
+import Structure
 
 extension NSData: @unchecked @retroactive Sendable {}
 

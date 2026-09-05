@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import DBRepository
-import ServiceContracts
+import Structure
 
 /// Permanent multi-agent orchestration limits (Settings modal).
 @MainActor

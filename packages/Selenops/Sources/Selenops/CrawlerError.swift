@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Errors that can occur during crawling.
 public enum CrawlerError: Error {

@@ -3,6 +3,7 @@ import Foundation
 import LLMAgentClient
 import MCPServer
 import DBRepository
+import Structure
 
 @MainActor
 final class LLMModelSettings: ObservableObject {

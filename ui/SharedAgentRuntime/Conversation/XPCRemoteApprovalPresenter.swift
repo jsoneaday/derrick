@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Waits for human approval via SQLite + user notifications (single path for all turns).
 public final class XPCRemoteApprovalPresenter: ApprovalConfirmationPresenting, @unchecked Sendable {

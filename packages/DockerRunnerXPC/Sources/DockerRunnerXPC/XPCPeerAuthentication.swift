@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Structure
 
 /// Code-signing peer checks for NSXPC connections between Derrick components.
 ///

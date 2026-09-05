@@ -1,4 +1,4 @@
-import ServiceContracts
+import Structure
 
 /// Classifies structured tool payloads that return success at the MCP transport layer but failed logically.
 public enum MCPToolOutcomeSemantics: Sendable {

@@ -2,7 +2,7 @@ import Combine
 import DBRepository
 import Foundation
 import LLMAgentClient
-import ServiceContracts
+import Structure
 
 struct ChatTab: Identifiable, Hashable {
     let id: String

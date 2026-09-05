@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 
 /// Network host allow via SQLite + user notifications.
 public enum XPCRemoteNetworkAccess {

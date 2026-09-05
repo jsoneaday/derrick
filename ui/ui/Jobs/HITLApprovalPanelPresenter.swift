@@ -3,7 +3,7 @@ import DBRepository
 import EgressProxy
 import Foundation
 import PolicyUserInteraction
-import ServiceContracts
+import Structure
 import SwiftUI
 
 /// Themed HITL approval card for notification taps (matches ModalPopup / job-result chrome).

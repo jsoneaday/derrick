@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import MCPToolCatalog
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Generic execution tools for approved factory releases. There is no
 /// plugin-specific dispatch here: every release receives JSON on stdin.

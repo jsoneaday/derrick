@@ -1,5 +1,6 @@
 import Foundation
 import MemorySystem
+import Structure
 
 /// Store-backed tool governance: loads rules from `PolicyStore`, matches, returns first enabled hit.
 public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {

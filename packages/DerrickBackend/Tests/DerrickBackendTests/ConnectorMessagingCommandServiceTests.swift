@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 import Testing
 @testable import DerrickBackend
 
@@ -22,7 +22,8 @@ import Testing
             pluginID: "slack-connector",
             kind: .bootstrap
         )
-        let provider = { repository }
+        nonisolated(unsafe) let repo = repository
+        let provider: @Sendable () async throws -> DBRepository = { repo }
         _ = try await ConnectorMessagingCommandService.shared.submit(request, repositoryProvider: provider)
         await #expect(throws: ConnectorMessagingCommandError.duplicateOperationID) {
             _ = try await ConnectorMessagingCommandService.shared.submit(request, repositoryProvider: provider)

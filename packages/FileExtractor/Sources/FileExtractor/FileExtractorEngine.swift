@@ -1,33 +1,5 @@
 import Foundation
-
-public enum FileExtractorEngineError: Error, LocalizedError, Sendable, Equatable {
-    case tooManyFiles
-    case emptyFileList
-    case unsafeFilename(String)
-    case missingInput(String)
-    case missingPDFTool
-    case pdfFailed(String)
-    case unsupportedConversion(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .tooManyFiles:
-            return "You can process at most \(FileExtractorLimits.maximumFiles) files."
-        case .emptyFileList:
-            return "Choose at least one attached file."
-        case .unsafeFilename(let name):
-            return "\(name) is not a safe file name."
-        case .missingInput(let name):
-            return "\(name) was not found in /data/in."
-        case .missingPDFTool:
-            return "PDF text extraction is unavailable in this image."
-        case .pdfFailed(let detail):
-            return detail.isEmpty ? "PDF text extraction failed." : detail
-        case .unsupportedConversion(let kind):
-            return "That conversion is not supported for \(kind) files."
-        }
-    }
-}
+import Structure
 
 public enum FileExtractorEngine: Sendable {
     public static func run(

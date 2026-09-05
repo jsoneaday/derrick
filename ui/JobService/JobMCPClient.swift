@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// JobService → MCPService callTool client (signed envelopes).
 ///

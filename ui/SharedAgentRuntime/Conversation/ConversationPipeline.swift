@@ -3,7 +3,7 @@ import LLMAgentClient
 import MCP
 import MCPClient
 import MCPToolCatalog
-import ServiceContracts
+import Structure
 
 protocol ConversationStreamingClient: Sendable {
     associatedtype Model: AgentModel

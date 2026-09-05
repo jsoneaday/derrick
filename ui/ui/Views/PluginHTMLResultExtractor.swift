@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 struct PluginHTMLPayload {
     let title: String?

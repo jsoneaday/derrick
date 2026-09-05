@@ -1,7 +1,7 @@
 import XCTest
 import SQLite3
 import AgentRuntime
-import ServiceContracts
+import Structure
 @testable import DBRepository
 
 final class DBAgentOrchestrationTests: XCTestCase {

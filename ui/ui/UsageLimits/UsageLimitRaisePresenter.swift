@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import PolicyUserInteraction
 import SwiftUI
+import Structure
 
 @MainActor
 final class UsageLimitRaisePresenter: ObservableObject {

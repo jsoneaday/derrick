@@ -1,23 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-
-public struct DockerCLIResult: Sendable {
-    public let exitCode: Int32
-    public let stdout: Data
-    public let stderr: Data
-
-    public init(exitCode: Int32, stdout: Data, stderr: Data) {
-        self.exitCode = exitCode
-        self.stdout = stdout
-        self.stderr = stderr
-    }
-}
-
-public typealias DockerCLIExecutor = @Sendable (
-    _ arguments: [String],
-    _ stdin: Data,
-    _ timeoutSeconds: Int
-) async throws -> DockerCLIResult
+import Structure
 
 /// Bounds concurrent Swift container work across factory and script execution.
 public actor SwiftDockerContainerPool {

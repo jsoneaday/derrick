@@ -1,6 +1,6 @@
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 
 /// Applies vendor-agnostic connector plugin results to messaging tables.
 public enum ConnectorMessagingPersistence: Sendable {

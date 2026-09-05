@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 enum ZipArchiveError: Error, Sendable {
     case invalidArchive

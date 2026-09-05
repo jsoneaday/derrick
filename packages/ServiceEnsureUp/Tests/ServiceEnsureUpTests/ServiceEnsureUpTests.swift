@@ -1,6 +1,6 @@
 import Testing
 @testable import ServiceEnsureUp
-import ServiceContracts
+import Structure
 
 @Suite struct ServiceEnsureUpTests {
     @Test func errorDescriptionsAreStable() {

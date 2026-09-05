@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Allow/deny policy for the egress proxy.
 /// Permanent suffixes and session grants are updatable at runtime (helper receives list from the app).

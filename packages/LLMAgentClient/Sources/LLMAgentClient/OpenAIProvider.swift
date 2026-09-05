@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
     case gpt54Mini = "gpt-5.4-mini"

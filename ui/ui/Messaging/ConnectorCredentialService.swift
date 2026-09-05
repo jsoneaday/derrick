@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import Plugin
-import ServiceContracts
+import Structure
 import SwiftUI
 
 /// Shared credential form: all fields shown, stored values obfuscated, partial Keychain updates.

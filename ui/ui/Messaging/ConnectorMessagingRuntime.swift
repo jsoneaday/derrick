@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// UI-side connector bootstrap and send through the daemon command service.
 @MainActor

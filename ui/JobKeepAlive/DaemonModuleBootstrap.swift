@@ -1,6 +1,6 @@
 import Foundation
 import DerrickBackend
-import ServiceContracts
+import Structure
 import DBRepository
 
 /// Boots MCP / Agent / Jobs modules inside derrickd (in-process, no peer mesh).

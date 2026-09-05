@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Exits this daemon when the on-disk executable is no longer the one we launched.
 /// launchd `KeepAlive` then execs the replacement. Do not `bootout` for a rebuild.

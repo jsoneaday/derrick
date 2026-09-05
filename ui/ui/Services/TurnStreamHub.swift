@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Multiplexes concurrent foreground turn streams by `turnID`.
 final class TurnStreamHub: @unchecked Sendable {

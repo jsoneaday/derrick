@@ -2,6 +2,7 @@ import Foundation
 import MCP
 import MCPToolCatalog
 import Plugin
+import Structure
 
 public enum ScriptExecutionToolModule: MCPToolModule {
     public static let id: AllowedMCPTool = .scriptExec

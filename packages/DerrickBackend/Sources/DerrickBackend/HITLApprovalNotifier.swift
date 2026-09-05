@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Pending HITL approval → Daemon UserNotifications (sole poster).
 public enum HITLApprovalNotifier: Sendable {

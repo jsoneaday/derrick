@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Polls SQLite for pending HITL approvals and posts banners via the Daemon.
 public final class HITLApprovalPollService: @unchecked Sendable {

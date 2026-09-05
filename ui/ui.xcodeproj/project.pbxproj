@@ -37,13 +37,13 @@
 		DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0053010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
-		DEJB10102A00000000JB001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10202A00000000JB001 /* ServiceContracts */; };
+		DEJB10102A00000000JB001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10202A00000000JB001 /* Structure */; };
 		DEJB10112A00000000JB001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10212A00000000JB001 /* DBRepository */; };
 		DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10222A00000000JB001 /* DockerRunnerXPC */; };
 		DEJB10132A00000000JB001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10232A00000000JB001 /* ServiceEnsureUp */; };
 		DEKA100B2A00000000KA001 /* JobKeepAlive.app in Embed JobKeepAlive */ = {isa = PBXBuildFile; fileRef = DEKA10012A00000000KA001 /* JobKeepAlive.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		DEKA100C2A00000000KA001 /* derrick.ui.Daemon.plist in Embed LaunchAgents */ = {isa = PBXBuildFile; fileRef = DEKA10022A00000000KA001 /* derrick.ui.Daemon.plist */; };
-		DEKA10102A00000000KA001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10202A00000000KA001 /* ServiceContracts */; };
+		DEKA10102A00000000KA001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10202A00000000KA001 /* Structure */; };
 		DEKA10112A00000000KA001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10212A00000000KA001 /* DockerRunnerXPC */; };
 		DEKA10222A00000000KA002 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10232A00000000KA002 /* DBRepository */; };
 		DEKA10242A00000000KA003 /* DerrickBackend in Frameworks */ = {isa = PBXBuildFile; productRef = DEKA10252A00000000KA003 /* DerrickBackend */; };
@@ -60,7 +60,7 @@
 		DEKAF00A2A00000000KA001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10232A00000000AS001 /* Lib */; };
 		DEKAF00B2A00000000KA001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEAS10252A00000000AS001 /* EgressProxy */; };
 		DEKAF00C2A00000000KA001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10232A00000000JB001 /* ServiceEnsureUp */; };
-		DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* ServiceContracts */; };
+		DEMC10102A00000000MC001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10202A00000000MC001 /* Structure */; };
 		DEMC10112A00000000MC001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10212A00000000MC001 /* DBRepository */; };
 		DEMC10122A00000000MC001 /* MCPClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10222A00000000MC001 /* MCPClient */; };
 		DEMC10132A00000000MC001 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10232A00000000MC001 /* MCPServer */; };
@@ -69,8 +69,8 @@
 		DEMC10162A00000000MC001 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10262A00000000MC001 /* Lib */; };
 		DEMC10172A00000000MC001 /* LLMAgentClient in Frameworks */ = {isa = PBXBuildFile; productRef = DEMC10272A00000000MC001 /* LLMAgentClient */; };
 		DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEPR00022A00000000PR001 /* PolicyRuntime */; };
-		DESC00012A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* ServiceContracts */; };
-		DESC00032A00000000SC001 /* ServiceContracts in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* ServiceContracts */; };
+		DESC00012A00000000SC001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00022A00000000SC001 /* Structure */; };
+		DESC00032A00000000SC001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DESC00042A00000000SC001 /* Structure */; };
 		DEUISE0012A00000000SE001 /* ServiceEnsureUp in Frameworks */ = {isa = PBXBuildFile; productRef = DEUISE0022A00000000SE001 /* ServiceEnsureUp */; };
 /* End PBXBuildFile section */
 
@@ -297,7 +297,7 @@
 				DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */,
 				DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */,
 				DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */,
-				DESC00012A00000000SC001 /* ServiceContracts in Frameworks */,
+				DESC00012A00000000SC001 /* Structure in Frameworks */,
 				DEUISE0012A00000000SE001 /* ServiceEnsureUp in Frameworks */,
 			);
 		};
@@ -320,7 +320,7 @@
 		DEAS10042A00000000AS001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				DESC00032A00000000SC001 /* ServiceContracts in Frameworks */,
+				DESC00032A00000000SC001 /* Structure in Frameworks */,
 				DEAS100F2A00000000AS001 /* DockerRunnerXPC in Frameworks */,
 				DEDB00012A00000000DB001 /* DBRepository in Frameworks */,
 				DEAS10102A00000000AS001 /* LLMAgentClient in Frameworks */,
@@ -340,7 +340,7 @@
 		DEJB10042A00000000JB001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				DEJB10102A00000000JB001 /* ServiceContracts in Frameworks */,
+				DEJB10102A00000000JB001 /* Structure in Frameworks */,
 				DEJB10112A00000000JB001 /* DBRepository in Frameworks */,
 				DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */,
 				DEJB10132A00000000JB001 /* ServiceEnsureUp in Frameworks */,
@@ -349,7 +349,7 @@
 		DEKA10052A00000000KA001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				DEKA10102A00000000KA001 /* ServiceContracts in Frameworks */,
+				DEKA10102A00000000KA001 /* Structure in Frameworks */,
 				DEKA10112A00000000KA001 /* DockerRunnerXPC in Frameworks */,
 				DEKA10222A00000000KA002 /* DBRepository in Frameworks */,
 				DEKA10242A00000000KA003 /* DerrickBackend in Frameworks */,
@@ -370,7 +370,7 @@
 		DEMC10042A00000000MC001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				DEMC10102A00000000MC001 /* ServiceContracts in Frameworks */,
+				DEMC10102A00000000MC001 /* Structure in Frameworks */,
 				DEMC10112A00000000MC001 /* DBRepository in Frameworks */,
 				DEMC10122A00000000MC001 /* MCPClient in Frameworks */,
 				DEMC10132A00000000MC001 /* MCPServer in Frameworks */,
@@ -464,7 +464,7 @@
 				DEPR00022A00000000PR001 /* PolicyRuntime */,
 				DEE6B0053010000000E6B001 /* EgressProxy */,
 				DEAR00022A00000000AR001 /* AgentRuntime */,
-				DESC00022A00000000SC001 /* ServiceContracts */,
+				DESC00022A00000000SC001 /* Structure */,
 				DEUISE0022A00000000SE001 /* ServiceEnsureUp */,
 			);
 			productName = Derrick;
@@ -550,7 +550,7 @@
 			);
 			name = AgentService;
 			packageProductDependencies = (
-				DESC00042A00000000SC001 /* ServiceContracts */,
+				DESC00042A00000000SC001 /* Structure */,
 				DED0C0032A0000000042F230 /* DockerRunnerXPC */,
 				DEDB00022A00000000DB001 /* DBRepository */,
 				DEAS10112A00000000AS001 /* LLMAgentClient */,
@@ -585,7 +585,7 @@
 			);
 			name = JobService;
 			packageProductDependencies = (
-				DEJB10202A00000000JB001 /* ServiceContracts */,
+				DEJB10202A00000000JB001 /* Structure */,
 				DEJB10212A00000000JB001 /* DBRepository */,
 				DEJB10222A00000000JB001 /* DockerRunnerXPC */,
 				DEJB10232A00000000JB001 /* ServiceEnsureUp */,
@@ -616,7 +616,7 @@
 			);
 			name = JobKeepAlive;
 			packageProductDependencies = (
-				DEKA10202A00000000KA001 /* ServiceContracts */,
+				DEKA10202A00000000KA001 /* Structure */,
 				DEKA10212A00000000KA001 /* DockerRunnerXPC */,
 				DEKA10232A00000000KA002 /* DBRepository */,
 				DEKA10252A00000000KA003 /* DerrickBackend */,
@@ -652,7 +652,7 @@
 			);
 			name = MCPService;
 			packageProductDependencies = (
-				DEMC10202A00000000MC001 /* ServiceContracts */,
+				DEMC10202A00000000MC001 /* Structure */,
 				DEMC10212A00000000MC001 /* DBRepository */,
 				DEMC10222A00000000MC001 /* MCPClient */,
 				DEMC10232A00000000MC001 /* MCPServer */,
@@ -712,9 +712,9 @@
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
 				DEPL00012A00000000PL001 /* XCLocalSwiftPackageReference "../packages/Plugin" */,
 				DEAR00032A00000000AR001 /* XCLocalSwiftPackageReference "../packages/AgentRuntime" */,
-				DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */,
 				DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */,
 				DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */,
+				DE75C7E4304A5F850079F1FD /* XCLocalSwiftPackageReference "../packages/Structure" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -1453,6 +1453,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/MCPServer;
 		};
+		DE75C7E4304A5F850079F1FD /* XCLocalSwiftPackageReference "../packages/Structure" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/Structure;
+		};
 		DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/AppEvents;
@@ -1496,10 +1500,6 @@
 		DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/PolicyRuntime;
-		};
-		DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../packages/ServiceContracts;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1632,9 +1632,9 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
 		};
-		DEJB10202A00000000JB001 /* ServiceContracts */ = {
+		DEJB10202A00000000JB001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
+			productName = Structure;
 		};
 		DEJB10212A00000000JB001 /* DBRepository */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1649,10 +1649,9 @@
 			package = DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */;
 			productName = ServiceEnsureUp;
 		};
-		DEKA10202A00000000KA001 /* ServiceContracts */ = {
+		DEKA10202A00000000KA001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = DESC00052A00000000SC001 /* XCLocalSwiftPackageReference "../packages/ServiceContracts" */;
-			productName = ServiceContracts;
+			productName = Structure;
 		};
 		DEKA10212A00000000KA001 /* DockerRunnerXPC */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1668,9 +1667,9 @@
 			package = DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */;
 			productName = DerrickBackend;
 		};
-		DEMC10202A00000000MC001 /* ServiceContracts */ = {
+		DEMC10202A00000000MC001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
+			productName = Structure;
 		};
 		DEMC10212A00000000MC001 /* DBRepository */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1705,13 +1704,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = PolicyRuntime;
 		};
-		DESC00022A00000000SC001 /* ServiceContracts */ = {
+		DESC00022A00000000SC001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
+			productName = Structure;
 		};
-		DESC00042A00000000SC001 /* ServiceContracts */ = {
+		DESC00042A00000000SC001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ServiceContracts;
+			productName = Structure;
 		};
 		DEUISE0022A00000000SE001 /* ServiceEnsureUp */ = {
 			isa = XCSwiftPackageProductDependency;

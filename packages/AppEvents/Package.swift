@@ -10,9 +10,13 @@ let package = Package(
     products: [
         .library(name: "AppEvents", targets: ["AppEvents"])
     ],
+    dependencies: [
+        .package(path: "../Structure"),
+    ],
     targets: [
         .target(
             name: "AppEvents",
+            dependencies: ["Structure"],
             path: "Sources/AppEvents",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")
@@ -20,7 +24,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppEventsTests",
-            dependencies: ["AppEvents"],
+            dependencies: ["AppEvents", "Structure"],
             path: "Tests/AppEventsTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

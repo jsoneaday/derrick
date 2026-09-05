@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Polls due **schedules** (spawn job runs) and due **jobs** (execute steps).
 final class JobServiceScheduler: @unchecked Sendable {

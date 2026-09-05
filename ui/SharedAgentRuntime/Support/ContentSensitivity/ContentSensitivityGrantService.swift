@@ -4,6 +4,7 @@ import DBRepository
 import PolicyRuntime
 import AppEvents
 import PolicyUserInteraction
+import Structure
 
 /// App-owned permanent/session grants that skip content-confirm for sensitivity categories.
 /// Mirrors egress once/always; not an MCP tool; not stored as policy rules.

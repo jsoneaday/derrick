@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Process-wide structured log fan-out: stderr, optional SQLite persistence, live UI hooks.
 public actor ServiceLogRecorder {

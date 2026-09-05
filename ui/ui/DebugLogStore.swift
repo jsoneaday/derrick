@@ -1,7 +1,7 @@
 import DBRepository
 import Foundation
 import Combine
-import ServiceContracts
+import Structure
 
 /// In-memory ring buffer for live debug UI; persistence goes through `ServiceLogRecorder`.
 @MainActor

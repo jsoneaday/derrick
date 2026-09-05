@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import ServiceContracts
+import Structure
 
 /// UI-only: evict orphan or stale `JobKeepAlive` processes before `ensureDaemon`.
 public enum DaemonProcessHygiene {

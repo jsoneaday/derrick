@@ -1,6 +1,6 @@
 import Foundation
 @testable import DerrickBackend
-import ServiceContracts
+import Structure
 import Testing
 
 @Suite struct DerrickBackendTests {

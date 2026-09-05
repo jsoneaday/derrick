@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import MCPClient
 import MCPToolCatalog
-import ServiceContracts
+import Structure
 
 #if canImport(System)
 import System
@@ -15,7 +15,7 @@ private func toolExecutionOutcomeIsError(_ text: String) -> Bool {
 }
 
 public actor MCPToolRegistry {
-    public typealias Handler = @Sendable ([String: Value]) async throws -> String
+    public typealias Handler = MCPToolHandler
 
     private var handlers: [String: (description: String, inputSchema: Value, handler: Handler)] = [:]
 
@@ -127,22 +127,6 @@ public actor MCPToolRegistry {
             return tokens.allSatisfy { lowered.contains($0) }
         }
         return filtered.joined(separator: "\n")
-    }
-}
-
-public struct SessionMemorySearchArguments: Sendable {
-    public static let maxRowsPerRequest = 100
-
-    public let query: String?
-    public let limit: Int
-    public let page: Int
-    public let includeArchived: Bool
-
-    public init(query: String? = nil, limit: Int = 10, page: Int = 1, includeArchived: Bool = false) {
-        self.query = query
-        self.limit = min(max(limit, 1), Self.maxRowsPerRequest)
-        self.page = max(page, 1)
-        self.includeArchived = includeArchived
     }
 }
 

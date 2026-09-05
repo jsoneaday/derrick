@@ -1,6 +1,6 @@
 import Foundation
 import DockerRunnerXPC
-import ServiceContracts
+import Structure
 
 /// Client for MCPService over XPC.
 ///
@@ -294,29 +294,6 @@ public final class MCPServiceClient: @unchecked Sendable {
             guard let first = try await group.next() else { throw MCPServiceClientError.timeout }
             group.cancelAll()
             return first
-        }
-    }
-}
-
-public enum MCPServiceClientError: Error, LocalizedError {
-    case unavailable
-    case bootstrapFailed(String)
-    case peerEndpointMissing
-    case meshUnverified(String)
-    case timeout
-
-    public var errorDescription: String? {
-        switch self {
-        case .unavailable:
-            return "MCPService is unavailable."
-        case .bootstrapFailed(let message):
-            return "MCPService bootstrap failed: \(message)"
-        case .peerEndpointMissing:
-            return "MCPService peer endpoint not installed."
-        case .meshUnverified(let message):
-            return "Agent→MCPService mesh failed verification: \(message)"
-        case .timeout:
-            return "MCPService XPC call timed out."
         }
     }
 }

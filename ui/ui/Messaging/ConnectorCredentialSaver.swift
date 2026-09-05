@@ -1,5 +1,5 @@
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Saves plugin connector credentials to Keychain. Only non-empty drafts are written.
 enum ConnectorCredentialSaver {

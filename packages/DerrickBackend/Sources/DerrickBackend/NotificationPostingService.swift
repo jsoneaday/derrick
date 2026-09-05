@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import ServiceContracts
+import Structure
 import UserNotifications
 
 /// Sole UserNotifications poster. Runs only inside the Daemon process.
@@ -135,17 +135,5 @@ public actor NotificationPostingService {
             }
         }
         return info
-    }
-}
-
-public enum NotificationPostingError: Error, LocalizedError, Sendable {
-    case denied
-    case notAuthorized
-
-    public var errorDescription: String? {
-        switch self {
-        case .denied: return "Notification permission denied for derrick.ui.Daemon — enable in System Settings → Notifications → DerrickDaemon"
-        case .notAuthorized: return "Notification permission not granted for derrick.ui.Daemon"
-        }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 #if canImport(zlib)
 import zlib
 #endif

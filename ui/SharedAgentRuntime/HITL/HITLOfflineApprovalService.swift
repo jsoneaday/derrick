@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Queue + wait for human approval when the UI XPC sink is unavailable.
 public enum HITLOfflineApprovalService {

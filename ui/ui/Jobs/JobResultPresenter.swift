@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 import SwiftUI
 
 /// Process-wide flags for notification panel sessions (readable from AppKit delegate callbacks).

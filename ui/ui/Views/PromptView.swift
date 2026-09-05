@@ -7,6 +7,7 @@
 
 import SwiftUI
 import LLMAgentClient
+import Structure
 
 private final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?

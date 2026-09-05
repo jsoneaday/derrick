@@ -2,6 +2,7 @@ import Foundation
 import LLMAgentClient
 import Testing
 @testable import ui
+import Structure
 
 @Suite struct ChatTurnStreamingTests {
     @Test func thinkingReplacesSnapshotInsteadOfAppendingPrefixes() {

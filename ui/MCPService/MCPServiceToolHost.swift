@@ -7,7 +7,7 @@ import MCPServer
 import MCPToolCatalog
 import MemorySystem
 import Plugin
-import ServiceContracts
+import Structure
 
 /// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, factory
 /// plugin tools, and session memory). No agents_* tools.

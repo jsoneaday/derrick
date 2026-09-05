@@ -1,6 +1,6 @@
 import Foundation
 import DBRepository
-import ServiceContracts
+import Structure
 
 actor JobServiceStore {
     static let shared = JobServiceStore()

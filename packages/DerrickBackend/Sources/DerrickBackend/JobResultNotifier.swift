@@ -1,6 +1,6 @@
 import DBRepository
 import Foundation
-import ServiceContracts
+import Structure
 
 /// Persisted job result → Daemon UserNotifications (sole poster).
 ///

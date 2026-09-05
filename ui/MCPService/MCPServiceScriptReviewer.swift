@@ -2,7 +2,7 @@ import Foundation
 import LLMAgentClient
 import MCPServer
 import MemorySystem
-import ServiceContracts
+import Structure
 
 /// Script security reviewer for MCPService using turn-supplied API key + model settings.
 /// Model selection comes from UI `LLMModelSettings.scriptReviewerModel` via

@@ -1,5 +1,6 @@
 import Foundation
 import WebCrawler
+import Structure
 
 /// Host-side helpers for preparing crawler Docker input and egress policy.
 enum WebCrawlerDockerInputPreparer {

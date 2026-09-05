@@ -1,5 +1,6 @@
 import Foundation
 import Plugin
+import Structure
 
 public struct HostHTTPFetch: Sendable {
     public var status: Int

@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import Structure
 
 extension DBRepository {
     /// Single entry point for opening the shared SQLite file.
