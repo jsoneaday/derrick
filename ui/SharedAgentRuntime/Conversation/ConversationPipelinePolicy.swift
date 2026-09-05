@@ -2,10 +2,8 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
-import MCPToolCatalog
 import MemorySystem
 import PartialJSON
-import Lib
 import AppEvents
 import PolicyUserInteraction
 import Structure

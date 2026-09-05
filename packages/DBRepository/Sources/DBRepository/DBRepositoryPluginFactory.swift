@@ -28,7 +28,7 @@ public extension DBRepository {
             try Self.execute("""
             INSERT INTO plugin_factory_releases (
                 plugin_id, version, content_hash, manifest_json, runtime_json,
-                swift_source, artifact_base64, skill_files_json, review_summary, created_at
+                guest_source, artifact_base64, skill_files_json, review_summary, created_at
             ) VALUES (
                 \(quoted(release.pluginID)),
                 \(quoted(release.version)),
@@ -49,7 +49,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let sql = """
             SELECT plugin_id, version, content_hash, manifest_json, runtime_json,
-                   swift_source, artifact_base64, skill_files_json, review_summary
+                   guest_source, artifact_base64, skill_files_json, review_summary
             FROM plugin_factory_releases
             WHERE plugin_id = \(quoted(pluginID))
               AND version = \(quoted(version))

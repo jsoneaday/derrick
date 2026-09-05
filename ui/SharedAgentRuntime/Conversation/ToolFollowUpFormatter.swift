@@ -1,6 +1,5 @@
 import Foundation
 import MemorySystem
-import MCPToolCatalog
 import Structure
 
 /// Builds slim tool payloads for the next agent turn.

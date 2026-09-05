@@ -2,7 +2,6 @@ import Foundation
 import LLMAgentClient
 import MCP
 import MCPClient
-import MCPToolCatalog
 import Structure
 
 protocol ConversationStreamingClient: Sendable {

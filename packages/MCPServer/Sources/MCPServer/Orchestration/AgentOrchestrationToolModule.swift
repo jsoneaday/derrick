@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import MCPToolCatalog
 import Structure
 
 /// Schemas + registration helpers for hierarchical multi-agent tools (MA-2).

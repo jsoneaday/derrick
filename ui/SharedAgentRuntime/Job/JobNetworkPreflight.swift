@@ -1,7 +1,6 @@
 import DBRepository
 import EgressProxy
 import Foundation
-import MCPToolCatalog
 import Plugin
 import PolicyUserInteraction
 import Structure

@@ -18,10 +18,7 @@ let package = Package(
         .target(
             name: "MemorySystem",
             dependencies: ["Structure"],
-            path: "Sources/MemorySystem",
-            resources: [
-                .process("Resources")
-            ]
+            path: "Sources/MemorySystem"
         ),
         .testTarget(
             name: "MemorySystemTests",

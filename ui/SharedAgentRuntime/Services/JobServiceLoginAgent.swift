@@ -410,9 +410,19 @@ public enum JobServiceLoginAgent {
     static let helperInstallTimeoutSeconds: TimeInterval = 60
 
     private static func runHelperInstall(executable: URL) throws {
+        // Launch JobKeepAlive.app (not the Mach-O directly). A sandboxed UI spawning the
+        // bare binary inherits the UI sandbox and cannot write the session LaunchAgent plist.
+        let appURL = executable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: appURL.path) else {
+            throw AgentError.missingExecutable(appURL.path)
+        }
+
         let process = Process()
-        process.executableURL = executable
-        process.arguments = ["--install-launchd"]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-W", "-n", appURL.path, "--args", "--install-launchd"]
         let err = Pipe()
         let out = Pipe()
         process.standardError = err

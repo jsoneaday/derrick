@@ -1,7 +1,6 @@
 import Foundation
 import MCP
 import MCPClient
-import MCPToolCatalog
 import Structure
 
 #if canImport(System)

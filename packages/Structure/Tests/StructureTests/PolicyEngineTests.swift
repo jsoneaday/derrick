@@ -1,16 +1,8 @@
 import Testing
-@testable import PolicyEngine
+@testable import Structure
 
 @Suite("Policy Engine")
 struct PolicyEngineTests {
-    private struct AlwaysConfirmPresenter: PolicyConfirmationPresenting {
-        let shouldConfirm: Bool
-
-        func confirm(_ request: PolicyConfirmationRequest) async -> Bool {
-            shouldConfirm
-        }
-    }
-
     @Test func deniesExplicitlyBlockedTools() {
         let engine = PolicyEngine(rules: [
             DenyToolNamesRule(toolNames: ["deleteFile"], reason: "Destructive operations are blocked.")
@@ -60,42 +52,5 @@ struct PolicyEngineTests {
 
         let decision = engine.decision(for: .init(call: .init(name: "readDocument", risk: .medium), context: .init(agentID: "a")))
         #expect(decision == .allow)
-    }
-
-    @Test func interceptorRunsProceedOnlyAfterConfirmation() async throws {
-        let engine = PolicyEngine(rules: [
-            ToolRule.confirm(ToolNameMatcher(.exact("writeFile")))
-        ])
-        let interceptor = PolicyToolCallInterceptor(engine: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: true))
-        let adapter = PolicyToolCallInterceptorAdapter(interceptor: interceptor)
-
-        let result: String = try await adapter.intercept(
-            .init(
-                request: .init(call: .init(name: "writeFile", effects: [.changesState]), context: .init(agentID: "a")),
-                payload: "payload",
-                proceed: { value in value.uppercased() }
-            )
-        )
-
-        #expect(result == "PAYLOAD")
-    }
-
-    @Test func interceptorRejectsWhenConfirmationIsDenied() async throws {
-        let engine = PolicyEngine(rules: [
-            ToolRule.confirm(ToolNameMatcher(.exact("writeFile")))
-        ])
-        let interceptor = PolicyToolCallInterceptor(engine: engine, presenter: AlwaysConfirmPresenter(shouldConfirm: false))
-
-        do {
-            _ = try await interceptor.intercept(
-                .init(call: .init(name: "writeFile", effects: [.changesState]), context: .init(agentID: "a"))
-            ) {
-                "ok"
-            }
-            Issue.record("Expected cancellation error.")
-        } catch PolicyError.cancelled {
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
     }
 }

@@ -44,9 +44,6 @@
       location = "group:packages/Plugin">
    </FileRef>
    <FileRef
-      location = "group:packages/PolicyEngine">
-   </FileRef>
-   <FileRef
       location = "group:packages/PolicyRuntime">
    </FileRef>
    <FileRef

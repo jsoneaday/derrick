@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 import Testing
 @testable import Plugin
 
@@ -216,7 +217,7 @@ import Testing
         }
     }
 
-    @Test func reservedSystemPluginIDsCannotBeCreated() async {
+    @Test func reservedPluginIDsCannotBeCreated() async {
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON().replacingOccurrences(of: "weather-tool", with: "create-plugin"),
             guestSource: guestPythonSource(),

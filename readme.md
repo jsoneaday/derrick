@@ -95,7 +95,7 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 ### Policy
 
 - **`PolicyEngine`** — in-process tool-call rules for chat (`Structure/Policy/PolicyEngine`).
-- **`PolicyRuntime`** — persisted rules from SQLite (`Structure/Policy/PolicyRuntime`); implemented by `StoreBacked*` evaluators.
+- **`PolicyRuntime`** — persisted rules from SQLite (`Structure/Policy/PolicyRuntime`); implemented by `StoreBacked*` evaluators in `packages/PolicyRuntime`.
 - **`PolicyInterceptor`** / **`ToolRequestInterceptor`** (MemorySystem) — pipeline hooks that call those policies.
 
 ### Messaging
@@ -113,7 +113,6 @@ Connector plugins declare `role: connector` in the manifest. Messages are persis
 | `packages/Plugin` | Plugin factory runtime and bundled skill/reviewer resources |
 | `packages/DerrickBackend` | Daemon runtime, notifications, HITL polling |
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
-| `packages/PolicyEngine` | In-process conversation tool policy (`Structure/Policy/PolicyEngine`) |
 | `packages/PolicyRuntime` | Store-backed policy evaluators (`Structure/Policy/PolicyRuntime`) |
 | `packages/LLMAgentClient` | Provider clients (OpenAI, Gemini, …) |
 

@@ -5,7 +5,6 @@ import LLMAgentClient
 import MCP
 import MCPClient
 import MCPServer
-import MCPToolCatalog
 import MemorySystem
 import Plugin
 import PolicyRuntime

@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import MCPToolCatalog
 import Plugin
 import Structure
 

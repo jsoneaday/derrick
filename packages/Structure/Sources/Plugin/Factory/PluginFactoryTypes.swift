@@ -360,7 +360,6 @@ public struct PluginFactoryReleaseSummary: Identifiable, Sendable, Hashable {
     public let version: String
     public let contentHash: String
     public let reviewSummary: String
-    public let isSystem: Bool
 
     public var id: String { "\(pluginID)@\(version)" }
 
@@ -368,14 +367,12 @@ public struct PluginFactoryReleaseSummary: Identifiable, Sendable, Hashable {
         pluginID: String,
         version: String,
         contentHash: String,
-        reviewSummary: String,
-        isSystem: Bool = false
+        reviewSummary: String
     ) {
         self.pluginID = pluginID
         self.version = version
         self.contentHash = contentHash
         self.reviewSummary = reviewSummary
-        self.isSystem = isSystem
     }
 }
 

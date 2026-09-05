@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import MCPToolCatalog
 import Structure
 
 public enum FileExtractorToolModule: MCPToolModule {

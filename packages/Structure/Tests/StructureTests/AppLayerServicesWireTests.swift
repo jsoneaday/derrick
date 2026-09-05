@@ -2,14 +2,14 @@ import Foundation
 import Testing
 @testable import Structure
 
-@Suite struct ServiceContractsTests {
+@Suite struct AppLayerServicesWireTests {
     private func appGroupCrossProcessStorageIsAvailable() -> Bool {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier
         ) else {
             return false
         }
-        let probe = container.appendingPathComponent("servicecontracts_ci_probe.txt")
+        let probe = container.appendingPathComponent("applayerservices_ci_probe.txt")
         do {
             try Data("probe".utf8).write(to: probe, options: .atomic)
             try FileManager.default.removeItem(at: probe)

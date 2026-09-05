@@ -1,3 +1,4 @@
+import Structure
 import XCTest
 @testable import DBRepository
 @testable import MemorySystem

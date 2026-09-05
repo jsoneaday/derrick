@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import MCPToolCatalog
 import Structure
 
 /// MCP boundary for the prebuilt Swift crawler image.
