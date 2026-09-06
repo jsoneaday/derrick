@@ -57,10 +57,14 @@ scan_content() {
     fi
   done
 
-  if echo "$content" | grep -Eiq '(^|[^A-Z_])([A-Z0-9_]*API_KEY|[A-Z0-9_]*SECRET[^=]*)=[^[:space:]#]+'; then
+  # Env-style assignments only (API_KEY=..., BOT_SECRET=...). Do not treat
+  # host placeholders like {{secret:bot_token}} plus a later separators= as secrets.
+  local assignment_regex='(^|[^A-Z_])([A-Z0-9_]*API_KEY|[A-Z0-9_]*SECRET[A-Z0-9_]*)[[:space:]]*=[^[:space:]#]+'
+  if echo "$content" | grep -Eiq "$assignment_regex"; then
     local line
-    line="$(echo "$content" | grep -Ei '(^|[^A-Z_])([A-Z0-9_]*API_KEY|[A-Z0-9_]*SECRET[^=]*)=[^[:space:]#]+' | head -1 || true)"
-        if [[ -n "$line" ]] && ! echo "$line" | grep -Eq '(=($|your-|change-me|dotenv-|example|test|placeholder))|dev-secret|=='; then
+    line="$(echo "$content" | grep -Ei "$assignment_regex" | head -1 || true)"
+    if [[ -n "$line" ]] \
+      && ! echo "$line" | grep -Eq '(=($|your-|change-me|dotenv|example|test|placeholder|true|false|keychain))|dev-secret|==|\{\{secret:|SECRET_MODE[[:space:]]*='; then
       if [[ -z "$path_hint" ]] || ! is_allowlisted "$path_hint"; then
         fail "Possible secret assignment in $label ${path_hint:+(path: $path_hint)}: $line"
       fi

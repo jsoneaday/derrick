@@ -52,9 +52,13 @@ public enum PluginHostHopDispatcher: Sendable {
         var responses: [HostHTTPResponse] = []
         for request in requests {
             let requestID = request.payload["request_id"]?.stringValue ?? UUID().uuidString
+            let headers = Self.envelopeHeaders(request.payload)
+            let body = request.payload["body"]?.stringValue
             let live = await HostHTTPClient.shared.perform(
                 method: request.payload["method"]?.stringValue ?? "GET",
                 urlString: request.payload["url"]?.stringValue ?? "",
+                headers: headers,
+                body: body,
                 invokeID: invokeID
             )
             responses.append(live.response(requestID: requestID))
@@ -67,5 +71,16 @@ public enum PluginHostHopDispatcher: Sendable {
                 params: params
             )
         )
+    }
+
+    private static func envelopeHeaders(_ payload: [String: PluginJSON]) -> [String: String] {
+        guard case .object(let object) = payload["headers"] else { return [:] }
+        var headers: [String: String] = [:]
+        for (key, value) in object {
+            if let string = value.stringValue {
+                headers[key] = string
+            }
+        }
+        return headers
     }
 }

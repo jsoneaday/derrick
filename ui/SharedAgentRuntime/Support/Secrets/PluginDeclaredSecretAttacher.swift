@@ -7,10 +7,10 @@ public struct PluginDeclaredSecretAttacher: HostHTTPSecretAttacher {
     public init() {}
 
     public func apply(url: URL) async -> (url: URL, headers: [String: String]) {
-        guard let pluginID = HostHTTPCallContext.shared.pluginID else {
+        guard let pluginID = HostHTTPInvokeSecrets.pluginID else {
             return (url, [:])
         }
-        let fields = HostHTTPCallContext.shared.secretFields
+        let fields = HostHTTPInvokeSecrets.secretFields
         guard !fields.isEmpty else { return (url, [:]) }
 
         var values: [String: String] = [:]

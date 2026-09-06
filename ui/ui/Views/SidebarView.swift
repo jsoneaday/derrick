@@ -7,6 +7,7 @@ private let sideMenuRecentsFontSize = CGFloat(12)
 
 struct SidebarView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    @ObservedObject var modelThinkingSettings: LLMModelThinkingSettings
     @ObservedObject var chatSessions: ChatSessionStore
     @ObservedObject var messaging: MessagingStore
     @Binding var workspace: AppWorkspace
@@ -106,7 +107,10 @@ struct SidebarView: View {
             Spacer()
 
             Button {
-                helperModelSettingsPanelController.show(helperModelSettings: helperModelSettings)
+                helperModelSettingsPanelController.show(
+                    helperModelSettings: helperModelSettings,
+                    modelThinkingSettings: modelThinkingSettings
+                )
             } label: {
                 HStack {
                     Circle()
@@ -375,8 +379,10 @@ struct SidebarView: View {
         password: "ui"
     )
     let store = ChatSessionStore()
+    let repo = DBRepository(configuration: config)
     SidebarView(
-        helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
+        helperModelSettings: LLMModelSettings(repository: repo),
+        modelThinkingSettings: LLMModelThinkingSettings(repository: repo),
         chatSessions: store,
         messaging: MessagingStore(),
         workspace: .constant(.chats)

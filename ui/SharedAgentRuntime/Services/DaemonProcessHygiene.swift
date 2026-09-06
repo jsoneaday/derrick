@@ -168,6 +168,17 @@ public enum DaemonProcessHygiene {
 
         let processes = listJobKeepAliveProcesses()
         if processes.isEmpty {
+            if JobServiceLoginAgent.isLaunchdJobLoaded() {
+                fputs(
+                    "[DaemonHygiene] pgrep empty (sandbox) but launchd job is loaded — skip extra spawn expected=\(expectedPath)\n",
+                    stderr
+                )
+                JobServiceLoginAgent.kickstartRegisteredDaemon()
+                if let expectedMtime {
+                    UserDefaults.standard.set(expectedMtime.timeIntervalSince1970, forKey: acceptedMtimeDefaultsKey)
+                }
+                return
+            }
             debugLog("[DaemonHygiene] reconcile ok — no JobKeepAlive processes")
             fputs(
                 "[DaemonHygiene] reconcile ok — no JobKeepAlive processes (expected=\(expectedPath))\n",
@@ -175,6 +186,8 @@ public enum DaemonProcessHygiene {
             )
             try await restartDaemonIfNeeded(
                 evictedAny: false,
+                hasHealthyExpectedDaemon: false,
+                healthyExpectedDaemonCount: 0,
                 hostPath: hostPath,
                 expectedPath: expectedPath,
                 expectedMtime: expectedMtime
@@ -211,22 +224,38 @@ public enum DaemonProcessHygiene {
             )
         }
 
-        let hasHealthy = listJobKeepAliveProcesses().contains { process in
-            DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
-                executablePath: process.executablePath,
-                processStartDate: process.startDate,
-                hostAppBundlePath: hostPath,
-                expectedExecutablePath: expectedPath,
-                expectedExecutableModificationDate: expectedMtime,
-                lastAcceptedExecutableModificationDate: lastAcceptedMtime
-            ) == nil
-                && DerrickDaemonHygiene.canonicalPath(process.executablePath)
-                    == DerrickDaemonHygiene.canonicalPath(expectedPath)
+        let duplicatePIDs = DerrickDaemonHygiene.duplicateExpectedDaemonPIDsToEvict(
+            expectedExecutablePath: expectedPath,
+            processes: listJobKeepAliveProcesses().map {
+                (pid: $0.pid, executablePath: $0.executablePath, startDate: $0.startDate)
+            }
+        )
+        for pid in duplicatePIDs {
+            evictedAny = true
+            if let process = listJobKeepAliveProcesses().first(where: { $0.pid == pid }) {
+                fputs("[DaemonHygiene] evict duplicate pid=\(pid)\n", stderr)
+                terminate(pid: pid, reason: .duplicate, path: process.executablePath)
+            }
         }
+
+        let remaining = listJobKeepAliveProcesses().filter {
+            DerrickDaemonHygiene.canonicalPath($0.executablePath)
+                == DerrickDaemonHygiene.canonicalPath(expectedPath)
+                && DerrickDaemonHygiene.evictionReasonUsingAcceptedBinaryMtime(
+                    executablePath: $0.executablePath,
+                    processStartDate: $0.startDate,
+                    hostAppBundlePath: hostPath,
+                    expectedExecutablePath: expectedPath,
+                    expectedExecutableModificationDate: expectedMtime,
+                    lastAcceptedExecutableModificationDate: lastAcceptedMtime
+                ) == nil
+        }
+        let hasHealthy = !remaining.isEmpty
 
         try await restartDaemonIfNeeded(
             evictedAny: evictedAny,
             hasHealthyExpectedDaemon: hasHealthy,
+            healthyExpectedDaemonCount: remaining.count,
             hostPath: hostPath,
             expectedPath: expectedPath,
             expectedMtime: expectedMtime
@@ -244,29 +273,47 @@ public enum DaemonProcessHygiene {
     private static func restartDaemonIfNeeded(
         evictedAny: Bool,
         hasHealthyExpectedDaemon: Bool = false,
+        healthyExpectedDaemonCount: Int = 0,
         hostPath: String = "",
         expectedPath: String = "",
         expectedMtime: Date? = nil
     ) async throws {
+        let launchdLoaded = JobServiceLoginAgent.isLaunchdJobLoaded()
         guard DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
             evictedAny: evictedAny,
-            hasHealthyExpectedDaemon: hasHealthyExpectedDaemon
+            hasHealthyExpectedDaemon: hasHealthyExpectedDaemon,
+            launchdJobLoaded: launchdLoaded,
+            healthyExpectedDaemonCount: healthyExpectedDaemonCount
         ) else {
             fputs("[DaemonHygiene] expected daemon healthy — skip register/kickstart\n", stderr)
             return
         }
+        if !launchdLoaded {
+            // Stray copies (from `open -n`) hold the Mach name so launchd stays in xpcproxy.
+            for process in listJobKeepAliveProcesses() {
+                let expected = DerrickDaemonHygiene.canonicalPath(expectedPath)
+                let path = DerrickDaemonHygiene.canonicalPath(process.executablePath)
+                if path == expected || path.contains(DerrickAppSupport.loginItemDaemonPathMarker) {
+                    fputs(
+                        "[DaemonHygiene] stop pid=\(process.pid) before launchd install path=\(process.executablePath)\n",
+                        stderr
+                    )
+                    terminate(pid: process.pid, reason: .orphanPath, path: process.executablePath)
+                }
+            }
+        }
         fputs(
-            "[DaemonHygiene] register+kickstart evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon)\n",
+            "[DaemonHygiene] register+kickstart evicted=\(evictedAny) healthy=\(hasHealthyExpectedDaemon) launchd=\(launchdLoaded) count=\(healthyExpectedDaemonCount)\n",
             stderr
         )
         do {
             let result = try await JobServiceLoginAgent.ensureRegistered()
             guard result.isRunningOrEnabled else {
                 fputs(
-                    "[DaemonHygiene] daemon registration requires user action: \(result.detail)\n",
+                    "[DaemonHygiene] daemon registration incomplete: \(result.detail)\n",
                     stderr
                 )
-                throw JobServiceLoginAgent.AgentError.needsLoginItemsApproval
+                throw JobServiceLoginAgent.AgentError.registerFailed(result.detail)
             }
         } catch {
             fputs(

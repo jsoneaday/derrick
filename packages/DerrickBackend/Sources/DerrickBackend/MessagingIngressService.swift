@@ -47,13 +47,19 @@ public final class MessagingIngressService: @unchecked Sendable {
                     continue
                 }
                 guard adapter.hasCredentials() else { continue }
-                if shouldSyncChannels {
+                let manifestJSON = try await repository.listLatestPluginFactoryManifests()
+                    .first(where: { $0.pluginID == connector.pluginID })?
+                    .manifestJSON ?? ""
+                if shouldSyncChannels,
+                   PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: manifestJSON) {
                     try await adapter.syncThreads(repository: repository)
                 }
-                let inserted = try await adapter.pollInbox(repository: repository)
-                newRows.append(contentsOf: inserted.filter {
-                    $0.inserted && $0.message.direction == .inbound
-                })
+                if PluginFactoryValidationExpectations.supportsPollInbox(manifestJSON: manifestJSON) {
+                    let inserted = try await adapter.pollInbox(repository: repository)
+                    newRows.append(contentsOf: inserted.filter {
+                        $0.inserted && $0.message.direction == .inbound
+                    })
+                }
             }
 
             if !newRows.isEmpty {

@@ -59,9 +59,20 @@ final class MessagingSessionStore: ObservableObject {
         isMessagingWorkspace = active
     }
 
-    func openConnector(pluginID: String) async {
+    /// Selects the vendor immediately so Messaging never paints the empty catalog root first.
+    func selectConnector(pluginID: String) {
+        if selectedPluginID != pluginID {
+            selectedThreadID = nil
+            tabs = []
+            threads = []
+            visibleMessages = []
+        }
         selectedPluginID = pluginID
-        await reloadThreads(autoOpenMostRecent: true)
+    }
+
+    func openConnector(pluginID: String, autoOpenMostRecent: Bool = true) async {
+        selectConnector(pluginID: pluginID)
+        await reloadThreads(autoOpenMostRecent: autoOpenMostRecent)
     }
 
     func selectThread(id: String) async {
@@ -192,6 +203,10 @@ final class MessagingSessionStore: ObservableObject {
             threads = try await repository.listMessagingThreads(pluginID: pluginID)
             tabs = tabs.compactMap { tab in
                 threads.first { $0.id == tab.id }.map(MessagingTab.init)
+            }
+            if let selectedThreadID, !threads.contains(where: { $0.id == selectedThreadID }) {
+                self.selectedThreadID = nil
+                visibleMessages = []
             }
             if autoOpenMostRecent {
                 if let latest = threads.first {

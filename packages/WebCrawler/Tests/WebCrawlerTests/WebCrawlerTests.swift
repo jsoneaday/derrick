@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Structure
 import Testing
 @testable import WebCrawler
 

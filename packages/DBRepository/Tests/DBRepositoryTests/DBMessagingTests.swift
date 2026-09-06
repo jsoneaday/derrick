@@ -245,6 +245,36 @@ final class DBMessagingTests: XCTestCase {
         XCTAssertTrue(threads.isEmpty)
     }
 
+    func testPruneMessagingThreadsKeepsOnlyAccessibleVendorIDs() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C1",
+                title: "#general"
+            )
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C2",
+                title: "#secret"
+            )
+        )
+
+        try await repository.pruneMessagingThreads(
+            pluginID: "slack-connection",
+            keepingVendorThreadIDs: ["C1"]
+        )
+
+        let threads = try await repository.listMessagingThreads(pluginID: "slack-connection")
+        XCTAssertEqual(Set(threads.map(\.vendorThreadID)), ["C1"])
+    }
+
     private func makeRepository() throws -> DBRepository {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

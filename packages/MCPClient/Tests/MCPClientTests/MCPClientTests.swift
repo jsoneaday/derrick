@@ -1,3 +1,4 @@
+import Structure
 import Testing
 import MCP
 @testable import MCPClient

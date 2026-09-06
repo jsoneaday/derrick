@@ -147,14 +147,21 @@ public enum ConnectorMessagingParser: Sendable {
         guard case .array(let items) = value else {
             throw ConnectorMessagingError.invalidField("threads")
         }
-        return try items.map { item in
+        return try items.compactMap { item in
             guard case .object(let object) = item,
                   let vendorThreadID = object["vendor_thread_id"]?.stringValue,
                   let title = object["title"]?.stringValue else {
                 throw ConnectorMessagingError.invalidField("threads")
             }
+            guard isAccessibleConversation(object) else { return nil }
             return ConnectorMessagingThread(vendorThreadID: vendorThreadID, title: title)
         }
+    }
+
+    private static func isAccessibleConversation(_ object: [String: PluginJSON]) -> Bool {
+        if object["accessible"]?.boolValue == false { return false }
+        if object["is_member"]?.boolValue == false { return false }
+        return true
     }
 
     private static func parseMessages(_ value: PluginJSON?) throws -> [ConnectorMessagingMessage] {

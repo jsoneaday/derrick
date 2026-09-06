@@ -9,7 +9,31 @@ let package = Package(
         .library(
             name: "MCPServer",
             targets: ["MCPServer"]
-        )
+        ),
+        .library(
+            name: "FactoryHarnessSupport",
+            targets: ["FactoryHarnessSupport"]
+        ),
+        .executable(
+            name: "FactoryHarness",
+            targets: ["FactoryHarness"]
+        ),
+        .executable(
+            name: "SlackConnectorE2EHarness",
+            targets: ["SlackConnectorE2EHarness"]
+        ),
+        .executable(
+            name: "SlackConnectorInstallReference",
+            targets: ["SlackConnectorInstallReference"]
+        ),
+        .executable(
+            name: "SlackConnectorBootstrapProbe",
+            targets: ["SlackConnectorBootstrapProbe"]
+        ),
+        .executable(
+            name: "SlackConnectorLiveHarness",
+            targets: ["SlackConnectorLiveHarness"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -20,6 +44,8 @@ let package = Package(
         .package(path: "../EgressProxy"),
         .package(path: "../Plugin"),
         .package(path: "../WebCrawler"),
+        .package(path: "../DBRepository"),
+        .package(path: "../DerrickBackend"),
     ],
     targets: [
         .target(
@@ -40,6 +66,67 @@ let package = Package(
             name: "MCPServerTests",
             dependencies: ["MCPServer", "MCPClient", "DockerRunnerXPC", "WebCrawler", "Structure"],
             path: "Tests/MCPServerTests"
-        )
+        ),
+        .target(
+            name: "FactoryHarnessSupport",
+            dependencies: ["MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            path: "Sources/FactoryHarnessSupport"
+        ),
+        .executableTarget(
+            name: "FactoryHarness",
+            dependencies: ["FactoryHarnessSupport", "MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            path: "Sources/FactoryHarness"
+        ),
+        .executableTarget(
+            name: "SlackConnectorE2EHarness",
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "MCPClient",
+                "Plugin",
+                "Structure",
+                "LLMAgentClient",
+                "DBRepository",
+                "DerrickBackend",
+            ],
+            path: "Sources/SlackConnectorE2EHarness"
+        ),
+        .executableTarget(
+            name: "SlackConnectorLiveHarness",
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "Plugin",
+                "Structure",
+                "LLMAgentClient",
+                "DBRepository",
+                "DerrickBackend",
+            ],
+            path: "Sources/SlackConnectorLiveHarness"
+        ),
+        .executableTarget(
+            name: "SlackConnectorInstallReference",
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "Plugin",
+                "Structure",
+                "DBRepository",
+                "DerrickBackend",
+            ],
+            path: "Sources/SlackConnectorInstallReference"
+        ),
+        .executableTarget(
+            name: "SlackConnectorBootstrapProbe",
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "Plugin",
+                "Structure",
+                "DBRepository",
+                "DerrickBackend",
+            ],
+            path: "Sources/SlackConnectorBootstrapProbe"
+        ),
     ]
 )

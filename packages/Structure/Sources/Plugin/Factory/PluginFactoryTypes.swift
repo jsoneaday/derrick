@@ -17,7 +17,7 @@ public struct PluginFactoryDraft: Sendable, Hashable {
     public init(
         manifestJSON: String,
         guestSource: String,
-        testInput: Data = Data("{}".utf8),
+        testInput: Data = Data(#"{"kind":"manual"}"#.utf8),
         skillFiles: [String: String] = [:],
         userGoal: String? = nil
     ) {
@@ -31,7 +31,7 @@ public struct PluginFactoryDraft: Sendable, Hashable {
     public init(
         manifest: PluginFactoryManifestInput,
         guestSource: String,
-        testInput: Data = Data("{}".utf8),
+        testInput: Data = Data(#"{"kind":"manual"}"#.utf8),
         skillFiles: [String: String] = [:],
         userGoal: String? = nil
     ) throws {
@@ -63,19 +63,22 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
     public let description: String
     public let secrets: [PluginSecretField]
     public let role: PluginRole
+    public let messagingOps: [String]
 
     public init(
         pluginID: String,
         version: String,
         description: String,
         secrets: [PluginSecretField] = [],
-        role: PluginRole = .standard
+        role: PluginRole = .standard,
+        messagingOps: [String] = []
     ) {
         self.pluginID = pluginID
         self.version = version
         self.description = description
         self.secrets = secrets
         self.role = role
+        self.messagingOps = messagingOps
     }
 
     public func encodedJSON() throws -> String {
@@ -98,6 +101,9 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
         }
         if role == .connector {
             derrick["role"] = PluginRole.connector.rawValue
+            if !messagingOps.isEmpty {
+                derrick["messaging_ops"] = messagingOps
+            }
         }
         let object: [String: Any] = [
             "$schema": PluginContract.agentPluginSchema,
@@ -176,16 +182,18 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     public let skillFiles: [PluginFactorySkillFile]
     public let secrets: [PluginSecretField]
     public let role: PluginRole
+    public let messagingOps: [String]
 
     public init(
         pluginID: String,
         version: String,
         description: String,
         guestSource: String,
-        testInputJSON: String = "{}",
+        testInputJSON: String = #"{"kind":"manual"}"#,
         skillFiles: [PluginFactorySkillFile] = [],
         secrets: [PluginSecretField] = [],
-        role: PluginRole = .standard
+        role: PluginRole = .standard,
+        messagingOps: [String] = []
     ) {
         self.pluginID = pluginID
         self.version = version
@@ -195,6 +203,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         self.skillFiles = skillFiles
         self.secrets = secrets
         self.role = role
+        self.messagingOps = messagingOps
     }
 
     enum CodingKeys: String, CodingKey {
@@ -206,6 +215,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         case skillFiles = "skill_files"
         case secrets
         case role
+        case messagingOps = "messaging_ops"
     }
 
     public init(from decoder: Decoder) throws {
@@ -219,6 +229,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
         secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
         role = try container.decodeIfPresent(PluginRole.self, forKey: .role) ?? .standard
+        messagingOps = try container.decodeIfPresent([String].self, forKey: .messagingOps) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -235,6 +246,14 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         if role != .standard {
             try container.encode(role, forKey: .role)
         }
+        if !messagingOps.isEmpty {
+            try container.encode(messagingOps, forKey: .messagingOps)
+        }
+    }
+
+    private func resolvedMessagingOps() -> [String] {
+        if !messagingOps.isEmpty { return messagingOps }
+        return role == .connector ? ["send_message"] : []
     }
 
     public func draft() throws -> PluginFactoryDraft {
@@ -258,7 +277,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
                 version: version,
                 description: description,
                 secrets: secrets,
-                role: role
+                role: role,
+                messagingOps: resolvedMessagingOps()
             ),
             guestSource: guestSource,
             testInput: input,
@@ -449,6 +469,7 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
     case packageFailed(String)
     case packagedRunFailed(String)
     case invalidPackagedOutput(String)
+    case draftValidationFailed(findings: [String])
 
     public var isBuilderCorrectable: Bool {
         switch self {
@@ -456,7 +477,7 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
             return true
         case .invalidSkillPath, .invalidManifest, .invalidSource:
             return true
-        case .reviewRejected:
+        case .reviewRejected, .draftValidationFailed:
             return true
         default:
             return false
@@ -480,7 +501,17 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         case .packageFailed(let message): return "Python plugin packaging failed: \(message)"
         case .packagedRunFailed(let message): return "Packaged plugin test failed: \(message)"
         case .invalidPackagedOutput(let message): return "Packaged plugin returned invalid output: \(message)"
+        case .draftValidationFailed(let findings):
+            let detail = findings.joined(separator: " ")
+            return findings.count == 1
+                ? "Draft validation failed: \(detail)"
+                : "Draft validation failed: \(detail)"
         }
+    }
+
+    public var draftValidationFindings: [String]? {
+        if case .draftValidationFailed(let findings) = self { return findings }
+        return nil
     }
 }
 

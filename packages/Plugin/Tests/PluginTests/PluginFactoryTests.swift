@@ -115,14 +115,18 @@ import Testing
                     import json, sys
                     _ = json.load(sys.stdin)
                     print("not a plugin envelope")
-                    """
+                    """,
+                    testInput: Data(#"{"kind":"manual"}"#.utf8)
                 ),
                 executor: executor,
                 reviewer: reviewer
             )
             Issue.record("Expected invalid output")
         } catch let error as PluginFactoryError {
-            #expect(error.localizedDescription.contains("invalid plugin output"))
+            #expect(
+                error.localizedDescription.contains("invalid plugin output")
+                    || error.localizedDescription.contains("Python draft test failed")
+            )
             #expect(await reviewer.callCount == 0)
         }
     }
@@ -299,12 +303,135 @@ import Testing
             version: "1.0.0",
             description: "Slack send and receive.",
             guestSource: guestPythonSource(),
-            role: .connector
+            role: .connector,
+            messagingOps: ["send_message"]
         )
         let draft = try response.draft()
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.isConnector)
         #expect(manifest.derrick?.role == .connector)
+        #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"send_message\"]"))
+    }
+
+    @Test func connectorManifestDefaultsMessagingOpsWhenOmitted() throws {
+        let response = PluginFactoryBuilderResponse(
+            pluginID: "slack-connection",
+            version: "1.0.0",
+            description: "Slack send only.",
+            guestSource: guestPythonSource(),
+            role: .connector
+        )
+        let draft = try response.draft()
+        #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"send_message\"]"))
+    }
+
+    @Test func connectorTestScriptRequiresHopsAndFixtures() throws {
+        let manifestJSON = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        """
+        let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
+        #expect(throws: PluginFactoryError.self) {
+            _ = try PluginFactoryTestScript.parse(Data(#"{"hops":[]}"#.utf8))
+        }
+        let draft = PluginFactoryDraft(
+            manifestJSON: manifestJSON,
+            guestSource: guestPythonSource(),
+            testInput: Data(
+                #"{"kind":"message_in_room","params":{"messaging_op":"send_message"}}"#.utf8
+            ),
+            userGoal: sendOnlyGoal()
+        )
+        #expect(throws: PluginFactoryError.self) {
+            try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
+        }
+        let validDraft = connectorDraft(testInput: validConnectorTestInput())
+        try PluginFactoryDraftValidator.validateStructure(draft: validDraft, manifest: manifest)
+    }
+
+    @Test func hopTestRunnerReplaysAllScriptHops() async throws {
+        let executor = MultiHopRecordingFactoryExecutor()
+        let testInput = Data(
+            """
+            {"hops":[
+              {"kind":"message_in_room","params":{"messaging_op":"send_message"}},
+              {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}]},
+              {"kind":"manual","params":{"messaging_op":"poll_inbox"}},
+              {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true,\\"messages\\":[]}"}]}
+            ]}
+            """.utf8
+        )
+        let run = try await PluginFactoryHopTestRunner.run(
+            source: "print('unused')",
+            testInput: testInput,
+            executor: executor
+        )
+        #expect(run.final.exitCode == 0)
+        #expect(await executor.runCount == 4)
+    }
+
+    @Test func sendOnlyDualFixtureAllowsUnsortedHttpResultsLoop() throws {
+        let manifestJSON = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        """
+        let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
+        let testInput = Data(
+            """
+            {"hops":[
+              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
+              {"kind":"http_results","http_results":[
+                {"request_id":"send-1","status":200,"body":"{\\"ok\\":true,\\"ts\\":\\"1.0\\"}"},
+                {"request_id":"auth-1","status":401,"body":"{\\"ok\\":false,\\"error\\":\\"invalid_auth\\"}"}
+              ],"params":{"messaging_op":"send_message"}}
+            ]}
+            """.utf8
+        )
+        let draft = PluginFactoryDraft(
+            manifestJSON: manifestJSON,
+            guestSource: """
+            import json, sys
+            event = json.load(sys.stdin)
+            for item in event.get("http_results") or []:
+                if item.get("request_id") == "send-1":
+                    body = json.loads(item.get("body") or "{}")
+                    if body.get("ok"):
+                        json.dump([{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1.0"}}], sys.stdout)
+                        sys.exit(0)
+            json.dump([{"verb":"result.emit","summary":"failed"}], sys.stdout)
+            """,
+            testInput: testInput,
+            userGoal: sendOnlyGoal()
+        )
+        try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
+    }
+
+    @Test func draftValidationFailureIsBuilderCorrectable() {
+        #expect(
+            PluginFactoryError.draftValidationFailed(findings: ["missing messaging_ops"]).isBuilderCorrectable
+        )
+    }
+
+    @Test func sessionRetriesDraftValidationWithBuilderFeedback() async throws {
+        let executor = MultiHopRecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
+        let invalidDraft = connectorDraft(testInput: Data(#"{"kind":"manual"}"#.utf8))
+        let validDraft = connectorDraft(testInput: validConnectorTestInput())
+        let builder = SequenceFactoryBuilder(drafts: [invalidDraft, validDraft])
+
+        let release = try await PluginFactorySession(
+            configuration: PluginFactoryConfiguration(maxBuilderAttempts: 2)
+        ).build(
+            userGoal: sendOnlyGoal(),
+            builder: builder,
+            executor: executor,
+            reviewer: reviewer
+        )
+
+        #expect(release.pluginID == "slack-connection")
+        #expect(await builder.callCount == 2)
+        let feedback = await builder.lastFeedback ?? ""
+        #expect(feedback.contains("Deterministic draft validation failed"))
     }
 
     @Test func missingRoleDefaultsToStandard() throws {
@@ -374,6 +501,91 @@ import Testing
         """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.2.3","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
         """
+    }
+}
+
+private func sendOnlyGoal() -> String {
+    PluginFactoryCreateInput.makeConnector(
+        vendor: .slack,
+        scope: .sendOnly,
+        userDescription: "Post alerts."
+    ).connectorBuildGoal(crawlSummary: nil)
+}
+
+private func validConnectorTestInput() -> Data {
+    Data(
+        """
+        {"hops":[
+          {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
+          {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+        ]}
+        """.utf8
+    )
+}
+
+private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
+    let manifestJSON = """
+    {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
+    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+    """
+    return PluginFactoryDraft(
+        manifestJSON: manifestJSON,
+        guestSource: """
+        import json, sys
+        event = json.load(sys.stdin)
+        def emit(v):
+            json.dump(v, sys.stdout, separators=(",", ":"))
+        if event.get("http_results"):
+            emit([{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}])
+        else:
+            emit([{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage"}])
+        """,
+        testInput: testInput
+    )
+}
+
+private actor SequenceFactoryBuilder: PluginFactoryBuilder {
+    let drafts: [PluginFactoryDraft]
+    private(set) var callCount = 0
+    private(set) var lastFeedback: String?
+
+    init(drafts: [PluginFactoryDraft]) {
+        self.drafts = drafts
+    }
+
+    func makeDraft(_ request: PluginFactoryBuilderRequest) async throws -> PluginFactoryDraft {
+        lastFeedback = request.feedback
+        let index = min(callCount, drafts.count - 1)
+        callCount += 1
+        return drafts[index]
+    }
+}
+
+private actor MultiHopRecordingFactoryExecutor: PluginFactoryExecutor {
+    private(set) var runCount = 0
+
+    func runGuestSource(source: String, input: Data) async throws -> PluginFactoryExecutionResult {
+        _ = source
+        let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+        runCount += 1
+        if event.kind == .httpResults {
+            return PluginFactoryExecutionResult(
+                exitCode: 0,
+                stdout: Data(
+                    #"[{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}]"#.utf8
+                )
+            )
+        }
+        return PluginFactoryExecutionResult(
+            exitCode: 0,
+            stdout: Data(#"[{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage"}]"#.utf8)
+        )
+    }
+
+    func packageGuestSource(source: String) async throws -> Data { Data(source.utf8) }
+
+    func runPackagedArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult {
+        try await runGuestSource(source: "", input: input)
     }
 }
 

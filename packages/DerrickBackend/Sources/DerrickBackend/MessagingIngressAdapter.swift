@@ -24,9 +24,13 @@ protocol MessagingIngressAdapter: Sendable {
 }
 
 extension MessagingIngressAdapter {
-    func bootstrap(repository: DBRepository) async throws {
-        try await syncThreads(repository: repository)
-        _ = try await pollInbox(repository: repository)
+    public func bootstrap(repository: DBRepository) async throws {
+        let manifestJSON = try await repository.listLatestPluginFactoryManifests()
+            .first(where: { $0.pluginID == pluginID })?
+            .manifestJSON ?? ""
+        if PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: manifestJSON) {
+            try await syncThreads(repository: repository)
+        }
     }
 }
 

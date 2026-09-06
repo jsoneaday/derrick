@@ -8,7 +8,9 @@ public enum ConnectorMessagingPersistence: Sendable {
     public static func apply(
         _ result: ConnectorMessagingResult,
         pluginID: String,
-        repository: DBRepository
+        repository: DBRepository,
+        pollVendorThreadID: String? = nil,
+        replaceThreadCatalog: Bool = false
     ) async throws -> [MessagingPersistResult] {
         for thread in result.threads {
             try await repository.upsertMessagingThread(
@@ -19,18 +21,32 @@ public enum ConnectorMessagingPersistence: Sendable {
                 )
             )
         }
+        if replaceThreadCatalog {
+            try await repository.pruneMessagingThreads(
+                pluginID: pluginID,
+                keepingVendorThreadIDs: Set(result.threads.map(\.vendorThreadID))
+            )
+        }
 
         var inserted: [MessagingPersistResult] = []
         let threads = try await repository.listMessagingThreads(pluginID: pluginID)
         let threadsByVendorID = Dictionary(uniqueKeysWithValues: threads.map { ($0.vendorThreadID, $0) })
 
         for message in result.messages {
-            guard let thread = threadsByVendorID[message.vendorThreadID] else { continue }
+            let resolvedVendorThreadID = resolveVendorThreadID(
+                message.vendorThreadID,
+                threadsByVendorID: threadsByVendorID,
+                pollVendorThreadID: pollVendorThreadID
+            )
+            guard let resolvedVendorThreadID,
+                  let thread = threadsByVendorID[resolvedVendorThreadID] else {
+                continue
+            }
             switch message.direction {
             case .inbound:
                 let record = MessagingInboundRecord(
                     pluginID: pluginID,
-                    vendorThreadID: message.vendorThreadID,
+                    vendorThreadID: resolvedVendorThreadID,
                     threadTitle: thread.title,
                     vendorMessageID: message.vendorMessageID,
                     sender: message.sender,
@@ -55,5 +71,20 @@ public enum ConnectorMessagingPersistence: Sendable {
             }
         }
         return inserted
+    }
+
+    private static func resolveVendorThreadID(
+        _ vendorThreadID: String,
+        threadsByVendorID: [String: MessagingThreadDTO],
+        pollVendorThreadID: String?
+    ) -> String? {
+        if threadsByVendorID[vendorThreadID] != nil {
+            return vendorThreadID
+        }
+        if let pollVendorThreadID,
+           threadsByVendorID[pollVendorThreadID] != nil {
+            return pollVendorThreadID
+        }
+        return nil
     }
 }

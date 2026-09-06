@@ -68,6 +68,15 @@ public actor ConnectorMessagingCommandService {
         )
         do {
             let repository = try await repositoryProvider()
+            let manifestJSON = try await repository.listLatestPluginFactoryManifests()
+                .first(where: { $0.pluginID == request.pluginID })?
+                .manifestJSON ?? ""
+            let secretFields = PluginSecretField.fields(fromManifestJSON: Data(manifestJSON.utf8))
+                .map(\.descriptor)
+            PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
+                pluginID: request.pluginID,
+                fields: secretFields
+            )
             guard let adapter = MessagingIngressRegistry.adapter(for: request.pluginID) else {
                 throw ConnectorMessagingCommandError.connectorUnavailable(request.pluginID)
             }

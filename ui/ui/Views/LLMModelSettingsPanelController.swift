@@ -6,7 +6,7 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
     private weak var window: NSWindow?
     private var escapeMonitor: Any?
 
-    func show(helperModelSettings: LLMModelSettings) {
+    func show(helperModelSettings: LLMModelSettings, modelThinkingSettings: LLMModelThinkingSettings) {
         if let window {
             center(window, relativeTo: preferredParentWindow())
             installEscapeMonitor()
@@ -16,7 +16,10 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         }
 
         let hostingController = NSHostingController(
-            rootView: LLMModelSettingsView(helperModelSettings: helperModelSettings)
+            rootView: LLMModelSettingsView(
+                helperModelSettings: helperModelSettings,
+                modelThinkingSettings: modelThinkingSettings
+            )
         )
         let panel = NSWindow(
             contentViewController: hostingController

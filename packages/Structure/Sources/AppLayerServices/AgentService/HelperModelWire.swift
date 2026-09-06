@@ -6,10 +6,18 @@ import Foundation
 public struct HelperModelWire: Codable, Sendable, Hashable {
     public let provider: String
     public let model: String
+    public let thinkingID: String?
 
-    public init(provider: String, model: String) {
+    public init(provider: String, model: String, thinkingID: String? = nil) {
         self.provider = provider
         self.model = model
+        self.thinkingID = thinkingID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case thinkingID = "thinking_id"
     }
 
     public static func encodeJSON(_ wire: HelperModelWire) throws -> String {

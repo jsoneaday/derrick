@@ -248,6 +248,7 @@ import DBRepository
         await reloaded.loadSettings()
         #expect(reloaded.thinking(for: .openai(.gpt56Sol)).id == "high")
         #expect(reloaded.thinking(for: .openai(.gpt56Luna)).id == "medium")
+        #expect(reloaded.pluginSafetyReviewerThinking(for: .openai(.gpt56Luna)).id == "medium")
     }
 
     @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {

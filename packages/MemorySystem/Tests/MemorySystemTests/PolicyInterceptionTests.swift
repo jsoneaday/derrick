@@ -1,4 +1,5 @@
 import XCTest
+import Structure
 @testable import MemorySystem
 
 final class PolicyInterceptionTests: XCTestCase {

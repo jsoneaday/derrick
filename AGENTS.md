@@ -2,11 +2,6 @@
 
 Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27.
 
-## Critical — do not violate
-
-- Run the **`ui` scheme only** for app work.
-- Do **not** launch `Products/Debug/JobKeepAlive.app`. It shares the database and steals scheduled jobs. `derrickd` starts via Login Items when you run the main app (`Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app`). The `JobKeepAlive` scheme is build-only (⌘R builds, does not launch).
-
 ## Guest contract (language-agnostic)
 
 The guest ↔ host boundary is **JSON Schema**, not Swift. Canonical schemas live in:
@@ -39,7 +34,7 @@ Do not add host-owned vendor API clients (e.g. Slack-specific Web API) for conne
 
 - Read the files on the code path you are changing. Do not guess.
 - Check `Info.plist` and app configuration before assuming a code bug.
-- Send the model the context it needs **before** asking it to produce output.
+- Think in terms of the system not an item.
 - Fix issues at the root cause. No band-aid fixes.
 
 ## Architecture

@@ -5,6 +5,8 @@ public enum DerrickDaemonHygiene: Sendable {
     public enum EvictionReason: String, Sendable, Equatable {
         /// Not nested under the current host app / wrong bundle layout (e.g. stray `Products/Debug/JobKeepAlive.app`).
         case orphanPath
+        /// Extra copy of the expected binary (Mach name / SQLite lock).
+        case duplicate
         /// Embedded daemon binary was rebuilt after this process started.
         case staleBuild
     }
@@ -108,12 +110,42 @@ public enum DerrickDaemonHygiene: Sendable {
             ) == nil
     }
 
-    /// After eviction pass: (re)register and kickstart when anything was removed or nothing healthy remains.
+    /// After eviction: (re)register when launchd is missing, copies were removed, or we
+    /// do not have exactly one healthy process for this host app.
     public static func shouldRestartDaemonAfterReconcile(
         evictedAny: Bool,
-        hasHealthyExpectedDaemon: Bool
+        hasHealthyExpectedDaemon: Bool,
+        launchdJobLoaded: Bool = true,
+        healthyExpectedDaemonCount: Int = 1
     ) -> Bool {
-        evictedAny || !hasHealthyExpectedDaemon
+        if !launchdJobLoaded { return true }
+        if healthyExpectedDaemonCount != 1 { return true }
+        return evictedAny || !hasHealthyExpectedDaemon
+    }
+
+    /// Extra processes of the expected binary steal the Mach service and lock SQLite.
+    /// Keep the newest; evict the rest.
+    public static func duplicateExpectedDaemonPIDsToEvict(
+        expectedExecutablePath: String,
+        processes: [(pid: Int32, executablePath: String, startDate: Date?)]
+    ) -> [Int32] {
+        let expected = canonicalPath(expectedExecutablePath)
+        let matching = processes.filter { canonicalPath($0.executablePath) == expected }
+        guard matching.count > 1 else { return [] }
+        let ranked = matching.sorted { lhs, rhs in
+            switch (lhs.startDate, rhs.startDate) {
+            case let (l?, r?):
+                if l != r { return l > r }
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                break
+            }
+            return lhs.pid > rhs.pid
+        }
+        return ranked.dropFirst().map(\.pid)
     }
 
     /// Connected daemon should exit (KeepAlive re-execs) when guest runtime or binary identity differs.

@@ -4,7 +4,96 @@ import Structure
 import Testing
 @testable import DerrickBackend
 
-@Suite struct WorkflowRuntimeEngineTests {
+/// Workflow tests share `InProcessServiceBridges.mcpCallTool`; run them serially.
+@Suite(.serialized) struct WorkflowIntegrationTests {
+    @Test func decodeBuildResultReadsSnakeCaseFactoryReceipt() async throws {
+        let receipt = """
+        {"ok":true,"plugin_id":"slack-connection","version":"1.0.0","content_hash":"abc","review_summary":"ok","secrets":[]}
+        """
+        let wrapped = try ToolExecutionOutcome.completed(
+            output: ToolExecutionOutcome.Output(format: .json, value: receipt)
+        ).encodedJSON()
+
+        let input = try PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .sendOnly,
+            userDescription: "Post alerts."
+        ).encodedJSON()
+
+        let request = WorkflowStartRequest(
+            kind: .pluginFactoryCreate,
+            sessionID: "session-decode",
+            agentID: "ui",
+            inputJSON: input,
+            principal: .agent(sessionID: "session-decode", agentID: "ui")
+        )
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let configuration = DBRepositoryConfiguration(
+            applicationName: "ui",
+            databaseName: "derrick",
+            databaseDirectoryURL: directory,
+            username: "app-user",
+            password: "app-secret"
+        )
+        let repository = DBRepository(configuration: configuration)
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let previousMCP = InProcessServiceBridges.mcpCallTool
+        defer { InProcessServiceBridges.mcpCallTool = previousMCP }
+        InProcessServiceBridges.mcpCallTool = { call in
+            switch call.toolName {
+            case "web.crawl":
+                let pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+                let outcome = try ToolExecutionOutcome.completed(
+                    output: ToolExecutionOutcome.Output(format: .json, value: pages)
+                ).encodedJSON()
+                return MCPToolCallResultDTO(
+                    requestID: call.requestID,
+                    ok: true,
+                    isError: false,
+                    text: outcome
+                )
+            case "plugin_factory_build":
+                return MCPToolCallResultDTO(
+                    requestID: call.requestID,
+                    ok: true,
+                    isError: false,
+                    text: wrapped
+                )
+            default:
+                return MCPToolCallResultDTO(
+                    requestID: call.requestID,
+                    ok: false,
+                    isError: true,
+                    text: "",
+                    message: "unexpected tool \(call.toolName)"
+                )
+            }
+        }
+
+        let provider: @Sendable () async throws -> DBRepository = { repository }
+        let handle = try await WorkflowRuntimeEngine.shared.startWorkflow(request, repositoryProvider: provider)
+
+        var status = WorkflowRunStatus.running
+        var resultJSON: String?
+        for _ in 0..<80 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            let poll = try await WorkflowRuntimeEngine.shared.pollWorkflowUpdate(
+                WorkflowPollRequest(workflowID: handle.workflowID, afterSeq: 0),
+                repositoryProvider: provider
+            )
+            status = poll.status
+            resultJSON = poll.resultJSON
+            if status != .running { break }
+        }
+
+        #expect(status == .completed)
+        #expect(resultJSON?.contains("slack-connection") == true)
+    }
+
     @Test func startWorkflowDedupesBySessionKindAndInput() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

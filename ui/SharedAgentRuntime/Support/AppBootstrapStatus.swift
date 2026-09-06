@@ -148,8 +148,9 @@ final class AppBootstrapStatus: ObservableObject {
 
     /// SwiftUI cancelled the bootstrap task — clear modal if we never reached ready
     /// so a later `.task` entry can run again (do not leave an undismissable overlay).
+    /// Also used by Try Again after a failure so `beginLoadingSession` can start a new flight.
     func noteBootstrapCancelled() {
-        guard phase != .ready, phase != .failed else { return }
+        guard phase != .ready else { return }
         phase = .idle
         statusMessage = "Starting…"
         failureTitle = nil
@@ -167,6 +168,7 @@ final class AppBootstrapStatus: ObservableObject {
 
     enum FailureRecovery: Equatable, Sendable {
         case none
+        case retryDaemon
         case openLoginItems
     }
 
@@ -239,17 +241,16 @@ final class AppBootstrapStatus: ObservableObject {
         if lower.contains("could not replace its background service")
             || lower.contains("leftover derrick")
             || lower.contains("previous runtime") {
-            return ClassifiedFailure(
-                title: "Initialization Failed",
-                message: "Derrick could not replace its background service. Quit Derrick and open it again."
-            )
+            return backgroundServiceRetryFailure()
+        }
+        if lower.contains("login items approval")
+            || lower.contains("smappservice") && lower.contains("operation not permitted") {
+            return backgroundServiceDidNotStartFailure()
         }
         if lower.contains("daemon registration failed")
             || lower.contains("failed to register derrick daemon")
-            || lower.contains("login items approval")
-            || lower.contains("launchctl bootstrap")
-            || lower.contains("smappservice") && lower.contains("operation not permitted") {
-            return backgroundServiceDidNotStartFailure()
+            || lower.contains("launchctl bootstrap") {
+            return backgroundServiceRetryFailure()
         }
         let trimmed = text.isEmpty ? "An unknown error occurred during startup." : text
         return ClassifiedFailure(
@@ -262,8 +263,10 @@ final class AppBootstrapStatus: ObservableObject {
         _ error: JobServiceLoginAgent.AgentError
     ) -> ClassifiedFailure {
         switch error {
-        case .needsLoginItemsApproval, .registerFailed:
+        case .needsLoginItemsApproval:
             return backgroundServiceDidNotStartFailure()
+        case .registerFailed:
+            return backgroundServiceRetryFailure()
         case .missingPlist, .missingExecutable:
             return ClassifiedFailure(
                 title: "Background Service Did Not Start",
@@ -272,16 +275,27 @@ final class AppBootstrapStatus: ObservableObject {
         }
     }
 
-    /// Copy for Login Items allowed-but-not-running, and for first-time approval.
-    /// macOS does not show an in-app prompt; the Settings switch can stay on while
-    /// the service is dead.
-    static func backgroundServiceDidNotStartFailure() -> ClassifiedFailure {
+    /// Session LaunchAgent failed. Retry in-app — do not send people to Login Items
+    /// unless macOS actually reports `.requiresApproval`.
+    static func backgroundServiceRetryFailure() -> ClassifiedFailure {
         ClassifiedFailure(
             title: "Background Service Did Not Start",
             message: """
-            Derrick could not start its background service. macOS does not show a permission popup after Derrick has been listed once, and the switch can stay on even when the service is not running.
+            Derrick could not start its background service. This is not a Slack or plugin problem — the helper that talks to connectors did not come up.
 
-            Open System Settings → General → Login Items. Under Background App Activity, turn Derrick off, wait a second, then turn it on. Quit Derrick, then open it again.
+            Tap Try Again. If it still fails, quit Derrick completely and open it once more.
+            """,
+            recovery: .retryDaemon
+        )
+    }
+
+    /// Copy for first-time Login Items approval only.
+    /// macOS does not show an in-app prompt after Derrick has been listed once.
+    static func backgroundServiceDidNotStartFailure() -> ClassifiedFailure {
+        ClassifiedFailure(
+            title: "Background Service Needs Permission",
+            message: """
+            macOS is blocking Derrick’s background helper. Open System Settings → General → Login Items, find Derrick under Background App Activity, turn it on, then tap Try Again.
             """,
             recovery: .openLoginItems
         )

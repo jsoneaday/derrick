@@ -65,6 +65,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
 
 struct LLMModelSettingsView: View {
     @ObservedObject var helperModelSettings: LLMModelSettings
+    @ObservedObject var modelThinkingSettings: LLMModelThinkingSettings
     private let credentialResolver = AppSecretResolver()
     @ObservedObject private var contentSensitivity = ContentSensitivityGrantService.shared
     @ObservedObject private var usageLimits = UsageLimitsService.shared
@@ -230,12 +231,44 @@ struct LLMModelSettingsView: View {
     }
 
     private var pluginSafetyReviewerDetail: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Plugin safety reviewer")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
             Text("A separate model checks the draft against the user’s request and Derrick’s safety rules before compilation.")
                 .foregroundStyle(.secondary)
-            Text("Selected model: \(helperModelSettings.pluginSafetyReviewerModel.helperDisplayName)")
+            Form {
+                Section("Reviewer model") {
+                    helperModelPicker(
+                        selection: $helperModelSettings.pluginSafetyReviewerModel,
+                        accessibilityLabel: "Plugin safety reviewer model"
+                    )
+                }
+                if !helperModelSettings.pluginSafetyReviewerModel.thinkingOptions.isEmpty {
+                    Section("Thinking level") {
+                        Picker("Thinking level", selection: Binding(
+                            get: {
+                                modelThinkingSettings.pluginSafetyReviewerThinking(
+                                    for: helperModelSettings.pluginSafetyReviewerModel
+                                ).id
+                            },
+                            set: { newID in
+                                let model = helperModelSettings.pluginSafetyReviewerModel
+                                if let option = model.thinkingOptions.first(where: { $0.id == newID }) {
+                                    modelThinkingSettings.setPluginSafetyReviewerThinking(option, for: model)
+                                }
+                            }
+                        )) {
+                            ForEach(helperModelSettings.pluginSafetyReviewerModel.thinkingOptions, id: \.id) { option in
+                                Text(option.displayName).tag(option.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Text("Default is Medium. Higher levels may improve review quality but use more tokens.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -594,5 +627,8 @@ struct LLMModelSettingsView: View {
         username: "ui",
         password: "ui"
     )
-    LLMModelSettingsView(helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)))
+    LLMModelSettingsView(
+        helperModelSettings: LLMModelSettings(repository: DBRepository(configuration: config)),
+        modelThinkingSettings: LLMModelThinkingSettings(repository: DBRepository(configuration: config))
+    )
 }

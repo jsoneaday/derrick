@@ -14,6 +14,7 @@ import Structure
 ///   JobKeepAlive --install-and-run — install then run
 
 DerrickProcessRole.isDaemon = true
+fputs("[derrickd] argv=\(CommandLine.arguments)\n", stderr)
 DaemonRuntime.onBootstrapModules = {
     await DaemonModuleBootstrap.startAllModules()
 }

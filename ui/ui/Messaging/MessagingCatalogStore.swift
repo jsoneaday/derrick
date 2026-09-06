@@ -11,21 +11,36 @@ final class MessagingCatalogStore: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var repository: DBRepository?
+    private var sendOnlyConnectors: Set<String> = []
+    private var pollInboxConnectors: Set<String> = []
+    private var syncThreadsConnectors: Set<String> = []
 
     func configure(repository: DBRepository) async {
         self.repository = repository
         await reloadFromFactory()
     }
 
-    func reloadFromFactory() async {
+    func reloadFromFactory(preservingPluginIDs: Set<String> = []) async {
         guard let repository else { return }
         lastError = nil
         do {
             let manifests = try await repository.listLatestPluginFactoryManifests()
             var connectorIDs: [String] = []
+            var sendOnly: Set<String> = []
+            var pollInbox: Set<String> = []
+            var syncThreads: Set<String> = []
             for row in manifests {
                 guard AgentPluginManifest.isConnector(manifestJSON: row.manifestJSON) else { continue }
                 connectorIDs.append(row.pluginID)
+                if PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: row.manifestJSON) {
+                    sendOnly.insert(row.pluginID)
+                }
+                if PluginFactoryValidationExpectations.supportsPollInbox(manifestJSON: row.manifestJSON) {
+                    pollInbox.insert(row.pluginID)
+                }
+                if PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: row.manifestJSON) {
+                    syncThreads.insert(row.pluginID)
+                }
                 try await repository.upsertMessagingConnector(
                     MessagingConnectorDTO(
                         pluginID: row.pluginID,
@@ -33,7 +48,19 @@ final class MessagingCatalogStore: ObservableObject {
                     )
                 )
             }
+            for pluginID in preservingPluginIDs where !connectorIDs.contains(pluginID) {
+                connectorIDs.append(pluginID)
+                try await repository.upsertMessagingConnector(
+                    MessagingConnectorDTO(
+                        pluginID: pluginID,
+                        displayName: Self.displayName(pluginID: pluginID)
+                    )
+                )
+            }
             try await repository.pruneMessagingConnectors(keeping: Set(connectorIDs))
+            sendOnlyConnectors = sendOnly
+            pollInboxConnectors = pollInbox
+            syncThreadsConnectors = syncThreads
             let stored = try await repository.listMessagingConnectors()
             let storedByID = Dictionary(uniqueKeysWithValues: stored.map { ($0.pluginID, $0) })
             connectors = connectorIDs.compactMap { storedByID[$0] }
@@ -61,7 +88,23 @@ final class MessagingCatalogStore: ObservableObject {
         connectors.contains { $0.pluginID == pluginID }
     }
 
-    private static func displayName(pluginID: String) -> String {
+    func isSendOnlyConnector(pluginID: String) -> Bool {
+        sendOnlyConnectors.contains(pluginID)
+    }
+
+    func supportsPollInbox(pluginID: String) -> Bool {
+        pollInboxConnectors.contains(pluginID)
+    }
+
+    func supportsSyncThreads(pluginID: String) -> Bool {
+        syncThreadsConnectors.contains(pluginID)
+    }
+
+    func supportsThreadDiscovery(pluginID: String) -> Bool {
+        supportsSyncThreads(pluginID: pluginID)
+    }
+
+    static func displayName(pluginID: String) -> String {
         pluginID
             .split(separator: "-")
             .map { part in

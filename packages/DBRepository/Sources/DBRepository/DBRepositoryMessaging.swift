@@ -27,6 +27,7 @@ public extension DBRepository {
         let rows = try withDatabaseHandle { handle in
             let sql = """
             SELECT c.plugin_id, c.display_name, c.listening, c.created_at, c.updated_at,
+                   c.listening_since,
                    COALESCE(SUM(t.unread_count), 0)
             FROM messaging_connectors c
             LEFT JOIN messaging_threads t ON t.plugin_id = c.plugin_id
@@ -71,10 +72,17 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             try requireMessagingConnector(pluginID: trimmed, on: handle)
             let updated = Self.iso8601Formatter().string(from: Date())
+            let listeningSinceSQL: String
+            if listening {
+                listeningSinceSQL = quoted(updated)
+            } else {
+                listeningSinceSQL = "NULL"
+            }
             try Self.execute("""
             UPDATE messaging_connectors
             SET listening = \(listening ? 1 : 0),
-                updated_at = \(quoted(updated))
+                updated_at = \(quoted(updated)),
+                listening_since = \(listeningSinceSQL)
             WHERE plugin_id = \(quoted(trimmed));
             """, on: handle)
         }
@@ -100,6 +108,29 @@ public extension DBRepository {
         }
     }
 
+    /// Drops thread rows (and cascaded messages) for a connector that are not in `vendorThreadIDs`.
+    func pruneMessagingThreads(pluginID: String, keepingVendorThreadIDs: Set<String>) throws {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw DBRepositoryError.sqliteOperationFailed("Messaging connector id is required.")
+        }
+        try withDatabaseHandle { handle in
+            if keepingVendorThreadIDs.isEmpty {
+                try Self.execute("""
+                DELETE FROM messaging_threads
+                WHERE plugin_id = \(quoted(trimmed));
+                """, on: handle)
+                return
+            }
+            let quotedIDs = keepingVendorThreadIDs.map { quoted($0) }.joined(separator: ", ")
+            try Self.execute("""
+            DELETE FROM messaging_threads
+            WHERE plugin_id = \(quoted(trimmed))
+              AND vendor_thread_id NOT IN (\(quotedIDs));
+            """, on: handle)
+        }
+    }
+
     func setMessagingThreadMuted(id: String, muted: Bool) throws {
         try withDatabaseHandle { handle in
             try Self.execute("""
@@ -117,6 +148,19 @@ public extension DBRepository {
             SET unread_count = 0
             WHERE id = \(quoted(id));
             """, on: handle)
+        }
+    }
+
+    /// Removes automated test messages that were accidentally persisted in a live database.
+    func purgeMessagingMessages(withBodyPrefix prefix: String) throws -> Int {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return 0 }
+        return try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_messages
+            WHERE body LIKE \(quoted(trimmed + "%"));
+            """, on: handle)
+            return Int(sqlite3_changes(handle))
         }
     }
 
@@ -413,11 +457,16 @@ public extension DBRepository {
     }
 
     private func decodeMessagingConnector(statement: OpaquePointer) throws -> MessagingConnectorDTO {
-        MessagingConnectorDTO(
+        let listeningSinceRaw = columnOptionalString(statement, index: 5)
+        let listeningSince = listeningSinceRaw.flatMap {
+            Self.iso8601Formatter().date(from: $0)
+        }
+        return MessagingConnectorDTO(
             pluginID: try columnString(statement, index: 0),
             displayName: try columnString(statement, index: 1),
             listening: sqlite3_column_int(statement, 2) != 0,
-            unreadCount: Int(sqlite3_column_int(statement, 5)),
+            unreadCount: Int(sqlite3_column_int(statement, 6)),
+            listeningSince: listeningSince,
             createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 3)) ?? .now,
             updatedAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 4)) ?? .now
         )

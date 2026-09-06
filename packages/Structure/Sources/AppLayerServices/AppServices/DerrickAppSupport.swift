@@ -74,8 +74,9 @@ public enum DerrickAppSupport {
         let destSize = fm.fileExists(atPath: destDB.path)
             ? ((try? fm.attributesOfItem(atPath: destDB.path)[.size] as? NSNumber)?.int64Value ?? 0)
             : 0
-        // Skip if dest already holds a full copy (same size or larger).
-        if destSize >= legacySize, destSize > 0 { return }
+        // Skip if dest already has a usable DB. Retrying a permission-denied copy on
+        // every launch stalls "Opening local database…" and can clobber WAL.
+        if destSize > 0 { return }
 
         try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         for name in ["derrick.sqlite3", "derrick.sqlite3-wal", "derrick.sqlite3-shm"] {

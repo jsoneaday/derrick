@@ -1,3 +1,5 @@
+import Foundation
+import Structure
 import Testing
 @testable import EgressProxy
 

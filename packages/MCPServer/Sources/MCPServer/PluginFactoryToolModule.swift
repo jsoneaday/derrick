@@ -91,6 +91,16 @@ public enum PluginFactoryToolModule: MCPToolModule {
             stage = .review
             diagnostics = reviewDiagnostics(summary: summary, findings: findings)
             retryAllowed = true
+        case .draftValidationFailed(let findings):
+            status = .blocked
+            stage = .validation
+            diagnostics = findings.map {
+                ToolExecutionOutcome.Diagnostic(
+                    code: "plugin_factory_draft_validation",
+                    message: $0
+                )
+            }
+            retryAllowed = true
         case .packageFailed:
             status = .failed
             stage = .compilation

@@ -17,6 +17,10 @@ enum MessagingConnectorCredentials {
             repository: repository
         )
         migrateLegacyCredentialsIfNeeded(pluginID: pluginID, secrets: secrets)
+        PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
+            pluginID: pluginID,
+            fields: secrets
+        )
         guard !secrets.isEmpty else { return .ok }
 
         let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: secrets)

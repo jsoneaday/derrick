@@ -4,6 +4,21 @@ import Foundation
 import Plugin
 import Structure
 
+/// Messaging's first paint: the empty catalog vs a specific vendor connector.
+enum MessagingConversationLanding: Equatable {
+    case catalogRoot
+    case vendorConnector(pluginID: String)
+
+    static func resolve(selectedPluginID: String?) -> Self {
+        guard let pluginID = selectedPluginID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !pluginID.isEmpty
+        else {
+            return .catalogRoot
+        }
+        return .vendorConnector(pluginID: pluginID)
+    }
+}
+
 /// UI facade: catalog and conversation stay separate objects.
 @MainActor
 final class MessagingStore: ObservableObject {
@@ -51,14 +66,70 @@ final class MessagingStore: ObservableObject {
         guard let selectedPluginID else { return nil }
         return connectors.first { $0.pluginID == selectedPluginID }
     }
+    var selectedConnectorDisplayName: String {
+        if let selectedConnector {
+            return selectedConnector.displayName
+        }
+        if let selectedPluginID {
+            return MessagingCatalogStore.displayName(pluginID: selectedPluginID)
+        }
+        return "Messaging"
+    }
+    var conversationLanding: MessagingConversationLanding {
+        MessagingConversationLanding.resolve(selectedPluginID: selectedPluginID)
+    }
     var selectedThread: MessagingThreadDTO? { session.selectedThread }
     var currentRoute: MessagingRoute { session.currentRoute }
+    var isSendOnlyConnector: Bool {
+        guard let selectedPluginID else { return false }
+        return catalog.isSendOnlyConnector(pluginID: selectedPluginID)
+    }
+    var supportsThreadDiscovery: Bool {
+        guard let selectedPluginID else { return false }
+        return catalog.supportsThreadDiscovery(pluginID: selectedPluginID)
+    }
+    var canPickThread: Bool {
+        selectedThread == nil
+            && supportsThreadDiscovery
+            && !threads.isEmpty
+            && selectedConnector?.listening == true
+            && !isConnectorSyncing
+    }
+    var needsThreadDiscovery: Bool {
+        selectedThread == nil
+            && supportsThreadDiscovery
+            && threads.isEmpty
+            && selectedConnector?.listening == true
+    }
     var canSendInSelectedThread: Bool {
         selectedThread != nil
             && selectedConnector?.listening == true
             && !isSending
             && !isConnectorSyncing
     }
+    var canComposeSendOnly: Bool {
+        canComposeManualChannel && isSendOnlyConnector
+    }
+    var canComposeManualChannel: Bool {
+        guard selectedThread == nil,
+              selectedConnector?.listening == true,
+              !isSending,
+              !isConnectorSyncing,
+              let pluginID = selectedPluginID else {
+            return false
+        }
+        if isSendOnlyConnector {
+            return true
+        }
+        if catalog.supportsPollInbox(pluginID: pluginID),
+           !catalog.supportsThreadDiscovery(pluginID: pluginID),
+           threads.isEmpty {
+            return true
+        }
+        return false
+    }
+    /// Legacy alias for manual destination entry (send-only or connectors without thread discovery).
+    var canComposeNewChannel: Bool { canComposeManualChannel }
 
     func setConnectorSyncing(_ syncing: Bool) {
         isConnectorSyncing = syncing
@@ -76,7 +147,8 @@ final class MessagingStore: ObservableObject {
     }
 
     func syncConnectorsFromFactory() async {
-        await catalog.reloadFromFactory()
+        let preserving = Set([session.selectedPluginID].compactMap { $0 })
+        await catalog.reloadFromFactory(preservingPluginIDs: preserving)
         session.dropSelectionIfConnectorMissing()
     }
 
@@ -84,7 +156,10 @@ final class MessagingStore: ObservableObject {
         catalog.unreadTotal(for: pluginID)
     }
 
-    func openConnector(pluginID: String) async {
+    @discardableResult
+    func openConnector(pluginID: String) async -> Bool {
+        session.selectConnector(pluginID: pluginID)
+        await catalog.reloadFromFactory(preservingPluginIDs: [pluginID])
         if let repository {
             switch await MessagingConnectorCredentials.ensureIfNeeded(
                 pluginID: pluginID,
@@ -93,18 +168,28 @@ final class MessagingStore: ObservableObject {
             case .ok:
                 break
             case .cancelled:
-                return
+                return false
             }
             try? await repository.setMessagingConnectorListening(pluginID: pluginID, listening: true)
+            await catalog.refreshBadges()
             DerrickMessagingIngressSignal.postPoll()
         }
-        await session.openConnector(pluginID: pluginID)
-        guard let repository, catalog.contains(pluginID: pluginID) else { return }
-        await connectorRuntime.bootstrap(
+        await session.openConnector(
             pluginID: pluginID,
-            store: self,
-            session: session
+            autoOpenMostRecent: !catalog.supportsThreadDiscovery(pluginID: pluginID)
         )
+        guard session.selectedPluginID == pluginID else { return false }
+        if repository != nil, catalog.contains(pluginID: pluginID) {
+            setConnectorSyncing(true)
+            Task { @MainActor in
+                await connectorRuntime.bootstrap(
+                    pluginID: pluginID,
+                    store: self,
+                    session: session
+                )
+            }
+        }
+        return true
     }
 
     func updateCredentials(pluginID: String) async -> Bool {
@@ -167,6 +252,85 @@ final class MessagingStore: ObservableObject {
                 )
             }
         }
+    }
+
+    /// Send-only connectors: create a thread row for the destination ID, then send.
+    func sendMessage(toChannel vendorThreadID: String, text: String) async {
+        guard let repository, let pluginID = selectedPluginID else { return }
+        let channel = vendorThreadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !channel.isEmpty else {
+            session.setLastError("Enter a destination ID.")
+            return
+        }
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await openChannelThread(pluginID: pluginID, channelID: channel, repository: repository)
+            guard let thread = session.threads.first(where: { $0.vendorThreadID == channel }) else {
+                session.setLastError("Could not open that channel.")
+                return
+            }
+            await session.selectThread(id: thread.id)
+            try await connectorRuntime.send(
+                pluginID: pluginID,
+                text: body,
+                thread: thread,
+                repository: repository,
+                store: self,
+                session: session
+            )
+            session.setLastError(nil)
+            DerrickMessagingIngressSignal.postPoll()
+        } catch {
+            session.setLastError(error.localizedDescription)
+        }
+    }
+
+    /// Legacy manual destination entry for connectors without thread discovery.
+    func connectToChannel(_ vendorThreadID: String) async {
+        guard let repository, let pluginID = selectedPluginID else { return }
+        let channel = vendorThreadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !channel.isEmpty else {
+            session.setLastError("Enter a destination ID.")
+            return
+        }
+        do {
+            try await openChannelThread(pluginID: pluginID, channelID: channel, repository: repository)
+            await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: true)
+            session.setLastError(nil)
+            DerrickMessagingIngressSignal.postPoll()
+        } catch {
+            session.setLastError(error.localizedDescription)
+        }
+    }
+
+    private func openChannelThread(
+        pluginID: String,
+        channelID: String,
+        repository: DBRepository
+    ) async throws {
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: pluginID,
+                vendorThreadID: channelID,
+                title: channelID
+            )
+        )
+        await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
+    }
+
+    /// Opens a discovered conversation by vendor ID (label is shown in the picker).
+    func openDiscoveredThread(vendorThreadID: String) async {
+        guard let thread = threads.first(where: { $0.vendorThreadID == vendorThreadID }) else {
+            session.setLastError("That conversation is no longer available. Try refreshing the list.")
+            return
+        }
+        await session.selectThread(id: thread.id)
+        session.setLastError(nil)
+        DerrickMessagingIngressSignal.postPoll()
     }
 
     func selectThread(id: String) async {

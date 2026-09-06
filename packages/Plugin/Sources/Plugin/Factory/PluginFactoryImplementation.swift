@@ -49,11 +49,68 @@ public struct PluginFactorySession: Sendable {
                 request = PluginFactoryBuilderRequest(
                     userGoal: userGoal,
                     previousDraft: currentDraft,
-                    feedback: error.localizedDescription
+                    feedback: Self.builderFeedback(from: error, userGoal: userGoal)
                 )
             }
         }
         throw lastError ?? PluginFactoryError.invalidSource("Factory stopped without a result.")
+    }
+
+    private static func builderFeedback(from error: PluginFactoryError, userGoal: String) -> String {
+        switch error {
+        case .draftValidationFailed(let findings):
+            var parts = [
+                "Deterministic draft validation failed before safety review.",
+                "Fix every item below in your next JSON draft response:",
+            ]
+            parts.append(contentsOf: findings.map { "- \($0)" })
+            if PluginFactoryScopeHints.isSendAndReceive(userGoal) {
+                parts.append(
+                    """
+                    Send + receive scope: use single-page sync_threads and poll_inbox (sync-1, poll-1, send-1). \
+                    Do not paginate unless every emitted request_id has an http_results fixture.
+                    """
+                )
+            }
+            parts.append(
+                """
+                Connector test_input_json must use a hops array replayed by the factory. Match each http.request \
+                request_id to an http_results fixture. Declare the same ops in messaging_ops and params.messaging_op.
+                """
+            )
+            return parts.joined(separator: "\n")
+        case .reviewRejected(let summary, let findings):
+            var parts = [
+                "Safety review rejected the draft.",
+                "Summary: \(summary)",
+            ]
+            if !findings.isEmpty {
+                parts.append("Findings:")
+                parts.append(contentsOf: findings.map { "- \($0)" })
+            }
+            if PluginFactoryScopeHints.isSendAndReceive(userGoal) {
+                parts.append(
+                    """
+                    Send + receive scope: use single-page sync_threads and poll_inbox only (sync-1, poll-1, send-1). \
+                    Do not emit sync-2/poll-2 unless test_input_json includes matching http_results fixtures.
+                    """
+                )
+            }
+            parts.append(
+                """
+                Before returning the next draft, update test_input_json to a hops array replayed by the factory:
+                {"hops":[{"kind":"message_in_room","params":{"messaging_op":"send_message",...}},\
+                {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
+                "params":{...}}]}
+                Include http_results fixtures for every messaging_op you implement. Match request_id values \
+                in fixtures to the http.request envelopes your python_source emits. De-duplicate http_results \
+                by request_id using stable sorting — do not overwrite duplicates by response order.
+                """
+            )
+            return parts.joined(separator: "\n")
+        default:
+            return error.localizedDescription
+        }
     }
 }
 
@@ -70,20 +127,24 @@ public struct PluginFactory: Sendable {
     ) async throws -> PluginFactoryRelease {
         let manifest = try validatedManifest(from: draft.manifestJSON)
         try validateSource(draft.guestSource)
+        try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
 
-        let direct: PluginFactoryExecutionResult
+        let hopRun: PluginFactoryHopTestRun
         do {
-            direct = try await executor.runGuestSource(
+            hopRun = try await PluginFactoryHopTestRunner.run(
                 source: draft.guestSource,
-                input: draft.testInput
+                testInput: draft.testInput,
+                executor: executor
             )
         } catch {
             await logger("[plugin_factory] direct_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.directRunFailed(error.localizedDescription)
         }
+        let direct = hopRun.final
+        let reviewRun = hopRun.aggregatedDirectRun
         await logger(
             "[plugin_factory] direct_test exit=\(direct.exitCode) " +
-            "stdout_chars=\(direct.stdout.count) stderr_chars=\(direct.stderr.count)"
+            "stdout_chars=\(reviewRun.stdout.count) stderr_chars=\(direct.stderr.count)"
         )
         guard direct.exitCode == 0 else {
             await logger("[plugin_factory] direct_test rejected=\(pluginFactoryLogValue(outputSummary(direct)))")
@@ -91,6 +152,22 @@ public struct PluginFactory: Sendable {
         }
         do {
             try validateOutput(direct.stdout)
+            try PluginFactoryDraftValidator.validateDirectTest(
+                draft: draft,
+                manifest: manifest,
+                hopRun: hopRun
+            )
+        } catch let error as PluginFactoryError {
+            switch error {
+            case .draftValidationFailed:
+                await logger(
+                    "[plugin_factory] draft_validation failed=\(pluginFactoryLogValue(error.localizedDescription))"
+                )
+                throw error
+            default:
+                await logger("[plugin_factory] direct_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
+                throw error
+            }
         } catch {
             await logger("[plugin_factory] direct_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.invalidDirectOutput(error.localizedDescription)
@@ -98,7 +175,7 @@ public struct PluginFactory: Sendable {
 
         let review: PluginFactoryReview
         do {
-            review = try await reviewer.review(draft: draft, directRun: direct)
+            review = try await reviewer.review(draft: draft, directRun: reviewRun)
         } catch {
             await logger("[plugin_factory] review failed=\(pluginFactoryLogValue(error.localizedDescription))")
             throw error
@@ -132,16 +209,18 @@ public struct PluginFactory: Sendable {
             throw PluginFactoryError.packageFailed("Guest source artifact is empty.")
         }
 
-        let packaged: PluginFactoryExecutionResult
+        let packagedRun: PluginFactoryHopTestRun
         do {
-            packaged = try await executor.runPackagedArtifact(
-                artifact,
-                input: draft.testInput
+            packagedRun = try await PluginFactoryHopTestRunner.run(
+                artifact: artifact,
+                testInput: draft.testInput,
+                executor: executor
             )
         } catch {
             await logger("[plugin_factory] packaged_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.packagedRunFailed(error.localizedDescription)
         }
+        let packaged = packagedRun.final
         await logger(
             "[plugin_factory] packaged_test exit=\(packaged.exitCode) " +
             "stdout_chars=\(packaged.stdout.count) stderr_chars=\(packaged.stderr.count)"
@@ -152,6 +231,22 @@ public struct PluginFactory: Sendable {
         }
         do {
             try validateOutput(packaged.stdout)
+            try PluginFactoryDraftValidator.validateDirectTest(
+                draft: draft,
+                manifest: manifest,
+                hopRun: packagedRun
+            )
+        } catch let error as PluginFactoryError {
+            switch error {
+            case .draftValidationFailed:
+                await logger(
+                    "[plugin_factory] packaged_validation failed=\(pluginFactoryLogValue(error.localizedDescription))"
+                )
+                throw error
+            default:
+                await logger("[plugin_factory] packaged_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
+                throw error
+            }
         } catch {
             await logger("[plugin_factory] packaged_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
             throw PluginFactoryError.invalidPackagedOutput(error.localizedDescription)

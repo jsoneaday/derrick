@@ -12,6 +12,7 @@ final class LLMModelThinkingSettings: ObservableObject {
     private let username: String
     private let password: String
     private static let configKey = "modelThinkingSelections"
+    private static let pluginSafetyReviewerPrefix = "pluginSafetyReviewer:"
 
     init(repository: DBRepository, username: String = "ui", password: String = "ui") {
         self.repository = repository
@@ -36,10 +37,25 @@ final class LLMModelThinkingSettings: ObservableObject {
         model.resolvedThinkingOption(id: selections[model.id])
     }
 
+    func pluginSafetyReviewerThinking(for model: LLMModelChoice) -> ModelThinkingOption {
+        model.resolvedThinkingOption(id: selections[Self.pluginSafetyReviewerKey(for: model)])
+            ?? model.preferredMediumThinkingOption
+    }
+
     func setThinking(_ option: ModelThinkingOption, for model: LLMModelChoice) {
         guard model.thinkingOptions.contains(where: { $0.id == option.id }) else { return }
         selections[model.id] = option.id
         Task { await save() }
+    }
+
+    func setPluginSafetyReviewerThinking(_ option: ModelThinkingOption, for model: LLMModelChoice) {
+        guard model.thinkingOptions.contains(where: { $0.id == option.id }) else { return }
+        selections[Self.pluginSafetyReviewerKey(for: model)] = option.id
+        Task { await save() }
+    }
+
+    private static func pluginSafetyReviewerKey(for model: LLMModelChoice) -> String {
+        "\(pluginSafetyReviewerPrefix)\(model.id)"
     }
 
     private func save() async {

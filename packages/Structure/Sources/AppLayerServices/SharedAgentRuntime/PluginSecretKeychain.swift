@@ -12,6 +12,9 @@ public enum PluginSecretKeychain: Sendable {
     }
 
     public static func hasStoredValue(pluginID: String, fieldID: String) -> Bool {
+        if PluginSecretDevelopmentSource.resolve(pluginID: pluginID, fieldID: fieldID) != nil {
+            return true
+        }
         guard let value = try? loadFromKeychain(pluginID: pluginID, fieldID: fieldID) else {
             return false
         }

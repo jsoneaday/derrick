@@ -20,7 +20,19 @@ final class ConnectorMessagingRuntime {
         defer { store.setConnectorSyncing(false) }
         do {
             try await client.bootstrap(pluginID: pluginID)
-            await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: true)
+            await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
+            if store.supportsThreadDiscovery, session.threads.isEmpty {
+                throw ConnectorMessagingError.pluginFailed(
+                    "No conversations were returned. Check the bot token and invite the bot to Slack channels, then tap Refresh list."
+                )
+            }
+            if store.supportsThreadDiscovery {
+                if session.threads.count == 1, let threadID = session.threads.first?.id {
+                    await session.selectThread(id: threadID)
+                }
+            } else if let threadID = session.threads.first?.id {
+                await session.selectThread(id: threadID)
+            }
             if let threadID = session.selectedThreadID {
                 await session.reloadMessagesForThread(id: threadID)
             }

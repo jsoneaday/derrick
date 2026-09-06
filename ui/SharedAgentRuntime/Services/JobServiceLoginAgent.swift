@@ -72,6 +72,11 @@ public enum JobServiceLoginAgent {
     }
 
     /// Register / refresh daemon. Call from the main actor after services are healthy.
+    ///
+    /// The session LaunchAgent (`derrick.ui.Daemon.session`) is the start path.
+    /// SMAppService Login Items is not: the Settings switch stays on while launchd
+    /// points at a previous DerivedData bundle, and `unregister()` forces a new
+    /// approval with no in-app prompt.
     @MainActor
     @discardableResult
     public static func ensureRegistered() async throws -> Result {
@@ -100,59 +105,61 @@ public enum JobServiceLoginAgent {
 
         if staleProgram {
             fputs(
-                "[derrickd] launchd still points at a previous app bundle — bootout and reinstall\n",
+                "[derrickd] session agent still points at a previous app bundle — bootout and reinstall\n",
                 stderr
             )
             bootoutRegisteredDaemon()
-            try? await smAgent.unregister()
         }
 
+        // Best-effort SM enable for login persistence. Never unregister on path
+        // change — that is what keeps asking for Login Items.
         var smDetail = "SM skipped"
-        var smEnabled = false
         do {
             if let r = try registerViaSMAppService() {
                 smDetail = r.detail
-                smEnabled = r.isRunningOrEnabled
             }
         } catch {
             smDetail = "SM failed: \(error.localizedDescription)"
             fputs("[derrickd] \(smDetail)\n", stderr)
         }
 
-        let loaded = isLaunchdJobLoaded()
-        if loaded {
+        if isLaunchdJobLoaded(), !staleProgram {
             kickstartRegisteredDaemon()
             return Result(
-                method: smEnabled ? .both : .userLaunchAgent,
+                method: .userLaunchAgent,
                 statusDescription: "launchd loaded",
                 isRunningOrEnabled: true,
                 detail: "\(smDetail); label=\(loadedLaunchdLabel() ?? label); mach=\(DerrickServiceID.daemon.machServiceName)"
             )
         }
 
-        // SMAppService can report enabled while the session job is not loaded. The
-        // unsandboxed helper installs `derrick.ui.Daemon.session` (BTM-safe).
+        var helperError: Error?
         do {
             try runHelperInstall(executable: paths.executable)
         } catch {
+            helperError = error
             fputs("[derrickd] helper --install-launchd failed: \(error.localizedDescription)\n", stderr)
-            if smEnabled {
-                reloadRegisteredDaemon()
-            }
-            guard isLaunchdJobLoaded() else {
-                throw error
-            }
+            reloadRegisteredDaemon()
         }
-        guard isLaunchdJobLoaded() else {
-            throw AgentError.registerFailed(
-                "Could not register derrickd. \(smDetail); session launchd job not loaded"
+
+        if isLaunchdJobLoaded() {
+            kickstartRegisteredDaemon()
+            return Result(
+                method: .userLaunchAgent,
+                statusDescription: "launchd loaded",
+                isRunningOrEnabled: true,
+                detail: "\(smDetail); helper --install-launchd ok; label=\(loadedLaunchdLabel() ?? DerrickServiceID.daemonSessionLaunchdLabel); mach=\(DerrickServiceID.daemon.machServiceName)"
             )
         }
-        return Result(
-            method: smEnabled ? .both : .userLaunchAgent,
-            statusDescription: "launchd loaded",
-            isRunningOrEnabled: true,
-            detail: "\(smDetail); helper --install-launchd ok; label=\(DerrickServiceID.daemonSessionLaunchdLabel); mach=\(DerrickServiceID.daemon.machServiceName)"
+
+        if smAgent.status == .requiresApproval {
+            throw AgentError.needsLoginItemsApproval
+        }
+        if let helperError {
+            throw helperError
+        }
+        throw AgentError.registerFailed(
+            "Could not register derrickd. \(smDetail); session launchd job not loaded"
         )
     }
 
@@ -250,7 +257,7 @@ public enum JobServiceLoginAgent {
         DerrickAppSupport.daemonSessionLaunchAgentPlistURL(homeDirectory: realUserHomeDirectory())
     }
 
-    private static func isLaunchdJobLoaded() -> Bool {
+    public static func isLaunchdJobLoaded() -> Bool {
         loadedLaunchdDomain() != nil
     }
 
@@ -406,8 +413,9 @@ public enum JobServiceLoginAgent {
 
     // MARK: - Helper install
 
-    /// `DaemonLaunchAgentInstaller` can spend ~30s on bootstrap + kickstart.
-    static let helperInstallTimeoutSeconds: TimeInterval = 60
+    /// Installer writes the session plist and exits. Do not use `open -W`:
+    /// if arguments are dropped the daemon runs forever and bootstrap waits 60s.
+    static let helperInstallTimeoutSeconds: TimeInterval = 20
 
     private static func runHelperInstall(executable: URL) throws {
         // Launch JobKeepAlive.app (not the Mach-O directly). A sandboxed UI spawning the
@@ -422,35 +430,34 @@ public enum JobServiceLoginAgent {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-W", "-n", appURL.path, "--args", "--install-launchd"]
+        process.arguments = ["-g", "-n", appURL.path, "--args", "--install-launchd"]
         let err = Pipe()
         let out = Pipe()
         process.standardError = err
         process.standardOutput = out
         try process.run()
-        let deadline = Date().addingTimeInterval(helperInstallTimeoutSeconds)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning {
-            process.terminate()
-            Thread.sleep(forTimeInterval: 0.2)
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-            throw AgentError.registerFailed(
-                "daemon --install-launchd timed out after \(Int(helperInstallTimeoutSeconds))s"
-            )
-        }
+        process.waitUntilExit()
         let errText = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if !errText.isEmpty {
             fputs(errText, stderr)
         }
         if process.terminationStatus != 0 {
             throw AgentError.registerFailed(
-                "daemon --install-launchd exit \(process.terminationStatus): \(errText)"
+                "daemon --install-launchd open failed (\(process.terminationStatus)): \(errText)"
             )
         }
+
+        let deadline = Date().addingTimeInterval(helperInstallTimeoutSeconds)
+        while Date() < deadline {
+            if isLaunchdJobLoaded() {
+                fputs("[derrickd] helper --install-launchd: launchd job loaded\n", stderr)
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        throw AgentError.registerFailed(
+            "daemon --install-launchd did not load the session job within \(Int(helperInstallTimeoutSeconds))s"
+        )
     }
 
     private static func describe(_ status: SMAppService.Status) -> String {

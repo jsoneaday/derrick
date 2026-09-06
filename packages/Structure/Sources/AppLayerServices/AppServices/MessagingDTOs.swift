@@ -7,6 +7,7 @@ public struct MessagingConnectorDTO: Codable, Sendable, Hashable, Identifiable {
     public var displayName: String
     public var listening: Bool
     public var unreadCount: Int
+    public var listeningSince: Date?
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -15,6 +16,7 @@ public struct MessagingConnectorDTO: Codable, Sendable, Hashable, Identifiable {
         displayName: String,
         listening: Bool = false,
         unreadCount: Int = 0,
+        listeningSince: Date? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -22,6 +24,7 @@ public struct MessagingConnectorDTO: Codable, Sendable, Hashable, Identifiable {
         self.displayName = displayName
         self.listening = listening
         self.unreadCount = unreadCount
+        self.listeningSince = listeningSince
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

@@ -45,19 +45,19 @@ import Testing
         let result = AppBootstrapStatus.classifyError(
             JobServiceLoginAgent.AgentError.needsLoginItemsApproval
         )
-        #expect(result.title == "Background Service Did Not Start")
-        #expect(result.message.lowercased().contains("does not show a permission popup"))
-        #expect(result.message.lowercased().contains("turn derrick off"))
+        #expect(result.title == "Background Service Needs Permission")
+        #expect(result.message.lowercased().contains("login items"))
         #expect(result.recovery == .openLoginItems)
     }
 
     @MainActor
-    @Test func classifyDaemonRegisterFailedUsesSameRecovery() {
+    @Test func classifyDaemonRegisterFailedRetriesInApp() {
         let result = AppBootstrapStatus.classifyError(
             JobServiceLoginAgent.AgentError.registerFailed("SM skipped")
         )
-        #expect(result.recovery == .openLoginItems)
-        #expect(result.message.lowercased().contains("switch can stay on"))
+        #expect(result.recovery == .retryDaemon)
+        #expect(result.message.lowercased().contains("try again"))
+        #expect(!result.message.lowercased().contains("turn derrick off"))
     }
 
     @MainActor

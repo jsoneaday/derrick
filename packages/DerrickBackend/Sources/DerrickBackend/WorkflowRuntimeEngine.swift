@@ -141,10 +141,24 @@ public actor WorkflowRuntimeEngine {
         do {
             switch request.kind {
             case .pluginFactoryCreate:
-                try await failWorkflow(
+                try await PluginFactoryCreateWorkflow.run(
                     workflowID: workflowID,
-                    message: "Plugin factory workflows are not available.",
-                    repositoryProvider: repositoryProvider
+                    request: request,
+                    baseContext: baseContext,
+                    repositoryProvider: repositoryProvider,
+                    executeTool: { toolName, argumentsJSON, context, principal, helperAPIKey, helperReviewerModelJSON, wfID, stage in
+                        try await self.executeTool(
+                            toolName: toolName,
+                            argumentsJSON: argumentsJSON,
+                            context: context,
+                            principal: principal,
+                            helperAPIKey: helperAPIKey,
+                            helperReviewerModelJSON: helperReviewerModelJSON,
+                            workflowID: wfID,
+                            stage: stage,
+                            repositoryProvider: repositoryProvider
+                        )
+                    }
                 )
             default:
                 try await failWorkflow(
@@ -170,6 +184,7 @@ public actor WorkflowRuntimeEngine {
         context: ExecutionContextWire,
         principal: ServicePrincipal,
         helperAPIKey: String?,
+        helperReviewerModelJSON: String?,
         workflowID: String,
         stage: String,
         repositoryProvider: @escaping @Sendable () async throws -> DBRepository
@@ -202,6 +217,7 @@ public actor WorkflowRuntimeEngine {
             toolName: toolName,
             argumentsJSON: argumentsJSON,
             helperAPIKey: helperAPIKey,
+            helperReviewerModelJSON: helperReviewerModelJSON,
             executionContextJSON: contextJSON
         )
         let result = try await call(request)

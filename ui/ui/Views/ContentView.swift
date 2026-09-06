@@ -263,8 +263,27 @@ struct ContentView: View {
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
+    @StateObject private var pluginCreationController = PluginCreationController()
     @State private var pluginAutocompleteHighlight = 0
     @State private var pluginAutocompleteDismissed = false
+
+    private var pluginWizardSessionID: String {
+        chatSessions.selectedSessionID ?? "plugin-wizard"
+    }
+
+    private var currentHelperAPIKey: String? {
+        secretResolver.resolve(
+            account: selectedProvider.secretAccount,
+            environmentKeys: selectedProvider.apiKeyEnvironmentKeys
+        )
+    }
+
+    private var currentHelperReviewerModelJSON: String? {
+        guard let settings = helperModelSettings else { return nil }
+        let model = settings.pluginSafetyReviewerModel
+        let thinking = modelThinkingSettings?.pluginSafetyReviewerThinking(for: model)
+        return try? model.encodeHelperModelWireJSON(thinking: thinking)
+    }
 
     private var canSendPrompt: Bool {
         sessionReady
@@ -367,6 +386,7 @@ struct ContentView: View {
             if let helperModelSettings = helperModelSettings {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
+                    modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
                     workspace: $workspace,
@@ -382,7 +402,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs {
+                } else if workspace != .debugLogs && workspace != .plugins {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
@@ -390,6 +410,23 @@ struct ContentView: View {
                     MessagingConversationView(store: messaging)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
+                case .plugins:
+                    PluginsWorkspaceView(
+                        controller: pluginCreationController,
+                        sessionReady: sessionReady,
+                        helperAPIKey: currentHelperAPIKey,
+                        helperReviewerModelJSON: currentHelperReviewerModelJSON,
+                        sessionID: pluginWizardSessionID,
+                        onOpenMessagingConnector: { pluginID in
+                            Task { @MainActor in
+                                let opened = await routeToMessagingConnector(pluginID)
+                                if opened {
+                                    pluginCreationController.dismissSuccess()
+                                }
+                                Task { await pluginFactoryList.reload() }
+                            }
+                        }
+                    )
                 default:
                     mainPanel
                 }
@@ -397,6 +434,9 @@ struct ContentView: View {
         }
         .onChange(of: workspace) { _, newValue in
             messaging.setWorkspaceActive(newValue == .messaging)
+            if newValue == .plugins {
+                pluginCreationController.showIntro()
+            }
         }
         .onAppear {
             messaging.setWorkspaceActive(workspace == .messaging)
@@ -561,11 +601,7 @@ struct ContentView: View {
                     }
 
                     if bootstrapStatus.isInitializing {
-                        Text(
-                            bootstrapStatus.phase == .preparingImage
-                                ? "First install prepares the guest runtime image. Keep Docker Desktop running."
-                                : "This may take a minute the first time while Docker images and containers are prepared."
-                        )
+                        Text(bootstrapProgressHint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -579,13 +615,23 @@ struct ContentView: View {
                     HStack(spacing: 10) {
                         Spacer(minLength: 0)
                         if bootstrapStatus.failureRecovery == .openLoginItems {
+                            Button("Open Login Items") {
+                                JobServiceLoginAgent.openLoginItemsSettings()
+                            }
+                            .buttonStyle(ModalSecondaryButtonStyle())
+                            Button("Try Again") {
+                                Task { await retryClientBootstrap() }
+                            }
+                            .buttonStyle(ModalPrimaryButtonStyle())
+                            .keyboardShortcut(.defaultAction)
+                        } else if bootstrapStatus.failureRecovery == .retryDaemon {
                             Button("OK") {
                                 bootstrapStatus.dismissFailure()
                             }
                             .buttonStyle(ModalSecondaryButtonStyle())
                             .keyboardShortcut(.cancelAction)
-                            Button("Open Login Items") {
-                                JobServiceLoginAgent.openLoginItemsSettings()
+                            Button("Try Again") {
+                                Task { await retryClientBootstrap() }
                             }
                             .buttonStyle(ModalPrimaryButtonStyle())
                             .keyboardShortcut(.defaultAction)
@@ -635,6 +681,28 @@ struct ContentView: View {
         .background(WindowConfigurator())
     }
 
+    private var bootstrapProgressHint: String {
+        switch bootstrapStatus.phase {
+        case .preparingImage, .checkingDocker, .verifyingEnvironment:
+            return "First launch may download a Docker image. Keep Docker Desktop running."
+        case .connectingHelper:
+            return "Starting the background helper…"
+        case .loadingSession:
+            return "Loading your local workspace…"
+        default:
+            return "Starting…"
+        }
+    }
+
+    @MainActor
+    private func retryClientBootstrap() async {
+        bootstrapStatus.dismissFailure()
+        bootstrapStatus.noteBootstrapCancelled()
+        await bootstrapStatus.runClientBootstrap {
+            await self.performClientBootstrap()
+        }
+    }
+
     /// Full UI client bootstrap (DB, Docker prewarm, Agent/MCP mesh). MainActor for `@State`.
     @MainActor
     private func performClientBootstrap() async {
@@ -662,6 +730,7 @@ struct ContentView: View {
                 await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
                 await PluginFactoryListStore.shared.configure(repository: repo)
+                pluginCreationController.configure(repository: repo)
 
                 bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
                 try await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
@@ -781,6 +850,7 @@ struct ContentView: View {
             await ServiceLogRecorder.shared.configure(repository: repo)
             sessionReady = true
             await PluginFactoryListStore.shared.configure(repository: repo)
+            pluginCreationController.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await messaging.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
@@ -1265,10 +1335,12 @@ struct ContentView: View {
         }
     }
 
-    private func routeToMessagingConnector(_ pluginID: String) async {
-        await messaging.syncConnectorsFromFactory()
+    @discardableResult
+    private func routeToMessagingConnector(_ pluginID: String) async -> Bool {
+        let opened = await messaging.openConnector(pluginID: pluginID)
+        guard opened else { return false }
         workspace = .messaging
-        await messaging.openConnector(pluginID: pluginID)
+        return true
     }
 
     private func isMessagingConnector(_ pluginID: String) async -> Bool {

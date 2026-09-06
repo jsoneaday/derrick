@@ -50,6 +50,11 @@ public enum PluginJSON: Codable, Sendable, Hashable {
         if case .string(let value) = self { return value }
         return nil
     }
+
+    public var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
+        return nil
+    }
 }
 
 enum PluginDecoding {

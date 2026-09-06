@@ -35,6 +35,18 @@ import Testing
         #expect(result.sentMessage?.vendorMessageID == "2.0")
     }
 
+    @Test func parserDropsThreadsMarkedInaccessible() throws {
+        let envelopes = """
+        [{"verb":"result.emit","threads":[\
+        {"vendor_thread_id":"C1","title":"#general","is_member":true},\
+        {"vendor_thread_id":"C2","title":"#secret","is_member":false},\
+        {"vendor_thread_id":"C3","title":"#hidden","accessible":false}\
+        ]}]
+        """
+        let result = try ConnectorMessagingParser.parse(envelopeJSON: Data(envelopes.utf8))
+        #expect(result.threads.map(\.vendorThreadID) == ["C1"])
+    }
+
     @Test func parserReadsCompletedToolOutcome() throws {
         let envelopes = """
         [{"verb":"result.emit","threads":[{"vendor_thread_id":"C9","title":"#random"}]}]

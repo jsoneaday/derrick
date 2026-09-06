@@ -37,6 +37,10 @@ actor MCPServiceToolHost {
             LLMModelSettings(repository: repo)
         }
         await factorySettings.loadSettings()
+        let factoryThinkingSettings = await MainActor.run {
+            LLMModelThinkingSettings(repository: repo)
+        }
+        await factoryThinkingSettings.loadSettings()
         let factoryExecutor = PythonPluginFactoryDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
@@ -49,6 +53,7 @@ actor MCPServiceToolHost {
         let factoryService = ConfiguredPluginFactoryService(
             repository: repo,
             settings: factorySettings,
+            thinkingSettings: factoryThinkingSettings,
             executor: factoryExecutor,
             logger: { message in
                 fputs("[MCPService] \(message)\n", stderr)
@@ -154,18 +159,16 @@ actor MCPServiceToolHost {
                             fields: secrets
                         )
                     }
-                    HostHTTPCallContext.shared.setPluginSecrets(
+                    return try await HostHTTPInvokeSecrets.withValues(
                         pluginID: release.pluginID,
-                        fields: secrets.map(\.descriptor)
-                    )
-                    defer {
-                        HostHTTPCallContext.shared.setPluginSecrets(pluginID: "", fields: [])
+                        secretFields: secrets.map(\.descriptor)
+                    ) {
+                        try await GuestPluginRunner.run(
+                            release: release,
+                            input: input,
+                            dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+                        )
                     }
-                    return try await GuestPluginRunner.run(
-                        release: release,
-                        input: input,
-                        dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
-                    )
                 }
             )
             await server.registerSessionMemorySearchTool { arguments in

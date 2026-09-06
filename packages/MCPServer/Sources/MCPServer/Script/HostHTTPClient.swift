@@ -55,13 +55,20 @@ public actor HostHTTPClient {
         secretAttacher = attacher
     }
 
-    public func perform(method: String, urlString: String, invokeID: String = "") async -> HostHTTPFetch {
+    public func perform(
+        method: String,
+        urlString: String,
+        headers envelopeHeaders: [String: String] = [:],
+        body: String? = nil,
+        invokeID: String = ""
+    ) async -> HostHTTPFetch {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")
         }
         var currentURL = url
         var currentMethod = method
+        var currentBody = body
         var visitedURLs = Set([url.absoluteString])
 
         for redirectIndex in 0...Self.maxRedirects {
@@ -69,7 +76,12 @@ public actor HostHTTPClient {
                 return HostHTTPFetch(status: 0, headers: [:], body: "", error: preflightError)
             }
 
-            let request = await makeRequest(method: currentMethod, url: currentURL)
+            let request = await makeRequest(
+                method: currentMethod,
+                url: currentURL,
+                envelopeHeaders: envelopeHeaders,
+                body: currentBody
+            )
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
@@ -84,8 +96,11 @@ public actor HostHTTPClient {
                 headers = PluginSSRFPolicy.stripResponseHeaders(headers)
 
                 guard Self.redirectStatuses.contains(status) else {
-                    let body = String(decoding: data.prefix(1_048_576), as: UTF8.self)
-                    return HostHTTPFetch(status: status, headers: headers, body: body, error: nil)
+                let body = VendorConversationMembershipFilter.sanitizedBody(
+                    urlString: currentURL.absoluteString,
+                    body: String(decoding: data.prefix(1_048_576), as: UTF8.self)
+                )
+                return HostHTTPFetch(status: status, headers: headers, body: body, error: nil)
                 }
                 guard redirectIndex < Self.maxRedirects else {
                     return HostHTTPFetch(status: status, headers: headers, body: "", error: "redirect_limit")
@@ -99,6 +114,7 @@ public actor HostHTTPClient {
                 }
 
                 currentURL = redirectURL
+                currentBody = nil
                 if status == 303 {
                     currentMethod = "GET"
                 }
@@ -133,30 +149,57 @@ public actor HostHTTPClient {
         }
     }
 
-    private func makeRequest(method: String, url: URL) async -> URLRequest {
+    private func makeRequest(
+        method: String,
+        url: URL,
+        envelopeHeaders: [String: String] = [:],
+        body: String? = nil
+    ) async -> URLRequest {
         var requestURL = url
-        var extraHeaders: [String: String] = [:]
+        var mergedHeaders = envelopeHeaders.filter {
+            !Self.isPlaceholderHeaderValue($0.value)
+        }
         if let secretAttacher {
             let attached = await secretAttacher.apply(url: url)
             requestURL = attached.url
-            extraHeaders = attached.headers
+            for (header, value) in attached.headers {
+                mergedHeaders[header] = value
+            }
         }
 
         var request = URLRequest(url: requestURL)
         request.httpMethod = method
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = false
-        for (header, value) in extraHeaders {
+        for (header, value) in mergedHeaders {
             request.setValue(value, forHTTPHeaderField: header)
         }
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        if let body, !body.isEmpty, let data = body.data(using: .utf8) {
+            request.httpBody = data
+        }
+        if request.value(forHTTPHeaderField: "User-Agent") == nil {
+            request.setValue(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+                forHTTPHeaderField: "User-Agent"
+            )
+        }
+        if request.value(forHTTPHeaderField: "Accept") == nil {
+            request.setValue(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                forHTTPHeaderField: "Accept"
+            )
+        }
+        if request.value(forHTTPHeaderField: "Accept-Language") == nil {
+            request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        }
+        if request.value(forHTTPHeaderField: "Accept-Encoding") == nil {
+            request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        }
         return request
+    }
+
+    private static func isPlaceholderHeaderValue(_ value: String) -> Bool {
+        value.contains("{{") || value.contains("${")
     }
 
     private func resolve(host: String) async throws -> [String] {

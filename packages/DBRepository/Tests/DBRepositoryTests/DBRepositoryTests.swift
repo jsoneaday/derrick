@@ -526,6 +526,27 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(uiTail.map(\.message), ["second"])
     }
 
+    func testReopeningExistingDatabaseCompletesQuickly() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let repository = DBRepository(
+            configuration: DBRepositoryConfiguration(
+                applicationName: "ui",
+                databaseName: "derrick",
+                databaseDirectoryURL: directory,
+                username: "app-user",
+                password: "app-secret"
+            )
+        )
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let started = Date()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        _ = try await repository.currentMemorySchemaVersion(username: "app-user", password: "app-secret")
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertLessThan(elapsed, 1.0, "Reopening an existing DB took \(elapsed)s")
+    }
+
     private func journalMode(at url: URL) throws -> String {
         var handle: OpaquePointer?
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle else {

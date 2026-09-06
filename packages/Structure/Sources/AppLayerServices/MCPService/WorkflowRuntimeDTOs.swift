@@ -22,6 +22,10 @@ public struct WorkflowStartRequest: Codable, Sendable, Hashable {
     public let agentID: String
     public let inputJSON: String
     public let principal: ServicePrincipal
+    /// LLM API key for factory builder/reviewer inside MCPService during the workflow.
+    public let helperAPIKey: String?
+    /// JSON `HelperModelWire` for helper models (builder/reviewer).
+    public let helperReviewerModelJSON: String?
 
     public init(
         kind: WorkflowKind,
@@ -29,7 +33,9 @@ public struct WorkflowStartRequest: Codable, Sendable, Hashable {
         turnID: String? = nil,
         agentID: String,
         inputJSON: String,
-        principal: ServicePrincipal
+        principal: ServicePrincipal,
+        helperAPIKey: String? = nil,
+        helperReviewerModelJSON: String? = nil
     ) {
         self.kind = kind
         self.sessionID = sessionID
@@ -37,6 +43,8 @@ public struct WorkflowStartRequest: Codable, Sendable, Hashable {
         self.agentID = agentID
         self.inputJSON = inputJSON
         self.principal = principal
+        self.helperAPIKey = helperAPIKey
+        self.helperReviewerModelJSON = helperReviewerModelJSON
     }
 }
 

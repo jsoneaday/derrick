@@ -289,7 +289,7 @@ import Testing
         )
     }
 
-    @Test func pluginSecretResolverIgnoresDotEnv() throws {
+    @Test func pluginSecretDevelopmentSourceReadsDotEnvInDevelopmentMode() throws {
         PluginSecretKeychain.deleteForTesting(
             pluginID: "test-plugin-dotenv",
             fieldID: "bot_token"
@@ -297,17 +297,62 @@ import Testing
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
-        try DotEnvTestFixtures.fileBody(extraLines: ["PLUGIN_TEST_PLUGIN_DOTENV_BOT_TOKEN=ignored"]).write(
+        try DotEnvTestFixtures.fileBody(extraLines: ["PLUGIN_TEST_PLUGIN_DOTENV_BOT_TOKEN=dev-token"]).write(
             to: resources.appendingPathComponent(".env"),
             atomically: true,
             encoding: .utf8
         )
 
-        let previousCWD = FileManager.default.currentDirectoryPath
-        FileManager.default.changeCurrentDirectoryPath(root.path)
-        defer { FileManager.default.changeCurrentDirectoryPath(previousCWD) }
+        let resolved = PluginSecretDevelopmentSource.resolve(
+            pluginID: "test-plugin-dotenv",
+            fieldID: "bot_token",
+            environment: [:],
+            bundleURL: root,
+            currentDirectoryURL: root
+        )
+        #expect(resolved == "dev-token")
+    }
 
-        #expect(PluginSecretResolver.resolve(pluginID: "test-plugin-dotenv", fieldID: "bot_token") == nil)
+    @Test func pluginSecretDevelopmentSourceReadsInlineEnvironment() {
+        let resolved = PluginSecretDevelopmentSource.resolve(
+            pluginID: "slack-connection",
+            fieldID: "bot_token",
+            environment: [
+                DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
+                "SLACK_BOT_KEY": "xoxb-dev-token",
+            ],
+            bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
+        )
+        #expect(resolved == "xoxb-dev-token")
+    }
+
+    @Test func pluginSecretResolverIgnoresDotEnvWhenNotInDevelopmentMode() throws {
+        PluginSecretKeychain.deleteForTesting(
+            pluginID: "test-plugin-dotenv",
+            fieldID: "bot_token"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("ui/ui/Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try """
+        UI_SECRET_MODE=keychain
+        IS_DEBUG=false
+        PLUGIN_TEST_PLUGIN_DOTENV_BOT_TOKEN=ignored
+        """.write(
+            to: resources.appendingPathComponent(".env"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let resolved = PluginSecretDevelopmentSource.resolve(
+            pluginID: "test-plugin-dotenv",
+            fieldID: "bot_token",
+            environment: ["IS_DEBUG": "false"],
+            bundleURL: root,
+            currentDirectoryURL: root
+        )
+        #expect(resolved == nil)
     }
 
     @Test func dotenvReaderFindsRepositoryRelativePath() throws {
@@ -359,23 +404,25 @@ import Testing
     }
 
     @Test func pluginSecretKeychainMigratesRetiredPluginFields() throws {
+        let sourceID = "test-migrate-source-\(UUID().uuidString)"
+        let destID = "test-migrate-dest-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: sourceID, fieldID: "bot_token")
+            PluginSecretKeychain.deleteForTesting(pluginID: destID, fieldID: "bot_token")
+        }
         try PluginSecretKeychain.save(
-            pluginID: "slack-connection",
+            pluginID: sourceID,
             fieldID: "bot_token",
             value: "legacy-token"
         )
-        defer {
-            PluginSecretKeychain.deleteForTesting(pluginID: "slack-connection", fieldID: "bot_token")
-            PluginSecretKeychain.deleteForTesting(pluginID: "slack-connector", fieldID: "bot_token")
-        }
         let fields = [PluginSecretDescriptor(id: "bot_token", label: "Bot token", kind: "token")]
         PluginSecretKeychain.migrateStoredFields(
-            from: "slack-connection",
-            to: "slack-connector",
+            from: sourceID,
+            to: destID,
             fields: fields
         )
-        #expect(PluginSecretKeychain.hasStoredValue(pluginID: "slack-connector", fieldID: "bot_token"))
-        #expect(try PluginSecretKeychain.load(pluginID: "slack-connector", fieldID: "bot_token") == "legacy-token")
+        #expect(PluginSecretKeychain.hasStoredValue(pluginID: destID, fieldID: "bot_token"))
+        #expect(try PluginSecretKeychain.load(pluginID: destID, fieldID: "bot_token") == "legacy-token")
     }
 
     @Test func messageSigningRoundTrip() {
@@ -658,9 +705,38 @@ import Testing
         #expect(
             DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
                 evictedAny: false,
-                hasHealthyExpectedDaemon: false
+                hasHealthyExpectedDaemon: true,
+                launchdJobLoaded: false
             )
         )
+        #expect(
+            DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+                evictedAny: false,
+                hasHealthyExpectedDaemon: true,
+                healthyExpectedDaemonCount: 3
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+                evictedAny: false,
+                hasHealthyExpectedDaemon: true,
+                launchdJobLoaded: true,
+                healthyExpectedDaemonCount: 1
+            )
+        )
+    }
+
+    @Test func derrickDaemonHygieneEvictsDuplicateExpectedDaemons() {
+        let expected = "/tmp/Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
+        let evict = DerrickDaemonHygiene.duplicateExpectedDaemonPIDsToEvict(
+            expectedExecutablePath: expected,
+            processes: [
+                (pid: 10, executablePath: expected, startDate: Date(timeIntervalSince1970: 1)),
+                (pid: 11, executablePath: expected, startDate: Date(timeIntervalSince1970: 3)),
+                (pid: 12, executablePath: expected, startDate: Date(timeIntervalSince1970: 2)),
+            ]
+        )
+        #expect(Set(evict) == [10, 12])
     }
 
     @Test func derrickDaemonHygieneDetectsStaleLaunchAgentProgramAfterProductRename() {
@@ -1079,5 +1155,138 @@ import Testing
                 "The direct test output exercises only poll_inbox."
             ) == false
         )
+    }
+
+    @Test func pluginFactoryCreateFailureMessageSanitizesReviewDetail() {
+        let raw = """
+        The source appears to use the guest runtime envelope, stable de-duplication, channel-specific identifiers, and paginated Slack requests, but the supplied direct test does not cover the connector's required receive/sync operations.
+        """
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("was not saved"))
+        #expect(!presentation.summary.contains("guest runtime envelope"))
+        #expect(presentation.summary.contains("safety review"))
+        #expect(presentation.technicalDetail == raw)
+    }
+
+    @Test func pluginFactoryCreateFailureMessageSanitizesDraftValidationDetail() {
+        let raw = """
+        Sort http_results by request_id and de-duplicate before lookup. Do not return the first matching entry from an unsorted loop.
+        """
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("was not saved"))
+        #expect(!presentation.summary.contains("http_results"))
+        #expect(presentation.technicalDetail == raw)
+    }
+
+    @Test func pluginFactoryCreateFailureMessageExplainsMissingSavedConnector() {
+        let raw = "Plugin factory did not return a saved connector."
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("was not saved"))
+        #expect(presentation.technicalDetail == raw)
+    }
+
+    @Test func connectorManifestMessagingOpsDetectSendOnlyScope() {
+        let sendOnly = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["send_message"]}}}
+        """
+        let fullSync = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        """
+        #expect(PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendOnly))
+        #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: fullSync))
+        let sendAndReceive = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["poll_inbox","send_message"]}}}
+        """
+        #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
+    }
+
+    @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .sendOnly,
+            userDescription: "Post alerts to #general."
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: nil)
+        #expect(goal.contains("send_message only"))
+        #expect(goal.contains("Reference Slack connector blueprint"))
+        #expect(!goal.contains("must sync and send messages"))
+    }
+
+    @Test func connectorInputUsesScopeDefaultWhenDescriptionEmpty() {
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: ""
+        )
+        #expect(!input.description.isEmpty)
+        #expect(input.description.localizedCaseInsensitiveContains("Slack"))
+        #expect(input.description.localizedCaseInsensitiveContains("sync"))
+    }
+
+    @Test func validationExpectationsParseDeclaredMessagingOpsFromGoal() {
+        let sendOnly = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .sendOnly,
+            userDescription: "Alerts."
+        )
+        let sendOnlyGoal = sendOnly.connectorBuildGoal(crawlSummary: nil)
+        #expect(PluginFactoryValidationExpectations.requiredMessagingOps(from: sendOnlyGoal) == ["send_message"])
+
+        let sendAndReceive = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .sendAndReceive,
+            userDescription: "Alerts."
+        )
+        let receiveGoal = sendAndReceive.connectorBuildGoal(crawlSummary: nil)
+        let receiveOps = PluginFactoryValidationExpectations.requiredMessagingOps(from: receiveGoal)
+        #expect(receiveOps.contains("sync_threads"))
+        #expect(receiveOps.contains("poll_inbox"))
+        #expect(receiveOps.contains("send_message"))
+    }
+
+    @Test func supportsThreadDiscoveryRequiresSyncThreadsOp() {
+        let withDiscovery = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        """
+        let withoutDiscovery = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["poll_inbox","send_message"]}}}
+        """
+        #expect(PluginFactoryValidationExpectations.supportsThreadDiscovery(manifestJSON: withDiscovery))
+        #expect(!PluginFactoryValidationExpectations.supportsThreadDiscovery(manifestJSON: withoutDiscovery))
+    }
+
+    @Test func pluginFactoryScopeHintsDetectSendAndReceiveGoal() {
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .sendAndReceive,
+            userDescription: "Alerts."
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: nil)
+        #expect(PluginFactoryScopeHints.isSendAndReceive(goal))
+        #expect(!PluginFactoryScopeHints.isFullSync(goal))
+        #expect(PluginFactoryScopeHints.paginationGuidance(for: goal)?.contains("single-page") == true)
+    }
+
+    @Test func pluginFactoryScopeHintsTreatPaginationReviewAsOverstrictForSendAndReceive() {
+        let review = PluginFactoryReview(
+            decision: .rejected,
+            findings: [
+                PluginReviewFinding(
+                    severity: .blocking,
+                    category: .correctness,
+                    message: "Skips required Slack pagination while presenting partial results as complete."
+                ),
+            ],
+            summary: "Rejected because poll_inbox pagination is incomplete."
+        )
+        #expect(PluginFactoryScopeHints.isPaginationCompletenessRejection(review))
+    }
+
+    @Test func validationExpectationsReadMessagingOpsFromManifestJSON() {
+        let json = """
+        {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["send_message","poll_inbox"]}}}
+        """
+        let ops = PluginFactoryValidationExpectations.messagingOps(fromManifestJSON: json)
+        #expect(ops == ["send_message", "poll_inbox"])
     }
 }

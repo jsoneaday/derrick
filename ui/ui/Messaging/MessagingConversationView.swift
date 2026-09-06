@@ -4,20 +4,51 @@ import SwiftUI
 struct MessagingConversationView: View {
     @ObservedObject var store: MessagingStore
     @State private var draft = ""
+    @State private var channelID = ""
+    @State private var selectedVendorThreadID = ""
     @FocusState private var composerFocused: Bool
+    @FocusState private var channelFocused: Bool
 
     var body: some View {
         Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
             .ignoresSafeArea()
             .overlay {
-                if store.selectedConnector == nil {
+                switch store.conversationLanding {
+                case .catalogRoot:
                     emptyConnectors
-                } else if store.selectedThread == nil {
-                    emptyThreads
-                } else {
-                    conversation
+                case .vendorConnector:
+                    if store.selectedThread == nil, store.isConnectorSyncing {
+                        discoveringThreads
+                    } else if store.selectedThread == nil, store.canPickThread {
+                        threadPicker
+                    } else if store.selectedThread == nil, store.needsThreadDiscovery {
+                        discoveringThreads
+                    } else if store.selectedThread == nil, store.canComposeManualChannel {
+                        channelCompose
+                    } else if store.selectedThread == nil {
+                        emptyThreads
+                    } else {
+                        conversation
+                    }
                 }
             }
+            .onChange(of: store.threads) { _, threads in
+                syncPickerSelection(with: threads)
+            }
+            .onAppear {
+                syncPickerSelection(with: store.threads)
+            }
+    }
+
+    private func syncPickerSelection(with threads: [MessagingThreadDTO]) {
+        guard !threads.isEmpty else {
+            selectedVendorThreadID = ""
+            return
+        }
+        if selectedVendorThreadID.isEmpty
+            || !threads.contains(where: { $0.vendorThreadID == selectedVendorThreadID }) {
+            selectedVendorThreadID = threads[0].vendorThreadID
+        }
     }
 
     private var emptyConnectors: some View {
@@ -32,9 +63,184 @@ struct MessagingConversationView: View {
         }
     }
 
+    private var threadPicker: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(store.selectedConnectorDisplayName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Text("Choose a conversation. Derrick shows names from the connector; the vendor ID is used behind the scenes.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Conversation")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Conversation", selection: $selectedVendorThreadID) {
+                    ForEach(store.threads, id: \.vendorThreadID) { thread in
+                        Text(thread.title).tag(thread.vendorThreadID)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+
+            HStack {
+                if let pluginID = store.selectedPluginID {
+                    Button {
+                        Task { await store.refreshConnector(pluginID: pluginID) }
+                    } label: {
+                        Label("Refresh list", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(store.isConnectorSyncing)
+                }
+                Spacer()
+                Button {
+                    Task { await store.openDiscoveredThread(vendorThreadID: selectedVendorThreadID) }
+                } label: {
+                    Label("Open conversation", systemImage: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .disabled(selectedVendorThreadID.isEmpty || store.isConnectorSyncing)
+            }
+
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: 520)
+    }
+
+    private var discoveringThreads: some View {
+        VStack(spacing: 10) {
+            Text(store.selectedConnectorDisplayName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+            ProgressView()
+                .controlSize(.small)
+            Text(store.isConnectorSyncing
+                 ? "Loading conversations from the connector…"
+                 : "No conversations found yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            if !store.isConnectorSyncing, let pluginID = store.selectedPluginID {
+                Button {
+                    Task { await store.refreshConnector(pluginID: pluginID) }
+                } label: {
+                    Label("Refresh list", systemImage: "arrow.clockwise")
+                }
+            }
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+        }
+    }
+
+    private var channelCompose: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(store.selectedConnectorDisplayName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Text(store.canComposeSendOnly
+                 ? "Send-only connector — enter a destination ID and message."
+                 : "Enter a destination ID to open a conversation. Incoming messages appear after you connect.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Destination ID")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Destination ID", text: $channelID)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($channelFocused)
+            }
+
+            if !store.canComposeSendOnly {
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await store.connectToChannel(channelID) }
+                    } label: {
+                        Label("Connect to channel", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .disabled(channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isConnectorSyncing)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Message")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Message", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .focused($composerFocused)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    submitChannelCompose()
+                } label: {
+                    Label(store.isSending ? "Sending…" : "Send message", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .disabled(!canSubmitChannelCompose)
+            }
+
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: 520)
+    }
+
+    private var canSubmitChannelCompose: Bool {
+        !store.isSending
+            && !channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitChannelCompose() {
+        let channel = channelID
+        let text = draft
+        draft = ""
+        Task {
+            await store.sendMessage(toChannel: channel, text: text)
+            composerFocused = true
+        }
+    }
+
     private var emptyThreads: some View {
         VStack(spacing: 10) {
-            Text(store.selectedConnector?.displayName ?? "Messaging")
+            Text(store.selectedConnectorDisplayName)
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
             if store.isConnectorSyncing {
                 ProgressView()
@@ -43,7 +249,7 @@ struct MessagingConversationView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                Text("No conversations yet. Threads appear when a connector syncs them.")
+                Text("No conversations yet. Open a connector that lists conversations, or refresh the list.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -88,7 +294,7 @@ struct MessagingConversationView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.selectedThread?.title ?? "Conversation")
                     .font(.headline)
-                Text(store.selectedConnector?.displayName ?? "")
+                Text(store.selectedConnectorDisplayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

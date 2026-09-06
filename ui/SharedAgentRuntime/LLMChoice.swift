@@ -164,7 +164,15 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         }
     }
 
-    func encodeHelperModelWireJSON() throws -> String {
-        try HelperModelWire.encodeJSON(helperModelWire)
+    func encodeHelperModelWireJSON(thinking: ModelThinkingOption? = nil) throws -> String {
+        var wire = helperModelWire
+        if let thinking {
+            wire = HelperModelWire(provider: wire.provider, model: wire.model, thinkingID: thinking.id)
+        }
+        return try HelperModelWire.encodeJSON(wire)
+    }
+
+    var preferredMediumThinkingOption: ModelThinkingOption {
+        thinkingOptions.first { $0.id == "medium" } ?? defaultThinkingOption
     }
 }
