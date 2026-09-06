@@ -362,6 +362,7 @@ final class MessagingStore: ObservableObject {
         if let threadID = selectedThreadID {
             await session.reloadMessagesForThread(id: threadID)
         }
+        await session.markVisibleConversationRead()
         await catalog.refreshBadges()
     }
 

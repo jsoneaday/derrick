@@ -34,7 +34,7 @@ final class PluginCreationController: ObservableObject {
     @Published private(set) var progressSteps: [ProgressStepState] = []
     @Published var selectedType: PluginFactoryCreateInput.PluginType = .connector
     @Published var selectedVendor: PluginFactoryCreateInput.ConnectorVendor = .slack
-    @Published var selectedScope: PluginFactoryCreateInput.ConnectorScope = .sendOnly
+    @Published var selectedScope: PluginFactoryCreateInput.ConnectorScope = .sendAndReceive
     @Published var customVendorName = ""
     @Published var connectorDescription = ""
     @Published private(set) var credentialFields: [PluginCredentialFieldPresentation] = []
@@ -68,6 +68,7 @@ final class PluginCreationController: ObservableObject {
         progressSteps = []
         credentialFields = []
         credentialDrafts = [:]
+        selectedScope = .sendAndReceive
     }
 
     func beginCreate() {
@@ -100,6 +101,7 @@ final class PluginCreationController: ObservableObject {
     }
 
     func confirmVendor() {
+        selectedScope = .sendAndReceive
         phase = .describe
     }
 
@@ -124,6 +126,7 @@ final class PluginCreationController: ObservableObject {
             return
         }
 
+        selectedScope = .sendAndReceive
         cancelPolling()
         phase = .creating
         statusMessage = "Starting connector creation…"

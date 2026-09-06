@@ -1165,6 +1165,8 @@ import Testing
         #expect(presentation.summary.contains("was not saved"))
         #expect(!presentation.summary.contains("guest runtime envelope"))
         #expect(presentation.summary.contains("safety review"))
+        #expect(!presentation.summary.contains("Send only"))
+        #expect(!presentation.summary.contains("Full sync"))
         #expect(presentation.technicalDetail == raw)
     }
 
@@ -1198,6 +1200,12 @@ import Testing
         {"extensions":{"app.derrick":{"role":"connector","messaging_ops":["poll_inbox","send_message"]}}}
         """
         #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
+    }
+
+    @Test func connectorWizardOffersSendAndReceiveOnly() {
+        #expect(PluginFactoryCreateInput.ConnectorScope.wizardCases == [.sendAndReceive])
+        #expect(!PluginFactoryCreateInput.ConnectorScope.wizardCases.contains(.sendOnly))
+        #expect(!PluginFactoryCreateInput.ConnectorScope.wizardCases.contains(.fullSync))
     }
 
     @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {

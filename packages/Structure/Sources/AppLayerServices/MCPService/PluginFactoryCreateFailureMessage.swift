@@ -22,7 +22,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         guard !trimmed.isEmpty else {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
-                The connector was not saved. Try again, or choose Send only and describe a simpler goal.
+                The connector was not saved. Try again, or describe a simpler goal.
                 """,
                 technicalDetail: nil
             )
@@ -32,7 +32,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
                 The connector was not saved. Derrick built a draft but the safety review could not approve it \
-                after several attempts. Try Send only, or narrow what the connector should do.
+                after several attempts. Try again, or narrow what the connector should do.
                 """,
                 technicalDetail: trimmed
             )
@@ -42,7 +42,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
                 The connector was not saved. Derrick could not finish building it after several attempts. \
-                Try Send only, or simplify what the connector should do in your description.
+                Try again, or simplify what the connector should do in your description.
                 """,
                 technicalDetail: trimmed
             )
@@ -51,8 +51,8 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         if isTechnicalFactoryDetail(trimmed) {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
-                The connector was not saved. Derrick could not finish building it. Try again with Send only \
-                scope, or simplify your description.
+                The connector was not saved. Derrick could not finish building it. Try again, \
+                or simplify your description.
                 """,
                 technicalDetail: trimmed
             )

@@ -143,14 +143,10 @@ struct PluginsWorkspaceView: View {
 
         case .describe:
             VStack(alignment: .leading, spacing: 12) {
-                Text("What should this connector do?")
+                Text("This connector lists conversations, lets you pick one, then sends and receives new messages.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                VStack(spacing: 8) {
-                    ForEach(PluginFactoryCreateInput.ConnectorScope.allCases, id: \.self) { scope in
-                        scopeButton(scope)
-                    }
-                }
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("Additional details (optional)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -373,37 +369,6 @@ struct PluginsWorkspaceView: View {
             get: { controller.credentialDrafts[id] ?? "" },
             set: { controller.credentialDrafts[id] = $0 }
         )
-    }
-
-    private func scopeButton(_ scope: PluginFactoryCreateInput.ConnectorScope) -> some View {
-        Button {
-            controller.selectedScope = scope
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(scope.displayName)
-                        .font(.body.weight(.semibold))
-                    Text(scope.wizardSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                if controller.selectedScope == scope {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                controller.selectedScope == scope
-                    ? Color.accentColor.opacity(0.12)
-                    : Color.primary.opacity(0.05)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
     }
 
     private func typeButton(

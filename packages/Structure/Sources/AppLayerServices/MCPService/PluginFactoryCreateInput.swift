@@ -21,14 +21,20 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             }
         }
 
+        /// Scopes offered in the create-connector wizard. Send-only and full-sync
+        /// remain decodable for older workflows and already-installed plugins.
+        public static var wizardCases: [ConnectorScope] {
+            [.sendAndReceive]
+        }
+
         public var wizardSubtitle: String {
             switch self {
             case .sendOnly:
                 return "Post messages to a channel. Fastest to build and review."
             case .sendAndReceive:
-                return "List conversations, pick one, then send and receive messages."
+                return "List conversations, pick one, then send and receive new messages."
             case .fullSync:
-                return "List channels, sync history (including threads), and send."
+                return "List conversations, pull full history including thread replies, paginate, and send."
             }
         }
 
@@ -103,7 +109,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         pluginType: PluginType,
         vendor: ConnectorVendor? = nil,
         customVendorName: String? = nil,
-        scope: ConnectorScope = .sendOnly,
+        scope: ConnectorScope = .sendAndReceive,
         description: String
     ) {
         self.pluginType = pluginType
@@ -177,7 +183,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         vendor = try container.decodeIfPresent(ConnectorVendor.self, forKey: .vendor)
         customVendorName = try container.decodeIfPresent(String.self, forKey: .customVendorName)?
             .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        scope = try container.decodeIfPresent(ConnectorScope.self, forKey: .scope) ?? .sendOnly
+        scope = try container.decodeIfPresent(ConnectorScope.self, forKey: .scope) ?? .sendAndReceive
         let rawDescription = try container.decode(String.self, forKey: .description)
         description = Self.resolvedDescription(
             userDescription: rawDescription,

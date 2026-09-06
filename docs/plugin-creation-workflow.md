@@ -97,16 +97,16 @@ The describe step requires a **scope preset** before optional detail text:
 
 | Scope | Messaging ops | When to use |
 |-------|---------------|-------------|
-| **Send only** | `send_message` | Fastest path; post to a channel |
-| **Send + receive** | `poll_inbox`, `send_message` | One channel inbox + send |
-| **Full sync** | `sync_threads`, `poll_inbox`, `send_message` | Channel list, history, pagination, threads |
+| **Send + receive** | `sync_threads`, `poll_inbox`, `send_message` | Channel list, pick one conversation, send and receive new messages |
 
 Scope is stored on `PluginFactoryCreateInput.scope` and drives:
 
 - **`connectorBuildGoal()`** — scope-specific requirements (no generic “must sync and send”).
 - **`ConnectorReferenceBlueprint`** — vendor reference patterns and test fixture expectations injected into the factory goal.
 
-Default scope is **Send only**.
+The wizard always creates **Send + receive**. Send-only and full-sync remain in the enum for already-installed plugins and older workflow payloads.
+
+Default wizard scope is **Send + receive**.
 
 Types: `PluginFactoryCreateInput.ConnectorScope` in Structure.
 
@@ -211,7 +211,7 @@ If there are no secrets, or all are already stored, the wizard skips straight to
 
 | Audience | Content |
 |----------|---------|
-| **User** | Short summary via `PluginFactoryCreateFailureMessage.presentation` — e.g. suggest narrowing scope to Send only |
+| **User** | Short summary via `PluginFactoryCreateFailureMessage.presentation` — e.g. try again or a simpler goal |
 | **Power user** | Expandable **Technical details** with raw reviewer or factory text |
 
 Validation-heavy failures map `FailureStep` back to **description** so the user can change scope or wording and retry.

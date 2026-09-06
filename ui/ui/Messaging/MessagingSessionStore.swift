@@ -56,7 +56,11 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func setWorkspaceActive(_ active: Bool) {
+        let becameActive = active && !isMessagingWorkspace
         isMessagingWorkspace = active
+        if becameActive {
+            Task { await markVisibleConversationRead() }
+        }
     }
 
     /// Selects the vendor immediately so Messaging never paints the empty catalog root first.
@@ -81,7 +85,7 @@ final class MessagingSessionStore: ObservableObject {
             tabs.append(MessagingTab(thread: thread))
         }
         selectedThreadID = id
-        await clearUnreadIfNeeded()
+        await markVisibleConversationRead()
         await loadNewestWindow()
     }
 
@@ -150,8 +154,10 @@ final class MessagingSessionStore: ObservableObject {
         if selectedPluginID == result.thread.pluginID {
             await reloadThreads(autoOpenMostRecent: false)
         }
-        await catalog?.refreshBadges()
-        guard viewing, result.inserted else { return }
+        guard viewing, result.inserted else {
+            await catalog?.refreshBadges()
+            return
+        }
         if isNearBottom {
             visibleMessages.append(result.message)
             if visibleMessages.count > MessagingViewport.maxVisibleMessages {
@@ -163,8 +169,8 @@ final class MessagingSessionStore: ObservableObject {
             showNewMessagesPill = true
             showJumpToLatest = true
         }
-        refreshSelectedTab()
-        await clearUnreadIfNeeded()
+        await markVisibleConversationRead()
+        await catalog?.refreshBadges()
     }
 
     func dropSelectionIfConnectorMissing() {
@@ -192,6 +198,10 @@ final class MessagingSessionStore: ObservableObject {
     func reloadMessagesForThread(id: String) async {
         guard selectedThreadID == id else { return }
         await loadNewestWindow()
+    }
+
+    func markVisibleConversationRead() async {
+        await clearUnreadIfNeeded()
     }
 
     private func reloadThreads(autoOpenMostRecent: Bool) async {
