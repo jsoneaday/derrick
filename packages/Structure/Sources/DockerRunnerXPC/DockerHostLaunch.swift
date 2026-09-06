@@ -31,7 +31,8 @@ public enum DockerHostLaunch: Sendable {
         "exec",
         "rm",
         "inspect",
-        "image"
+        "image",
+        "ps"
     ]
 
     /// Second-level tokens for `docker image …`.

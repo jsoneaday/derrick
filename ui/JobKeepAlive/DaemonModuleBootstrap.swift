@@ -69,8 +69,9 @@ enum DaemonModuleBootstrap {
             }
             await DaemonRuntime.shared.markModuleReady(.mcp)
             fputs("[derrickd] module mcp ready\n", stderr)
+            await sweepEmbeddedDockerLeftovers()
             Task {
-                await syncEmbeddedDockerHelper()
+                await prewarmEmbeddedDockerImages()
             }
         } catch {
             fputs("[derrickd] MCP module bootstrap failed: \(error.localizedDescription)\n", stderr)
@@ -94,11 +95,25 @@ enum DaemonModuleBootstrap {
         }
     }
 
-    /// Embedded DockerRunnerHelper in JobKeepAlive — sync egress + verify without blocking bootstrap.
-    private static func syncEmbeddedDockerHelper() async {
+    /// Remove leftover runtime containers before the job scheduler starts.
+    /// Image prewarm stays in the background so a cold crawler build does not block jobs.
+    private static func sweepEmbeddedDockerLeftovers() async {
         guard DerrickProcessRole.isDaemon else { return }
         do {
             try await MCPServiceDockerHelperRunner.shared.verifyPeerMesh()
+            let swept = await MCPServiceDockerHelperRunner.shared.sweepOrphanRuntimeContainers()
+            if swept > 0 {
+                fputs("[derrickd] removed \(swept) leftover Docker container(s)\n", stderr)
+            }
+        } catch {
+            fputs("[derrickd] embedded Docker leftover sweep skipped: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    /// Embedded DockerRunnerHelper in JobKeepAlive — prewarm without blocking bootstrap.
+    private static func prewarmEmbeddedDockerImages() async {
+        guard DerrickProcessRole.isDaemon else { return }
+        do {
             try await MCPServiceDockerHelperRunner.shared.prewarmGuestRuntime()
             try await MCPServiceDockerHelperRunner.shared.prewarmWebCrawlerImage()
             fputs("[derrickd] embedded Docker helper verified\n", stderr)

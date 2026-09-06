@@ -6,6 +6,8 @@ public enum DerrickNotificationLaunch: Sendable {
     public static let showJobResultArgument = "--derrick-show-job-result"
     /// Present a HITL Allow/Deny sheet: `--derrick-show-hitl-approval <approval-id>`
     public static let showHITLApprovalArgument = "--derrick-show-hitl-approval"
+    /// Open a connector conversation in the main UI: `--derrick-show-messaging-conversation <plugin-id> <thread-id>`
+    public static let showMessagingConversationArgument = "--derrick-show-messaging-conversation"
 
     public static func jobResultIDToPresent(_ arguments: [String] = CommandLine.arguments) -> String? {
         guard let idx = arguments.firstIndex(of: showJobResultArgument) else { return nil }
@@ -49,5 +51,30 @@ public enum DerrickNotificationLaunch: Sendable {
 
     public static func postShowHITLApproval(_ id: String) {
         DerrickHITLApprovalPresentationWake.post(approvalID: id)
+    }
+
+    public static func messagingConversationToPresent(
+        _ arguments: [String] = CommandLine.arguments
+    ) -> DerrickMessagingConversationPresentationWake.Payload? {
+        guard let idx = arguments.firstIndex(of: showMessagingConversationArgument) else { return nil }
+        let pluginIndex = arguments.index(after: idx)
+        let threadIndex = arguments.index(after: pluginIndex)
+        guard threadIndex < arguments.endIndex else { return nil }
+        let payload = DerrickMessagingConversationPresentationWake.Payload(
+            pluginID: arguments[pluginIndex],
+            threadID: arguments[threadIndex]
+        )
+        return payload.isValid ? payload : nil
+    }
+
+    public static func hasMessagingConversationPresentationIntent(
+        _ arguments: [String] = CommandLine.arguments
+    ) -> Bool {
+        messagingConversationToPresent(arguments) != nil
+            || DerrickMessagingConversationPresentationWake.peekPending() != nil
+    }
+
+    public static func postShowMessagingConversation(pluginID: String, threadID: String) {
+        DerrickMessagingConversationPresentationWake.post(pluginID: pluginID, threadID: threadID)
     }
 }

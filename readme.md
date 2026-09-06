@@ -10,7 +10,7 @@ A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isol
 |------|-------------|
 | **Chat** | Multi-tab conversations with OpenAI, Gemini, and other configured models |
 | **Tools (MCP)** | Model Context Protocol tool host inside the headless daemon |
-| **Scripts** | Agent-generated Swift executed in isolated Docker containers  Includes secondary agent code reviewer and approvals flow.|
+| **Scripts** | Agent-generated Python executed in isolated Docker containers. Includes a secondary agent code reviewer and approvals flow. |
 | **Plugin factory** | LLM-assisted creation of versioned, reviewed connector plugins |
 | **Jobs** | Scheduled and deferred tool/agent runs that survive app quit |
 | **Messaging** | Connector plugins (e.g. Slack) with threads, history, and live sync |
@@ -35,14 +35,14 @@ A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isol
         └────────────────┘        └───────────┬────────────┘
                                                 │
                                     ┌───────────▼────────────┐
-                                    │ Swift guest containers │
+                                    │ Python guest containers  │
                                     │ --network none         │
                                     └────────────────────────┘
 ```
 
 - **UI** is a client: it does not own agent turns or MCP when the daemon is up.
 - **Daemon** (`derrickd`) is the single owner of OS notifications and in-process Agent/Job/MCP modules.
-- **Docker** runs untrusted Swift for `script_exec`, plugin factory builds, and approved plugin invocations.
+- **Docker** runs untrusted Python for `script_exec`, plugin factory builds, and approved plugin invocations.
 
 See [docs/adr-headless-backend.md](docs/adr-headless-backend.md) and [docs/services-plan.md](docs/services-plan.md).
 
@@ -50,12 +50,12 @@ See [docs/adr-headless-backend.md](docs/adr-headless-backend.md) and [docs/servi
 
 Derrick treats model output and guest code as untrusted.
 
-### Docker sandbox (Swift runtime)
+### Docker sandbox (Python guest runtime)
 
-- Guest programs run in `swiftlang/swift:nightly` containers with **`--network none`**.
-- No shell, `Process`, `URLSession`, or credentials inside the guest.
+- Guest programs run in `python:3.14.7` containers with **`--network none`**.
+- No sockets, urllib/requests, subprocess, or credentials inside the guest.
 - The host dispatches `http.request` envelopes, attaches secrets, and enforces egress policy.
-- Documented in [docs/adr-swift-script-runtime.md](docs/adr-swift-script-runtime.md).
+- Historical Swift guest notes: [docs/adr-swift-script-runtime.md](docs/adr-swift-script-runtime.md).
 
 ### Script review agent
 
@@ -65,7 +65,7 @@ Before `script_exec` writes to disk, a **configured LLM reviewer** checks:
 - No secret literals in source
 - Safe handling of fetched content (no raw HTML leakage unless requested)
 
-Instructions live in `ui/SharedAgentRuntime/Resources/script_reviewer_instructions.md`. A static **Swift verifier** also rejects forbidden APIs.
+Instructions live in `ui/SharedAgentRuntime/Resources/script_reviewer_instructions.md`. A static **Python verifier** also rejects forbidden APIs.
 
 ### Egress & network
 

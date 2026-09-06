@@ -8,14 +8,14 @@ import WebCrawler
 @testable import MCPServer
 
 @Suite struct MCPServerTests {
+    private static let dummyPythonScript = """
+        import json, sys
+        _ = sys.stdin.read()
+        json.dump([{"verb":"result.emit","summary":"ok"}], sys.stdout)
+        """
+
     private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { arguments, _, _ in
-        if arguments.contains("base64") {
-            let artifact = Data("compiled".utf8).base64EncodedString()
-            return DockerCLIResult(exitCode: 0, stdout: Data(artifact.utf8), stderr: Data())
-        }
-        if arguments.contains("/tmp/plugin"),
-           !arguments.contains("chmod"),
-           !arguments.contains("cat") {
+        if arguments.contains("python3"), arguments.contains("/tmp/guest.py") {
             return DockerCLIResult(
                 exitCode: 0,
                 stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
@@ -205,6 +205,13 @@ import WebCrawler
         #expect(args.contains("DERRICK_EGRESS_PROXY_TOKEN=token"))
         #expect(entrypointIndex! < imageIndex!)
         #expect(sleepIndex! < imageIndex!)
+        #expect(args.contains("--label"))
+        #expect(args.contains(DerrickDockerRuntimeIdentity.labelAssignment))
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: args, timeoutSeconds: 60)
+            ) == nil
+        )
     }
 
     @Test func webCrawlerInputPreparerAddsRedirectHosts() async throws {
@@ -280,6 +287,58 @@ import WebCrawler
         #expect(imageIndex != nil)
         #expect(entrypointIndex! < imageIndex!)
         #expect(sleepIndex! < imageIndex!)
+        #expect(args.contains("--label"))
+        #expect(args.contains(DerrickDockerRuntimeIdentity.labelAssignment))
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: args, timeoutSeconds: 60)
+            ) == nil
+        )
+    }
+
+    @Test func orphanSweeperRemovesLabeledAndPrefixedContainers() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "ps" {
+                if args.contains("label=\(DerrickDockerRuntimeIdentity.labelAssignment)") {
+                    return DockerCLIResult(exitCode: 0, stdout: Data("aaaaaaaaaaaa\n".utf8), stderr: Data())
+                }
+                if args.contains("name=derrick-guest-runtime") {
+                    return DockerCLIResult(exitCode: 0, stdout: Data("bbbbbbbbbbbb\naaaaaaaaaaaa\n".utf8), stderr: Data())
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let removed = await DerrickDockerOrphanSweeper.sweep(executor: executor)
+        #expect(removed == 2)
+        let calls = await recorder.calls
+        #expect(calls.filter { $0.first == "ps" }.count == DerrickDockerRuntimeIdentity.psListArguments.count)
+        let rm = try #require(calls.first { $0.first == "rm" })
+        #expect(rm.contains("-f"))
+        #expect(rm.contains("aaaaaaaaaaaa"))
+        #expect(rm.contains("bbbbbbbbbbbb"))
+        for call in calls where call.first == "ps" || call.first == "rm" {
+            #expect(
+                DockerRunRequestValidator.validate(
+                    DockerHostLaunch.makeRequest(dockerArguments: call, timeoutSeconds: 60)
+                ) == nil
+            )
+        }
+    }
+
+    @Test func orphanSweeperSkipsRemoveWhenNothingMatches() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let removed = await DerrickDockerOrphanSweeper.sweep(executor: executor)
+        #expect(removed == 0)
+        let calls = await recorder.calls
+        #expect(calls.allSatisfy { $0.first == "ps" })
+        #expect(!calls.contains { $0.first == "rm" })
     }
 
     @Test func fileJobWorkspaceCopiesAttachmentsAndPublishesOutputs() throws {
@@ -524,7 +583,7 @@ import WebCrawler
                 PluginRuntimeToolModule.makeInvokeRegistration { _, _ in
                     PluginFactoryExecutionResult(
                         exitCode: 7,
-                        stderr: Data("swift runtime failed".utf8)
+                        stderr: Data("guest runtime failed".utf8)
                     )
                 }
             )
@@ -540,7 +599,7 @@ import WebCrawler
         #expect(outcome.status == .failed)
         #expect(outcome.stage == .execution)
         #expect(result.text.contains("exit 7"))
-        #expect(result.text.contains("swift runtime failed"))
+        #expect(result.text.contains("guest runtime failed"))
     }
 
     @Test func pluginFactorySurfacesReviewFailureOutcome() async throws {
@@ -570,7 +629,7 @@ import WebCrawler
     }
 
     @Test func phaseTimingScriptMetricsCountLinesAndChars() {
-        let script = "import Foundation\nprint(1)\n"
+        let script = "import json, sys\nprint(1)\n"
         let metrics = ScriptPhaseTiming.scriptMetrics(script)
         #expect(metrics.chars == script.utf8.count)
         #expect(metrics.lines == 3)
@@ -683,8 +742,11 @@ import WebCrawler
         #expect(create.contains("--network"))
         #expect(create.contains("none"))
         #expect(create.contains("--read-only"))
+        #expect(create.contains("--label"))
+        #expect(create.contains(DerrickDockerRuntimeIdentity.labelAssignment))
         let exec = calls.first(where: { $0.contains("python3") }) ?? []
         #expect(exec.contains("/tmp/guest.py"))
+        #expect(calls.contains { $0.first == "rm" && $0.contains("-f") })
     }
 
     @Test func pythonGuestDockerCommandsPassXPCValidation() async throws {
@@ -723,82 +785,20 @@ import WebCrawler
         #expect(calls.contains { $0.contains("python3") && $0.contains("/tmp/guest.py") })
     }
 
-    @Test func swiftRuntimeUsesPinnedImage() {
-        #expect(SwiftScriptPreparer.image == DerrickGuestRuntime.swiftPluginDockerImage)
-        #expect(SwiftScriptPreparer.containerPrefix == "derrick-swift-runtime")
-        #expect(SwiftScriptPreparer.maxTimeoutSeconds == 300)
+    @Test func leftoverSwiftRuntimePrefixIsStillSwept() {
+        #expect(DerrickDockerRuntimeIdentity.namePrefixes.contains("derrick-swift-runtime"))
+        #expect(GuestRuntimeLimits.maxTimeoutSeconds == 300)
     }
 
-    @Test func swiftExecutorUsesReadOnlyExecutableContainer() async throws {
-        let recorder = DockerCallRecorder()
-        let runner = SwiftDockerExecutor(
-            image: "swift:pinned",
-            executor: { arguments, _, _ in
-                await recorder.append(arguments)
-                if arguments.contains("base64") {
-                    let artifact = Data("compiled".utf8).base64EncodedString()
-                    return DockerCLIResult(exitCode: 0, stdout: Data(artifact.utf8), stderr: Data())
-                }
-                if arguments.contains("/tmp/plugin"),
-                   !arguments.contains("chmod"),
-                   !arguments.contains("cat") {
-                    return DockerCLIResult(
-                        exitCode: 0,
-                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
-                        stderr: Data()
-                    )
-                }
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
-        )
-        let artifact = try await runner.compile(source: "import Foundation\nprint(\"[]\")")
-        _ = try await runner.runArtifact(artifact, input: Data(#"{"kind":"manual"}"#.utf8))
-
-        let calls = await recorder.calls
-        let create = calls.first(where: { $0.first == "create" }) ?? []
-        #expect(create.contains("--network"))
-        #expect(create.contains("none"))
-        #expect(create.contains("--read-only"))
-        #expect(create.contains("--tmpfs"))
-        #expect(create.contains { $0.contains("exec") })
-    }
-
-    @Test func guestSourceVerifierRejectsHostEscapeAndDependencies() {
-        let findings = SwiftScriptVerifier.validate(
-            source: "import Foundation\nlet _ = URLSession.shared",
-            dependencies: ["example": "1.0.0"]
-        )
-        #expect(findings.contains("Direct network access is not allowed; emit http.request envelopes."))
-        #expect(findings.contains("Swift script dependencies are not supported; use the standard library and Foundation."))
-    }
-
-    @Test func guestSourceVerifierAllowsStandaloneInput() {
-        let findings = SwiftScriptVerifier.validate(
-            source: "import Foundation\nlet data = FileHandle.standardInput.readDataToEndOfFile()"
-        )
-        #expect(findings.isEmpty)
-    }
-
-    @Test func swiftScriptCanReturnHTMLResult() async throws {
+    @Test func pythonScriptCanReturnHTMLResult() async throws {
         let resultText = try await ScriptExecutionRuntime.run(
             arguments: [
                 "description": .string("render a safe card"),
                 "reason": .string("manual HTML output check"),
-                "script": .string(
-                    "import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"
-                )
+                "script": .string(Self.dummyPythonScript)
             ],
             stdinExecutor: { arguments, _, _ in
-                if arguments.contains("base64") {
-                    return DockerCLIResult(
-                        exitCode: 0,
-                        stdout: Data(Data("compiled".utf8).base64EncodedString().utf8),
-                        stderr: Data()
-                    )
-                }
-                if arguments.contains("/tmp/plugin"),
-                   !arguments.contains("chmod"),
-                   !arguments.contains("cat") {
+                if arguments.contains("python3"), arguments.contains("/tmp/guest.py") {
                     return DockerCLIResult(
                         exitCode: 0,
                         stdout: Data(
@@ -826,7 +826,26 @@ import WebCrawler
         #expect(result.output?.value == "<p><strong>Safe</strong></p>")
     }
 
-    @Test func swiftScriptToolBlocksReadonlyViolations() async throws {
+    @Test func scriptExecRejectsSwiftLanguage() async throws {
+        let resultText = try await ScriptExecutionRuntime.run(
+            arguments: [
+                "description": .string("legacy swift"),
+                "reason": .string("should be blocked"),
+                "script": .string(Self.dummyPythonScript),
+                "language": .string("swift")
+            ],
+            stdinExecutor: Self.dummyStdin,
+            reviewer: nil,
+            logger: { _ in },
+            reviewRequired: false
+        )
+        let result = try #require(ToolExecutionOutcome.decode(from: resultText))
+        #expect(result.status == .blocked)
+        #expect(result.stage == .validation)
+        #expect(resultText.contains("only runs Python"))
+    }
+
+    @Test func pythonScriptToolBlocksFilesystemAccess() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
                 stdinExecutor: Self.dummyStdin,
@@ -847,9 +866,7 @@ import WebCrawler
             arguments: [
                 "description": .string("attempt write"),
                 "reason": .string("test"),
-                "script": .string(
-                    "import Foundation\nlet _ = FileManager.default.createDirectory(atPath: \"/tmp/a\", withIntermediateDirectories: true)"
-                )
+                "script": .string("import sys\n_ = sys.stdin.read()\nopen('/tmp/a','w')")
             ]
         )
 
@@ -857,13 +874,9 @@ import WebCrawler
         #expect(result.text.contains("\"stage\":\"validation\""))
     }
 
-    @Test func swiftExecutorUsesSwiftImage() {
+    @Test func leftoverSwiftGuestImageIsTreatedAsStaleHygieneTag() {
         #expect(DerrickGuestRuntime.swiftPluginDockerImage.contains("swift"))
-    }
-
-    @Test func swiftRuntimeErrorUsesSwiftLanguage() {
-        let error = SwiftDockerExecutorError.commandFailed("swiftc", "compile failed")
-        #expect(error.localizedDescription.contains("swiftc"))
+        #expect(DerrickGuestRuntime.pythonGuestDockerImage == "python:3.14.7")
     }
 
     @Test func guestPluginRunnerRunsPythonRelease() async throws {
@@ -915,12 +928,12 @@ import WebCrawler
         #expect(String(decoding: result.stdout, as: UTF8.self).contains("done"))
     }
 
-    @Test func swiftContainerArgumentsStayNetworkIsolated() {
-        let name = "derrick-swift-runtime-test"
+    @Test func pythonGuestContainerArgumentsStayNetworkIsolated() {
+        let name = "derrick-guest-runtime-test"
         let args = [
             "create", "--network", "none", "--name", name, "--read-only",
             "--tmpfs", "/tmp:rw,exec,nosuid,size=128m",
-            "swiftlang/swift:nightly-6.4.x-noble", "/bin/sleep", "infinity",
+            DerrickGuestRuntime.pythonGuestDockerImage, "/bin/sleep", "infinity",
         ]
         #expect(args.contains("--name"))
         #expect(args.contains(name))
@@ -942,7 +955,7 @@ import WebCrawler
                 "mode": .string("write"),
                 "description": .string("create report file"),
                 "reason": .string("user asked for file output"),
-                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
+                "script": .string(Self.dummyPythonScript),
                 "expected_effects": .array([.string("write /tmp/report.txt")]),
                 "allow_network": .bool(true)
             ]
@@ -973,7 +986,7 @@ import WebCrawler
                 "mode": .string("readonly"),
                 "description": .string("inspect csv"),
                 "reason": .string("analyze user-provided data"),
-                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
+                "script": .string(Self.dummyPythonScript),
                 "user_prompt": .string("summarize this csv"),
                 "allow_network": .bool(true)
             ]
@@ -1052,9 +1065,9 @@ import WebCrawler
     @Test func effectiveScriptTimeoutCapsAtContainerLeaseTTL() {
         ContainerLifecycleRuntime.resetToDefaultForTesting()
         defer { ContainerLifecycleRuntime.resetToDefaultForTesting() }
-        #expect(SwiftScriptPreparer.effectiveScriptTimeoutSeconds(requested: 30) == 30)
-        #expect(SwiftScriptPreparer.effectiveScriptTimeoutSeconds(requested: 900) == SwiftScriptPreparer.containerRunMaxTTLSeconds)
-        #expect(SwiftScriptPreparer.containerRunMaxTTLSeconds == 7 * 60)
+        #expect(GuestRuntimeLimits.effectiveScriptTimeoutSeconds(requested: 30) == 30)
+        #expect(GuestRuntimeLimits.effectiveScriptTimeoutSeconds(requested: 900) == GuestRuntimeLimits.containerRunMaxTTLSeconds)
+        #expect(GuestRuntimeLimits.containerRunMaxTTLSeconds == 7 * 60)
     }
 
     @Test func containerLeaseExceededProducesClearLLMMessage() {
@@ -1089,7 +1102,7 @@ import WebCrawler
                 "mode": .string("readonly"),
                 "description": .string("fetch page"),
                 "reason": .string("test"),
-                "script": .string("import Foundation\nlet _ = FileHandle.standardInput.readDataToEndOfFile()\nprint(\"[]\")"),
+                "script": .string(Self.dummyPythonScript),
                 "allow_network": .bool(true)
             ]
         )

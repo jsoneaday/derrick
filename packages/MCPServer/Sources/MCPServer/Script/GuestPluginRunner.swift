@@ -8,7 +8,7 @@ public enum GuestPluginRunner: Sendable {
         release: PluginFactoryRelease,
         input: Data,
         dockerExecutor: @escaping DockerCLIExecutor,
-        timeoutSeconds: Int = SwiftScriptPreparer.effectiveScriptTimeoutSeconds(requested: 60),
+        timeoutSeconds: Int = GuestRuntimeLimits.effectiveScriptTimeoutSeconds(requested: 60),
         hopHandler: (any PluginHopHandler)? = nil,
         logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> PluginFactoryExecutionResult {

@@ -24,7 +24,9 @@ Validate at boundaries with `GuestContractValidation` before decoding.
 | **Network** | Yes (proxied) | `web.crawl` — fixed crawler image |
 | **Offline guest** | No (`--network none`) | `script_exec` + `plugin.invoke` — **consolidate into one guest runtime** with ephemeral vs packaged entry modes |
 
-Offline guests may be implemented in **Python** (primary target) or Swift (legacy). The host broker (HTTP, secrets, hop loop) stays Swift.
+Offline guests are **Python** only. The host broker (HTTP, secrets, hop loop) stays Swift.
+
+Derrick runtime containers are labeled `app.derrick=runtime` and named with prefixes `derrick-web-crawler`, `derrick-guest-runtime`, `derrick-swift-runtime`, `derrick-file-extractor`. Daemon Docker sync sweeps leftovers. Do not create unlabeled product containers. Do not sweep from the UI on launch — that would kill in-flight daemon jobs.
 
 **Python guest image** (`docker/guest-runtime/Dockerfile`): base on `python:3.14.7`, install **[uv](https://github.com/astral-sh/uv)** for packaged plugin dependencies (`COPY --from=ghcr.io/astral-sh/uv:latest`). `script_exec` uses the pullable `python:3.14.7` image today; the custom `derrick-guest-runtime:python-v1` image is for connector plugins with baked deps.
 

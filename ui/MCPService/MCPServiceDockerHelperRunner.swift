@@ -57,9 +57,15 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
         fputs("[MCPService] Docker helper peer mesh verified\n", stderr)
     }
 
+    /// Remove leftover Derrick containers from a previous crash or kill.
+    @discardableResult
+    func sweepOrphanRuntimeContainers() async -> Int {
+        await DerrickDockerOrphanSweeper.sweep(executor: makeStdinCLIExecutor())
+    }
+
     /// Prewarm the shared offline guest runtime image.
     func prewarmGuestRuntime() async throws {
-        try await SwiftDockerContainerPool.shared.prewarm(
+        try await GuestDockerContainerPool.shared.prewarm(
             image: DerrickGuestRuntime.pythonGuestDockerImage,
             executor: makeStdinCLIExecutor()
         )

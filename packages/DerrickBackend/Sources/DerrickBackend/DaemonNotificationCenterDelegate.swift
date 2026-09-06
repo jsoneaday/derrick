@@ -33,6 +33,10 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
             ?? info["jobResultID"] as? String
         let approvalID = info[UserNotificationUserInfoKey.approvalID.rawValue] as? String
             ?? info["approvalID"] as? String
+        let pluginID = info[UserNotificationUserInfoKey.pluginID.rawValue] as? String
+            ?? info["pluginID"] as? String
+        let threadID = info[UserNotificationUserInfoKey.threadID.rawValue] as? String
+            ?? info["threadID"] as? String
         completionHandler()
         if kind == UserNotificationKind.jobResult.rawValue || kind == "job-result",
            let jobResultID,
@@ -54,6 +58,19 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
             }
             return
         }
+        if kind == UserNotificationKind.messagingMessage.rawValue || kind == "messaging-message",
+           let pluginID, !pluginID.isEmpty,
+           let threadID, !threadID.isEmpty {
+            DispatchQueue.main.async {
+                Task {
+                    await DaemonUILauncher.openMessagingConversation(
+                        pluginID: pluginID,
+                        threadID: threadID
+                    )
+                }
+            }
+            return
+        }
         fputs("[derrickd] notification tap ignored kind=\(kind ?? "nil")\n", stderr)
     }
 }
@@ -65,6 +82,8 @@ public enum DaemonUILauncher: Sendable {
     nonisolated(unsafe) private static var lastOpenedAt: Date = .distantPast
     nonisolated(unsafe) private static var lastHITLOpenedID: String?
     nonisolated(unsafe) private static var lastHITLOpenedAt: Date = .distantPast
+    nonisolated(unsafe) private static var lastMessagingOpenedKey: String?
+    nonisolated(unsafe) private static var lastMessagingOpenedAt: Date = .distantPast
 
     public static func openHITLApproval(id: String) async {
         let skip = (lastHITLOpenedID == id && Date().timeIntervalSince(lastHITLOpenedAt) < 45)
@@ -87,6 +106,30 @@ public enum DaemonUILauncher: Sendable {
             return
         }
         openHITLViaOpenCLI(uiURL: uiURL, approvalID: id)
+    }
+
+    public static func openMessagingConversation(pluginID: String, threadID: String) async {
+        let key = "\(pluginID)|\(threadID)"
+        let skip = (lastMessagingOpenedKey == key && Date().timeIntervalSince(lastMessagingOpenedAt) < 45)
+        if skip {
+            fputs("[derrickd] present-messaging skipped (debounce) \(key)\n", stderr)
+            return
+        }
+        lastMessagingOpenedKey = key
+        lastMessagingOpenedAt = Date()
+
+        DerrickNotificationLaunch.postShowMessagingConversation(pluginID: pluginID, threadID: threadID)
+
+        if DerrickUIPresence.isInteractiveUIRunning() {
+            fputs("[derrickd] present-messaging wake \(key) (UI already running)\n", stderr)
+            return
+        }
+
+        guard let uiURL = locateUIApp() else {
+            fputs("[derrickd] cannot locate derrick.ui to present messaging \(key)\n", stderr)
+            return
+        }
+        openMessagingViaOpenCLI(uiURL: uiURL, pluginID: pluginID, threadID: threadID)
     }
 
     public static func openJobResult(id: String) async {
@@ -150,6 +193,25 @@ public enum DaemonUILauncher: Sendable {
             fputs("[derrickd] /usr/bin/open -n panel-only for \(resultID)\n", stderr)
         } catch {
             fputs("[derrickd] /usr/bin/open failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    /// Opens the main Derrick window — not a panel-only session — so the conversation is usable.
+    private static func openMessagingViaOpenCLI(uiURL: URL, pluginID: String, threadID: String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = [
+            "-a", uiURL.path,
+            "--args",
+            DerrickNotificationLaunch.showMessagingConversationArgument,
+            pluginID,
+            threadID,
+        ]
+        do {
+            try proc.run()
+            fputs("[derrickd] /usr/bin/open messaging conversation \(pluginID) \(threadID)\n", stderr)
+        } catch {
+            fputs("[derrickd] /usr/bin/open messaging failed: \(error.localizedDescription)\n", stderr)
         }
     }
 

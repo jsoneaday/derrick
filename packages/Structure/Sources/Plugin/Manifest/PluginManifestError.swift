@@ -65,7 +65,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .intervalTooShort(let s):
             return "Schedule interval must be at least \(PluginContract.minScheduleIntervalSeconds)s (got \(s))"
         case .invalidDependency(let n):
-            return "Swift plugin dependencies are not supported: \(n)"
+            return "Plugin dependencies are not supported: \(n)"
         case .invalidContentHash(let h):
             return "Invalid content hash: \(h)"
         case .invalidSkill(let s):

@@ -107,6 +107,10 @@ public enum DockerRunRequestValidator: Sendable {
            let error = validateBuildArguments(dockerArgs) {
             return error
         }
+        if subcommand == "ps",
+           let error = validatePsArguments(dockerArgs) {
+            return error
+        }
         var index = 0
         while index < dockerArgs.count {
             let arg = dockerArgs[index]
@@ -150,6 +154,24 @@ public enum DockerRunRequestValidator: Sendable {
             }
             index += 1
         }
+        if subcommand == "create",
+           !DerrickDockerRuntimeIdentity.createHasRuntimeLabel(dockerArgs) {
+            return .disallowedDockerFlag("create missing runtime label")
+        }
+        return nil
+    }
+
+    /// `docker ps -aq --filter label=app.derrick=runtime` (or an allowed name prefix).
+    private static func validatePsArguments(
+        _ dockerArgs: [String]
+    ) -> DockerRunRequestValidationError? {
+        guard dockerArgs.count == 4,
+              dockerArgs[1] == "-aq",
+              dockerArgs[2] == "--filter",
+              DerrickDockerRuntimeIdentity.isAllowedPsFilter(dockerArgs[3])
+        else {
+            return .disallowedDockerFlag("ps")
+        }
         return nil
     }
 
@@ -184,34 +206,12 @@ public enum DockerRunRequestValidator: Sendable {
         case "sh":
             guard args.count == 3,
                   args[1] == "-c",
-                  (args[2] == "cat > /tmp/plugin.swift"
-                    || args[2] == "cat > /tmp/plugin"
-                    || args[2] == "cat > /tmp/guest.py")
+                  args[2] == "cat > /tmp/guest.py"
             else {
                 return .disallowedDockerFlag("exec \(command)")
             }
         case "python3":
             guard args.count == 2, args[1] == "/tmp/guest.py" else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "swift":
-            guard args.count == 2, args[1] == "/tmp/plugin.swift" else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "swiftc":
-            guard args == ["swiftc", "-O", "/tmp/plugin.swift", "-o", "/tmp/plugin"] else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "base64":
-            guard args == ["base64", "-w", "0", "/tmp/plugin"] else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "chmod":
-            guard args == ["chmod", "700", "/tmp/plugin"] else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "/tmp/plugin":
-            guard args == ["/tmp/plugin"] else {
                 return .disallowedDockerFlag("exec \(command)")
             }
         case "/usr/local/bin/derrick-web-crawler":

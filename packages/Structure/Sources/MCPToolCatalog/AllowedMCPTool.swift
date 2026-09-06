@@ -41,7 +41,7 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     public var defaultDescription: String {
         switch self {
         case .scriptExec:
-            return "Run declared standalone Swift in a constrained Docker container after verification. Emit HTTP request envelopes; the host performs the request."
+            return "Run declared standalone Python in a constrained Docker container after verification. Emit HTTP request envelopes; the host performs the request."
         case .sessionMemorySearch:
             return "Search prior session memory entries with optional query and paging."
         case .agentsSpawn:

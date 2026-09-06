@@ -3,7 +3,7 @@ import MCP
 import Plugin
 import Structure
 
-/// Runs standalone guest source (Python primary, Swift legacy) and dispatches host-owned capability hops.
+/// Runs standalone Python guest source and dispatches host-owned capability hops.
 public enum ScriptExecutionRuntime {
     public static func run(
         arguments: [String: Value],
@@ -16,12 +16,21 @@ public enum ScriptExecutionRuntime {
     ) async throws -> String {
         let started = Date()
         let parsed = try parse(arguments)
-        let language = GuestScriptLanguage.resolve(arguments: arguments, script: parsed.script)
+        let language = GuestScriptLanguage.python
         logger("[script_exec] \(language.rawValue) source chars=\(parsed.script.count)")
 
+        if GuestScriptLanguage.requestedLanguageIsUnsupported(arguments) {
+            return finish(blocked(
+                findings: ["script_exec only runs Python. Swift guest scripts are not supported."],
+                stage: .staticValidation,
+                started: started,
+                parsed: parsed,
+                verifier: language.verifierID
+            ), logger: logger)
+        }
+
         let staticStarted = Date()
-        let staticFindings = staticValidate(
-            language: language,
+        let staticFindings = PythonScriptVerifier.validate(
             source: parsed.script,
             dependencies: parsed.dependencies
         )
@@ -104,49 +113,27 @@ public enum ScriptExecutionRuntime {
             logger("[script_exec] skipping LLM reviewer")
         }
 
-        let timeout = SwiftScriptPreparer.effectiveScriptTimeoutSeconds(
+        let timeout = GuestRuntimeLimits.effectiveScriptTimeoutSeconds(
             requested: parsed.timeoutSeconds
         )
         let invokeID = UUID().uuidString
         do {
-            let result: ScriptExecutionResult
-            switch language {
-            case .python:
-                let executor = PythonGuestDockerExecutor(executor: stdinExecutor)
-                result = try await GuestHopLoop.run(
-                    initialEvent: initialEvent,
-                    invokeID: invokeID,
-                    timeoutSeconds: timeout,
-                    verifier: language.verifierID,
-                    execute: { input in
-                        try await executor.runSource(
-                            source: parsed.script,
-                            input: input,
-                            timeoutSeconds: timeout
-                        )
-                    },
-                    logger: logger,
-                    hopHandler: hopHandler
-                )
-            case .swift:
-                let executor = SwiftDockerExecutor(executor: stdinExecutor)
-                let artifact = try await executor.compile(source: parsed.script)
-                result = try await GuestHopLoop.run(
-                    initialEvent: initialEvent,
-                    invokeID: invokeID,
-                    timeoutSeconds: timeout,
-                    verifier: language.verifierID,
-                    execute: { input in
-                        try await executor.runArtifact(
-                            artifact,
-                            input: input,
-                            timeoutSeconds: timeout
-                        )
-                    },
-                    logger: logger,
-                    hopHandler: hopHandler
-                )
-            }
+            let executor = PythonGuestDockerExecutor(executor: stdinExecutor)
+            let result = try await GuestHopLoop.run(
+                initialEvent: initialEvent,
+                invokeID: invokeID,
+                timeoutSeconds: timeout,
+                verifier: language.verifierID,
+                execute: { input in
+                    try await executor.runSource(
+                        source: parsed.script,
+                        input: input,
+                        timeoutSeconds: timeout
+                    )
+                },
+                logger: logger,
+                hopHandler: hopHandler
+            )
             let metrics = ScriptPhaseTiming.scriptMetrics(parsed.script)
             var phaseTiming = result.phaseTiming ?? ScriptPhaseTiming()
             phaseTiming.staticValidateMS = staticValidateMS
@@ -169,23 +156,6 @@ public enum ScriptExecutionRuntime {
                 phaseTiming: phaseTiming
             )
             return finish(decorated, logger: logger)
-        } catch let error as SwiftDockerExecutorError {
-            let stage: ScriptFailureStage
-            switch error {
-            case .commandFailed(let step, _) where step == "swiftc":
-                stage = .typecheck
-            default:
-                stage = .execution
-            }
-            logger("[script_exec] guest runtime failed stage=\(stage.rawValue): \(error.localizedDescription)")
-            return finish(runtimeFailure(
-                findings: [error.localizedDescription],
-                stage: stage,
-                started: started,
-                parsed: parsed,
-                assessment: reviewerAssessment,
-                verifier: language.verifierID
-            ), logger: logger)
         } catch let error as PythonGuestDockerExecutorError {
             logger("[script_exec] guest runtime failed: \(error.localizedDescription)")
             return finish(runtimeFailure(
@@ -206,19 +176,6 @@ public enum ScriptExecutionRuntime {
                 assessment: reviewerAssessment,
                 verifier: language.verifierID
             ), logger: logger)
-        }
-    }
-
-    private static func staticValidate(
-        language: GuestScriptLanguage,
-        source: String,
-        dependencies: [String: String]
-    ) -> [String] {
-        switch language {
-        case .python:
-            return PythonScriptVerifier.validate(source: source, dependencies: dependencies)
-        case .swift:
-            return SwiftScriptVerifier.validate(source: source, dependencies: dependencies)
         }
     }
 

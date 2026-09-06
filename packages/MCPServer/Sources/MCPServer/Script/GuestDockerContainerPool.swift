@@ -2,9 +2,9 @@ import Foundation
 import DockerRunnerXPC
 import Structure
 
-/// Bounds concurrent Swift container work across factory and script execution.
-public actor SwiftDockerContainerPool {
-    public static let shared = SwiftDockerContainerPool()
+/// Bounds concurrent offline-guest container work (script_exec and plugin.invoke).
+public actor GuestDockerContainerPool {
+    public static let shared = GuestDockerContainerPool()
 
     private let maxConcurrentContainers: Int
     private var activeContainers = 0
@@ -24,7 +24,7 @@ public actor SwiftDockerContainerPool {
         guard pulled.exitCode == 0 else {
             let detail = String(decoding: pulled.stderr, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw SwiftDockerContainerPoolError.imageUnavailable(
+            throw GuestDockerContainerPoolError.imageUnavailable(
                 detail.isEmpty ? "exit \(pulled.exitCode)" : detail
             )
         }
@@ -59,7 +59,7 @@ public actor SwiftDockerContainerPool {
     }
 }
 
-public enum SwiftDockerContainerPoolError: Error, LocalizedError, Equatable, Sendable {
+public enum GuestDockerContainerPoolError: Error, LocalizedError, Equatable, Sendable {
     case imageUnavailable(String)
 
     public var errorDescription: String? {

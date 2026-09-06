@@ -88,7 +88,7 @@ import Testing
         let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
         #expect(scriptReviewer.contains("intent alignment"))
         #expect(scriptReviewer.contains("secret literals"))
-        #expect(scriptReviewer.contains("Swift verifier"))
+        #expect(scriptReviewer.contains("Python verifier"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
@@ -679,6 +679,34 @@ import Testing
         #expect(!DerrickNotificationLaunch.isJobResultPresentationLaunch([]))
     }
 
+    @Test func derrickNotificationLaunchParsesMessagingConversationArgv() {
+        let args = [
+            "derrick",
+            DerrickNotificationLaunch.showMessagingConversationArgument,
+            "slack-bot",
+            "thread-1",
+        ]
+        let payload = DerrickNotificationLaunch.messagingConversationToPresent(args)
+        #expect(payload?.pluginID == "slack-bot")
+        #expect(payload?.threadID == "thread-1")
+        #expect(DerrickNotificationLaunch.hasMessagingConversationPresentationIntent(args))
+        #expect(!DerrickNotificationLaunch.hasJobResultPresentationIntent(args))
+    }
+
+    @Test func derrickMessagingConversationWakeRoundTripsPendingPayload() {
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
+        _ = DerrickMessagingConversationPresentationWake.takePending()
+        DerrickMessagingConversationPresentationWake.post(pluginID: "slack-bot", threadID: "thread-1")
+        defer { _ = DerrickMessagingConversationPresentationWake.takePending() }
+        #expect(DerrickNotificationLaunch.hasMessagingConversationPresentationIntent([]))
+        let payload = DerrickMessagingConversationPresentationWake.peekPending()
+        #expect(payload?.pluginID == "slack-bot")
+        #expect(payload?.threadID == "thread-1")
+        let taken = DerrickMessagingConversationPresentationWake.takePending()
+        #expect(taken?.threadID == "thread-1")
+        #expect(DerrickMessagingConversationPresentationWake.peekPending() == nil)
+    }
+
     @Test func derrickUISessionPresenceTracksLivePID() {
         guard appGroupCrossProcessStorageIsAvailable() else { return }
         DerrickUISessionPresence.clearInteractiveSession()
@@ -1024,6 +1052,26 @@ import Testing
         #expect(policy.containerRunMaxTTLSeconds == 7 * 60)
         #expect(policy.destroyAfterEveryRun)
         #expect(policy.neverReusePostExecution)
+    }
+
+    @Test func derrickDockerRuntimeIdentityIsStable() {
+        #expect(DerrickDockerRuntimeIdentity.labelAssignment == "app.derrick=runtime")
+        #expect(DerrickDockerRuntimeIdentity.createLabelArguments == ["--label", "app.derrick=runtime"])
+        #expect(DerrickDockerRuntimeIdentity.namePrefixes == [
+            "derrick-web-crawler",
+            "derrick-guest-runtime",
+            "derrick-swift-runtime",
+            "derrick-file-extractor",
+        ])
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("label=app.derrick=runtime"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=derrick-guest-runtime"))
+        #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
+        #expect(
+            DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
+                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + ["python:3.14.7"]
+            )
+        )
+        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", "python:3.14.7"]))
     }
 
     @Test func orchestrationLimitsDefaults() {

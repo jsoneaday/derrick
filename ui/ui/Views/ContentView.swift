@@ -455,6 +455,24 @@ struct ContentView: View {
                 await routeToMessagingConnector(pluginID)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: DerrickMessagingConversationPresentationWake.uiOpenNotificationName
+        )) { notification in
+            guard let pluginID = notification.userInfo?[
+                DerrickMessagingConversationPresentationWake.pluginIDUserInfoKey
+            ] as? String,
+                  let threadID = notification.userInfo?[
+                    DerrickMessagingConversationPresentationWake.threadIDUserInfoKey
+                  ] as? String,
+                  !pluginID.isEmpty,
+                  !threadID.isEmpty
+            else {
+                return
+            }
+            Task { @MainActor in
+                await routeToMessagingConversation(pluginID: pluginID, threadID: threadID)
+            }
+        }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
         }
@@ -1338,6 +1356,14 @@ struct ContentView: View {
     @discardableResult
     private func routeToMessagingConnector(_ pluginID: String) async -> Bool {
         let opened = await messaging.openConnector(pluginID: pluginID)
+        guard opened else { return false }
+        workspace = .messaging
+        return true
+    }
+
+    @discardableResult
+    private func routeToMessagingConversation(pluginID: String, threadID: String) async -> Bool {
+        let opened = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
         guard opened else { return false }
         workspace = .messaging
         return true

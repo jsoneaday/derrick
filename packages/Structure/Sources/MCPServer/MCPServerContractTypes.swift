@@ -3,32 +3,19 @@ import MCP
 
 public enum GuestScriptLanguage: String, Sendable, Equatable {
     case python
-    case swift
 
-    public var verifierID: String {
-        switch self {
-        case .python:
-            return "python-check-v1"
-        case .swift:
-            return "swift-check-v1"
-        }
-    }
+    public var verifierID: String { "python-check-v1" }
 
-    public static func resolve(arguments: [String: Value], script: String) -> GuestScriptLanguage {
-        if let raw = arguments["language"]?.stringValue?.lowercased() {
-            switch raw {
-            case "python", "py":
-                return .python
-            case "swift":
-                return .swift
-            default:
-                break
-            }
+    /// `language` is optional and must be Python when set.
+    public static func requestedLanguageIsUnsupported(_ arguments: [String: Value]) -> Bool {
+        guard let raw = arguments["language"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+            !raw.isEmpty
+        else {
+            return false
         }
-        if script.contains("import Foundation") || script.contains("import Swift") {
-            return .swift
-        }
-        return .python
+        return raw != "python" && raw != "py"
     }
 }
 

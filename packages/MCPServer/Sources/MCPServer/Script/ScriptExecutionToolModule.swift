@@ -20,11 +20,11 @@ public enum ScriptExecutionToolModule: MCPToolModule {
                 ]),
                 "script": .object([
                     "type": .string("string"),
-                    "description": .string("Standalone Python source (default) or Swift when language is swift. Reads one JSON event from standard input and writes a JSON array of Derrick envelopes to standard output. Use http.request envelopes for host HTTP and result.emit/message.post for terminal output.")
+                    "description": .string("Standalone Python source. Reads one JSON event from standard input and writes a JSON array of Derrick envelopes to standard output. Use http.request envelopes for host HTTP and result.emit/message.post for terminal output.")
                 ]),
                 "language": .object([
                     "type": .string("string"),
-                    "description": .string("Guest language: python (default) or swift (legacy). Omit to auto-detect from source.")
+                    "description": .string("Must be python when set. Swift guest scripts are not supported.")
                 ]),
                 "user_prompt": .object([
                     "type": .string("string"),

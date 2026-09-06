@@ -5,12 +5,13 @@ import PolicyUserInteraction
 import Structure
 import UserNotifications
 
-/// UI presentation for notification taps (job results + HITL Allow/Deny).
+/// UI presentation for notification taps (job results + HITL Allow/Deny + messaging).
 ///
 /// Delivery rules:
 /// - Live chat HITL (UI connected): modal via `HITLLiveApprovalHandlers` — no notification.
 /// - Offline HITL: posted by derrickd; tap → Allow/Deny alert in the UI.
 /// - Job completion: always notified by derrickd; tap → result panel (UI open or closed).
+/// - Connector messages: derrickd polls while Derrick is closed; tap → that conversation.
 /// - Info/errors during UI session: modal only (`PolicyEventPresenter`), never notifications.
 @MainActor
 final class DerrickNotificationService {
@@ -19,6 +20,7 @@ final class DerrickNotificationService {
     private var repository: DBRepository?
     private var presentJobResultObserver: DerrickDarwinNotifyObserver?
     private var presentHITLObserver: DerrickDarwinNotifyObserver?
+    private var presentMessagingObserver: DerrickDarwinNotifyObserver?
     private let launchEpoch = Date()
     private var sessionReady = false
 
@@ -31,6 +33,7 @@ final class DerrickNotificationService {
     func prepare() {
         registerPresentJobResultObserver()
         registerPresentHITLObserver()
+        registerPresentMessagingObserver()
     }
 
     func activateSession(repository: DBRepository) async {
@@ -49,6 +52,7 @@ final class DerrickNotificationService {
     func stop() {
         unregisterPresentJobResultObserver()
         unregisterPresentHITLObserver()
+        unregisterPresentMessagingObserver()
     }
 
     func presentHITLApprovalWhenReady(id: String) async {
@@ -61,6 +65,25 @@ final class DerrickNotificationService {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
         await resolveHITLFromNotificationTap(approvalID: id)
+    }
+
+    func presentMessagingConversationWhenReady(pluginID: String, threadID: String) async {
+        for _ in 0..<40 {
+            if sessionReady {
+                deliverMessagingConversation(pluginID: pluginID, threadID: threadID)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        deliverMessagingConversation(pluginID: pluginID, threadID: threadID)
+    }
+
+    private func deliverMessagingConversation(pluginID: String, threadID: String) {
+        guard !JobResultPanelSession.isPanelOnlyLaunch else { return }
+        DerrickMainWindowBridge.ensureMainWindow()
+        DerrickMessagingConversationPresentationWake.requestOpenInUI(
+            .init(pluginID: pluginID, threadID: threadID)
+        )
     }
 
     private func resolveHITLFromNotificationTap(approvalID: String) async {
@@ -263,5 +286,40 @@ final class DerrickNotificationService {
     private func unregisterPresentHITLObserver() {
         presentHITLObserver?.stop()
         presentHITLObserver = nil
+    }
+
+    private func registerPresentMessagingObserver() {
+        guard presentMessagingObserver == nil else { return }
+        if let argv = DerrickNotificationLaunch.messagingConversationToPresent() {
+            DerrickMessagingConversationPresentationWake.post(argv)
+        }
+        let observer = DerrickDarwinNotifyObserver(
+            darwinName: DerrickMessagingConversationPresentationWake.darwinName,
+            localName: DerrickMessagingConversationPresentationWake.localNotificationName
+        ) {
+            Task { @MainActor in
+                if let payload = DerrickMessagingConversationPresentationWake.takePending() {
+                    await DerrickNotificationService.shared.presentMessagingConversationWhenReady(
+                        pluginID: payload.pluginID,
+                        threadID: payload.threadID
+                    )
+                }
+            }
+        }
+        presentMessagingObserver = observer
+        observer.start()
+        if let payload = DerrickMessagingConversationPresentationWake.takePending() {
+            Task { @MainActor in
+                await self.presentMessagingConversationWhenReady(
+                    pluginID: payload.pluginID,
+                    threadID: payload.threadID
+                )
+            }
+        }
+    }
+
+    private func unregisterPresentMessagingObserver() {
+        presentMessagingObserver?.stop()
+        presentMessagingObserver = nil
     }
 }

@@ -23,7 +23,7 @@ Derrick integrates with user-configured APIs. You supply your own keys and are s
 
 ## Runtime
 
-- **Docker Desktop** — script and plugin execution use the `swiftlang/swift` container image (see `docs/adr-swift-script-runtime.md`).
+- **Docker Desktop** — script and plugin execution use the `python:3.14.7` guest image (see `docs/adr-swift-script-runtime.md` for superseded Swift guest notes).
 
 ## Project license
 

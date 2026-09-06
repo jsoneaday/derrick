@@ -65,6 +65,7 @@ public struct FileExtractorDockerExecutor: Sendable {
     ) -> [String] {
         [
             "create",
+        ] + DerrickDockerRuntimeIdentity.createLabelArguments + [
             "--network", "none",
             "--read-only",
             "--tmpfs", "/tmp:rw,exec,nosuid,size=128m",

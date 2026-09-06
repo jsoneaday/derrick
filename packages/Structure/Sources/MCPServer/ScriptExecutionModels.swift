@@ -59,7 +59,7 @@ public enum ScriptFailureStage: String, Codable, Sendable, Equatable {
     case none
     /// Static verifier rejected the request before run.
     case staticValidation
-    /// The Swift compiler rejected the script.
+    /// Leftover Swift compiler stage. Guest scripts are Python; this case remains for stored outcomes.
     case typecheck
     /// LLM security reviewer rejected (or could not complete when required).
     case llmReview
@@ -253,7 +253,7 @@ public struct ScriptExecutionResult: Sendable {
         stderr: String,
         durationMS: Int,
         phaseTiming: ScriptPhaseTiming?,
-        verifier: String = "swift-check-v1"
+        verifier: String = "python-check-v1"
     ) -> ScriptExecutionResult {
         let combined = stdout + "\n" + stderr
         let looksLikeEgress = combined.localizedCaseInsensitiveContains("UNAUTHORIZED_EGRESS")

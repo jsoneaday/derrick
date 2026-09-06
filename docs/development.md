@@ -46,7 +46,7 @@ sqlite3 "$HOME/Library/Group Containers/<TEAM_ID>.derrick.shared/Library/Applica
 ## Docker
 
 - Docker Desktop must be running before chat tools or plugin execution.
-- Guest Swift uses `swiftlang/swift:nightly-6.4.x-noble` with `--network none` (see [adr-swift-script-runtime.md](adr-swift-script-runtime.md)).
+- Guest Python uses `python:3.14.7` with `--network none` (see [adr-swift-script-runtime.md](adr-swift-script-runtime.md) for the superseded Swift guest notes).
 
 ## Secret scanning
 

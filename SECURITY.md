@@ -18,7 +18,7 @@ We will acknowledge receipt and work on a fix before public disclosure when poss
 Derrick runs LLM agents with tools on the user's Mac. The design assumes:
 
 - **Untrusted model output** — tools and scripts are gated before execution.
-- **Untrusted guest code** — Swift plugins/scripts run in Docker with no network; the host performs HTTP.
+- **Untrusted guest code** — Python plugins/scripts run in Docker with no network; the host performs HTTP.
 - **Untrusted remote content** — fetched HTML and tool output are sanitized before display.
 - **Secrets stay on the host** — API keys and connector tokens live in Keychain or local `.env` (dev only); they are not injected into guest containers.
 
@@ -26,7 +26,7 @@ Derrick runs LLM agents with tools on the user's Mac. The design assumes:
 
 | Layer | Mechanism |
 |-------|-----------|
-| Script execution | Docker `--network none`, static Swift verifier, LLM script reviewer |
+| Script execution | Docker `--network none`, static Python verifier, LLM script reviewer |
 | Network egress | Host HTTP client, egress blacklist, user approval for new destinations |
 | Plugins | Factory build + review; hop-limited `http.request`; Keychain-attached auth |
 | Inter-process | Code-signed XPC peers, HMAC-signed service messages (release: Keychain secret) |

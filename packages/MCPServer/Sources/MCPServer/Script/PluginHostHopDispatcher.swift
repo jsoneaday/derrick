@@ -2,9 +2,9 @@ import Foundation
 import Plugin
 import Structure
 
-/// Host-owned dispatcher for capability hops emitted by Swift programs.
+/// Host-owned dispatcher for capability hops emitted by guest programs.
 public enum PluginHostHopDispatcher: Sendable {
-    /// Runs a compiled Swift artifact until it emits a terminal result,
+    /// Runs a guest program until it emits a terminal result,
     /// dispatching HTTP requests between invocations.
     public static func run(
         initialInput: Data,

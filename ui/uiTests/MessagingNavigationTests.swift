@@ -183,4 +183,33 @@ import Testing
         #expect(session.threads.first?.unreadCount == 0)
         #expect(session.tabs.first?.unreadCount == 0)
     }
+
+    @MainActor
+    @Test func openConversationFromNotificationSelectsThatThread() async throws {
+        let repository = createTestRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
+        let store = MessagingStore()
+        await store.configure(repository: repository)
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-bot", displayName: "Slack Bot")
+        )
+        let general = MessagingThreadDTO(
+            pluginID: "slack-bot",
+            vendorThreadID: "C123",
+            title: "#general"
+        )
+        let random = MessagingThreadDTO(
+            pluginID: "slack-bot",
+            vendorThreadID: "C456",
+            title: "#random"
+        )
+        try await repository.upsertMessagingThread(general)
+        try await repository.upsertMessagingThread(random)
+
+        let opened = await store.openConversation(pluginID: "slack-bot", threadID: random.id)
+        #expect(opened)
+        #expect(store.selectedPluginID == "slack-bot")
+        #expect(store.selectedThreadID == random.id)
+        #expect(store.conversationLanding == .vendorConnector(pluginID: "slack-bot"))
+    }
 }

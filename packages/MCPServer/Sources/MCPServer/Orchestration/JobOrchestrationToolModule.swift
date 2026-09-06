@@ -34,7 +34,7 @@ public enum JobOrchestrationToolModule {
                     ]),
                     "tool_arguments": .object([
                         "type": .string("object"),
-                        "description": .string("Frozen effector args. For web.crawl use {start_url,goal,max_pages,max_depth,timeout_seconds}. For script_exec use {description,reason,script} where script is standalone Swift reading JSON from stdin and writing Derrick envelope JSON to stdout.")
+                        "description": .string("Frozen effector args. For web.crawl use {start_url,goal,max_pages,max_depth,timeout_seconds}. For script_exec use {description,reason,script} where script is standalone Python reading JSON from stdin and writing Derrick envelope JSON to stdout.")
                     ]),
                     "wake_after": .object([
                         "type": .string("boolean"),

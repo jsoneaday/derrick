@@ -192,6 +192,16 @@ final class MessagingStore: ObservableObject {
         return true
     }
 
+    /// Opens a specific conversation from a notification tap.
+    func openConversation(pluginID: String, threadID: String) async -> Bool {
+        session.selectConnector(pluginID: pluginID)
+        await catalog.reloadFromFactory(preservingPluginIDs: [pluginID])
+        await session.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
+        guard session.threads.contains(where: { $0.id == threadID }) else { return false }
+        await session.selectThread(id: threadID)
+        return session.selectedPluginID == pluginID && session.selectedThreadID == threadID
+    }
+
     func updateCredentials(pluginID: String) async -> Bool {
         guard let repository else { return false }
         let secrets = await ConnectorCredentialService.secretDescriptors(

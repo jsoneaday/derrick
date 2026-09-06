@@ -281,7 +281,7 @@ public final class XPCDockerRunner: @unchecked Sendable {
                 )
             }
             await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
-            try await SwiftDockerContainerPool.shared.prewarm(
+            try await GuestDockerContainerPool.shared.prewarm(
                 image: DerrickGuestRuntime.pythonGuestDockerImage,
                 executor: makeDockerExecutor()
             )

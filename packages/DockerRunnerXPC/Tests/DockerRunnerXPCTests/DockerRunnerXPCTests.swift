@@ -213,12 +213,12 @@ struct DockerRunnerXPCTests {
             ["pull", "img"],
             ["exec", "-i", "c", "python3", "/tmp/guest.py"],
             ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py"],
-            ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
-            ["exec", "-i", "c", "/tmp/plugin"],
             ["exec", "-i", "c", "/usr/local/bin/derrick-web-crawler"],
-            ["create", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
+            ["create", "--label", "app.derrick=runtime", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
             [
                 "create",
+                "--label",
+                "app.derrick=runtime",
                 "--network", "none",
                 "--name", "derrick-guest-runtime-test",
                 "--env", "HOME=/tmp",
@@ -239,6 +239,8 @@ struct DockerRunnerXPCTests {
             ["exec", "-i", "c", "/usr/local/bin/derrick-file-extractor"],
             [
                 "create",
+                "--label",
+                "app.derrick=runtime",
                 "-v",
                 "/tmp/file-jobs/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/in:/data/in:ro",
                 "-v",
@@ -261,6 +263,9 @@ struct DockerRunnerXPCTests {
             ["exec", "-i", "c", "sh", "-c", "cat > /tmp/other.py"],
             ["exec", "-i", "c", "sh", "-c", "rm -rf /"],
             ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py", "extra"],
+            ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
+            ["exec", "-i", "c", "/tmp/plugin"],
+            ["exec", "-i", "c", "swiftc", "-O", "/tmp/plugin.swift", "-o", "/tmp/plugin"],
         ] as [[String]] {
             let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
             #expect(DockerRunRequestValidator.validate(r) != nil, "expected reject for \(args)")
@@ -329,5 +334,31 @@ struct DockerRunnerXPCTests {
         #expect(DockerHostLaunch.envExecutablePath == "/usr/bin/env")
         #expect(DockerHostLaunch.dockerCommandName == "docker")
         #expect(DockerHostLaunch.dockerCLIArguments(["version"]) == ["docker", "version"])
+    }
+
+    @Test func rejectsCreateWithoutRuntimeLabel() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "create", "--name", "c", "python:3.14.7", "/bin/sleep", "infinity",
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("create missing runtime label"))
+    }
+
+    @Test func allowsOrphanSweepPsFilters() {
+        for args in DerrickDockerRuntimeIdentity.psListArguments {
+            let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+            #expect(DockerRunRequestValidator.validate(r) == nil, "expected allow for \(args)")
+        }
+    }
+
+    @Test func rejectsUnscopedDockerPs() {
+        for args in [
+            ["ps"],
+            ["ps", "-aq"],
+            ["ps", "-aq", "--filter", "name=nginx"],
+            ["ps", "-a", "--filter", "label=app.derrick=runtime"],
+        ] as [[String]] {
+            let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+            #expect(DockerRunRequestValidator.validate(r) != nil, "expected reject for \(args)")
+        }
     }
 }

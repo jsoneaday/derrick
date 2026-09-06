@@ -9,9 +9,7 @@ public enum ServiceHealthStatus: String, Codable, Sendable, Hashable {
 
 /// Guest container images the product expects for offline plugin/script work.
 public enum DerrickGuestRuntime: Sendable {
-    /// Official Swift 6.4 image used by legacy factory and script execution.
-    /// Swift 6.4 is not a stable Docker release yet; pin this tag to a digest
-    /// when publishing a production build.
+    /// Leftover Swift guest image tag reported by older daemons. Hygiene retires a mismatch.
     public static let swiftPluginDockerImage = "swiftlang/swift:nightly-6.4.x-noble"
 
     /// Pullable Python image for offline guests (script_exec primary).

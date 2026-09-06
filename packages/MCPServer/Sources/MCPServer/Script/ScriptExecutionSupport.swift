@@ -132,7 +132,7 @@ public enum ScriptExecutionVerifier {
             findings.append("Write mode requires expected_effects.")
         }
         if !args.dependencies.isEmpty {
-            findings.append("Swift script dependencies are not supported.")
+            findings.append("Guest script dependencies are not supported.")
         }
 
         if args.mode == .readonly {
@@ -144,8 +144,8 @@ public enum ScriptExecutionVerifier {
 
     private static func readonlyViolations(in script: String) -> [String] {
         let patterns: [(String, String)] = [
-            (#"(?m)\b(FileManager|writeData|write\(to:|removeItem|moveItem|createDirectory)\b"#, "Readonly mode cannot mutate filesystem."),
-            (#"(?m)\b(Process|URLSession|NWConnection|Socket)\b"#, "Readonly mode cannot execute nested commands or access the network.")
+            (#"(?m)\bopen\s*\("#, "Readonly mode cannot mutate filesystem."),
+            (#"(?m)\b(subprocess|os\.system|os\.popen|socket|urllib|requests|httpx)\b"#, "Readonly mode cannot execute nested commands or access the network.")
         ]
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil
@@ -157,11 +157,11 @@ extension ScriptExecutionResult {
     /// Container lease TTL hit — run stopped to free the slot for other agents.
     public static func containerLeaseExceeded(
         durationMS: Int,
-        maxSeconds: Int = SwiftScriptPreparer.containerRunMaxTTLSeconds,
+        maxSeconds: Int = GuestRuntimeLimits.containerRunMaxTTLSeconds,
         phaseTiming: ScriptPhaseTiming? = nil,
-        verifier: String = "swift-check-v1"
+        verifier: String = "python-check-v1"
     ) -> ScriptExecutionResult {
-        let explanation = SwiftScriptPreparer.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
+        let explanation = GuestRuntimeLimits.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
         return ScriptExecutionResult(
             status: .timeout,
             decision: .allow,

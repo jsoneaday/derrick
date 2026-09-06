@@ -43,21 +43,22 @@ public enum PromptResources {
         try DerrickBundledText.load("user_facing_spawn_overlay.md", from: resourceRoot)
     }
 
-    /// Swift guest contract wrapped for a model prompt.
+    /// Python guest contract wrapped for a model prompt.
     public static func guestSDKForModel(
         from resourceRoot: URL? = nil,
         spec: PluginSpec? = nil
     ) throws -> String {
         _ = resourceRoot
         return DerrickBundledText.formatCodeForModel(
-            try DerrickGuestSwift.source(for: spec),
-            heading: "standalone Swift plugin contract"
+            try DerrickGuestPython.source(for: spec),
+            heading: "standalone Python guest contract",
+            language: "python"
         )
     }
 
     public static func guestSDKSource(from resourceRoot: URL? = nil) throws -> String {
         _ = resourceRoot
-        return try DerrickGuestSwift.source()
+        return try DerrickGuestPython.source()
     }
 
     private static func load(named name: String, from resourceRoot: URL?, prefixTxt: String? = nil) throws -> String {

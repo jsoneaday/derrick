@@ -5,7 +5,7 @@ Thank you for your interest in contributing. Please read the [Code of Conduct](C
 ## Requirements
 
 - **macOS** with **Xcode 27** (Swift 6.4+)
-- **Docker Desktop** (Swift script and plugin runtime; image `swiftlang/swift:nightly-6.4.x-noble`)
+- **Docker Desktop** (Python guest runtime, web crawler, and file extractor images)
 - Apple Developer account for code signing
 
 ## Getting started

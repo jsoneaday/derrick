@@ -78,6 +78,7 @@ public struct WebCrawlerDockerExecutor: Sendable {
     ) -> [String] {
         [
             "create",
+        ] + DerrickDockerRuntimeIdentity.createLabelArguments + [
             "--network", dockerNetwork,
             "--read-only",
             "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",

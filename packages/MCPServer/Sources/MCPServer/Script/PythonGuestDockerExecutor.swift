@@ -1,5 +1,4 @@
 import Foundation
-import DockerRunnerXPC
 import Plugin
 import Structure
 
@@ -29,7 +28,7 @@ public struct PythonGuestDockerExecutor: Sendable {
                 from: try await executor(
                     ["exec", "-i", name, "python3", "/tmp/guest.py"],
                     input,
-                    min(max(timeoutSeconds, 1), SwiftScriptPreparer.maxTimeoutSeconds)
+                    min(max(timeoutSeconds, 1), GuestRuntimeLimits.maxTimeoutSeconds)
                 )
             )
         }
@@ -39,7 +38,7 @@ public struct PythonGuestDockerExecutor: Sendable {
         _ body: @escaping @Sendable (String) async throws -> T
     ) async throws -> T {
         try await ensureImage()
-        return try await SwiftDockerContainerPool.shared.withPermit {
+        return try await GuestDockerContainerPool.shared.withPermit {
             try await self.createAndRunContainer(body)
         }
     }
@@ -52,6 +51,7 @@ public struct PythonGuestDockerExecutor: Sendable {
             try await executor(
                 [
                     "create",
+                ] + DerrickDockerRuntimeIdentity.createLabelArguments + [
                     "--network", "none",
                     "--name", name,
                     "--env", "HOME=/tmp",
@@ -86,7 +86,7 @@ public struct PythonGuestDockerExecutor: Sendable {
     }
 
     private func ensureImage() async throws {
-        try await SwiftDockerContainerPool.shared.prewarm(
+        try await GuestDockerContainerPool.shared.prewarm(
             image: image,
             executor: executor
         )

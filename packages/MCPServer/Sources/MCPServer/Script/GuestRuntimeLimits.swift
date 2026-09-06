@@ -1,10 +1,8 @@
 import Foundation
 import Structure
 
-/// Shared Swift runtime limits and container identity.
-public enum SwiftScriptPreparer: Sendable {
-    public static let image = DerrickGuestRuntime.swiftPluginDockerImage
-    public static let containerPrefix = "derrick-swift-runtime"
+/// Shared offline-guest timeout and container lease limits.
+public enum GuestRuntimeLimits: Sendable {
     public static let defaultTimeoutSeconds = 60
     public static let maxTimeoutSeconds = 300
 
@@ -21,7 +19,7 @@ public enum SwiftScriptPreparer: Sendable {
     ) -> String {
         let minutes = maxSeconds / 60
         return """
-        Swift container lease expired after \(maxSeconds)s (\(minutes) minutes). Each script_exec run may hold a container for at most \(maxSeconds)s so other agents are not blocked. Shorten the script, lower timeout_seconds, or split the work into smaller runs.
+        Guest container lease expired after \(maxSeconds)s (\(minutes) minutes). Each script_exec run may hold a container for at most \(maxSeconds)s so other agents are not blocked. Shorten the script, lower timeout_seconds, or split the work into smaller runs.
         """
     }
 }
