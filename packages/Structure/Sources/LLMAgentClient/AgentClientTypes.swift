@@ -406,15 +406,62 @@ public protocol HTTPTransport: Sendable {
     func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse)
 }
 
+/// Timeouts for streamed LLM HTTP calls. `URLRequest` defaults to 60 seconds,
+/// which drops High-thinking replies before the first token.
+public enum LLMHTTPTimeouts {
+    /// Maximum silence between streamed bytes (thinking can sit quiet this long).
+    public static let requestIdleSeconds: TimeInterval = 180
+    /// Maximum length of one streamed model response.
+    public static let resourceSeconds: TimeInterval = 480
+
+    public static var resourceNanoseconds: UInt64 {
+        UInt64(resourceSeconds * 1_000_000_000)
+    }
+
+    public static let streamingSession: URLSession = {
+        URLSession(configuration: streamingConfiguration())
+    }()
+
+    public static func streamingConfiguration() -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = requestIdleSeconds
+        config.timeoutIntervalForResource = resourceSeconds
+        config.waitsForConnectivity = true
+        return config
+    }
+
+    public static func applyIdleTimeout(to request: inout URLRequest) {
+        request.timeoutInterval = requestIdleSeconds
+    }
+
+    public static func isTimeout(_ error: Error) -> Bool {
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return true
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+            return true
+        }
+        return isTimeoutDescription(error.localizedDescription)
+    }
+
+    public static func isTimeoutDescription(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("timed out") || lower.contains("the request timed out")
+    }
+}
+
 public struct URLSessionTransport: HTTPTransport {
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession = LLMHTTPTimeouts.streamingSession) {
         self.session = session
     }
 
     public func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
-        try await session.bytes(for: request)
+        var request = request
+        LLMHTTPTimeouts.applyIdleTimeout(to: &request)
+        return try await session.bytes(for: request)
     }
 }
 

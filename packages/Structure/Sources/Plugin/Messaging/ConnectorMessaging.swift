@@ -24,6 +24,8 @@ public struct ConnectorMessagingMessage: Sendable, Hashable {
     public let sender: String
     public let body: String
     public let createdAt: Date
+    public let parentVendorMessageID: String?
+    public let replyCount: Int
 
     public init(
         vendorThreadID: String,
@@ -31,7 +33,9 @@ public struct ConnectorMessagingMessage: Sendable, Hashable {
         direction: MessagingMessageDirection,
         sender: String,
         body: String,
-        createdAt: Date
+        createdAt: Date,
+        parentVendorMessageID: String? = nil,
+        replyCount: Int = 0
     ) {
         self.vendorThreadID = vendorThreadID
         self.vendorMessageID = vendorMessageID
@@ -39,6 +43,11 @@ public struct ConnectorMessagingMessage: Sendable, Hashable {
         self.sender = sender
         self.body = body
         self.createdAt = createdAt
+        self.parentVendorMessageID = MessagingMessageDTO.normalizedParentID(
+            parentVendorMessageID,
+            vendorMessageID: vendorMessageID
+        )
+        self.replyCount = max(0, replyCount)
     }
 }
 
@@ -80,6 +89,21 @@ public struct ConnectorMessagingResult: Sendable, Hashable {
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: ": ")
     }
+
+    /// True when title/summary report a vendor failure rather than an empty success.
+    public var reportsVendorFailure: Bool {
+        let haystack = [terminalTitle, terminalSummary]
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        return haystack.contains("fail") || haystack.contains("error:")
+    }
+}
+
+/// Incremental poll cursors as unix seconds with Slack-style 6 fractional digits.
+public enum ConnectorPollCursor: Sendable {
+    public static func unixSeconds(_ date: Date) -> String {
+        String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), date.timeIntervalSince1970)
+    }
 }
 
 public enum ConnectorMessagingHopBuilder: Sendable {
@@ -91,7 +115,7 @@ public enum ConnectorMessagingHopBuilder: Sendable {
         merged["messaging_op"] = .string(operation.rawValue)
         let kind: PluginEventKind = operation == .sendMessage ? .messageInRoom : .manual
         let event = PluginHopEvent(kind: kind, params: merged)
-        return try JSONEncoder().encode(event)
+        return try event.encodeValidated()
     }
 }
 
@@ -180,13 +204,17 @@ public enum ConnectorMessagingParser: Sendable {
                 throw ConnectorMessagingError.invalidField("messages")
             }
             let createdAt = parseDate(object["created_at"]) ?? .now
+            let parent = stringValue(from: object["parent_vendor_message_id"])
+                ?? stringValue(from: object["thread_ts"])
             return ConnectorMessagingMessage(
                 vendorThreadID: vendorThreadID,
                 vendorMessageID: vendorMessageID,
                 direction: direction,
                 sender: sender,
                 body: body,
-                createdAt: createdAt
+                createdAt: createdAt,
+                parentVendorMessageID: parent,
+                replyCount: intValue(from: object["reply_count"])
             )
         }
     }
@@ -217,6 +245,18 @@ public enum ConnectorMessagingParser: Sendable {
             return String(number)
         }
         return nil
+    }
+
+    private static func intValue(from value: PluginJSON?) -> Int {
+        guard let value else { return 0 }
+        if case .number(let number) = value {
+            return max(0, Int(number))
+        }
+        if let string = value.stringValue,
+           let parsed = Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return max(0, parsed)
+        }
+        return 0
     }
 
     private static func parseDate(_ value: PluginJSON?) -> Date? {
@@ -256,7 +296,7 @@ public enum ConnectorMessagingError: Error, LocalizedError, Equatable, Sendable 
         case .invalidToolOutcome:
             return "Connector plugin returned an unreadable tool outcome."
         case .pluginFailed(let detail):
-            return detail
+            return ConnectorPluginExecutionMessage.userFacing(fromDetail: detail) ?? detail
         case .missingOutput:
             return "Connector plugin returned no output."
         case .missingTerminalEnvelope:

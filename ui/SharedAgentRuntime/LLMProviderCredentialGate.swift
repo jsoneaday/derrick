@@ -24,6 +24,6 @@ enum LLMProviderCredentialGate {
         if usesDotenvSecrets() {
             return "Set \(keys) in `\(DotEnvReader.repositoryRelativePath)`."
         }
-        return "Save your key to Keychain account `\(provider.secretAccount)`, or set \(keys) in the environment."
+        return "Add your \(provider.apiKeyName) in Settings → Credentials."
     }
 }

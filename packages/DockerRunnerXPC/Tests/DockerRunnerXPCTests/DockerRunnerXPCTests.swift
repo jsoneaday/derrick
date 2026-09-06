@@ -277,6 +277,22 @@ struct DockerRunnerXPCTests {
         let dockerfile = root
             .appendingPathComponent(DockerProductImagePolicy.webCrawlerDockerfileRelativePath)
             .path
+        let context = DockerProductImagePolicy.webCrawlerBuildContext(repoRoot: root).path
+        let args = [
+            "build",
+            "-f", dockerfile,
+            "-t", DockerProductImagePolicy.webCrawlerImage,
+            context,
+        ]
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
+        #expect(DockerRunRequestValidator.validate(r) == nil)
+    }
+
+    @Test func rejectsWebCrawlerBuildWithRepoRootContext() {
+        guard let root = DerrickRepositoryRoot.locate() else { return }
+        let dockerfile = root
+            .appendingPathComponent(DockerProductImagePolicy.webCrawlerDockerfileRelativePath)
+            .path
         let args = [
             "build",
             "-f", dockerfile,
@@ -284,7 +300,7 @@ struct DockerRunnerXPCTests {
             root.path,
         ]
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
-        #expect(DockerRunRequestValidator.validate(r) == nil)
+        #expect(DockerRunRequestValidator.validate(r) != nil)
     }
 
     @Test func rejectsUntrustedDockerBuild() {

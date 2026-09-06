@@ -12,7 +12,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
     case usageLimits
     case pluginBuilder
     case pluginSafetyReviewer
-    case connectors
+    case credentials
 
     var id: String { rawValue }
 
@@ -34,8 +34,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Plugin builder"
         case .pluginSafetyReviewer:
             return "Plugin safety reviewer"
-        case .connectors:
-            return "Connectors"
+        case .credentials:
+            return "Credentials"
         }
     }
 
@@ -57,9 +57,47 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "hammer"
         case .pluginSafetyReviewer:
             return "checkmark.shield"
-        case .connectors:
-            return "bubble.left.and.bubble.right"
+        case .credentials:
+            return "key.fill"
         }
+    }
+}
+
+enum SettingsLayout {
+    static let sidebarWidth: CGFloat = 280
+    static let sidebarListPadding: CGFloat = 12
+    static let sidebarRowHorizontal: CGFloat = 10
+    static let sidebarRowVertical: CGFloat = 6
+    static let sidebarIconWidth: CGFloat = 18
+    static let detailPadding = EdgeInsets(top: 28, leading: 28, bottom: 28, trailing: 32)
+    static let fieldIndent: CGFloat = 16
+    static let sectionSpacing: CGFloat = 24
+    static let headerControlSpacing: CGFloat = 8
+}
+
+private struct SettingsControlSection<Content: View>: View {
+    let title: String
+    var caption: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.headerControlSpacing) {
+            Text(title)
+                .font(.headline)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, SettingsLayout.fieldIndent)
+            if let caption {
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, SettingsLayout.fieldIndent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -83,13 +121,26 @@ struct LLMModelSettingsView: View {
         HStack(spacing: 0) {
             List(selection: $selectedItem) {
                 ForEach(LLMModelSettingsSidebarItem.allCases) { item in
-                    Label(item.title, systemImage: item.systemImage)
+                    sidebarRow(item)
                         .tag(item)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: SettingsLayout.sidebarRowVertical,
+                                leading: SettingsLayout.sidebarRowHorizontal,
+                                bottom: SettingsLayout.sidebarRowVertical,
+                                trailing: SettingsLayout.sidebarRowHorizontal
+                            )
+                        )
+                        .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.sidebar)
-            .frame(width: 240)
+            .scrollContentBackground(.hidden)
+            .padding(.horizontal, SettingsLayout.sidebarListPadding)
+            .padding(.vertical, SettingsLayout.sidebarListPadding)
+            .frame(width: SettingsLayout.sidebarWidth)
             .frame(maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
 
@@ -114,16 +165,12 @@ struct LLMModelSettingsView: View {
                         pluginBuilderDetail
                     case .pluginSafetyReviewer:
                         pluginSafetyReviewerDetail
-                    case .connectors:
-                        ConnectorCredentialsSettingsView(repository: helperModelSettings.settingsRepository)
+                    case .credentials:
+                        CredentialsSettingsView(repository: helperModelSettings.settingsRepository)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(.top, 24)
-                .padding(.leading, 24)
-                .padding(.bottom, 24)
-                // Keep controls clear of the scroller track (~12–16pt gap).
-                .padding(.trailing, 36)
+                .padding(SettingsLayout.detailPadding)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -163,69 +210,96 @@ struct LLMModelSettingsView: View {
 
     @ViewBuilder
     private var helperModelDetail: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Helper models")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Text("Choose the models Derrick uses for memory summarization, script review, and secondary agents spawned during a chat.")
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Form {
-                Section("Summarizer model") {
+            VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                SettingsControlSection(title: "Summarizer model") {
                     helperModelPicker(
                         selection: $helperModelSettings.summarizerModel,
                         accessibilityLabel: "Summarizer model"
                     )
                 }
 
-                Section("Script reviewer model") {
+                SettingsControlSection(title: "Script reviewer model") {
                     helperModelPicker(
                         selection: $helperModelSettings.scriptReviewerModel,
                         accessibilityLabel: "Script reviewer model"
                     )
                 }
 
-                Section("Plugin builder model") {
+                SettingsControlSection(
+                    title: "Plugin builder model",
+                    caption: "Translates the user’s request into an Agent Plugin draft. It cannot approve or release code. Default is GPT 5.6 Terra at High thinking."
+                ) {
                     helperModelPicker(
                         selection: $helperModelSettings.pluginBuilderModel,
                         accessibilityLabel: "Plugin builder model"
                     )
-                    Text("Translates the user’s request into an Agent Plugin draft. It cannot approve or release code.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
-                Section("Plugin safety reviewer model") {
+                if !helperModelSettings.pluginBuilderModel.thinkingOptions.isEmpty {
+                    SettingsControlSection(title: "Thinking level") {
+                        pluginBuilderThinkingPicker
+                    }
+                }
+
+                SettingsControlSection(
+                    title: "Plugin safety reviewer model",
+                    caption: "Independently checks alignment, safety, correctness, privacy, and supply-chain risk."
+                ) {
                     helperModelPicker(
                         selection: $helperModelSettings.pluginSafetyReviewerModel,
                         accessibilityLabel: "Plugin safety reviewer model"
                     )
-                    Text("Independently checks alignment, safety, correctness, privacy, and supply-chain risk.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
-                Section("Secondary agent model") {
+                SettingsControlSection(
+                    title: "Secondary agent model",
+                    caption: "Used when the main agent or you spawn worker agents (agents_spawn). The main chat keeps the model selected in the chat input."
+                ) {
                     helperModelPicker(
                         selection: $helperModelSettings.workerAgentModel,
                         accessibilityLabel: "Secondary agent model"
                     )
-                    Text("Used when the main agent or you spawn worker agents (agents_spawn). The main chat keeps the model selected in the chat input.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var pluginBuilderDetail: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Plugin builder")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .leading)
             Text("The builder turns the user’s request into a complete Agent Plugin draft. It does not review or release its own code.")
                 .foregroundStyle(.secondary)
-            Text("Selected model: \(helperModelSettings.pluginBuilderModel.helperDisplayName)")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                SettingsControlSection(title: "Builder model") {
+                    helperModelPicker(
+                        selection: $helperModelSettings.pluginBuilderModel,
+                        accessibilityLabel: "Plugin builder model"
+                    )
+                }
+                if !helperModelSettings.pluginBuilderModel.thinkingOptions.isEmpty {
+                    SettingsControlSection(
+                        title: "Thinking level",
+                        caption: "Default is GPT 5.6 Terra at High. Higher levels may improve draft quality but use more tokens."
+                    ) {
+                        pluginBuilderThinkingPicker
+                    }
+                }
+            }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -234,41 +308,27 @@ struct LLMModelSettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Plugin safety reviewer")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, alignment: .leading)
             Text("A separate model checks the draft against the user’s request and Derrick’s safety rules before compilation.")
                 .foregroundStyle(.secondary)
-            Form {
-                Section("Reviewer model") {
+                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                SettingsControlSection(title: "Reviewer model") {
                     helperModelPicker(
                         selection: $helperModelSettings.pluginSafetyReviewerModel,
                         accessibilityLabel: "Plugin safety reviewer model"
                     )
                 }
                 if !helperModelSettings.pluginSafetyReviewerModel.thinkingOptions.isEmpty {
-                    Section("Thinking level") {
-                        Picker("Thinking level", selection: Binding(
-                            get: {
-                                modelThinkingSettings.pluginSafetyReviewerThinking(
-                                    for: helperModelSettings.pluginSafetyReviewerModel
-                                ).id
-                            },
-                            set: { newID in
-                                let model = helperModelSettings.pluginSafetyReviewerModel
-                                if let option = model.thinkingOptions.first(where: { $0.id == newID }) {
-                                    modelThinkingSettings.setPluginSafetyReviewerThinking(option, for: model)
-                                }
-                            }
-                        )) {
-                            ForEach(helperModelSettings.pluginSafetyReviewerModel.thinkingOptions, id: \.id) { option in
-                                Text(option.displayName).tag(option.id)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        Text("Default is Medium. Higher levels may improve review quality but use more tokens.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    SettingsControlSection(
+                        title: "Thinking level",
+                        caption: "Default is Medium. Higher levels may improve review quality but use more tokens."
+                    ) {
+                        pluginSafetyReviewerThinkingPicker
                     }
                 }
             }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -279,7 +339,7 @@ struct LLMModelSettingsView: View {
             Text("Multi-agent")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel script_exec runs may still queue on the Docker container pool.")
+            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel script_exec runs wait in line (one Python guest container at a time). Crawls and file conversions have their own lines.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -369,7 +429,7 @@ struct LLMModelSettingsView: View {
                     step: 1
                 )
 
-                Text("Current limit: \(draftContainerTTLMinutes) minute\(draftContainerTTLMinutes == 1 ? "" : "s") (\(draftContainerTTLMinutes * 60)s). Network pool: up to 2 containers (1 warm). Offline pool: 1 container, queued.")
+                Text("Current limit: \(draftContainerTTLMinutes) minute\(draftContainerTTLMinutes == 1 ? "" : "s") (\(draftContainerTTLMinutes * 60)s). Each script creates a fresh container from the cached image and deletes it when the script finishes. Other scripts wait (one at a time). Crawls can run two at a time, and file conversions one at a time, on their own images — they do not share the script line.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -599,6 +659,66 @@ struct LLMModelSettingsView: View {
         String(format: "$%.4f", value)
     }
 
+    private func sidebarRow(_ item: LLMModelSettingsSidebarItem) -> some View {
+        Label {
+            Text(item.title)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: item.systemImage)
+                .frame(width: SettingsLayout.sidebarIconWidth, alignment: .center)
+        }
+    }
+
+    @ViewBuilder
+    private var pluginBuilderThinkingPicker: some View {
+        Picker("Thinking level", selection: Binding(
+            get: {
+                modelThinkingSettings.pluginBuilderThinking(
+                    for: helperModelSettings.pluginBuilderModel
+                ).id
+            },
+            set: { newID in
+                let model = helperModelSettings.pluginBuilderModel
+                if let option = model.thinkingOptions.first(where: { $0.id == newID }) {
+                    modelThinkingSettings.setPluginBuilderThinking(option, for: model)
+                }
+            }
+        )) {
+            ForEach(helperModelSettings.pluginBuilderModel.thinkingOptions, id: \.id) { option in
+                Text(option.displayName).tag(option.id)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .accessibilityLabel("Thinking level")
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private var pluginSafetyReviewerThinkingPicker: some View {
+        Picker("Thinking level", selection: Binding(
+            get: {
+                modelThinkingSettings.pluginSafetyReviewerThinking(
+                    for: helperModelSettings.pluginSafetyReviewerModel
+                ).id
+            },
+            set: { newID in
+                let model = helperModelSettings.pluginSafetyReviewerModel
+                if let option = model.thinkingOptions.first(where: { $0.id == newID }) {
+                    modelThinkingSettings.setPluginSafetyReviewerThinking(option, for: model)
+                }
+            }
+        )) {
+            ForEach(helperModelSettings.pluginSafetyReviewerModel.thinkingOptions, id: \.id) { option in
+                Text(option.displayName).tag(option.id)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .accessibilityLabel("Thinking level")
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private func helperModelPicker(
         selection: Binding<LLMModelChoice>,
         accessibilityLabel: String
@@ -616,6 +736,8 @@ struct LLMModelSettingsView: View {
             }
         }
         .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

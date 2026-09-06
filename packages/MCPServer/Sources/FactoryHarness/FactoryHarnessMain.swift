@@ -24,16 +24,16 @@ enum FactoryHarnessMain {
 
         let goal = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendOnly,
-            userDescription: "Post alerts to Slack channels."
+            scope: .fullSync,
+            userDescription: ""
         ).connectorBuildGoal(
             crawlSummary: """
-            Slack Web API chat.postMessage accepts JSON with channel and text. Authenticate with a bot token \
-            in Authorization: Bearer. Responses include ok (boolean), channel, ts, and message on success.
+            Slack Web API: conversations.list, conversations.history, conversations.replies, and chat.postMessage. \
+            Authenticate with a bot token in Authorization: Bearer. Responses include ok (boolean).
             """
         )
 
-        fputs("FactoryHarness: building slack send-only connector…\n", stderr)
+        fputs("FactoryHarness: building slack full-sync connector…\n", stderr)
         let executor = PythonPluginFactoryDockerExecutor(executor: DirectShellDocker.executor())
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)

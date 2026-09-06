@@ -53,7 +53,9 @@ public enum PluginFactoryDraftValidator: Sendable {
         do {
             envelopes = try terminalEnvelopes(from: hopRun)
         } catch {
-            findings.append("Direct test output must be a valid envelope array.")
+            findings.append(
+                "Direct test output must be a valid envelope array. \(error.localizedDescription)"
+            )
             throw failure(findings)
         }
 
@@ -122,8 +124,56 @@ public enum PluginFactoryDraftValidator: Sendable {
             findings.append("Manifest messaging_ops must declare \(op) required by the user goal.")
         }
 
+        let document = try? ConnectorContractStore.loadProtocol()
+        if let document,
+           let scopeID = PluginFactoryScopeHints.scopeID(from: draft.userGoal),
+           let spec = try? document.scope(id: scopeID),
+           spec.includeReplyPoll {
+            let hasReplyPoll = script.hops.contains { hop in
+                hop.params?["messaging_op"]?.stringValue == ConnectorMessagingOperation.pollInbox.rawValue
+                    && hopHasReplyParent(hop)
+            }
+            if !hasReplyPoll {
+                findings.append(
+                    "Full sync test_input_json must include a poll_inbox hop with parent_vendor_message_id (reply thread)."
+                )
+            }
+        }
+
         findings.append(contentsOf: fixtureIntegrityFindings(in: script))
+        findings.append(contentsOf: hopParamsSchemaFindings(in: script))
+        findings.append(contentsOf: hopKindFindings(script: script, document: document))
+        let knownOps = Set(PluginFactoryValidationExpectations.knownMessagingOps)
+        for op in messagingOpsExercised(in: script) where !knownOps.contains(op) {
+            findings.append("params.messaging_op \(op) is not a connector protocol op.")
+        }
         return findings
+    }
+
+    private static func hopKindFindings(
+        script: PluginFactoryTestScript,
+        document: ConnectorProtocolDocument?
+    ) -> [String] {
+        guard let document else { return [] }
+        var findings: [String] = []
+        for hop in script.hops {
+            guard hop.kind != .httpResults else { continue }
+            let op = hop.params?["messaging_op"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let spec = document.ops[op] else { continue }
+            if hop.kind.rawValue != spec.kind {
+                findings.append("Op \(op) hop kind must be \(spec.kind).")
+            }
+        }
+        return findings
+    }
+
+    private static func hopHasReplyParent(_ hop: PluginHopEvent) -> Bool {
+        let parent = hop.params?["parent_vendor_message_id"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let threadTS = hop.params?["thread_ts"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (parent?.isEmpty == false) || (threadTS?.isEmpty == false)
     }
 
     private static func connectorDirectTestFindings(
@@ -145,16 +195,30 @@ public enum PluginFactoryDraftValidator: Sendable {
                     "test_input_json http_results must include a fixture for emitted request_id \(requestID)."
                 )
             }
+            findings.append(
+                contentsOf: forbiddenVendorCallFindings(
+                    script: script,
+                    hopRun: hopRun,
+                    userGoal: draft.userGoal
+                )
+            )
         }
 
+        let document = try? ConnectorContractStore.loadProtocol()
+        let requireSentMessage = document?.ops[ConnectorMessagingOperation.sendMessage.rawValue]?
+            .success.requiresSentMessage ?? true
+        let requirePollMessages = document?.rules.directTestPollRequiresNonEmptyMessages ?? true
+        let requireThreads = document?.rules.directTestThreadsRequiresNonEmpty ?? true
+
         if requiredOps.contains(ConnectorMessagingOperation.sendMessage.rawValue),
+           requireSentMessage,
            !terminalEnvelopes.contains(where: { $0.verb == .resultEmit && $0.payload["sent_message"] != nil }) {
             findings.append(
                 "send_message direct test must emit result.emit with sent_message when that op is in scope."
             )
         }
 
-        if requiredOps.contains(ConnectorMessagingOperation.pollInbox.rawValue) {
+        if requiredOps.contains(ConnectorMessagingOperation.pollInbox.rawValue), requirePollMessages {
             let hasMessages = terminalEnvelopes.contains { terminal in
                 terminal.payload["messages"].flatMap { value -> Bool? in
                     if case .array(let items) = value { return !items.isEmpty }
@@ -168,7 +232,7 @@ public enum PluginFactoryDraftValidator: Sendable {
             }
         }
 
-        if requiredOps.contains(ConnectorMessagingOperation.syncThreads.rawValue) {
+        if requiredOps.contains(ConnectorMessagingOperation.syncThreads.rawValue), requireThreads {
             let hasThreads = terminalEnvelopes.contains { terminal in
                 terminal.payload["threads"].flatMap { value -> Bool? in
                     if case .array(let items) = value { return !items.isEmpty }
@@ -182,7 +246,40 @@ public enum PluginFactoryDraftValidator: Sendable {
             }
         }
 
+        findings.append(contentsOf: emitShapeFindings(in: terminalEnvelopes))
+
         _ = manifest
+        return findings
+    }
+
+    private static func hopParamsSchemaFindings(in script: PluginFactoryTestScript) -> [String] {
+        var findings: [String] = []
+        for hop in script.hops {
+            guard let params = hop.params else { continue }
+            do {
+                try GuestContract.validate(
+                    PluginJSON.object(params).untypedJSON,
+                    against: .connectorParams
+                )
+            } catch {
+                findings.append(error.localizedDescription)
+            }
+        }
+        return findings
+    }
+
+    private static func emitShapeFindings(in terminals: [PluginEnvelope]) -> [String] {
+        var findings: [String] = []
+        for terminal in terminals where terminal.verb == .resultEmit {
+            do {
+                try GuestContract.validate(
+                    PluginJSON.object(terminal.payload).untypedJSON,
+                    against: .connectorResultEmit
+                )
+            } catch {
+                findings.append(error.localizedDescription)
+            }
+        }
         return findings
     }
 
@@ -222,6 +319,58 @@ public enum PluginFactoryDraftValidator: Sendable {
             }
         }
         return findings
+    }
+
+    private static func forbiddenVendorCallFindings(
+        script: PluginFactoryTestScript,
+        hopRun: PluginFactoryHopTestRun,
+        userGoal: String?
+    ) -> [String] {
+        guard let document = try? ConnectorContractStore.loadProtocol() else { return [] }
+        let vendor = try? ConnectorContractStore.loadVendor(
+            ConnectorContractStore.vendorName(fromUserGoal: userGoal) ?? ""
+        )
+        let scopeID = PluginFactoryScopeHints.scopeID(from: userGoal)
+        let scope = scopeID.flatMap { try? document.scope(id: $0) }
+        var findings: [String] = []
+        for index in script.hops.indices {
+            guard index < hopRun.hopResults.count else { break }
+            let hop = script.hops[index]
+            let paired = index + 1 < script.hops.count ? script.hops[index + 1] : nil
+            let op = resolvedMessagingOp(hop: hop, paired: paired)
+            guard let spec = document.ops[op] else { continue }
+            var forbidden = spec.mustNotCall
+            if op == ConnectorMessagingOperation.pollInbox.rawValue {
+                if hopHasReplyParent(hop) || paired.map(hopHasReplyParent) == true {
+                    forbidden.append(contentsOf: spec.whenNoParent?.mayCall ?? [])
+                } else {
+                    forbidden.append(contentsOf: spec.whenParent?.mayCall ?? [])
+                    forbidden.append(contentsOf: scope?.pollMustNotCall ?? [])
+                }
+            }
+            let needles = ConnectorContractStore.urlNeedles(forCallIDs: forbidden, vendor: vendor)
+            guard let envelopes = try? PluginEnvelopeList.decode(hopRun.hopResults[index].stdout) else {
+                continue
+            }
+            for envelope in envelopes where envelope.verb == .httpRequest {
+                let url = envelope.payload["url"]?.stringValue ?? ""
+                for needle in needles where !needle.isEmpty && url.localizedCaseInsensitiveContains(needle) {
+                    findings.append(
+                        "Op \(op) must not call \(needle)."
+                    )
+                }
+            }
+        }
+        return findings
+    }
+
+    private static func resolvedMessagingOp(hop: PluginHopEvent, paired: PluginHopEvent?) -> String {
+        let own = hop.params?["messaging_op"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !own.isEmpty { return own }
+        let next = paired?.params?["messaging_op"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return next
     }
 
     private static func httpRequestIDs(from hopResults: [PluginFactoryExecutionResult]) -> Set<String> {

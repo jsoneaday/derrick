@@ -2,42 +2,13 @@
 
 Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27.
 
-## Guest contract (language-agnostic)
-
-The guest ↔ host boundary is **JSON Schema**, not Swift. Canonical schemas live in:
-
-`packages/Structure/Sources/Contract/Resources/schemas/`
-
-| Schema | Direction | Swift types (must stay in sync) |
-|--------|-----------|----------------------------------|
-| `hop-event.schema.json` | Host → guest (stdin) | `PluginHopEvent`, `PluginEventKind` |
-| `envelope-list.schema.json` | Guest → host (stdout) | `PluginVerb`, `PluginEnvelope` |
-
-**When you change any schema file, you must update the matching Swift types and tests in the same change.** There is no Xcode codegen for this — edit both by hand. `GuestContractAlignmentTests` (Plugin) and `GuestContractTests` (Structure) fail if schema enums and Swift enums drift.
-
-Validate at boundaries with `GuestContractValidation` before decoding.
-
-### Container profiles (target architecture)
-
-| Profile | Network | Examples |
-|---------|---------|----------|
-| **Network** | Yes (proxied) | `web.crawl` — fixed crawler image |
-| **Offline guest** | No (`--network none`) | `script_exec` + `plugin.invoke` — **consolidate into one guest runtime** with ephemeral vs packaged entry modes |
-
-Offline guests are **Python** only. The host broker (HTTP, secrets, hop loop) stays Swift.
-
-Derrick runtime containers are labeled `app.derrick=runtime` and named with prefixes `derrick-web-crawler`, `derrick-guest-runtime`, `derrick-swift-runtime`, `derrick-file-extractor`. Daemon Docker sync sweeps leftovers. Do not create unlabeled product containers. Do not sweep from the UI on launch — that would kill in-flight daemon jobs.
-
-**Python guest image** (`docker/guest-runtime/Dockerfile`): base on `python:3.14.7`, install **[uv](https://github.com/astral-sh/uv)** for packaged plugin dependencies (`COPY --from=ghcr.io/astral-sh/uv:latest`). `script_exec` uses the pullable `python:3.14.7` image today; the custom `derrick-guest-runtime:python-v1` image is for connector plugins with baked deps.
-
-Do not add host-owned vendor API clients (e.g. Slack-specific Web API) for connectors — vendors belong in guest plugins.
 
 ## Before changing code
 
 - Read the files on the code path you are changing. Do not guess.
 - Check `Info.plist` and app configuration before assuming a code bug.
-- Think in terms of the system not an item.
-- Fix issues at the root cause. No band-aid fixes.
+- Find the root cause of an issue. Do not assume or guess. Then and only then proceed to create a solution.
+- All services must follow the Protocols in the Structure spm or update them.
 
 ## Architecture
 
@@ -59,5 +30,5 @@ Do not add host-owned vendor API clients (e.g. Slack-specific Web API) for conne
 - End users must not need terminal commands or technical knowledge to use app features and settings. Manual user intervention should not be necessary.
 
 ## Tool Usage
-- The apps service\_logs table contains all runtime logs. service: ui and code: runtime.
+- The apps service_logs table contains all runtime logs. service: ui and code: runtime.
 - When searching on terminal use ripgrep, rg, not grep.

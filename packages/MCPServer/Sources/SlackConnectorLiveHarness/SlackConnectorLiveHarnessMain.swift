@@ -20,7 +20,7 @@ enum SlackConnectorLiveHarnessMain {
         try await env.cleanupPlugin()
         try env.ensureSlackCredentials()
 
-        _ = try await env.buildSendAndReceiveConnector()
+        _ = try await env.buildFullSyncConnector()
         try await env.registerConnector()
 
         let adapter = PluginMessagingIngressAdapter(

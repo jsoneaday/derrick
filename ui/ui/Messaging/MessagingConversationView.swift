@@ -268,6 +268,20 @@ struct MessagingConversationView: View {
     private var conversation: some View {
         VStack(spacing: 0) {
             header
+            if let warning = store.replyThreadWarning, !warning.isEmpty {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.orange.opacity(0.14))
+                    )
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+            }
             ZStack(alignment: .bottom) {
                 messageList
                 if store.showJumpToLatest || store.showNewMessagesPill {
@@ -291,8 +305,23 @@ struct MessagingConversationView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            if store.isViewingReplyThread {
+                Button {
+                    store.closeReplyThread()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(.white.opacity(0.9), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to conversation")
+            }
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.selectedThread?.title ?? "Conversation")
+                Text(store.isViewingReplyThread
+                     ? "\(store.selectedThread?.title ?? "Conversation") › thread"
+                     : (store.selectedThread?.title ?? "Conversation"))
                     .font(.headline)
                 Text(store.selectedConnectorDisplayName)
                     .font(.caption)
@@ -316,6 +345,10 @@ struct MessagingConversationView: View {
         .padding(.vertical, 12)
     }
 
+    private var displayedMessages: [MessagingMessageDTO] {
+        store.isViewingReplyThread ? store.visibleReplyMessages : store.visibleMessages
+    }
+
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -325,8 +358,15 @@ struct MessagingConversationView: View {
                         .onAppear {
                             Task { await store.loadOlderIfNeeded() }
                         }
-                    ForEach(store.visibleMessages) { message in
-                        MessagingBubble(message: message)
+                    ForEach(displayedMessages) { message in
+                        MessagingBubble(
+                            message: message,
+                            showsReplyAction: !store.isViewingReplyThread && message.vendorMessageID != nil
+                        ) {
+                            if let parent = message.vendorMessageID {
+                                Task { await store.openReplyThread(parentVendorMessageID: parent) }
+                            }
+                        }
                             .id(message.id)
                     }
                     Color.clear
@@ -364,7 +404,7 @@ struct MessagingConversationView: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message", text: $draft, axis: .vertical)
+                TextField(store.isViewingReplyThread ? "Reply" : "Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
                     .focused($composerFocused)
@@ -420,6 +460,8 @@ struct MessagingConversationView: View {
 
 private struct MessagingBubble: View {
     let message: MessagingMessageDTO
+    var showsReplyAction = false
+    var onOpenThread: () -> Void = {}
 
     var body: some View {
         HStack {
@@ -438,8 +480,26 @@ private struct MessagingBubble: View {
                                   ? Color.black.opacity(0.08)
                                   : Color.white)
                     )
+                if showsReplyAction {
+                    Button(action: onOpenThread) {
+                        Text(replyActionTitle)
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
             }
             if message.direction == .inbound { Spacer(minLength: 80) }
         }
+    }
+
+    private var replyActionTitle: String {
+        if message.replyCount == 1 {
+            return "1 reply"
+        }
+        if message.replyCount > 1 {
+            return "\(message.replyCount) replies"
+        }
+        return "Reply in thread"
     }
 }

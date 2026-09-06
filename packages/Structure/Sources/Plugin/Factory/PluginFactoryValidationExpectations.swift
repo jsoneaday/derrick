@@ -2,25 +2,24 @@ import Foundation
 
 /// Scope and manifest facts used by deterministic factory draft validation.
 public enum PluginFactoryValidationExpectations: Sendable {
-    public static let knownMessagingOps = ["send_message", "poll_inbox", "sync_threads"]
+    public static var knownMessagingOps: [String] {
+        (try? ConnectorContractIntegrity.messagingOpIDs())
+            ?? ["sync_threads", "poll_inbox", "send_message"]
+    }
 
     public static func requiredMessagingOps(from userGoal: String?) -> [String] {
         guard let userGoal, !userGoal.isEmpty else { return [] }
+        if let scopeID = PluginFactoryScopeHints.scopeID(from: userGoal),
+           let ops = try? ConnectorContractStore.loadProtocol().scope(id: scopeID).ops,
+           !ops.isEmpty {
+            return ops
+        }
         if let declared = parseDeclaredMessagingOps(from: userGoal), !declared.isEmpty {
             return declared
         }
-        if userGoal.localizedCaseInsensitiveContains("send_message only") {
-            return ["send_message"]
-        }
-        if userGoal.localizedCaseInsensitiveContains("Scope: sync_threads, send_message, and poll_inbox")
-            || userGoal.localizedCaseInsensitiveContains("sync_threads, send_message, and poll_inbox") {
-            return ["sync_threads", "poll_inbox", "send_message"]
-        }
-        if userGoal.localizedCaseInsensitiveContains("Scope: send_message and poll_inbox")
-            || userGoal.localizedCaseInsensitiveContains("send_message and poll_inbox") {
-            return ["poll_inbox", "send_message"]
-        }
-        if userGoal.localizedCaseInsensitiveContains("sync_threads, poll_inbox, and send_message") {
+        if userGoal.localizedCaseInsensitiveContains("sync_threads")
+            || userGoal.localizedCaseInsensitiveContains("poll_inbox")
+            || userGoal.localizedCaseInsensitiveContains("send_message") {
             return ["sync_threads", "poll_inbox", "send_message"]
         }
         return []
@@ -53,7 +52,7 @@ public enum PluginFactoryValidationExpectations: Sendable {
         messagingOps(fromManifestJSON: manifestJSON).contains("sync_threads")
     }
 
-    /// Connectors with sync_threads expose label→vendor ID mappings for the host channel picker.
+    /// Connectors with sync_threads expose label→vendor ID mappings for conversation tabs.
     public static func supportsThreadDiscovery(manifestJSON: String) -> Bool {
         supportsSyncThreads(manifestJSON: manifestJSON)
     }

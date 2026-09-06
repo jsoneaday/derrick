@@ -174,6 +174,55 @@ final class DBMessagingTests: XCTestCase {
         XCTAssertEqual(olderPage.map(\.id), window.dropLast().map(\.id))
     }
 
+    func testReplyMessagesStayOffTheChannelFeed() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "test-connector", displayName: "Test Connector")
+        )
+
+        let root = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "test-connector",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "derrick",
+                body: "a2",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                replyCount: 1
+            )
+        )
+        XCTAssertTrue(root.inserted)
+
+        let reply = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "test-connector",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.2",
+                sender: "alice",
+                body: "hi this is a thread",
+                createdAt: Date(timeIntervalSince1970: 2_000),
+                parentVendorMessageID: "171.1"
+            )
+        )
+        XCTAssertTrue(reply.inserted)
+
+        let channel = try await repository.listMessagingMessages(
+            threadID: root.thread.id,
+            filter: .channelRoots
+        )
+        XCTAssertEqual(channel.map(\.body), ["a2"])
+        XCTAssertEqual(channel.first?.replyCount, 1)
+
+        let thread = try await repository.listMessagingMessages(
+            threadID: root.thread.id,
+            filter: .replyThread(parentVendorMessageID: "171.1")
+        )
+        XCTAssertEqual(thread.map(\.body), ["a2", "hi this is a thread"])
+    }
+
     func testConcurrentInboundPersistDoesNotDoubleUnread() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -60,6 +60,71 @@ import Testing
         #expect(Set(threads.map(\.vendorThreadID)) == ["C123"])
     }
 
+    @Test func syncThreadsEmptySuccessfulListDoesNotThrow() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "CSECRET",
+                title: "#secret"
+            )
+        )
+
+        let invoker = ConnectorPluginInvoker { _, _ in
+            let envelopes = """
+            [{"verb":"result.emit","threads":[]}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        try await adapter.syncThreads(repository: repository)
+
+        let threads = try await repository.listMessagingThreads(pluginID: "slack-connection")
+        #expect(threads.isEmpty)
+    }
+
+    @Test func syncThreadsEmptyVendorErrorDoesNotWipeCatalog() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "CSECRET",
+                title: "#secret"
+            )
+        )
+
+        let invoker = ConnectorPluginInvoker { _, _ in
+            let envelopes = """
+            [{"verb":"result.emit","threads":[],"title":"Slack list failed","summary":"invalid_auth"}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        do {
+            try await adapter.syncThreads(repository: repository)
+            Issue.record("Expected vendor error to fail sync_threads")
+        } catch let error as ConnectorMessagingError {
+            #expect(error.localizedDescription.contains("invalid_auth"))
+        }
+
+        let threads = try await repository.listMessagingThreads(pluginID: "slack-connection")
+        #expect(threads.map(\.vendorThreadID) == ["CSECRET"])
+    }
+
     @Test func sendMessagePersistsOutboundRow() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
@@ -92,6 +157,137 @@ import Testing
         let messages = try await repository.listMessagingMessages(threadID: thread.id, limit: 10)
         #expect(messages.map(\.body) == ["hello slack"])
         #expect(messages.first?.direction == .outbound)
+    }
+
+    @Test func sendMessagePassesParentVendorMessageID() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        let thread = MessagingThreadDTO(
+            pluginID: "slack-connection",
+            vendorThreadID: "C123",
+            title: "#general"
+        )
+        try await repository.upsertMessagingThread(thread)
+
+        let capture = ParentCapture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parent = event.params?["parent_vendor_message_id"]?.stringValue
+            let envelopes = """
+            [{"verb":"result.emit","sent_message":{"vendor_message_id":"42.1","created_at":"1710000001.000100"}}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        try await adapter.sendMessage(
+            vendorThreadID: "C123",
+            text: "in thread",
+            threadID: thread.id,
+            parentVendorMessageID: "171.1",
+            repository: repository
+        )
+        #expect(capture.parent == "171.1")
+        let replies = try await repository.listMessagingMessages(
+            threadID: thread.id,
+            filter: .replyThread(parentVendorMessageID: "171.1")
+        )
+        #expect(replies.map(\.body) == ["in thread"])
+        #expect(replies.first?.parentVendorMessageID == "171.1")
+        let channel = try await repository.listMessagingMessages(
+            threadID: thread.id,
+            filter: .channelRoots
+        )
+        #expect(channel.isEmpty)
+    }
+
+    @Test func pollConversationPassesParentVendorMessageID() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+
+        let capture = ParentCapture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parent = event.params?["parent_vendor_message_id"]?.stringValue
+            let envelopes = """
+            [{"verb":"result.emit","messages":[{"vendor_thread_id":"C123","vendor_message_id":"171.2","direction":"inbound","sender":"U2","body":"hi this is a thread","created_at":"1710000002.000100","parent_vendor_message_id":"171.1"}]}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        let inserted = try await adapter.pollConversation(
+            vendorThreadID: "C123",
+            parentVendorMessageID: "171.1",
+            repository: repository
+        )
+        #expect(capture.parent == "171.1")
+        #expect(inserted.contains(where: { $0.message.body == "hi this is a thread" }))
+        let channel = try await repository.listMessagingMessages(
+            threadID: inserted[0].thread.id,
+            filter: .channelRoots
+        )
+        #expect(channel.isEmpty)
+        let replies = try await repository.listMessagingMessages(
+            threadID: inserted[0].thread.id,
+            filter: .replyThread(parentVendorMessageID: "171.1")
+        )
+        #expect(replies.map(\.body) == ["hi this is a thread"])
+    }
+
+    @Test func pollConversationSurfacesSlackMissingScopeAsReadPermissionError() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+
+        let invoker = ConnectorPluginInvoker { _, _ in
+            let envelopes = """
+            [{"verb":"result.emit","title":"Slack blocked this thread","summary":"missing_scope"}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        do {
+            _ = try await adapter.pollConversation(
+                vendorThreadID: "C123",
+                parentVendorMessageID: "171.1",
+                repository: repository
+            )
+            Issue.record("Expected missing_scope to fail the reply poll")
+        } catch let error as ConnectorMessagingError {
+            #expect(error.localizedDescription == ConnectorReplyThreadAccessMessage.slackBlockedThread)
+        } catch {
+            Issue.record("Unexpected error \(error)")
+        }
     }
 
     @Test func sendOnlyBootstrapSkipsUnsupportedOps() async throws {
@@ -278,7 +474,75 @@ import Testing
         }
         let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
         _ = try await adapter.pollInbox(repository: repository)
-        #expect(capture.oldest != nil)
+        let oldest = try #require(capture.oldest)
+        #expect(oldest.range(of: #"^\d+\.\d{6}$"#, options: .regularExpression) != nil)
+        let connectors = try await repository.listMessagingConnectors()
+        let listeningSince = try #require(connectors.first?.listeningSince)
+        #expect(oldest == ConnectorPollCursor.unixSeconds(listeningSince))
+    }
+
+    @Test func pollInboxEmptyVendorErrorDoesNotLookLikeSuccess() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+
+        let invoker = ConnectorPluginInvoker { _, _ in
+            let envelopes = """
+            [{"verb":"result.emit","messages":[],"title":"Slack message poll failed","summary":"Slack error: invalid_arguments"}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        do {
+            _ = try await adapter.pollInbox(repository: repository)
+            Issue.record("Expected vendor error to fail poll_inbox")
+        } catch let error as ConnectorMessagingError {
+            #expect(error.localizedDescription.contains("invalid_arguments"))
+        }
+    }
+
+    @Test func pollInboxEmptySuccessfulListDoesNotThrow() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+
+        let invoker = ConnectorPluginInvoker { _, _ in
+            let envelopes = """
+            [{"verb":"result.emit","messages":[],"title":"Slack messages","summary":"Loaded 0 messages."}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        let inserted = try await adapter.pollInbox(repository: repository)
+        #expect(inserted.isEmpty)
+    }
+
+    private final class ParentCapture: @unchecked Sendable {
+        var parent: String?
     }
 
     private func makeRepository() throws -> DBRepository {

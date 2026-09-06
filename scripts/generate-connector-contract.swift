@@ -1,0 +1,155 @@
+#!/usr/bin/env swift
+import CryptoKit
+import Foundation
+
+/// Regenerates `ConnectorContract.generated.swift` from bundled connector JSON.
+/// `--check` exits 1 when the committed fingerprint does not match the JSON files
+/// or when the JSON no longer satisfies the bundled schemas.
+
+let repoRoot = URL(fileURLWithPath: CommandLine.arguments[0])
+    .resolvingSymlinksInPath()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+
+let resources = repoRoot
+    .appendingPathComponent("packages/Structure/Sources/Contract/Resources")
+
+let sources: [(relative: String, url: URL)] = [
+    "schemas/connector-contract.schema.json",
+    "schemas/connector-params.schema.json",
+    "schemas/connector-result-emit.schema.json",
+    "schemas/connector-vendor.schema.json",
+    "contracts/connector-contract.json",
+    "contracts/vendors/slack.json",
+].map { relative in
+    (relative, resources.appendingPathComponent(relative))
+}
+
+let generatedURL = repoRoot
+    .appendingPathComponent("packages/Structure/Sources/Contract/Generated/ConnectorContract.generated.swift")
+
+func jsonObject(_ url: URL) throws -> [String: Any] {
+    let data = try Data(contentsOf: url)
+    guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw ScriptError("\(url.lastPathComponent) is not a JSON object.")
+    }
+    return object
+}
+
+func requireKeys(_ object: [String: Any], _ keys: [String], file: String) throws {
+    for key in keys where object[key] == nil {
+        throw ScriptError("\(file) is missing required key \(key).")
+    }
+}
+
+func validateGraph() throws {
+    let contractSchema = try jsonObject(resources.appendingPathComponent("schemas/connector-contract.schema.json"))
+    let contract = try jsonObject(resources.appendingPathComponent("contracts/connector-contract.json"))
+    try requireKeys(contract, contractSchema["required"] as? [String] ?? [], file: "connector-contract.json")
+    let opsSchema = (contractSchema["properties"] as? [String: Any])?["ops"] as? [String: Any]
+    try requireKeys(
+        contract["ops"] as? [String: Any] ?? [:],
+        opsSchema?["required"] as? [String] ?? [],
+        file: "connector-contract.json ops"
+    )
+    let rulesSchema = (contractSchema["properties"] as? [String: Any])?["rules"] as? [String: Any]
+    try requireKeys(
+        contract["rules"] as? [String: Any] ?? [:],
+        rulesSchema?["required"] as? [String] ?? [],
+        file: "connector-contract.json rules"
+    )
+    let scopesSchema = (contractSchema["properties"] as? [String: Any])?["scopes"] as? [String: Any]
+    try requireKeys(
+        contract["scopes"] as? [String: Any] ?? [:],
+        scopesSchema?["required"] as? [String] ?? [],
+        file: "connector-contract.json scopes"
+    )
+
+    let paramsSchema = try jsonObject(resources.appendingPathComponent("schemas/connector-params.schema.json"))
+    let paramNames = Set(((paramsSchema["properties"] as? [String: Any]) ?? [:]).keys)
+    let messagingOps = (((paramsSchema["properties"] as? [String: Any])?["messaging_op"] as? [String: Any])?["enum"] as? [String]) ?? []
+    let ops = contract["ops"] as? [String: Any] ?? [:]
+    for (opID, raw) in ops {
+        guard messagingOps.contains(opID) else {
+            throw ScriptError("Op \(opID) is missing from connector-params.schema.json messaging_op enum.")
+        }
+        let spec = raw as? [String: Any] ?? [:]
+        for param in spec["params"] as? [String] ?? [] where !paramNames.contains(param) {
+            throw ScriptError("Op \(opID) param \(param) is missing from connector-params.schema.json.")
+        }
+    }
+
+    let emitSchema = try jsonObject(resources.appendingPathComponent("schemas/connector-result-emit.schema.json"))
+    let emitFields = Set(((emitSchema["properties"] as? [String: Any]) ?? [:]).keys)
+    for (opID, raw) in ops {
+        let emit = (raw as? [String: Any])?["emit"] as? String ?? ""
+        guard emitFields.contains(emit) else {
+            throw ScriptError("Op \(opID) emit \(emit) is missing from connector-result-emit.schema.json.")
+        }
+    }
+
+    let vendorSchema = try jsonObject(resources.appendingPathComponent("schemas/connector-vendor.schema.json"))
+    let slack = try jsonObject(resources.appendingPathComponent("contracts/vendors/slack.json"))
+    try requireKeys(slack, vendorSchema["required"] as? [String] ?? [], file: "vendors/slack.json")
+    let calls = slack["calls"] as? [String: Any] ?? [:]
+    if calls.isEmpty {
+        throw ScriptError("vendors/slack.json calls must not be empty.")
+    }
+}
+
+func fingerprint() throws -> String {
+    var joined = Data()
+    for source in sources {
+        let data = try Data(contentsOf: source.url)
+        joined.append(Data(source.relative.utf8))
+        joined.append(0)
+        joined.append(data)
+        joined.append(0)
+    }
+    return SHA256.hash(data: joined).map { String(format: "%02x", $0) }.joined()
+}
+
+func generatedSource(hash: String) -> String {
+    """
+    // Automatically generated by scripts/generate-connector-contract.swift. DO NOT EDIT.
+
+    /// SHA-256 of connector protocol JSON and schemas. `swift test` fails when this is stale.
+    public enum ConnectorContractFingerprint: Sendable {
+        public static let sha256 = "\(hash)"
+        public static let sourceFiles: [String] = [
+    \(sources.map { "        \"\($0.relative)\"," }.joined(separator: "\n"))
+        ]
+    }
+
+    """
+}
+
+struct ScriptError: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
+}
+
+do {
+    try validateGraph()
+} catch {
+    fputs("\(error)\n", stderr)
+    exit(1)
+}
+
+let hash = try fingerprint()
+let check = CommandLine.arguments.contains("--check")
+if check {
+    let existing = try String(contentsOf: generatedURL, encoding: .utf8)
+    if !existing.contains("public static let sha256 = \"\(hash)\"") {
+        fputs("connector contract fingerprint is stale. Run scripts/generate-connector-contract.swift\n", stderr)
+        exit(1)
+    }
+    exit(0)
+}
+
+try FileManager.default.createDirectory(
+    at: generatedURL.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+)
+try generatedSource(hash: hash).write(to: generatedURL, atomically: true, encoding: .utf8)
+print("Wrote \(generatedURL.path) sha256=\(hash)")

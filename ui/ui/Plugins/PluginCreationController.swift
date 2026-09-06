@@ -9,7 +9,6 @@ final class PluginCreationController: ObservableObject {
         case intro
         case chooseType
         case chooseVendor
-        case describe
         case creating
         case collectCredentials(pluginID: String)
         case failed(step: PluginFactoryCreateInput.FailureStep, message: String, technicalDetail: String? = nil)
@@ -34,9 +33,8 @@ final class PluginCreationController: ObservableObject {
     @Published private(set) var progressSteps: [ProgressStepState] = []
     @Published var selectedType: PluginFactoryCreateInput.PluginType = .connector
     @Published var selectedVendor: PluginFactoryCreateInput.ConnectorVendor = .slack
-    @Published var selectedScope: PluginFactoryCreateInput.ConnectorScope = .sendAndReceive
+    @Published var selectedScope: PluginFactoryCreateInput.ConnectorScope = .fullSync
     @Published var customVendorName = ""
-    @Published var connectorDescription = ""
     @Published private(set) var credentialFields: [PluginCredentialFieldPresentation] = []
     @Published var credentialDrafts: [String: String] = [:]
 
@@ -47,6 +45,13 @@ final class PluginCreationController: ObservableObject {
 
     deinit {
         pollTask?.cancel()
+    }
+
+    var canConfirmVendor: Bool {
+        if selectedVendor == .custom {
+            return !customVendorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
     }
 
     func configure(repository: DBRepository) {
@@ -68,7 +73,7 @@ final class PluginCreationController: ObservableObject {
         progressSteps = []
         credentialFields = []
         credentialDrafts = [:]
-        selectedScope = .sendAndReceive
+        selectedScope = .fullSync
     }
 
     func beginCreate() {
@@ -76,13 +81,6 @@ final class PluginCreationController: ObservableObject {
         phase = .chooseType
         statusMessage = ""
         progressSteps = []
-    }
-
-    func beginEdit() {
-        phase = .failed(
-            step: .type,
-            message: "Editing an existing plugin is coming soon. Delete a version from the sidebar and create a new one."
-        )
     }
 
     func selectType(_ type: PluginFactoryCreateInput.PluginType) {
@@ -101,16 +99,11 @@ final class PluginCreationController: ObservableObject {
     }
 
     func confirmVendor() {
-        selectedScope = .sendAndReceive
-        phase = .describe
+        selectedScope = .fullSync
     }
 
     func goBackToTypeSelection() {
         phase = .chooseType
-    }
-
-    func goBackToVendorSelection() {
-        phase = .chooseVendor
     }
 
     func startCreation(
@@ -120,13 +113,13 @@ final class PluginCreationController: ObservableObject {
     ) {
         guard let helperAPIKey, !helperAPIKey.isEmpty else {
             phase = .failed(
-                step: .description,
+                step: .vendor,
                 message: "Add an API key in Settings before creating a plugin."
             )
             return
         }
 
-        selectedScope = .sendAndReceive
+        selectedScope = .fullSync
         cancelPolling()
         phase = .creating
         statusMessage = "Starting connector creation…"
@@ -137,7 +130,7 @@ final class PluginCreationController: ObservableObject {
             vendor: selectedVendor,
             customVendorName: selectedVendor == .custom ? customVendorName : nil,
             scope: selectedScope,
-            userDescription: connectorDescription
+            userDescription: ""
         )
 
         pollTask = Task { @MainActor in
@@ -185,9 +178,7 @@ final class PluginCreationController: ObservableObject {
         case .failed(let step, _, _):
             switch step {
             case .type: phase = .chooseType
-            case .vendor: phase = .chooseVendor
-            case .description: phase = .describe
-            case .creating: phase = .describe
+            case .vendor, .description, .creating: phase = .chooseVendor
             }
         default:
             phase = .intro
@@ -282,11 +273,11 @@ final class PluginCreationController: ObservableObject {
                 for event in result.events {
                     pollAfterSeq = max(pollAfterSeq, event.seq)
                     applyProgressEvent(event)
-                    if event.kind == "progress",
-                       WorkflowChatProgress.shouldSurfaceWorkflowMessage(event.message) {
-                        statusMessage = event.message
-                    } else if let mapped = WorkflowChatProgress.factoryProgressMessage(from: event.message) {
+                    if let mapped = WorkflowChatProgress.factoryProgressMessage(from: event.message) {
                         statusMessage = mapped
+                    } else if event.kind == "progress",
+                              WorkflowChatProgress.shouldSurfaceWorkflowMessage(event.message) {
+                        statusMessage = event.message
                     }
                 }
                 switch result.status {

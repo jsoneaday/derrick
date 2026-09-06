@@ -263,6 +263,88 @@ import WebCrawler
         #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.webCrawlerImage])
         #expect(calls[1].first == "build")
         #expect(calls[1].contains(DockerProductImagePolicy.webCrawlerImage))
+        #expect(calls[1].last?.hasSuffix("/\(DockerProductImagePolicy.webCrawlerBuildContextRelativePath)") == true)
+    }
+
+    @Test func crawlerImageBuildFailureMessageOmitsBuildkitDump() {
+        let error = DockerProductImagePrewarmerError.buildFailed(
+            DockerProductImagePolicy.webCrawlerImage,
+            "#0 building with \"default\" instance using docker driver"
+        )
+        let text = error.localizedDescription
+        #expect(!text.contains("#0 building"))
+        #expect(text.lowercased().contains("web crawler"))
+        #expect(text.lowercased().contains("disk"))
+        #expect(error.compilerDiagnostic == nil)
+    }
+
+    @Test func crawlerImageBuildDiagnosticExtractsCompilerError() {
+        let detail = """
+        #0 building with "default" instance using docker driver
+        /build/Structure/Sources/AppLayerServices/AgentService/AgentServiceXPC.swift:2:8: error: no such module 'CryptoKit'
+        error: Build failed
+        """
+        let error = DockerProductImagePrewarmerError.buildFailed(
+            DockerProductImagePolicy.webCrawlerImage,
+            detail
+        )
+        #expect(error.compilerDiagnostic?.contains("CryptoKit") == true)
+        #expect(!error.localizedDescription.contains("CryptoKit"))
+    }
+
+    @Test func crawlerImageBuildIsSingleFlight() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "image" {
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            if args.first == "build" {
+                try await Task.sleep(for: .milliseconds(80))
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let gate = WebCrawlerImageGate()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await gate.ensureReady(executor: executor) }
+            group.addTask { try await gate.ensureReady(executor: executor) }
+            group.addTask { try await gate.ensureReady(executor: executor) }
+            try await group.waitForAll()
+        }
+        let calls = await recorder.calls
+        #expect(calls.filter { $0.first == "build" }.count == 1)
+        #expect(calls.filter { $0.first == "image" }.count == 1)
+    }
+
+    @Test func crawlerImageBuildFailureAllowsRetry() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "image" {
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            if args.first == "build" {
+                let builds = await recorder.calls.filter { $0.first == "build" }.count
+                if builds == 1 {
+                    return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data("boom".utf8))
+                }
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let gate = WebCrawlerImageGate()
+        do {
+            try await gate.ensureReady(executor: executor)
+            Issue.record("expected first build to fail")
+        } catch {
+            // retry after failure
+        }
+        try await gate.ensureReady(executor: executor)
+        let builds = await recorder.calls.filter { $0.first == "build" }
+        #expect(builds.count == 2)
     }
 
     @Test func fileExtractorContainerCreateUsesJobBindMountsAndOverridesEntrypoint() {
@@ -294,6 +376,54 @@ import WebCrawler
                 DockerHostLaunch.makeRequest(dockerArguments: args, timeoutSeconds: 60)
             ) == nil
         )
+    }
+
+    @Test func fileExtractorRunCreatesStartsExecsAndRemoves() async throws {
+        let recorder = DockerCallRecorder()
+        let runner = FileExtractorDockerExecutor(
+            executor: { arguments, _, _ in
+                await recorder.append(arguments)
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            },
+            queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
+        )
+        let jobID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        _ = try await runner.run(
+            input: Data(#"{}"#.utf8),
+            inputDirectory: URL(fileURLWithPath: "/tmp/file-jobs/\(jobID)/in"),
+            outputDirectory: URL(fileURLWithPath: "/tmp/file-jobs/\(jobID)/out"),
+            timeoutSeconds: 5
+        )
+        let calls = await recorder.calls
+        #expect(calls.first?.starts(with: ["image", "inspect"]) == true)
+        #expect(calls.contains { $0.first == "create" })
+        #expect(calls.contains { $0.first == "start" })
+        #expect(calls.contains { $0.contains("/usr/local/bin/derrick-file-extractor") })
+        #expect(calls.contains { $0.first == "rm" && $0.contains("-f") })
+    }
+
+    @Test func fileExtractorMissingImageDoesNotCreateContainer() async throws {
+        let recorder = DockerCallRecorder()
+        let runner = FileExtractorDockerExecutor(
+            executor: { arguments, _, _ in
+                await recorder.append(arguments)
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            },
+            queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
+        )
+        do {
+            _ = try await runner.run(
+                input: Data(#"{}"#.utf8),
+                inputDirectory: URL(fileURLWithPath: "/tmp/file-jobs/missing/in"),
+                outputDirectory: URL(fileURLWithPath: "/tmp/file-jobs/missing/out"),
+                timeoutSeconds: 5
+            )
+            Issue.record("expected missing extractor image")
+        } catch let error as FileExtractorDockerExecutorError {
+            #expect(error == .imageUnavailable(FileExtractorDockerExecutor.image))
+        }
+        let calls = await recorder.calls
+        #expect(calls == [["image", "inspect", FileExtractorDockerExecutor.image]])
     }
 
     @Test func orphanSweeperRemovesLabeledAndPrefixedContainers() async throws {
@@ -669,8 +799,7 @@ import WebCrawler
         let client = HostHTTPClient()
         await client.setAccessGate(StubDenyGate())
         let fetched = await client.perform(
-            method: "GET",
-            urlString: "https://example.com/",
+            HostHTTPRequest(requestID: "r1", method: "GET", url: "https://example.com/"),
             invokeID: "inv-1"
         )
         #expect(fetched.succeeded == false)
@@ -699,6 +828,107 @@ import WebCrawler
     @Test func pythonGuestRuntimeUsesPinnedImage() {
         #expect(DerrickGuestRuntime.pythonGuestDockerImage == "python:3.14.7")
         #expect(PythonGuestDockerExecutor.containerPrefix == "derrick-guest-runtime")
+        #expect(DerrickDockerRunQueue.guest.maxConcurrentContainers == 1)
+        #expect(DerrickDockerRunQueue.crawler.maxConcurrentContainers == 2)
+        #expect(DerrickDockerRunQueue.extractor.maxConcurrentContainers == 1)
+        #expect(
+            DerrickDockerRunQueue.guest.maxConcurrentContainers
+                == ContainerLifecyclePolicy.derrickDefault.maxOfflineContainers
+        )
+        #expect(
+            DerrickDockerRunQueue.crawler.maxConcurrentContainers
+                == ContainerLifecyclePolicy.derrickDefault.maxNetworkContainers
+        )
+        #expect(
+            DerrickDockerRunQueue.extractor.maxConcurrentContainers
+                == ContainerLifecyclePolicy.derrickDefault.maxFileExtractContainers
+        )
+    }
+
+    @Test func oneshotEnsurePulledImageSkipsPullWhenImageExists() async throws {
+        let recorder = DockerCallRecorder()
+        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+            await recorder.append(arguments)
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let calls = await recorder.calls
+        #expect(calls.contains { $0.starts(with: ["image", "inspect"]) })
+        #expect(!calls.contains { $0.first == "pull" })
+    }
+
+    @Test func oneshotEnsurePulledImagePullsWhenMissing() async throws {
+        let recorder = DockerCallRecorder()
+        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+            await recorder.append(arguments)
+            if arguments.first == "image" {
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let calls = await recorder.calls
+        #expect(calls.contains { $0.starts(with: ["image", "inspect"]) })
+        #expect(calls.contains { $0.first == "pull" && $0.contains("python:3.14.7") })
+    }
+
+    @Test func dockerRunQueueSerializesWhenMaxIsOne() async throws {
+        let queue = DerrickDockerRunQueue(maxConcurrentContainers: 1)
+        let peak = PeakCounter()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<3 {
+                group.addTask {
+                    try await queue.withPermit {
+                        await peak.enter()
+                        try await Task.sleep(for: .milliseconds(40))
+                        await peak.leave()
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+        #expect(await peak.peak == 1)
+    }
+
+    @Test func dockerRunQueueAllowsCrawlerCapOfTwo() async throws {
+        let queue = DerrickDockerRunQueue(maxConcurrentContainers: 2)
+        let peak = PeakCounter()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 {
+                group.addTask {
+                    try await queue.withPermit {
+                        await peak.enter()
+                        try await Task.sleep(for: .milliseconds(40))
+                        await peak.leave()
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+        #expect(await peak.peak == 2)
+    }
+
+    @Test func oneshotDockerContainerRemovesAfterBodyFailure() async throws {
+        let recorder = DockerCallRecorder()
+        do {
+            _ = try await OneshotDockerContainer.run(
+                executor: { arguments, _, _ in
+                    await recorder.append(arguments)
+                    return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                },
+                prefix: "derrick-guest-runtime",
+                createArguments: { name in ["create", "--name", name, "python:3.14.7"] },
+                createStep: "create guest runtime container",
+                startStep: "start guest runtime container",
+                body: { _ in
+                    throw OneshotDockerContainerError.commandFailed("exec", "boom")
+                }
+            )
+            Issue.record("expected oneshot body failure")
+        } catch {
+            let calls = await recorder.calls
+            #expect(calls.contains { $0.first == "create" })
+            #expect(calls.contains { $0.first == "start" })
+            #expect(calls.contains { $0.first == "rm" && $0.contains("-f") })
+        }
     }
 
     @Test func pythonSourceVerifierRejectsNetworkAndDependencies() {
@@ -730,7 +960,8 @@ import WebCrawler
                     )
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
+            },
+            queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
         )
         _ = try await runner.runSource(
             source: "import json, sys\njson.dump([], sys.stdout)",
@@ -773,7 +1004,8 @@ import WebCrawler
                     )
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
+            },
+            queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
         )
         let result = try await runner.runSource(
             source: "import json, sys\njson.dump([], sys.stdout)",
@@ -926,6 +1158,120 @@ import WebCrawler
         }
         #expect(result.exitCode == 0)
         #expect(String(decoding: result.stdout, as: UTF8.self).contains("done"))
+    }
+
+    @Test func pluginInvokeAccumulatesHTTPResultsAcrossHops() async throws {
+        actor Seen {
+            var hops: [[String]] = []
+            func record(_ ids: [String]) { hops.append(ids) }
+        }
+        let seen = Seen()
+        let initial = PluginHopEvent(
+            kind: .manual,
+            params: ["messaging_op": .string("sync_threads")]
+        )
+        let result = try await GuestHopLoop.runForPluginInvoke(
+            initialEvent: initial,
+            invokeID: "test-invoke",
+            timeoutSeconds: 30,
+            execute: { input in
+                let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+                let ids = (event.httpResults ?? []).map(\.requestID)
+                await seen.record(ids)
+                if ids.isEmpty {
+                    return PluginFactoryExecutionResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"[{"verb":"http.request","request_id":"sync-1","method":"GET","url":"https://example.com/page1"}]"#.utf8
+                        )
+                    )
+                }
+                if ids == ["sync-1"] {
+                    return PluginFactoryExecutionResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"[{"verb":"http.request","request_id":"sync-2","method":"GET","url":"https://example.com/page2"}]"#.utf8
+                        )
+                    )
+                }
+                if Set(ids) == Set(["sync-1", "sync-2"]) {
+                    return PluginFactoryExecutionResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            ##"[{"verb":"result.emit","summary":"ok","threads":[{"vendor_thread_id":"C1","title":"#general"}]}]"##.utf8
+                        )
+                    )
+                }
+                return PluginFactoryExecutionResult(
+                    exitCode: 1,
+                    stderr: Data("unexpected ids \(ids)".utf8)
+                )
+            },
+            logger: { _ in },
+            httpResultEvent: { envelopes, _, params in
+                let responses = envelopes.filter { $0.verb == .httpRequest }.map { envelope in
+                    HostHTTPResponse(
+                        requestID: envelope.payload["request_id"]?.stringValue ?? "",
+                        status: 200,
+                        body: #"{"ok":true}"#
+                    )
+                }
+                return try? PluginHopEvent(
+                    kind: .httpResults,
+                    httpResults: responses,
+                    params: params
+                ).encodeValidated()
+            }
+        )
+        #expect(result.exitCode == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self).contains("result.emit"))
+        let hops = await seen.hops
+        #expect(hops.count == 3)
+        #expect(hops[0].isEmpty)
+        #expect(hops[1] == ["sync-1"])
+        #expect(Set(hops[2]) == Set(["sync-1", "sync-2"]))
+    }
+
+    @Test func pluginInvokeStopsWhenHopBudgetExceeded() async throws {
+        actor Counter {
+            var hops = 0
+            func bump() { hops += 1 }
+        }
+        let counter = Counter()
+        let result = try await GuestHopLoop.runForPluginInvoke(
+            initialEvent: PluginHopEvent(kind: .manual),
+            invokeID: "test-invoke",
+            timeoutSeconds: 30,
+            execute: { _ in
+                await counter.bump()
+                return PluginFactoryExecutionResult(
+                    exitCode: 0,
+                    stdout: Data(
+                        #"[{"verb":"http.request","request_id":"n-1","method":"GET","url":"https://example.com"}]"#.utf8
+                    )
+                )
+            },
+            logger: { _ in },
+            httpResultEvent: { envelopes, _, params in
+                let responses = envelopes.filter { $0.verb == .httpRequest }.map { envelope in
+                    HostHTTPResponse(
+                        requestID: envelope.payload["request_id"]?.stringValue ?? "n-1",
+                        status: 200,
+                        body: "{}"
+                    )
+                }
+                return try? PluginHopEvent(
+                    kind: .httpResults,
+                    httpResults: responses,
+                    params: params
+                ).encodeValidated()
+            }
+        )
+        #expect(result.exitCode == 1)
+        let stderr = String(decoding: result.stderr, as: UTF8.self)
+        #expect(stderr.contains("Hop budget exceeded"))
+        let hops = await counter.hops
+        #expect(hops == PluginContract.maxPluginInvokeHops)
     }
 
     @Test func pythonGuestContainerArgumentsStayNetworkIsolated() {
@@ -1118,6 +1464,20 @@ actor DockerCallRecorder {
 
     func append(_ arguments: [String]) {
         calls.append(arguments)
+    }
+}
+
+private actor PeakCounter {
+    private(set) var current = 0
+    private(set) var peak = 0
+
+    func enter() {
+        current += 1
+        peak = max(peak, current)
+    }
+
+    func leave() {
+        current = max(0, current - 1)
     }
 }
 

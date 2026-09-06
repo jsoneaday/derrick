@@ -65,10 +65,9 @@ struct PluginsWorkspaceView: View {
 
     private var modalTitle: String {
         switch controller.phase {
-        case .intro: return "Create or edit a plugin"
+        case .intro: return "Create a plugin"
         case .chooseType: return "Create a plugin"
         case .chooseVendor: return "Choose a vendor"
-        case .describe: return "Describe your connector"
         case .creating: return "Creating connector"
         case .collectCredentials: return "Connector credentials"
         case .failed: return "Could not create connector"
@@ -139,27 +138,17 @@ struct PluginsWorkspaceView: View {
                     TextField("Vendor name", text: $controller.customVendorName)
                         .textFieldStyle(.roundedBorder)
                 }
-            }
-
-        case .describe:
-            VStack(alignment: .leading, spacing: 12) {
-                Text("This connector lists conversations, lets you pick one, then sends and receives new messages.")
-                    .font(.subheadline)
+                Text("This connector lists conversations as tabs, including reply threads, then sends and receives new messages.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Additional details (optional)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $controller.connectorDescription)
-                    .font(.body)
-                    .frame(minHeight: 80, maxHeight: 120)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.primary.opacity(0.12))
-                    )
-                Text("Derrick will read the vendor API docs, build the plugin, run tests, and run a safety review — in that order.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                if controller.selectedVendor == .slack {
+                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
         case .creating:
@@ -168,10 +157,7 @@ struct PluginsWorkspaceView: View {
                     progressStepRow(step)
                 }
                 if !controller.statusMessage.isEmpty {
-                    Text(controller.statusMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    FactoryCreatingStatusLine(message: controller.statusMessage)
                         .padding(.top, 2)
                 }
             }
@@ -182,6 +168,12 @@ struct PluginsWorkspaceView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if controller.selectedVendor == .slack {
+                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 ForEach(controller.credentialFields) { field in
                     credentialFieldRow(field)
                 }
@@ -222,8 +214,6 @@ struct PluginsWorkspaceView: View {
         switch controller.phase {
         case .intro:
             HStack {
-                Button("Edit existing") { controller.beginEdit() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
                 Spacer()
                 Button("Create plugin") { controller.beginCreate() }
                     .buttonStyle(ModalPrimaryButtonStyle())
@@ -246,17 +236,8 @@ struct PluginsWorkspaceView: View {
                 Button("Back") { controller.goBackToTypeSelection() }
                     .buttonStyle(ModalSecondaryButtonStyle())
                 Spacer()
-                Button("Continue") { controller.confirmVendor() }
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-            }
-
-        case .describe:
-            HStack {
-                Button("Back") { controller.goBackToVendorSelection() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                Spacer()
                 Button("Create") {
+                    controller.confirmVendor()
                     controller.startCreation(
                         sessionID: sessionID,
                         helperAPIKey: helperAPIKey,
@@ -264,7 +245,7 @@ struct PluginsWorkspaceView: View {
                     )
                 }
                 .buttonStyle(ModalPrimaryButtonStyle())
-                .disabled(!sessionReady)
+                .disabled(!sessionReady || !controller.canConfirmVendor)
                 .keyboardShortcut(.defaultAction)
             }
 
@@ -411,5 +392,47 @@ struct PluginsWorkspaceView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+    }
+}
+
+struct FactoryCreatingStatusLine: View {
+    let message: String
+    @State private var startedAt = Date()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let wait = PluginCreationElapsedWait.label(
+                    elapsedSeconds: Int(context.date.timeIntervalSince(startedAt))
+                ) {
+                    Text(wait)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .onAppear { startedAt = Date() }
+        .onChange(of: message) { _, _ in
+            startedAt = Date()
+        }
+    }
+}
+
+enum PluginCreationElapsedWait {
+    static func label(elapsedSeconds: Int) -> String? {
+        guard elapsedSeconds >= 8 else { return nil }
+        if elapsedSeconds < 60 {
+            return "Still working · \(elapsedSeconds) seconds"
+        }
+        let minutes = elapsedSeconds / 60
+        let remainder = elapsedSeconds % 60
+        if remainder == 0 {
+            return "Still working · \(minutes) min"
+        }
+        return "Still working · \(minutes) min \(remainder) sec"
     }
 }

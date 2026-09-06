@@ -17,7 +17,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
         let stream = client.stream(
             AgentRequest.prompt(
                 Self.userPrompt(for: request),
-                system: Self.builderSystemPrompt,
+                system: Self.builderSystemPrompt(for: request.userGoal),
                 temperature: 0,
                 responseSchema: Self.builderResponseSchema
             ),
@@ -63,7 +63,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
         return try JSONDecoder().decode(PluginFactoryBuilderResponse.self, from: data).draft()
     }
 
-    private static let builderSystemPrompt: String = {
+    private static func builderSystemPrompt(for userGoal: String) -> String {
         """
         You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
         Return exactly one JSON object with these keys:
@@ -87,7 +87,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
         If skill_files is not needed, return an empty array. Every skill file path must be exactly
         skills/<name>/SKILL.md. Never use manifest.json or other paths in skill_files.
         \(DerrickGuestPython.modelContract)
-        \(ConnectorMessagingContract.hostContract)
+        \(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
         Before returning the draft, self-check the implementation:
         - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
         - Match host responses by the emitted request_id.
@@ -96,16 +96,14 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
         For messaging connector plugins (role connector) that call a vendor HTTP API:
         - Declare secrets in the manifest only. Never hard-code credentials.
         - Parse each http_results body as JSON when the vendor returns JSON.
-        - Scope pagination: send + receive connectors should use single-page sync_threads and poll_inbox in tests \
-          (sync-1, poll-1, send-1 only). Full sync scope may paginate; every extra request_id needs a fixture.
         - When scope includes send_message, the final result.emit must include sent_message.
-        - When scope includes poll_inbox, the final result.emit must include a non-empty messages array.
+        - Direct tests for poll_inbox must include a non-empty messages array; runtime empty messages with vendor success is success.
         - When scope includes sync_threads, the final result.emit must include a non-empty threads array.
           Each thread needs vendor_thread_id (opaque vendor ID) and title (human label for the host channel picker).
           Emit only conversations the saved secret can access; for Slack skip channels where is_member is false.
-        When vendor documentation is supplied in the user prompt, follow it exactly.
+        When vendor documentation is supplied in the user prompt, use it only to fill may_call HTTP details.
         """
-    }()
+    }
 
     private static let builderResponseSchema = AgentSchema(
         type: .object,
@@ -180,7 +178,7 @@ public actor LiveFactoryReviewer: PluginFactoryReviewer {
                 Direct test output:
                 \(output)
                 """,
-                system: Self.reviewerSystemPrompt,
+                system: Self.reviewerSystemPrompt(for: draft.userGoal),
                 temperature: 0,
                 responseSchema: Self.reviewerResponseSchema
             ),
@@ -190,16 +188,17 @@ public actor LiveFactoryReviewer: PluginFactoryReviewer {
         return try Self.decodeReview(text)
     }
 
-    private static let reviewerSystemPrompt = """
+    private static func reviewerSystemPrompt(for userGoal: String?) -> String {
+        """
     You are Derrick's independent plugin alignment and safety reviewer.
     Return exactly one JSON object:
     {"decision":"approved|rejected","summary":"...","findings":[
       {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
     ]}
     Reject unsafe or non-deterministic code. Approve when direct test output matches fixtures through result.emit.
-    Send + receive scope: approve single-page sync_threads and poll_inbox; do not reject for missing pagination.
-    Full sync scope: reject incomplete pagination when cursors indicate more pages.
+    \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
     """
+    }
 
     private static let reviewerResponseSchema = AgentSchema(
         type: .object,

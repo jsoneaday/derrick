@@ -35,14 +35,6 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             repository: repository,
             replaceThreadCatalog: true
         )
-        if result.threads.isEmpty {
-            let persisted = try await repository.listMessagingThreads(pluginID: pluginID)
-            if persisted.isEmpty {
-                throw ConnectorMessagingError.pluginFailed(
-                    "No conversations were returned. Check the bot token and invite the bot to channels."
-                )
-            }
-        }
     }
 
     public func pollInbox(repository: DBRepository) async throws -> [MessagingPersistResult] {
@@ -53,40 +45,115 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
 
         var inserted: [MessagingPersistResult] = []
         for thread in threads {
-            var params: [String: PluginJSON] = [
-                "vendor_thread_id": .string(thread.vendorThreadID),
-            ]
-            if let cursor = try await pollCursor(for: thread, repository: repository) {
-                params["since"] = .string(cursor)
-                params["oldest"] = .string(cursor)
-            } else if let baseline = pollBaseline(
-                thread: thread,
-                connector: connector
-            ) {
-                params["since"] = .string(baseline)
-                params["oldest"] = .string(baseline)
-            }
-            let result = try await invoker.invoke(
-                pluginID: pluginID,
-                operation: .pollInbox,
-                params: params
-            )
             inserted.append(
-                contentsOf: try await ConnectorMessagingPersistence.apply(
-                    result,
-                    pluginID: pluginID,
+                contentsOf: try await pollConversation(
+                    thread: thread,
+                    parentVendorMessageID: nil,
                     repository: repository,
-                    pollVendorThreadID: thread.vendorThreadID
+                    connector: connector
                 )
             )
         }
         return inserted
     }
 
-    private func pollCursor(for thread: MessagingThreadDTO, repository: DBRepository) async throws -> String? {
+    public func pollConversation(
+        vendorThreadID: String,
+        parentVendorMessageID: String?,
+        repository: DBRepository
+    ) async throws -> [MessagingPersistResult] {
+        let threads = try await repository.listMessagingThreads(pluginID: pluginID)
+        guard let thread = threads.first(where: { $0.vendorThreadID == vendorThreadID }) else {
+            return []
+        }
+        let connector = try await repository.listMessagingConnectors()
+            .first(where: { $0.pluginID == pluginID })
+        return try await pollConversation(
+            thread: thread,
+            parentVendorMessageID: parentVendorMessageID,
+            repository: repository,
+            connector: connector
+        )
+    }
+
+    private func pollConversation(
+        thread: MessagingThreadDTO,
+        parentVendorMessageID: String?,
+        repository: DBRepository,
+        connector: MessagingConnectorDTO?
+    ) async throws -> [MessagingPersistResult] {
+        var params: [String: PluginJSON] = [
+            "vendor_thread_id": .string(thread.vendorThreadID),
+        ]
+        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parent.isEmpty {
+            params["parent_vendor_message_id"] = .string(parent)
+            params["thread_ts"] = .string(parent)
+        }
+        let filter: MessagingMessageListFilter = {
+            if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !parent.isEmpty {
+                return .replyThread(parentVendorMessageID: parent)
+            }
+            return .channelRoots
+        }()
+        if let cursor = try await pollCursor(
+            for: thread,
+            filter: filter,
+            repository: repository
+        ) {
+            params["since"] = .string(cursor)
+            params["oldest"] = .string(cursor)
+        } else if parentVendorMessageID == nil, let baseline = pollBaseline(
+            thread: thread,
+            connector: connector
+        ) {
+            params["since"] = .string(baseline)
+            params["oldest"] = .string(baseline)
+        }
+        let result = try await invoker.invoke(
+            pluginID: pluginID,
+            operation: .pollInbox,
+            params: params
+        )
+        try Self.throwIfReplyThreadBlocked(
+            result: result,
+            parentVendorMessageID: parentVendorMessageID
+        )
+        if result.messages.isEmpty,
+           result.reportsVendorFailure,
+           let detail = result.terminalDetail {
+            throw ConnectorMessagingError.pluginFailed(detail)
+        }
+        return try await ConnectorMessagingPersistence.apply(
+            result,
+            pluginID: pluginID,
+            repository: repository,
+            pollVendorThreadID: thread.vendorThreadID
+        )
+    }
+
+    private static func throwIfReplyThreadBlocked(
+        result: ConnectorMessagingResult,
+        parentVendorMessageID: String?
+    ) throws {
+        let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !parent.isEmpty else { return }
+        guard let detail = result.terminalDetail else { return }
+        if let mapped = ConnectorReplyThreadAccessMessage.userFacing(fromVendorDetail: detail) {
+            throw ConnectorMessagingError.pluginFailed(mapped)
+        }
+    }
+
+    private func pollCursor(
+        for thread: MessagingThreadDTO,
+        filter: MessagingMessageListFilter,
+        repository: DBRepository
+    ) async throws -> String? {
         let messages = try await repository.listMessagingMessages(
             threadID: thread.id,
-            limit: MessagingViewport.maxVisibleMessages
+            limit: MessagingViewport.maxVisibleMessages,
+            filter: filter
         )
         guard let latestInbound = messages.last(where: { $0.direction == .inbound }) else {
             return nil
@@ -96,7 +163,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
            !vendorMessageID.isEmpty {
             return vendorMessageID
         }
-        return String(latestInbound.createdAt.timeIntervalSince1970)
+        return ConnectorPollCursor.unixSeconds(latestInbound.createdAt)
     }
 
     /// When no inbound cursor exists yet, only fetch vendor messages after the user opened the connector.
@@ -105,24 +172,31 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         connector: MessagingConnectorDTO?
     ) -> String? {
         let anchor = connector?.listeningSince ?? thread.createdAt
-        return String(anchor.timeIntervalSince1970)
+        return ConnectorPollCursor.unixSeconds(anchor)
     }
 
     public func sendMessage(
         vendorThreadID: String,
         text: String,
         threadID: String,
+        parentVendorMessageID: String? = nil,
         repository: DBRepository
     ) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        var params: [String: PluginJSON] = [
+            "vendor_thread_id": .string(vendorThreadID),
+            "text": .string(trimmed),
+        ]
+        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parent.isEmpty {
+            params["parent_vendor_message_id"] = .string(parent)
+            params["thread_ts"] = .string(parent)
+        }
         let result = try await invoker.invoke(
             pluginID: pluginID,
             operation: .sendMessage,
-            params: [
-                "vendor_thread_id": .string(vendorThreadID),
-                "text": .string(trimmed),
-            ]
+            params: params
         )
         let sent = try ConnectorMessagingParser.requireSentMessage(result)
         let outbound = MessagingMessageDTO(
@@ -131,7 +205,8 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             direction: .outbound,
             sender: "derrick",
             body: trimmed,
-            createdAt: sent.createdAt
+            createdAt: sent.createdAt,
+            parentVendorMessageID: parentVendorMessageID
         )
         _ = try await repository.insertMessagingMessage(outbound, incrementUnread: false)
     }

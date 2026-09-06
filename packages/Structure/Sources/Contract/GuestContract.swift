@@ -1,11 +1,16 @@
 import Foundation
 
-/// Canonical JSON Schema paths for the language-agnostic guest ↔ host contract.
+/// Canonical JSON Schema catalog for guest I/O, connector protocol, and factory prompts.
+/// Load, dump, and validate every bundled schema through this type.
 public enum GuestContract: Sendable {
     public enum Schema: String, Sendable, CaseIterable {
         case hopEvent = "hop-event.schema.json"
         case envelopeList = "envelope-list.schema.json"
         case executionContextWire = "execution-context-wire.schema.json"
+        case connectorContract = "connector-contract.schema.json"
+        case connectorParams = "connector-params.schema.json"
+        case connectorResultEmit = "connector-result-emit.schema.json"
+        case connectorVendor = "connector-vendor.schema.json"
     }
 
     public static func loadSchemaText(_ schema: Schema) throws -> String {
@@ -25,6 +30,31 @@ public enum GuestContract: Sendable {
             throw GuestContractError.missingSchema(schema)
         }
         return try Data(contentsOf: url)
+    }
+
+    public static func loadSchemaObject(_ schema: Schema) throws -> [String: Any] {
+        try JSONSchema.object(from: try loadSchemaData(schema), name: schema.rawValue)
+    }
+
+    public static func validate(_ instance: Any, against schema: Schema) throws {
+        let root = try loadSchemaObject(schema)
+        try JSONSchema.validate(
+            instance: instance,
+            schema: root,
+            root: root,
+            loadDocument: loadSiblingSchema(named:),
+            path: "$"
+        )
+    }
+
+    public static func validate(json data: Data, against schema: Schema) throws {
+        let instance: Any
+        do {
+            instance = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw GuestContractError.invalidJSON
+        }
+        try validate(instance, against: schema)
     }
 
     public static func officialEnvelopeVerbs(from schema: Schema = .envelopeList) throws -> [String] {
@@ -56,21 +86,28 @@ public enum GuestContract: Sendable {
         )
     }
 
-    private static func nestedStringEnum(schema: Schema, path: [String]) throws -> [String] {
-        guard var node = try JSONSerialization.jsonObject(with: loadSchemaData(schema)) as? [String: Any] else {
-            throw GuestContractError.invalidJSON
+    private static func loadSiblingSchema(named fileName: String) throws -> [String: Any] {
+        guard let schema = Schema(rawValue: fileName) else {
+            throw GuestContractError.validationFailed("Unknown schema $ref \(fileName).")
         }
-        for key in path.dropLast() {
-            guard let next = node[key] as? [String: Any] else {
+        return try loadSchemaObject(schema)
+    }
+
+    private static func nestedStringEnum(schema: Schema, path: [String]) throws -> [String] {
+        var node: Any = try loadSchemaObject(schema)
+        for key in path {
+            guard let object = node as? [String: Any], let next = object[key] else {
                 throw GuestContractError.invalidJSON
             }
             node = next
         }
-        guard let field = node[path.last!] as? [String: Any],
-              let values = field["enum"] as? [String] else {
-            throw GuestContractError.invalidJSON
+        if let values = (node as? [String: Any])?["enum"] as? [String] {
+            return values
         }
-        return values
+        if let field = node as? [String: Any], let values = field["enum"] as? [String] {
+            return values
+        }
+        throw GuestContractError.invalidJSON
     }
 }
 
@@ -91,5 +128,29 @@ public enum GuestContractError: Error, Equatable, LocalizedError {
         case .validationFailed(let message):
             return message
         }
+    }
+}
+
+enum SchemaEnumLoader {
+    static func stringEnum(
+        from data: Data,
+        property: String,
+        arrayPath: [String] = []
+    ) throws -> [String] {
+        guard var node = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GuestContractError.invalidJSON
+        }
+        for key in arrayPath {
+            guard let next = node[key] as? [String: Any] else {
+                throw GuestContractError.invalidJSON
+            }
+            node = next
+        }
+        guard let properties = node["properties"] as? [String: Any],
+              let field = properties[property] as? [String: Any],
+              let values = field["enum"] as? [String] else {
+            throw GuestContractError.invalidJSON
+        }
+        return values
     }
 }

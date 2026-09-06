@@ -17,14 +17,17 @@ struct MessagingTab: Identifiable, Hashable {
     }
 }
 
-/// Open vendor, thread tabs, and the 100-message viewport. Not the connector catalog.
+/// Open vendor, conversation tabs (one per channel/DM), and the 100-message viewport.
 @MainActor
 final class MessagingSessionStore: ObservableObject {
     @Published private(set) var threads: [MessagingThreadDTO] = []
     @Published private(set) var tabs: [MessagingTab] = []
     @Published var selectedPluginID: String?
     @Published var selectedThreadID: String?
+    @Published var selectedReplyParentVendorMessageID: String?
     @Published private(set) var visibleMessages: [MessagingMessageDTO] = []
+    @Published private(set) var visibleReplyMessages: [MessagingMessageDTO] = []
+    @Published var replyThreadWarning: String?
     @Published var scrollToBottomToken = 0
     @Published var scrollAnchorID: String?
     @Published var showJumpToLatest = false
@@ -40,6 +43,10 @@ final class MessagingSessionStore: ObservableObject {
     var selectedThread: MessagingThreadDTO? {
         guard let selectedThreadID else { return nil }
         return threads.first { $0.id == selectedThreadID }
+    }
+
+    var isViewingReplyThread: Bool {
+        selectedReplyParentVendorMessageID != nil
     }
 
     var currentRoute: MessagingRoute {
@@ -67,9 +74,12 @@ final class MessagingSessionStore: ObservableObject {
     func selectConnector(pluginID: String) {
         if selectedPluginID != pluginID {
             selectedThreadID = nil
+            selectedReplyParentVendorMessageID = nil
             tabs = []
             threads = []
             visibleMessages = []
+            visibleReplyMessages = []
+            replyThreadWarning = nil
         }
         selectedPluginID = pluginID
     }
@@ -85,14 +95,34 @@ final class MessagingSessionStore: ObservableObject {
             tabs.append(MessagingTab(thread: thread))
         }
         selectedThreadID = id
+        selectedReplyParentVendorMessageID = nil
+        visibleReplyMessages = []
+        replyThreadWarning = nil
         await markVisibleConversationRead()
         await loadNewestWindow()
+    }
+
+    func openReplyThread(parentVendorMessageID: String) async {
+        let parent = parentVendorMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !parent.isEmpty else { return }
+        selectedReplyParentVendorMessageID = parent
+        await loadReplyWindow()
+    }
+
+    func closeReplyThread() {
+        selectedReplyParentVendorMessageID = nil
+        visibleReplyMessages = []
+        replyThreadWarning = nil
+        Task { await loadNewestWindow() }
     }
 
     func closeTab(id: String) {
         tabs.removeAll { $0.id == id }
         if selectedThreadID == id {
             selectedThreadID = tabs.last?.id
+            selectedReplyParentVendorMessageID = nil
+            visibleReplyMessages = []
+            replyThreadWarning = nil
             Task { await loadNewestWindow() }
         }
     }
@@ -118,6 +148,7 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func loadOlderIfNeeded() async {
+        guard selectedReplyParentVendorMessageID == nil else { return }
         guard let repository,
               let threadID = selectedThreadID,
               let oldest = visibleMessages.first,
@@ -129,7 +160,8 @@ final class MessagingSessionStore: ObservableObject {
             let older = try await repository.listMessagingMessages(
                 threadID: threadID,
                 before: oldest.cursor,
-                limit: MessagingViewport.maxVisibleMessages
+                limit: MessagingViewport.maxVisibleMessages,
+                filter: .channelRoots
             )
             hasOlder = older.count == MessagingViewport.maxVisibleMessages
             guard !older.isEmpty else { return }
@@ -142,7 +174,11 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func jumpToLatest() async {
-        await loadNewestWindow()
+        if selectedReplyParentVendorMessageID != nil {
+            await loadReplyWindow()
+        } else {
+            await loadNewestWindow()
+        }
         showJumpToLatest = false
         showNewMessagesPill = false
         isNearBottom = true
@@ -155,6 +191,15 @@ final class MessagingSessionStore: ObservableObject {
             await reloadThreads(autoOpenMostRecent: false)
         }
         guard viewing, result.inserted else {
+            await catalog?.refreshBadges()
+            return
+        }
+        if result.message.isReply {
+            await loadNewestWindow()
+            if selectedReplyParentVendorMessageID == result.message.parentVendorMessageID {
+                await loadReplyWindow()
+            }
+            await markVisibleConversationRead()
             await catalog?.refreshBadges()
             return
         }
@@ -178,9 +223,16 @@ final class MessagingSessionStore: ObservableObject {
         guard !catalog.contains(pluginID: selected) else { return }
         selectedPluginID = nil
         selectedThreadID = nil
+        selectedReplyParentVendorMessageID = nil
+        replyThreadWarning = nil
         tabs = []
         threads = []
         visibleMessages = []
+        visibleReplyMessages = []
+    }
+
+    func setReplyThreadWarning(_ message: String?) {
+        replyThreadWarning = message
     }
 
     func setLastError(_ message: String?) {
@@ -198,38 +250,13 @@ final class MessagingSessionStore: ObservableObject {
     func reloadMessagesForThread(id: String) async {
         guard selectedThreadID == id else { return }
         await loadNewestWindow()
+        if selectedReplyParentVendorMessageID != nil {
+            await loadReplyWindow()
+        }
     }
 
     func markVisibleConversationRead() async {
         await clearUnreadIfNeeded()
-    }
-
-    private func reloadThreads(autoOpenMostRecent: Bool) async {
-        guard let repository, let pluginID = selectedPluginID else {
-            threads = []
-            return
-        }
-        do {
-            threads = try await repository.listMessagingThreads(pluginID: pluginID)
-            tabs = tabs.compactMap { tab in
-                threads.first { $0.id == tab.id }.map(MessagingTab.init)
-            }
-            if let selectedThreadID, !threads.contains(where: { $0.id == selectedThreadID }) {
-                self.selectedThreadID = nil
-                visibleMessages = []
-            }
-            if autoOpenMostRecent {
-                if let latest = threads.first {
-                    await selectThread(id: latest.id)
-                } else {
-                    selectedThreadID = nil
-                    visibleMessages = []
-                    tabs = []
-                }
-            }
-        } catch {
-            lastError = error.localizedDescription
-        }
     }
 
     private func loadNewestWindow() async {
@@ -241,7 +268,8 @@ final class MessagingSessionStore: ObservableObject {
         do {
             let page = try await repository.listMessagingMessages(
                 threadID: threadID,
-                limit: MessagingViewport.maxVisibleMessages
+                limit: MessagingViewport.maxVisibleMessages,
+                filter: .channelRoots
             )
             visibleMessages = page
             hasOlder = page.count == MessagingViewport.maxVisibleMessages
@@ -252,6 +280,95 @@ final class MessagingSessionStore: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    private func loadReplyWindow() async {
+        guard let repository,
+              let threadID = selectedThreadID,
+              let parent = selectedReplyParentVendorMessageID
+        else {
+            visibleReplyMessages = []
+            replyThreadWarning = nil
+            return
+        }
+        do {
+            visibleReplyMessages = try await repository.listMessagingMessages(
+                threadID: threadID,
+                limit: MessagingViewport.maxVisibleMessages,
+                filter: .replyThread(parentVendorMessageID: parent)
+            )
+            refreshReplyThreadAccessWarning()
+            isNearBottom = true
+            showJumpToLatest = false
+            showNewMessagesPill = false
+            scrollToBottomToken += 1
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func refreshReplyThreadAccessWarning() {
+        guard let parentID = selectedReplyParentVendorMessageID else {
+            replyThreadWarning = nil
+            return
+        }
+        let parent = visibleReplyMessages.first(where: { $0.vendorMessageID == parentID })
+            ?? visibleMessages.first(where: { $0.vendorMessageID == parentID })
+        let hasReplies = visibleReplyMessages.contains(where: { $0.parentVendorMessageID == parentID })
+        if let parent, parent.replyCount > 0, !hasReplies {
+            replyThreadWarning = ConnectorReplyThreadAccessMessage.repliesDidNotLoad
+        } else {
+            replyThreadWarning = nil
+        }
+    }
+
+    private func reloadThreads(autoOpenMostRecent: Bool) async {
+        guard let repository, let pluginID = selectedPluginID else {
+            threads = []
+            tabs = []
+            return
+        }
+        do {
+            threads = try await repository.listMessagingThreads(pluginID: pluginID)
+            syncConversationTabs()
+            if let selectedThreadID, !threads.contains(where: { $0.id == selectedThreadID }) {
+                self.selectedThreadID = nil
+                selectedReplyParentVendorMessageID = nil
+                replyThreadWarning = nil
+                visibleMessages = []
+                visibleReplyMessages = []
+            }
+            if autoOpenMostRecent {
+                if let latest = threads.first {
+                    await selectThread(id: latest.id)
+                } else {
+                    selectedThreadID = nil
+                    selectedReplyParentVendorMessageID = nil
+                    replyThreadWarning = nil
+                    visibleMessages = []
+                    visibleReplyMessages = []
+                    tabs = []
+                }
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Every conversation the connector listed is a tab. Only the selected tab loads messages.
+    private func syncConversationTabs() {
+        var next: [MessagingTab] = []
+        var seen = Set<String>()
+        for tab in tabs {
+            if let thread = threads.first(where: { $0.id == tab.id }) {
+                next.append(MessagingTab(thread: thread))
+                seen.insert(tab.id)
+            }
+        }
+        for thread in threads where !seen.contains(thread.id) {
+            next.append(MessagingTab(thread: thread))
+        }
+        tabs = next
     }
 
     private func clearUnreadIfNeeded() async {

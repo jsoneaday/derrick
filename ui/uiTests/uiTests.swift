@@ -79,6 +79,48 @@ import DBRepository
         )
     }
 
+    @Test func connectorCredentialSaverRequiresDraftToUpdateStoredCredentials() {
+        let fields = [
+            PluginCredentialFieldPresentation(
+                id: "bot_token",
+                label: "Bot token",
+                kind: "token",
+                hasStoredValue: true
+            )
+        ]
+        #expect(
+            !ConnectorCredentialSaver.canSave(
+                fields: fields,
+                drafts: [:],
+                mode: .allowPartialUpdate
+            )
+        )
+        #expect(
+            ConnectorCredentialSaver.canSave(
+                fields: fields,
+                drafts: ["bot_token": "xoxb-new"],
+                mode: .allowPartialUpdate
+            )
+        )
+    }
+
+    @MainActor @Test func settingsCredentialHintPointsAtCredentialsPane() {
+        guard !LLMProviderCredentialGate.usesDotenvSecrets() else { return }
+        #expect(
+            LLMProviderCredentialGate.configurationHint(for: .openai)
+                .contains("Settings → Credentials")
+        )
+    }
+
+    @Test func pluginCredentialGroupUsesHumanDisplayName() {
+        let group = PluginCredentialGroup(
+            pluginID: "slack-connection",
+            isConnector: true,
+            secrets: [PluginSecretDescriptor(id: "bot_token", label: "Bot Token", kind: "token")]
+        )
+        #expect(group.displayName == "Slack Connection")
+    }
+
     @MainActor @Test func keychainModeStillPrefersKeychain() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let uiFolder = root.appendingPathComponent("ui", isDirectory: true)
@@ -220,7 +262,7 @@ import DBRepository
         await settings.loadSettings()
         #expect(settings.summarizerModel == .defaultHelperModel)
         #expect(settings.scriptReviewerModel == .defaultHelperModel)
-        #expect(settings.pluginBuilderModel == .defaultHelperModel)
+        #expect(settings.pluginBuilderModel == .defaultPluginBuilderModel)
         #expect(settings.pluginSafetyReviewerModel == .defaultHelperModel)
         #expect(settings.workerAgentModel == .defaultHelperModel)
     }
@@ -234,6 +276,8 @@ import DBRepository
         #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Terra)))
         #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Sol)))
         #expect(LLMModelChoice.defaultHelperModel == .openai(.gpt56Luna))
+        #expect(LLMModelChoice.defaultPluginBuilderModel == .openai(.gpt56Terra))
+        #expect(LLMModelChoice.defaultPluginBuilderModel.preferredHighThinkingOption.id == "high")
     }
 
     @MainActor @Test func modelThinkingSettingsPersistsPerModelSelection() async {
@@ -249,6 +293,13 @@ import DBRepository
         #expect(reloaded.thinking(for: .openai(.gpt56Sol)).id == "high")
         #expect(reloaded.thinking(for: .openai(.gpt56Luna)).id == "medium")
         #expect(reloaded.pluginSafetyReviewerThinking(for: .openai(.gpt56Luna)).id == "medium")
+        #expect(reloaded.pluginBuilderThinking(for: .openai(.gpt56Terra)).id == "high")
+        let medium = OpenAIModel.gpt56Terra.thinkingOptions.first { $0.id == "medium" }!
+        settings.setPluginBuilderThinking(medium, for: .openai(.gpt56Terra))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let reloadedBuilder = LLMModelThinkingSettings(repository: repo)
+        await reloadedBuilder.loadSettings()
+        #expect(reloadedBuilder.pluginBuilderThinking(for: .openai(.gpt56Terra)).id == "medium")
     }
 
     @Test func debugConfigurationReadsIsDebugFromEnvironment() throws {

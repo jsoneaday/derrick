@@ -9,64 +9,33 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     }
 
     public enum ConnectorScope: String, Codable, Sendable, CaseIterable {
-        case sendOnly = "send_only"
-        case sendAndReceive = "send_and_receive"
         case fullSync = "full_sync"
 
-        public var displayName: String {
-            switch self {
-            case .sendOnly: return "Send only"
-            case .sendAndReceive: return "Send + receive"
-            case .fullSync: return "Full sync"
-            }
-        }
+        public var displayName: String { "Full sync" }
 
-        /// Scopes offered in the create-connector wizard. Send-only and full-sync
-        /// remain decodable for older workflows and already-installed plugins.
-        public static var wizardCases: [ConnectorScope] {
-            [.sendAndReceive]
-        }
+        public static var wizardCases: [ConnectorScope] { [.fullSync] }
 
         public var wizardSubtitle: String {
-            switch self {
-            case .sendOnly:
-                return "Post messages to a channel. Fastest to build and review."
-            case .sendAndReceive:
-                return "List conversations, pick one, then send and receive new messages."
-            case .fullSync:
-                return "List conversations, pull full history including thread replies, paginate, and send."
-            }
+            "List conversations as tabs, including Slack reply threads, then send and receive."
         }
 
-        var scopeRequirement: String {
-            switch self {
-            case .sendOnly:
-                return """
-                Scope: send_message only. Do not implement sync_threads or poll_inbox unless the user requirements explicitly ask for them.
-                """
-            case .sendAndReceive:
-                return """
-                Scope: sync_threads, send_message, and poll_inbox for one conversation at a time.
-                Implement sync_threads when the vendor uses opaque conversation IDs that differ from human-readable labels (read vendor docs).
-                sync_threads result.emit must map each conversation the secret can access to {vendor_thread_id, title} so the host can show a channel picker.
-                For Slack, skip channels where is_member is false. Do not list public channels the bot is not in.
-                Do not fetch thread replies unless the user requirements explicitly require them.
-                For send + receive, single-page sync_threads and poll_inbox are correct — do not paginate in tests unless you include http_results fixtures for every extra request_id you emit.
-                """
-            case .fullSync:
-                return """
-                Scope: sync_threads, poll_inbox, and send_message with pagination.
-                Include thread replies when the vendor supports them and the user requirements expect full conversation history.
-                """
+        public var requiredMessagingOps: [String] {
+            if let ops = try? ConnectorContractStore.loadProtocol().scope(id: rawValue).ops,
+               !ops.isEmpty {
+                return ops
             }
+            return ["sync_threads", "poll_inbox", "send_message"]
         }
 
-        var requiredMessagingOps: [String] {
-            switch self {
-            case .sendOnly: return ["send_message"]
-            case .sendAndReceive: return ["sync_threads", "poll_inbox", "send_message"]
-            case .fullSync: return ["sync_threads", "poll_inbox", "send_message"]
-            }
+        /// Older workflow JSON used `send_only` / `send_and_receive`. Those create full sync now.
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = ConnectorScope(rawValue: raw) ?? .fullSync
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
         }
     }
 
@@ -109,7 +78,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         pluginType: PluginType,
         vendor: ConnectorVendor? = nil,
         customVendorName: String? = nil,
-        scope: ConnectorScope = .sendAndReceive,
+        scope: ConnectorScope = .fullSync,
         description: String
     ) {
         self.pluginType = pluginType
@@ -124,11 +93,11 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         )
     }
 
-    /// Builds connector workflow input, using scope-based defaults when the user leaves details blank.
+    /// Builds connector workflow input. The factory goal uses the fixed scope sentence, not free-text extras.
     public static func makeConnector(
         vendor: ConnectorVendor,
         customVendorName: String? = nil,
-        scope: ConnectorScope,
+        scope: ConnectorScope = .fullSync,
         userDescription: String = ""
     ) -> PluginFactoryCreateInput {
         PluginFactoryCreateInput(
@@ -156,17 +125,11 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         customVendorName: String?,
         scope: ConnectorScope
     ) -> String {
+        _ = scope
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
-        switch scope {
-        case .sendOnly:
-            return "Send messages through \(vendorLabel)."
-        case .sendAndReceive:
-            return "Send messages and receive new messages from one \(vendorLabel) conversation."
-        case .fullSync:
-            return """
-            Fully sync \(vendorLabel): list channels, paginate conversation history (including threads where supported), and send messages.
-            """
-        }
+        return """
+        List \(vendorLabel) conversations as tabs, load messages for each conversation including reply threads when opened, and send messages.
+        """
     }
 
     enum CodingKeys: String, CodingKey {
@@ -183,7 +146,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         vendor = try container.decodeIfPresent(ConnectorVendor.self, forKey: .vendor)
         customVendorName = try container.decodeIfPresent(String.self, forKey: .customVendorName)?
             .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        scope = try container.decodeIfPresent(ConnectorScope.self, forKey: .scope) ?? .sendAndReceive
+        scope = try container.decodeIfPresent(ConnectorScope.self, forKey: .scope) ?? .fullSync
         let rawDescription = try container.decode(String.self, forKey: .description)
         description = Self.resolvedDescription(
             userDescription: rawDescription,
@@ -211,27 +174,23 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     /// Factory goal passed to `plugin_factory_build` after vendor docs are crawled.
     public func connectorBuildGoal(crawlSummary: String?) -> String {
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
-        var parts: [String] = [
-            "Create an Agent Plugin messaging connector for \(vendorLabel).",
-            "Set extensions.app.derrick.role to connector.",
-            "Declare messaging_ops: \(scope.requiredMessagingOps.map { "\"\($0)\"" }.joined(separator: ", ")).",
-            scope.scopeRequirement,
+        do {
+            return try ConnectorContractPrompts.factoryGoal(
+                vendorLabel: vendorLabel,
+                scope: scope,
+                vendor: vendor,
+                crawlSummary: crawlSummary,
+                reference: vendor.flatMap {
+                    ConnectorReferenceBlueprint.reference(vendor: $0, scope: scope)
+                }
+            )
+        } catch {
+            return """
+            Create an Agent Plugin messaging connector for \(vendorLabel).
+            Scope id: \(scope.rawValue)
+            Connector contract failed to load: \(error.localizedDescription)
             """
-            test_input_json must include a hops array with http_results fixtures that exercise every messaging_op you implement \
-            (\(scope.requiredMessagingOps.joined(separator: ", "))) through to result.emit.
-            """,
-            "User requirements: \(description)",
-        ]
-        if let vendor, let reference = ConnectorReferenceBlueprint.reference(vendor: vendor, scope: scope) {
-            parts.append(reference)
         }
-        if let pagination = PluginFactoryScopeHints.paginationGuidance(for: parts.joined(separator: "\n")) {
-            parts.append(pagination)
-        }
-        if let crawlSummary, !crawlSummary.isEmpty {
-            parts.append("Reference these crawled vendor API notes:\n\(crawlSummary)")
-        }
-        return parts.joined(separator: "\n\n")
     }
 
     /// Failure stage hint for returning the wizard to the right step.
@@ -244,10 +203,10 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
 
     public static func failureStep(forStage stage: String?) -> FailureStep {
         switch stage?.lowercased() {
-        case "crawl", "docs":
+        case "type":
+            return .type
+        case "crawl", "docs", "vendor", "factory", "build", "review", "description":
             return .vendor
-        case "factory", "build", "review":
-            return .description
         default:
             return .creating
         }

@@ -46,7 +46,9 @@ sqlite3 "$HOME/Library/Group Containers/<TEAM_ID>.derrick.shared/Library/Applica
 ## Docker
 
 - Docker Desktop must be running before chat tools or plugin execution.
-- Guest Python uses `python:3.14.7` with `--network none` (see [adr-swift-script-runtime.md](adr-swift-script-runtime.md) for the superseded Swift guest notes).
+- Guest Python uses `python:3.14.7` with `--network none`. Each script run creates a fresh container and deletes it when finished; the image stays cached. Max 1 guest container at a time.
+- Web crawl (max 2) and file convert (max 1) use the same oneshot queue/cleanup on their own images; they do not share the script line.
+- Chat startup waits for Docker and the guest image only. `derrickd` builds the crawler image in the background from `packages/` (WebCrawler, Selenops, and Structure’s Linux crawler types). A crawl that arrives during that build waits for it instead of starting a second build. Later crawls reuse the image; they do not compile Swift again.
 
 ## Secret scanning
 

@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "ops": {
+    "sync_threads": {
+      "kind": "manual",
+      "emit": "threads",
+      "params": [],
+      "may_call": ["conversation.list"],
+      "must_not_call": ["conversation.history", "conversation.replies"],
+      "success": {
+        "empty_collection_ok": true
+      }
+    },
+    "poll_inbox": {
+      "kind": "manual",
+      "emit": "messages",
+      "params": [
+        "vendor_thread_id",
+        "since",
+        "oldest",
+        "parent_vendor_message_id",
+        "thread_ts"
+      ],
+      "when_no_parent": {
+        "may_call": ["conversation.history"]
+      },
+      "when_parent": {
+        "may_call": ["conversation.replies"]
+      },
+      "must_not_call": [],
+      "success": {
+        "empty_array_ok_if_vendor_ok": true
+      },
+      "failure": {
+        "vendor_ok_false_empty_is_not_success": true,
+        "codes": ["missing_scope", "no_permission", "not_in_channel"]
+      }
+    },
+    "send_message": {
+      "kind": "message_in_room",
+      "emit": "sent_message",
+      "params": [
+        "vendor_thread_id",
+        "text",
+        "parent_vendor_message_id",
+        "thread_ts"
+      ],
+      "may_call": ["message.send"],
+      "must_not_call": [],
+      "success": {
+        "requires_sent_message": true
+      }
+    }
+  },
+  "scopes": {
+    "full_sync": {
+      "ops": ["sync_threads", "poll_inbox", "send_message"],
+      "include_reply_poll": true,
+      "test_pagination": "follow_cursor"
+    }
+  },
+  "rules": {
+    "sync_threads_lists_tabs_only": true,
+    "poll_loads_one_conversation": true,
+    "paginate_within_op": true,
+    "live_http_results_accumulate": true,
+    "direct_test_poll_requires_non_empty_messages": true,
+    "direct_test_threads_requires_non_empty": true,
+    "runtime_empty_messages_ok_if_vendor_ok": true
+  }
+}

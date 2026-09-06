@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/connector-vendor.schema.json",
+  "title": "Connector vendor profile",
+  "description": "HTTP bindings for one vendor. Call ids must match may_call / must_not_call in connector-contract.json.",
+  "type": "object",
+  "required": ["vendor", "vendor_ok_field", "calls"],
+  "additionalProperties": false,
+  "properties": {
+    "vendor": { "type": "string" },
+    "vendor_ok_field": { "type": "string" },
+    "membership_flag": { "type": "string" },
+    "pagination_cursor": { "type": "string" },
+    "calls": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["method", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "method": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

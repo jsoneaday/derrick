@@ -4,6 +4,12 @@ import Structure
 
 /// Shared host hop loop for offline Python guest programs.
 public enum GuestHopLoop: Sendable {
+    public typealias HTTPResultEventBuilder = @Sendable (
+        [PluginEnvelope],
+        String,
+        [String: PluginJSON]?
+    ) async -> Data?
+
     public static func run(
         initialEvent: PluginHopEvent,
         invokeID: String,
@@ -11,7 +17,8 @@ public enum GuestHopLoop: Sendable {
         verifier: String,
         execute: @escaping @Sendable (Data) async throws -> PluginFactoryExecutionResult,
         logger: @escaping @Sendable (String) -> Void,
-        hopHandler: (any PluginHopHandler)? = nil
+        hopHandler: (any PluginHopHandler)? = nil,
+        httpResultEvent: HTTPResultEventBuilder? = nil
     ) async throws -> ScriptExecutionResult {
         var event = initialEvent
         var posts: [String] = []
@@ -19,7 +26,7 @@ public enum GuestHopLoop: Sendable {
         var lastSummary = ""
 
         for _ in 0..<PluginContract.maxHops {
-            let input = try JSONEncoder().encode(event)
+            let input = try event.encodeValidated()
             let hopResult = try await execute(input)
             let stdout = String(decoding: hopResult.stdout, as: UTF8.self)
             let stderr = String(decoding: hopResult.stderr, as: UTF8.self)
@@ -36,7 +43,7 @@ public enum GuestHopLoop: Sendable {
             }
 
             let envelopes = try PluginEnvelopeList.decode(hopResult.stdout)
-            let requests = envelopes.filter { $0.verb == .httpRequest }
+            let httpRequests = try HostHTTPRequest.all(in: envelopes)
             let uiPresents = envelopes.filter { $0.verb == .uiPresent }
             let secretRequests = envelopes.filter { $0.verb == .secretRequest }
             let terminals = envelopes.filter { $0.verb.classification == .terminal }
@@ -61,9 +68,10 @@ public enum GuestHopLoop: Sendable {
                     ?? lastSummary
             }
 
-            if !requests.isEmpty {
-                guard let nextData = await PluginHostHopDispatcher.httpResultEvent(
-                    for: envelopes,
+            if !httpRequests.isEmpty {
+                guard let nextData = await resolveHTTPResultEvent(
+                    httpResultEvent,
+                    envelopes: envelopes,
                     invokeID: invokeID,
                     params: event.params
                 ) else {
@@ -82,7 +90,7 @@ public enum GuestHopLoop: Sendable {
                         phaseTiming: nil
                     )
                 }
-                event = try JSONDecoder().decode(PluginHopEvent.self, from: nextData)
+                event = try eventByMergingHTTPResults(current: event, nextData: nextData)
                 continue
             }
 
@@ -186,19 +194,20 @@ public enum GuestHopLoop: Sendable {
         timeoutSeconds: Int,
         execute: @escaping @Sendable (Data) async throws -> PluginFactoryExecutionResult,
         logger: @escaping @Sendable (String) -> Void,
-        hopHandler: (any PluginHopHandler)? = nil
+        hopHandler: (any PluginHopHandler)? = nil,
+        httpResultEvent: HTTPResultEventBuilder? = nil
     ) async throws -> PluginFactoryExecutionResult {
         var event = initialEvent
         var lastResult = PluginFactoryExecutionResult(exitCode: 1)
 
-        for _ in 0..<PluginContract.maxHops {
-            let input = try JSONEncoder().encode(event)
+        for _ in 0..<PluginContract.maxPluginInvokeHops {
+            let input = try event.encodeValidated()
             let hopResult = try await execute(input)
             lastResult = hopResult
             guard hopResult.exitCode == 0 else { return hopResult }
 
             let envelopes = try PluginEnvelopeList.decode(hopResult.stdout)
-            let requests = envelopes.filter { $0.verb == .httpRequest }
+            let httpRequests = try HostHTTPRequest.all(in: envelopes)
             let uiPresents = envelopes.filter { $0.verb == .uiPresent }
             let secretRequests = envelopes.filter { $0.verb == .secretRequest }
             let terminals = envelopes.filter { $0.verb.classification == .terminal }
@@ -207,9 +216,10 @@ public enum GuestHopLoop: Sendable {
                 logger("[plugin.invoke] \(envelope.payload["message"]?.stringValue ?? "")")
             }
 
-            if !requests.isEmpty {
-                guard let nextData = await PluginHostHopDispatcher.httpResultEvent(
-                    for: envelopes,
+            if !httpRequests.isEmpty {
+                guard let nextData = await resolveHTTPResultEvent(
+                    httpResultEvent,
+                    envelopes: envelopes,
                     invokeID: invokeID,
                     params: event.params
                 ) else {
@@ -219,7 +229,7 @@ public enum GuestHopLoop: Sendable {
                         stderr: Data("Host could not prepare HTTP results.".utf8)
                     )
                 }
-                event = try JSONDecoder().decode(PluginHopEvent.self, from: nextData)
+                event = try eventByMergingHTTPResults(current: event, nextData: nextData)
                 continue
             }
 
@@ -261,6 +271,30 @@ public enum GuestHopLoop: Sendable {
             stdout: lastResult.stdout,
             stderr: Data("Hop budget exceeded.".utf8)
         )
+    }
+
+    private static func resolveHTTPResultEvent(
+        _ override: HTTPResultEventBuilder?,
+        envelopes: [PluginEnvelope],
+        invokeID: String,
+        params: [String: PluginJSON]?
+    ) async -> Data? {
+        if let override {
+            return await override(envelopes, invokeID, params)
+        }
+        return await PluginHostHopDispatcher.httpResultEvent(
+            for: envelopes,
+            invokeID: invokeID,
+            params: params
+        )
+    }
+
+    private static func eventByMergingHTTPResults(
+        current: PluginHopEvent,
+        nextData: Data
+    ) throws -> PluginHopEvent {
+        let latest = try PluginHopEvent.decodeValidated(nextData)
+        return current.mergingLatestHTTPResults(latest)
     }
 
     private static func terminalStdout(

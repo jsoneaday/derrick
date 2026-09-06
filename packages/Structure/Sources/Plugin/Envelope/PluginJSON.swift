@@ -55,6 +55,24 @@ public enum PluginJSON: Codable, Sendable, Hashable {
         if case .bool(let value) = self { return value }
         return nil
     }
+
+    /// JSONSerialization-compatible value for schema checks.
+    var untypedJSON: Any {
+        switch self {
+        case .null:
+            return NSNull()
+        case .bool(let value):
+            return value
+        case .number(let value):
+            return value
+        case .string(let value):
+            return value
+        case .array(let value):
+            return value.map(\.untypedJSON)
+        case .object(let value):
+            return Dictionary(uniqueKeysWithValues: value.map { ($0.key, $0.value.untypedJSON) })
+        }
+    }
 }
 
 enum PluginDecoding {

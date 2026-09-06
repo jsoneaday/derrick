@@ -35,13 +35,11 @@ import Testing
         #expect(runtime?.entrypoint.hasSuffix(".py") == true)
     }
 
-    @Test func envelopeDecoderFlattensNestedResultAliases() throws {
+    @Test func envelopeDecoderRejectsNestedResultAliases() {
         let raw = "[{\"verb\":\"result.emit\",\"result\":{\"emit\":{\"content\":\"## News digest\"}}}]"
-        let envelopes = try PluginEnvelopeList.decode(Data(raw.utf8))
-
-        #expect(envelopes.count == 1)
-        #expect(envelopes[0].verb == .resultEmit)
-        #expect(envelopes[0].payload["content"]?.stringValue == "## News digest")
+        #expect(throws: GuestContractError.self) {
+            _ = try PluginEnvelopeList.decode(Data(raw.utf8))
+        }
     }
 
     @Test func buildRunsDraftReviewsCompilesAndVerifiesRelease() async throws {
@@ -317,18 +315,18 @@ import Testing
         let response = PluginFactoryBuilderResponse(
             pluginID: "slack-connection",
             version: "1.0.0",
-            description: "Slack send only.",
+            description: "Slack full sync.",
             guestSource: guestPythonSource(),
             role: .connector
         )
         let draft = try response.draft()
-        #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"send_message\"]"))
+        #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"sync_threads\",\"poll_inbox\",\"send_message\"]"))
     }
 
     @Test func connectorTestScriptRequiresHopsAndFixtures() throws {
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
         #expect(throws: PluginFactoryError.self) {
@@ -340,7 +338,7 @@ import Testing
             testInput: Data(
                 #"{"kind":"message_in_room","params":{"messaging_op":"send_message"}}"#.utf8
             ),
-            userGoal: sendOnlyGoal()
+            userGoal: fullSyncGoal()
         )
         #expect(throws: PluginFactoryError.self) {
             try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
@@ -370,15 +368,71 @@ import Testing
         #expect(await executor.runCount == 4)
     }
 
-    @Test func sendOnlyDualFixtureAllowsUnsortedHttpResultsLoop() throws {
+    @Test func fullSyncTestScriptRequiresReplyThreadPollHop() throws {
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        """
+        let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
+        let channelOnly = Data(
+            """
+            {"hops":[
+              {"kind":"manual","params":{"messaging_op":"sync_threads"}},
+              {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
+              {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123"}},
+              {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
+              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}},
+              {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+            ]}
+            """.utf8
+        )
+        let missingReplies = PluginFactoryDraft(
+            manifestJSON: manifestJSON,
+            guestSource: guestPythonSource(),
+            testInput: channelOnly,
+            userGoal: fullSyncGoal()
+        )
+        #expect(throws: PluginFactoryError.self) {
+            try PluginFactoryDraftValidator.validateStructure(draft: missingReplies, manifest: manifest)
+        }
+
+        let withReplies = PluginFactoryDraft(
+            manifestJSON: manifestJSON,
+            guestSource: guestPythonSource(),
+            testInput: Data(
+                """
+                {"hops":[
+                  {"kind":"manual","params":{"messaging_op":"sync_threads"}},
+                  {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
+                  {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123"}},
+                  {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
+                  {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123","parent_vendor_message_id":"171.1"}},
+                  {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
+                  {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}},
+                  {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+                ]}
+                """.utf8
+            ),
+            userGoal: fullSyncGoal()
+        )
+        try PluginFactoryDraftValidator.validateStructure(draft: withReplies, manifest: manifest)
+    }
+
+    @Test func dualFixtureAllowsUnsortedHttpResultsLoop() throws {
+        let manifestJSON = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
         let testInput = Data(
             """
             {"hops":[
+              {"kind":"manual","params":{"messaging_op":"sync_threads"}},
+              {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
+              {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1"}},
+              {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
+              {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1","parent_vendor_message_id":"1"}},
+              {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
               {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
               {"kind":"http_results","http_results":[
                 {"request_id":"send-1","status":200,"body":"{\\"ok\\":true,\\"ts\\":\\"1.0\\"}"},
@@ -401,7 +455,7 @@ import Testing
             json.dump([{"verb":"result.emit","summary":"failed"}], sys.stdout)
             """,
             testInput: testInput,
-            userGoal: sendOnlyGoal()
+            userGoal: fullSyncGoal()
         )
         try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
     }
@@ -422,7 +476,7 @@ import Testing
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 2)
         ).build(
-            userGoal: sendOnlyGoal(),
+            userGoal: fullSyncGoal(),
             builder: builder,
             executor: executor,
             reviewer: reviewer
@@ -504,11 +558,11 @@ import Testing
     }
 }
 
-private func sendOnlyGoal() -> String {
+private func fullSyncGoal() -> String {
     PluginFactoryCreateInput.makeConnector(
         vendor: .slack,
-        scope: .sendOnly,
-        userDescription: "Post alerts."
+        scope: .fullSync,
+        userDescription: ""
     ).connectorBuildGoal(crawlSummary: nil)
 }
 
@@ -516,6 +570,12 @@ private func validConnectorTestInput() -> Data {
     Data(
         """
         {"hops":[
+          {"kind":"manual","params":{"messaging_op":"sync_threads"}},
+          {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
+          {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1"}},
+          {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
+          {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1","parent_vendor_message_id":"1"}},
+          {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
           {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
           {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
         ]}
@@ -526,7 +586,7 @@ private func validConnectorTestInput() -> Data {
 private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
     let manifestJSON = """
     {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
     """
     return PluginFactoryDraft(
         manifestJSON: manifestJSON,
@@ -572,13 +632,37 @@ private actor MultiHopRecordingFactoryExecutor: PluginFactoryExecutor {
             return PluginFactoryExecutionResult(
                 exitCode: 0,
                 stdout: Data(
-                    #"[{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}]"#.utf8
+                    #"[{"verb":"result.emit","threads":[{"vendor_thread_id":"C1","title":"general"}],"messages":[{"vendor_thread_id":"C1","vendor_message_id":"1","direction":"inbound","sender":"a","body":"hi","created_at":"1"}],"sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}]"#.utf8
                 )
             )
         }
+        let op = event.params?["messaging_op"]?.stringValue ?? ""
+        let parent = event.params?["parent_vendor_message_id"]?.stringValue
+        let requestID: String
+        let method: String
+        let url: String
+        if op == "sync_threads" {
+            requestID = "sync-1"
+            method = "GET"
+            url = "https://slack.com/api/conversations.list"
+        } else if op == "poll_inbox", let parent, !parent.isEmpty {
+            requestID = "replies-1"
+            method = "GET"
+            url = "https://slack.com/api/conversations.replies?channel=C1&ts=1"
+        } else if op == "poll_inbox" {
+            requestID = "poll-1"
+            method = "GET"
+            url = "https://slack.com/api/conversations.history?channel=C1"
+        } else {
+            requestID = "send-1"
+            method = "POST"
+            url = "https://slack.com/api/chat.postMessage"
+        }
         return PluginFactoryExecutionResult(
             exitCode: 0,
-            stdout: Data(#"[{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage"}]"#.utf8)
+            stdout: Data(
+                #"[{"verb":"http.request","request_id":"\#(requestID)","method":"\#(method)","url":"\#(url)"}]"#.utf8
+            )
         )
     }
 

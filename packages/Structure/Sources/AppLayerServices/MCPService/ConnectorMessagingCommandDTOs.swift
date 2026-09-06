@@ -3,6 +3,7 @@ import Foundation
 public enum ConnectorOperationKind: String, Codable, Sendable, Hashable {
     case bootstrap
     case send
+    case pollInbox = "poll_inbox"
 }
 
 public enum ConnectorOperationStatus: String, Codable, Sendable, Hashable {
@@ -18,6 +19,7 @@ public struct ConnectorOperationRequest: Codable, Sendable, Hashable {
     public let vendorThreadID: String?
     public let threadID: String?
     public let text: String?
+    public let parentVendorMessageID: String?
 
     public init(
         operationID: String,
@@ -25,7 +27,8 @@ public struct ConnectorOperationRequest: Codable, Sendable, Hashable {
         kind: ConnectorOperationKind,
         vendorThreadID: String? = nil,
         threadID: String? = nil,
-        text: String? = nil
+        text: String? = nil,
+        parentVendorMessageID: String? = nil
     ) {
         self.operationID = operationID
         self.pluginID = pluginID
@@ -33,6 +36,7 @@ public struct ConnectorOperationRequest: Codable, Sendable, Hashable {
         self.vendorThreadID = vendorThreadID
         self.threadID = threadID
         self.text = text
+        self.parentVendorMessageID = parentVendorMessageID
     }
 }
 

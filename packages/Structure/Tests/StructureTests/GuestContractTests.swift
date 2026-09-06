@@ -23,6 +23,13 @@ import Testing
         try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
     }
 
+    @Test func envelopeListValidationAcceptsJSONObjectBody() throws {
+        let json = """
+        [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage","json":{"channel":"C1","text":"hi"}}]
+        """
+        try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
+    }
+
     @Test func envelopeListValidationRejectsUnknownVerb() {
         let json = #" [{"verb":"network.fetch","url":"https://example.com"}] "#
         #expect(throws: GuestContractError.self) {
@@ -42,10 +49,58 @@ import Testing
         }
     }
 
-    @Test func envelopeVerbsIncludeHttpRequestAndResultEmit() throws {
-        let verbs = try GuestContract.officialEnvelopeVerbs()
-        #expect(verbs.contains("http.request"))
-        #expect(verbs.contains("result.emit"))
-        #expect(verbs.contains("message.post"))
+    @Test func hopEventValidationUsesParamsSchemaRef() {
+        #expect(throws: GuestContractError.self) {
+            try GuestContract.validate(
+                json: Data(#"{"kind":"manual","params":{"messaging_op":"react"}}"#.utf8),
+                against: .hopEvent
+            )
+        }
+    }
+
+    @Test func hopEventValidationRejectsUnknownProperty() {
+        #expect(throws: GuestContractError.self) {
+            try GuestContract.validate(
+                json: Data(#"{"kind":"manual","foo":1}"#.utf8),
+                against: .hopEvent
+            )
+        }
+    }
+
+    @Test func envelopeListValidationRejectsUnknownProperty() {
+        let json = #"[{"verb":"http.request","request_id":"a","method":"GET","url":"https://example.com","body":"x"}]"#
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
+        }
+    }
+
+    @Test func envelopeListValidationRejectsVerbAlias() {
+        let json = #"[{"verb":"http","url":"https://example.com"}]"#
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
+        }
+    }
+
+    @Test func envelopeListValidationRejectsTypeAlias() {
+        let json = #"[{"type":"http.request","url":"https://example.com"}]"#
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
+        }
+    }
+
+    @Test func hopEventValidationRejectsUnknownParamProperty() {
+        #expect(throws: GuestContractError.self) {
+            try GuestContract.validate(
+                json: Data(#"{"kind":"manual","params":{"messaging_op":"sync_threads","channel":"C1"}}"#.utf8),
+                against: .hopEvent
+            )
+        }
+    }
+
+    @Test func envelopeListValidationRejectsIncompleteThread() {
+        let json = #"[{"verb":"result.emit","threads":[{"vendor_thread_id":"C1"}]}]"#
+        #expect(throws: GuestContractError.self) {
+            try GuestContract.validate(json: Data(json.utf8), against: .envelopeList)
+        }
     }
 }

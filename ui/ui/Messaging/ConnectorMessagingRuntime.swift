@@ -20,17 +20,9 @@ final class ConnectorMessagingRuntime {
         defer { store.setConnectorSyncing(false) }
         do {
             try await client.bootstrap(pluginID: pluginID)
-            await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
-            if store.supportsThreadDiscovery, session.threads.isEmpty {
-                throw ConnectorMessagingError.pluginFailed(
-                    "No conversations were returned. Check the bot token and invite the bot to Slack channels, then tap Refresh list."
-                )
-            }
-            if store.supportsThreadDiscovery {
-                if session.threads.count == 1, let threadID = session.threads.first?.id {
-                    await session.selectThread(id: threadID)
-                }
-            } else if let threadID = session.threads.first?.id {
+            let shouldAutoOpen = session.selectedThreadID == nil
+            await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: shouldAutoOpen)
+            if session.selectedThreadID == nil, let threadID = session.threads.first?.id {
                 await session.selectThread(id: threadID)
             }
             if let threadID = session.selectedThreadID {
@@ -65,6 +57,7 @@ final class ConnectorMessagingRuntime {
         pluginID: String,
         text: String,
         thread: MessagingThreadDTO,
+        parentVendorMessageID: String? = nil,
         repository: DBRepository,
         store: MessagingStore,
         session: MessagingSessionStore
@@ -75,10 +68,26 @@ final class ConnectorMessagingRuntime {
             pluginID: pluginID,
             vendorThreadID: thread.vendorThreadID,
             threadID: thread.id,
-            text: trimmed
+            text: trimmed,
+            parentVendorMessageID: parentVendorMessageID
         )
         await session.reloadMessagesForThread(id: thread.id)
         await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
         await store.catalog.refreshBadges()
+    }
+
+    func pollConversation(
+        pluginID: String,
+        vendorThreadID: String,
+        parentVendorMessageID: String?,
+        threadID: String,
+        session: MessagingSessionStore
+    ) async throws {
+        try await client.pollInbox(
+            pluginID: pluginID,
+            vendorThreadID: vendorThreadID,
+            parentVendorMessageID: parentVendorMessageID
+        )
+        await session.reloadMessagesForThread(id: threadID)
     }
 }

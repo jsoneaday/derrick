@@ -71,7 +71,10 @@ enum DaemonModuleBootstrap {
             fputs("[derrickd] module mcp ready\n", stderr)
             await sweepEmbeddedDockerLeftovers()
             Task {
-                await prewarmEmbeddedDockerImages()
+                await prewarmGuestRuntimeImage()
+            }
+            Task {
+                await startWebCrawlerImageInBackground()
             }
         } catch {
             fputs("[derrickd] MCP module bootstrap failed: \(error.localizedDescription)\n", stderr)
@@ -96,7 +99,7 @@ enum DaemonModuleBootstrap {
     }
 
     /// Remove leftover runtime containers before the job scheduler starts.
-    /// Image prewarm stays in the background so a cold crawler build does not block jobs.
+    /// Guest image pull stays in the background so a cold Python pull does not block jobs.
     private static func sweepEmbeddedDockerLeftovers() async {
         guard DerrickProcessRole.isDaemon else { return }
         do {
@@ -110,15 +113,25 @@ enum DaemonModuleBootstrap {
         }
     }
 
-    /// Embedded DockerRunnerHelper in JobKeepAlive — prewarm without blocking bootstrap.
-    private static func prewarmEmbeddedDockerImages() async {
+    /// Embedded DockerRunnerHelper in JobKeepAlive — guest image pull does not block jobs.
+    private static func prewarmGuestRuntimeImage() async {
         guard DerrickProcessRole.isDaemon else { return }
         do {
             try await MCPServiceDockerHelperRunner.shared.prewarmGuestRuntime()
-            try await MCPServiceDockerHelperRunner.shared.prewarmWebCrawlerImage()
-            fputs("[derrickd] embedded Docker helper verified\n", stderr)
+            fputs("[derrickd] guest runtime image ready\n", stderr)
         } catch {
             fputs("[derrickd] embedded Docker helper sync failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    /// Does not block jobs or chat. A crawl that arrives during this build waits on the same task.
+    private static func startWebCrawlerImageInBackground() async {
+        guard DerrickProcessRole.isDaemon else { return }
+        do {
+            try await MCPServiceDockerHelperRunner.shared.ensureWebCrawlerImage()
+            fputs("[derrickd] web crawler image ready\n", stderr)
+        } catch {
+            fputs("[derrickd] web crawler image background build skipped: \(error.localizedDescription)\n", stderr)
         }
     }
 }

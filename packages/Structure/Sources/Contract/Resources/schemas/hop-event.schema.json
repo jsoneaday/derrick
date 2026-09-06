@@ -24,6 +24,7 @@
       "items": {
         "type": "object",
         "required": ["request_id", "status"],
+        "additionalProperties": false,
         "properties": {
           "request_id": { "type": "string" },
           "status": { "type": "integer" },
@@ -34,8 +35,7 @@
       }
     },
     "params": {
-      "type": "object",
-      "additionalProperties": true
+      "$ref": "connector-params.schema.json"
     }
   },
   "additionalProperties": false

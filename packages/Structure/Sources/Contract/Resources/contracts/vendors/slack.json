@@ -1,0 +1,24 @@
+{
+  "vendor": "slack",
+  "vendor_ok_field": "ok",
+  "membership_flag": "is_member",
+  "pagination_cursor": "response_metadata.next_cursor",
+  "calls": {
+    "conversation.list": {
+      "method": "conversations.list",
+      "url": "https://slack.com/api/conversations.list"
+    },
+    "conversation.history": {
+      "method": "conversations.history",
+      "url": "https://slack.com/api/conversations.history"
+    },
+    "conversation.replies": {
+      "method": "conversations.replies",
+      "url": "https://slack.com/api/conversations.replies"
+    },
+    "message.send": {
+      "method": "chat.postMessage",
+      "url": "https://slack.com/api/chat.postMessage"
+    }
+  }
+}

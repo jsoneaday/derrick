@@ -65,17 +65,15 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
 
     /// Prewarm the shared offline guest runtime image.
     func prewarmGuestRuntime() async throws {
-        try await GuestDockerContainerPool.shared.prewarm(
-            image: DerrickGuestRuntime.pythonGuestDockerImage,
+        try await OneshotDockerContainer.ensurePulledImage(
+            DerrickGuestRuntime.pythonGuestDockerImage,
             executor: makeStdinCLIExecutor()
         )
     }
 
-    /// Build or verify the trusted web crawler product image.
-    func prewarmWebCrawlerImage() async throws {
-        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(
-            executor: makeStdinCLIExecutor()
-        )
+    /// Build the crawler image in the background. Joins an in-flight build if one exists.
+    func ensureWebCrawlerImage() async throws {
+        try await WebCrawlerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())
     }
 
     var hasPeerEndpoint: Bool {

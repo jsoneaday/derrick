@@ -15,4 +15,16 @@ import Testing
         let swiftKinds = Set(PluginEventKind.allCases.map(\.rawValue))
         #expect(swiftKinds == schemaKinds)
     }
+
+    @Test func hostHTTPRequestFieldsAreOnTheEnvelopeSchema() throws {
+        let schema = try GuestContract.loadSchemaObject(.envelopeList)
+        let properties = try #require(
+            (schema["items"] as? [String: Any])?["properties"] as? [String: Any]
+        )
+        let hostKeys = Set(["request_id", "method", "url", "auth_ref", "headers", "json"])
+        #expect(hostKeys.isSubset(of: Set(properties.keys)))
+        #expect(properties["body"] == nil)
+        #expect(properties["type"] == nil)
+        #expect((schema["items"] as? [String: Any])?["additionalProperties"] as? Bool == false)
+    }
 }

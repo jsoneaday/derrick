@@ -1048,7 +1048,8 @@ import Testing
         let policy = ContainerLifecyclePolicy.derrickDefault
         #expect(policy.maxNetworkContainers == 2)
         #expect(policy.maxOfflineContainers == 1)
-        #expect(policy.warmStandbyCount == 1)
+        #expect(policy.maxFileExtractContainers == 1)
+        #expect(policy.warmStandbyCount == 0)
         #expect(policy.containerRunMaxTTLSeconds == 7 * 60)
         #expect(policy.destroyAfterEveryRun)
         #expect(policy.neverReusePostExecution)
@@ -1072,6 +1073,51 @@ import Testing
             )
         )
         #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", "python:3.14.7"]))
+    }
+
+    @Test func webCrawlerProductImageBuildUsesPackagesContext() {
+        guard let root = DerrickRepositoryRoot.locate() else { return }
+        let dockerfile = root
+            .appendingPathComponent(DockerProductImagePolicy.webCrawlerDockerfileRelativePath)
+            .path
+        let packages = DockerProductImagePolicy.webCrawlerBuildContext(repoRoot: root).path
+        #expect(
+            DockerProductImagePolicy.isAllowedWebCrawlerBuild(
+                dockerfilePath: dockerfile,
+                imageTag: DockerProductImagePolicy.webCrawlerImage,
+                contextPath: packages
+            )
+        )
+        #expect(
+            !DockerProductImagePolicy.isAllowedWebCrawlerBuild(
+                dockerfilePath: dockerfile,
+                imageTag: DockerProductImagePolicy.webCrawlerImage,
+                contextPath: root.path
+            )
+        )
+    }
+
+    @Test func webCrawlerLinuxImageSourcesStayFoundationOnly() throws {
+        guard let root = DerrickRepositoryRoot.locate() else { return }
+        let folder = root
+            .appendingPathComponent("packages/Structure/Sources/WebCrawler")
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            .filter { $0.hasSuffix(".swift") }
+        #expect(!files.isEmpty)
+        let banned = ["CryptoKit", "Security", "AppKit", "SwiftUI", "MCP"]
+        for name in files {
+            let text = try String(
+                contentsOf: folder.appendingPathComponent(name),
+                encoding: .utf8
+            )
+            #expect(text.contains("import Foundation"), "\(name) should import Foundation")
+            for module in banned {
+                #expect(
+                    !text.contains("import \(module)"),
+                    "\(name) must not import \(module); the Linux crawler image cannot compile Apple-only Structure"
+                )
+            }
+        }
     }
 
     @Test func orchestrationLimitsDefaults() {
@@ -1196,13 +1242,48 @@ import Testing
         #expect(
             WorkflowChatProgress.factoryProgressMessage(
                 from: "[plugin_factory] attempt=2/3 draft_started"
-            ) == "Generating plugin draft (attempt 2 of 3)…"
+            ) == "Waiting on the plugin builder (attempt 2 of 3). High thinking can take several minutes…"
+        )
+        #expect(
+            WorkflowChatProgress.factoryProgressMessage(
+                from: "[plugin_factory] builder_streaming"
+            ) == "The plugin builder is writing the draft…"
+        )
+        #expect(
+            WorkflowChatProgress.factoryProgressMessage(
+                from: "[plugin_factory] review_started"
+            ) == "Safety reviewer is checking the draft. This can take a few minutes…"
+        )
+        #expect(
+            WorkflowChatProgress.factoryProgressMessage(
+                from: "[plugin_factory] attempt=1/3 failed=The plugin builder model timed out."
+            ) == "The plugin builder did not finish in time."
+        )
+        #expect(
+            WorkflowChatProgress.shouldSurfaceWorkflowMessage(
+                "[plugin_factory] attempt=1/3 draft_started"
+            ) == false
         )
         #expect(
             WorkflowChatProgress.shouldSurfaceWorkflowMessage(
                 "The direct test output exercises only poll_inbox."
             ) == false
         )
+    }
+
+    @Test func pluginFactoryCreateFailureMessageExplainsBuilderTimeout() {
+        let presentation = PluginFactoryCreateFailureMessage.presentation("The request timed out.")
+        #expect(presentation.summary.contains("plugin builder did not finish in time"))
+        #expect(presentation.summary.contains("several minutes"))
+        #expect(presentation.technicalDetail == "The request timed out.")
+    }
+
+    @Test func pluginFactoryCreateFailureMessageExplainsReviewerTimeout() {
+        let presentation = PluginFactoryCreateFailureMessage.presentation(
+            "The plugin safety reviewer model timed out."
+        )
+        #expect(presentation.summary.contains("safety reviewer did not finish in time"))
+        #expect(presentation.technicalDetail?.contains("safety reviewer") == true)
     }
 
     @Test func pluginFactoryCreateFailureMessageSanitizesReviewDetail() {
@@ -1250,22 +1331,69 @@ import Testing
         #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
     }
 
-    @Test func connectorWizardOffersSendAndReceiveOnly() {
-        #expect(PluginFactoryCreateInput.ConnectorScope.wizardCases == [.sendAndReceive])
-        #expect(!PluginFactoryCreateInput.ConnectorScope.wizardCases.contains(.sendOnly))
-        #expect(!PluginFactoryCreateInput.ConnectorScope.wizardCases.contains(.fullSync))
+    @Test func connectorFactoryFailureReturnsToVendorStep() {
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .vendor)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .vendor)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .vendor)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .vendor)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .type)
+    }
+
+    @Test func connectorWizardOffersFullSyncOnly() {
+        #expect(PluginFactoryCreateInput.ConnectorScope.allCases == [.fullSync])
+        #expect(PluginFactoryCreateInput.ConnectorScope.wizardCases == [.fullSync])
     }
 
     @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendOnly,
+            scope: .fullSync,
             userDescription: "Post alerts to #general."
         )
         let goal = input.connectorBuildGoal(crawlSummary: nil)
-        #expect(goal.contains("send_message only"))
+        #expect(goal.contains("Scope id: full_sync"))
+        #expect(goal.contains("send_message"))
+        #expect(goal.contains("sync_threads"))
+        #expect(goal.contains("poll_inbox"))
         #expect(goal.contains("Reference Slack connector blueprint"))
         #expect(!goal.contains("must sync and send messages"))
+        #expect(!goal.contains("Post alerts to #general"))
+        #expect(!goal.contains("User requirements:"))
+        #expect(!goal.contains("Scope id: send_only"))
+        #expect(!goal.contains("Scope id: send_and_receive"))
+    }
+
+    @Test func connectorBuildGoalIgnoresFreeTextUserDescription() {
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: "Also add reactions, file uploads, and slash commands."
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: nil)
+        #expect(!goal.contains("Also add reactions, file uploads, and slash commands."))
+        #expect(!goal.contains("User requirements:"))
+        #expect(!goal.localizedCaseInsensitiveContains("unless the user requirements"))
+        #expect(goal.contains("Scope id: full_sync"))
+        #expect(goal.localizedCaseInsensitiveContains("reply threads"))
+        #expect(goal.contains("conversation.replies") || goal.contains("conversations.replies"))
+    }
+
+    @Test func connectorBuildGoalFullSyncIncludesReplyThreads() {
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: ""
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: nil)
+        #expect(goal.localizedCaseInsensitiveContains("parent_vendor_message_id"))
+        #expect(goal.localizedCaseInsensitiveContains("conversations.replies"))
+        #expect(goal.localizedCaseInsensitiveContains("missing_scope"))
+        #expect(goal.contains("must_not_call"))
+        #expect(goal.contains("conversation.history"))
+        #expect(goal.contains("runtime_empty_messages_ok_if_vendor_ok"))
+        #expect(goal.contains("Scope id: full_sync"))
+        #expect(PluginFactoryScopeHints.isFullSync(goal))
+        #expect(PluginFactoryScopeHints.paginationGuidance(for: goal)?.contains("follow_cursor") == true)
     }
 
     @Test func connectorInputUsesScopeDefaultWhenDescriptionEmpty() {
@@ -1276,28 +1404,22 @@ import Testing
         )
         #expect(!input.description.isEmpty)
         #expect(input.description.localizedCaseInsensitiveContains("Slack"))
-        #expect(input.description.localizedCaseInsensitiveContains("sync"))
+        #expect(input.description.localizedCaseInsensitiveContains("conversations"))
+        #expect(input.description.localizedCaseInsensitiveContains("reply"))
     }
 
     @Test func validationExpectationsParseDeclaredMessagingOpsFromGoal() {
-        let sendOnly = PluginFactoryCreateInput.makeConnector(
+        let fullSync = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendOnly,
+            scope: .fullSync,
             userDescription: "Alerts."
         )
-        let sendOnlyGoal = sendOnly.connectorBuildGoal(crawlSummary: nil)
-        #expect(PluginFactoryValidationExpectations.requiredMessagingOps(from: sendOnlyGoal) == ["send_message"])
-
-        let sendAndReceive = PluginFactoryCreateInput.makeConnector(
-            vendor: .slack,
-            scope: .sendAndReceive,
-            userDescription: "Alerts."
-        )
-        let receiveGoal = sendAndReceive.connectorBuildGoal(crawlSummary: nil)
-        let receiveOps = PluginFactoryValidationExpectations.requiredMessagingOps(from: receiveGoal)
-        #expect(receiveOps.contains("sync_threads"))
-        #expect(receiveOps.contains("poll_inbox"))
-        #expect(receiveOps.contains("send_message"))
+        let goal = fullSync.connectorBuildGoal(crawlSummary: nil)
+        let ops = PluginFactoryValidationExpectations.requiredMessagingOps(from: goal)
+        #expect(ops.contains("sync_threads"))
+        #expect(ops.contains("poll_inbox"))
+        #expect(ops.contains("send_message"))
+        #expect(ops == ["sync_threads", "poll_inbox", "send_message"] || Set(ops) == Set(["sync_threads", "poll_inbox", "send_message"]))
     }
 
     @Test func supportsThreadDiscoveryRequiresSyncThreadsOp() {
@@ -1311,31 +1433,99 @@ import Testing
         #expect(!PluginFactoryValidationExpectations.supportsThreadDiscovery(manifestJSON: withoutDiscovery))
     }
 
-    @Test func pluginFactoryScopeHintsDetectSendAndReceiveGoal() {
+    @Test func pluginFactoryScopeHintsDetectFullSyncGoal() {
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendAndReceive,
+            scope: .fullSync,
             userDescription: "Alerts."
         )
         let goal = input.connectorBuildGoal(crawlSummary: nil)
-        #expect(PluginFactoryScopeHints.isSendAndReceive(goal))
-        #expect(!PluginFactoryScopeHints.isFullSync(goal))
-        #expect(PluginFactoryScopeHints.paginationGuidance(for: goal)?.contains("single-page") == true)
+        #expect(PluginFactoryScopeHints.isFullSync(goal))
+        #expect(PluginFactoryScopeHints.paginationGuidance(for: goal)?.contains("follow_cursor") == true)
+        #expect(PluginFactoryScopeHints.paginationGuidance(for: goal)?.contains("include_reply_poll=true") == true)
     }
 
-    @Test func pluginFactoryScopeHintsTreatPaginationReviewAsOverstrictForSendAndReceive() {
+    @Test func pluginFactoryCreateInputDecodesLegacyScopesAsFullSync() throws {
+        let sendOnly = """
+        {"pluginType":"connector","vendor":"slack","scope":"send_only","description":"x"}
+        """
+        let sendAndReceive = """
+        {"pluginType":"connector","vendor":"slack","scope":"send_and_receive","description":"x"}
+        """
+        #expect(try PluginFactoryCreateInput.decodeJSON(sendOnly).scope == .fullSync)
+        #expect(try PluginFactoryCreateInput.decodeJSON(sendAndReceive).scope == .fullSync)
+    }
+
+    @Test func pluginFactoryScopeHintsOverrideMisplacedFullSyncHistoryReview() {
+        let goal = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: ""
+        ).connectorBuildGoal(crawlSummary: nil)
         let review = PluginFactoryReview(
             decision: .rejected,
             findings: [
                 PluginReviewFinding(
                     severity: .blocking,
                     category: .correctness,
-                    message: "Skips required Slack pagination while presenting partial results as complete."
+                    message: """
+                    sync_threads only paginates conversations.list and emits channel tabs; \
+                    it never fetches conversations.history or conversations.replies.
+                    """
                 ),
             ],
-            summary: "Rejected because poll_inbox pagination is incomplete."
+            summary: """
+            Rejected: the requested fully paginated Slack sync—including channel history and reply threads—is not implemented or tested.
+            """
         )
-        #expect(PluginFactoryScopeHints.isPaginationCompletenessRejection(review))
+        #expect(PluginFactoryScopeHints.isMisplacedHistoryInSyncThreadsRejection(review))
+        #expect(PluginFactoryScopeHints.isOverstrictFullSyncRejection(review))
+        let override = PluginFactoryScopeHints.approvedOverride(for: review, userGoal: goal)
+        #expect(override?.approved == true)
+    }
+
+    @Test func pluginFactoryScopeHintsOverrideEmptySuccessfulPollReview() {
+        let goal = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: ""
+        ).connectorBuildGoal(crawlSummary: nil)
+        let review = PluginFactoryReview(
+            decision: .rejected,
+            findings: [
+                PluginReviewFinding(
+                    severity: .blocking,
+                    category: .correctness,
+                    message: """
+                    An empty Slack messages array is emitted as a successful inbox update.
+                    """
+                ),
+            ],
+            summary: "Rejected: empty Slack messages array is emitted as a successful inbox update."
+        )
+        #expect(PluginFactoryScopeHints.isEmptySuccessfulPollRejection(review))
+        let override = PluginFactoryScopeHints.approvedOverride(for: review, userGoal: goal)
+        #expect(override?.approved == true)
+    }
+
+    @Test func pluginFactoryScopeHintsKeepsSafetyRejectionForFullSync() {
+        let goal = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: ""
+        ).connectorBuildGoal(crawlSummary: nil)
+        let review = PluginFactoryReview(
+            decision: .rejected,
+            findings: [
+                PluginReviewFinding(
+                    severity: .blocking,
+                    category: .safety,
+                    message: "The source uses urllib to fetch Slack."
+                ),
+            ],
+            summary: "Rejected: empty Slack messages array is emitted as a successful inbox update."
+        )
+        #expect(PluginFactoryScopeHints.approvedOverride(for: review, userGoal: goal) == nil)
     }
 
     @Test func validationExpectationsReadMessagingOpsFromManifestJSON() {

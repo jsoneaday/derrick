@@ -1,6 +1,6 @@
 import Foundation
 
-/// Canonical JSON Schema for guest stdout (envelope list).
+/// Canonical JSON Schema for guest stdout. Use `GuestContract` as the schema interface.
 public enum PluginEnvelopeSchema {
     public static var jsonSchema: String {
         (try? GuestContract.loadSchemaText(.envelopeList))

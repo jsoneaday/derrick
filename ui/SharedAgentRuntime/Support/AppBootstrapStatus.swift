@@ -223,7 +223,16 @@ final class AppBootstrapStatus: ObservableObject {
             || lower.contains("swift runtime image is unavailable") {
             return ClassifiedFailure(
                 title: "Environment Image Setup Failed",
-                message: "Derrick could not build or download the guest runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
+                message: "Derrick could not download the guest runtime image. Check your network connection and that Docker Desktop has enough disk space, then try again."
+            )
+        }
+        if lower.contains("docker image build failed")
+            || lower.contains("derrick-web-crawler")
+            || lower.contains("#0 building")
+            || lower.contains("could not build the web crawler") {
+            return ClassifiedFailure(
+                title: "Website Crawl Is Still Setting Up",
+                message: "You can chat now. Website crawl will work after Docker finishes preparing it. Make sure Docker Desktop is running and has enough disk space."
             )
         }
         if lower.contains("invalid reference format") {

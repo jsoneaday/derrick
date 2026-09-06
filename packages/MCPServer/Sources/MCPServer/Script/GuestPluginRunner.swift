@@ -13,7 +13,7 @@ public enum GuestPluginRunner: Sendable {
         logger: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> PluginFactoryExecutionResult {
         let invokeID = UUID().uuidString
-        let initialEvent = (try? JSONDecoder().decode(PluginHopEvent.self, from: input))
+        let initialEvent = (try? PluginHopEvent.decodeValidated(input))
             ?? PluginHopEvent(kind: .manual)
         let executor = PythonGuestDockerExecutor(executor: dockerExecutor)
         return try await GuestHopLoop.runForPluginInvoke(

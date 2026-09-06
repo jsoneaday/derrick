@@ -75,6 +75,23 @@ import Testing
     }
 
     @MainActor
+    @Test func classifyCrawlerBuildDumpDoesNotBlockWithRawBuildkit() {
+        let error = NSError(
+            domain: "MCPServer",
+            code: 503,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Docker image build failed for derrick-web-crawler:swift-6.4-v1: #0 building with \"default\" instance using docker driver"
+            ]
+        )
+        let result = AppBootstrapStatus.classifyError(error)
+        #expect(result.title.lowercased().contains("crawl"))
+        #expect(!result.message.contains("#0 building"))
+        #expect(!result.message.contains("derrick-web-crawler:swift-6.4-v1"))
+        #expect(result.message.lowercased().contains("chat"))
+    }
+
+    @MainActor
     @Test func beginAndReadyToggleModal() {
         let status = AppBootstrapStatus.shared
         // Reset shared singleton from other tests / prior ready.

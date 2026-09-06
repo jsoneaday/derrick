@@ -26,4 +26,35 @@ public struct PluginHopEvent: Codable, Sendable, Hashable {
         try GuestContractValidation.validateHopEventJSON(data)
         return try JSONDecoder().decode(PluginHopEvent.self, from: data)
     }
+
+    public func encodeValidated() throws -> Data {
+        let data = try JSONEncoder().encode(self)
+        try GuestContractValidation.validateHopEventJSON(data)
+        return data
+    }
+
+    /// Live hops keep earlier HTTP bodies so pagination can see previous pages.
+    /// The same `request_id` on a later hop replaces the earlier row.
+    public func mergingLatestHTTPResults(_ latest: PluginHopEvent) -> PluginHopEvent {
+        var byID: [String: HostHTTPResponse] = [:]
+        var anonymous: [HostHTTPResponse] = []
+        func ingest(_ rows: [HostHTTPResponse]) {
+            for row in rows {
+                let id = row.requestID.trimmingCharacters(in: .whitespacesAndNewlines)
+                if id.isEmpty {
+                    anonymous.append(row)
+                } else {
+                    byID[id] = row
+                }
+            }
+        }
+        ingest(httpResults ?? [])
+        ingest(latest.httpResults ?? [])
+        let merged = byID.keys.sorted().compactMap { byID[$0] } + anonymous
+        return PluginHopEvent(
+            kind: .httpResults,
+            httpResults: merged,
+            params: latest.params ?? params
+        )
+    }
 }

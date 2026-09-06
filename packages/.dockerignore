@@ -1,0 +1,13 @@
+# Context for `docker build -f docker/web-crawler/Dockerfile packages`.
+*
+!Structure/
+!Structure/**
+!Selenops/
+!Selenops/**
+!WebCrawler/
+!WebCrawler/**
+**/.build
+**/.swiftpm
+**/.git
+Structure/Tests
+Structure/Tests/**

@@ -37,15 +37,18 @@ actor ConfiguredPluginFactoryService {
             userGoal: userGoal,
             builder: ConfiguredPluginFactoryBuilder(
                 settings: settings,
+                thinkingSettings: thinkingSettings,
                 existingReleases: existingReleases,
-                apiKeyProvider: apiKeyProvider
+                apiKeyProvider: apiKeyProvider,
+                logger: logger
             ),
             executor: executor,
             reviewer: ScopeAwarePluginFactoryReviewer(
                 inner: ConfiguredPluginSafetyReviewer(
                     settings: settings,
                     thinkingSettings: thinkingSettings,
-                    apiKeyProvider: apiKeyProvider
+                    apiKeyProvider: apiKeyProvider,
+                    logger: logger
                 )
             ),
             logger: logger
@@ -59,21 +62,28 @@ actor ConfiguredPluginFactoryService {
 /// intent into data; it does not run, review, compile, or release source.
 actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     private let settings: LLMModelSettings
+    private let thinkingSettings: LLMModelThinkingSettings
     private let existingReleases: [PluginFactoryReleaseSummary]
     private let apiKeyProvider: @Sendable () -> String?
+    private let logger: PluginFactoryLogger
 
     init(
         settings: LLMModelSettings,
+        thinkingSettings: LLMModelThinkingSettings,
         existingReleases: [PluginFactoryReleaseSummary] = [],
-        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
+        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
+        logger: @escaping PluginFactoryLogger = { _ in }
     ) {
         self.settings = settings
+        self.thinkingSettings = thinkingSettings
         self.existingReleases = existingReleases
         self.apiKeyProvider = apiKeyProvider
+        self.logger = logger
     }
 
     func makeDraft(_ request: PluginFactoryBuilderRequest) async throws -> PluginFactoryDraft {
         let model = await MainActor.run { settings.pluginBuilderModel }
+        let thinking = await thinkingSettings.pluginBuilderThinking(for: model)
         guard let apiKey = await resolveAPIKey(for: model) else {
             throw PluginFactoryModelError.missingAPIKey(model.helperDisplayName)
         }
@@ -81,9 +91,10 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         let response = try await stream(
             AgentRequest.prompt(
                 Self.userPrompt(for: request, existingReleases: existingReleases),
-                system: Self.builderSystemPrompt,
+                system: Self.builderSystemPrompt(for: request.userGoal),
                 temperature: 0,
-                responseSchema: Self.builderResponseSchema
+                responseSchema: Self.builderResponseSchema,
+                thinking: thinking
             ),
             model: model,
             apiKey: apiKey
@@ -117,14 +128,20 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             stream = OpenAIAgentClient(provider: OpenAIProvider(apiKey: apiKey))
                 .stream(request, model: selected)
         }
-        let (text, usage) = try await collectFactoryModelStream(stream, role: "builder")
+        let (text, usage) = try await collectFactoryModelStream(
+            stream,
+            role: "builder",
+            onFirstText: { [logger] in
+                await logger("[plugin_factory] builder_streaming")
+            }
+        )
         if let usage {
             _ = await UsageLimitsService.shared.recordAPIUsage(usage)
         }
         return text
     }
 
-    private static let builderSystemPrompt: String = {
+    private static func builderSystemPrompt(for userGoal: String) -> String {
         """
         You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
         Return exactly one JSON object with these keys:
@@ -149,7 +166,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         including the exact `$schema` field for Agent Plugin 1.0 and the fixed
         extensions.app.derrick.entrypoint ./app.derrick/plugin.py.
         \(DerrickGuestPython.modelContract)
-        \(ConnectorMessagingContract.hostContract)
+        \(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
         Before returning the draft, self-check the implementation:
         - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
         - Match host responses by the emitted request_id.
@@ -160,11 +177,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         For messaging connector plugins (role connector) that call a vendor HTTP API:
         - Declare secrets in the manifest only. Never hard-code credentials.
         - Parse each http_results body as JSON when the vendor returns JSON.
-        - Scope pagination: send + receive connectors should use single-page sync_threads and poll_inbox in tests \
-          (sync-1, poll-1, send-1 only). Full sync scope may paginate; every extra request_id needs a fixture.
-        - For sync_threads, emit only conversations the saved secret can access. For Slack, skip channels where is_member is false.
         - test_input_json http_results must exercise success paths for every messaging_op in scope.
-        - If the user goal limits scope to send_message only, test_input_json must not claim sync or inbox coverage.
         - test_input_json must be a single JSON object serialized as a string (valid JSON.parse input).
         - test_input_json must not be empty or "{}".
         - For connector plugins, test_input_json must use a hops array:
@@ -174,9 +187,9 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
           Repeat additional hop pairs for each messaging_op in scope. request_id values in fixtures must \
           match the http.request envelopes your python_source emits.
         - Match http_results by request_id and de-duplicate with stable sorting; never depend on response order.
-        When vendor documentation is supplied in the user prompt, follow it exactly.
+        When vendor documentation is supplied in the user prompt, use it only to fill may_call HTTP details.
         """
-    }()
+    }
 
     private static let builderResponseSchema = AgentSchema(
         type: .object,
@@ -289,15 +302,18 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     private let settings: LLMModelSettings
     private let thinkingSettings: LLMModelThinkingSettings
     private let apiKeyProvider: @Sendable () -> String?
+    private let logger: PluginFactoryLogger
 
     init(
         settings: LLMModelSettings,
         thinkingSettings: LLMModelThinkingSettings,
-        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
+        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
+        logger: @escaping PluginFactoryLogger = { _ in }
     ) {
         self.settings = settings
         self.thinkingSettings = thinkingSettings
         self.apiKeyProvider = apiKeyProvider
+        self.logger = logger
     }
 
     func review(
@@ -312,7 +328,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
         let response = try await stream(
             AgentRequest.prompt(
                 Self.userPrompt(for: draft, directRun: directRun),
-                system: Self.reviewerSystemPrompt,
+                system: Self.reviewerSystemPrompt(for: draft.userGoal),
                 temperature: 0,
                 responseSchema: Self.reviewerResponseSchema,
                 thinking: thinking
@@ -349,14 +365,21 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
             stream = OpenAIAgentClient(provider: OpenAIProvider(apiKey: apiKey))
                 .stream(request, model: selected)
         }
-        let (text, usage) = try await collectFactoryModelStream(stream, role: "safety reviewer")
+        let (text, usage) = try await collectFactoryModelStream(
+            stream,
+            role: "safety reviewer",
+            onFirstText: { [logger] in
+                await logger("[plugin_factory] review_streaming")
+            }
+        )
         if let usage {
             _ = await UsageLimitsService.shared.recordAPIUsage(usage)
         }
         return text
     }
 
-    private static let reviewerSystemPrompt = """
+    private static func reviewerSystemPrompt(for userGoal: String?) -> String {
+        """
     You are Derrick's independent plugin alignment and safety reviewer.
     Review the user's goal, manifest, test_input_json, exact Python source, and direct test output.
     Return exactly one JSON object:
@@ -369,16 +392,12 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     - Source-derived headline titles may be fragments; only generated explanatory summaries must be complete sentences when the manifest requires prose.
     - `result.emit.html` is an allowed output format. Derrick sanitizes it with an allowlist before rendering. Reject executable script behavior or a deliberate sanitizer bypass, not ordinary safe HTML tags.
     - Reject missing source-grounded parsing or claims that the direct test output does not support.
-    - For connector plugins: reject code that ignores documented auth/error fields or uses test fixtures that do not cover the vendor
-      operations declared in the user goal. When test_input_json includes a hops array with http_results
-      fixtures and the direct test output matches those fixtures through result.emit, do not reject solely
-      because fixtures were not repeated in the review prompt prose.
-    - Send + receive scope (user goal mentions send_message and poll_inbox but not full sync pagination):
-      approve single-page sync_threads and poll_inbox. Do NOT reject for missing pagination or partial channel history.
-    - Full sync scope: reject skipping required pagination while presenting partial results as complete.
+    - For connector plugins, obey the connector protocol JSON below. If a rule is not in that JSON, do not require it.
+    \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
     Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
     Reject Swift source, socket/urllib/requests usage, or missing stdin reads.
     """
+    }
 
     private static let reviewerResponseSchema = AgentSchema(
         type: .object,
@@ -462,8 +481,8 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     }
 }
 
-/// Approves send + receive drafts that passed deterministic validation when the LLM reviewer
-/// rejects only for pagination completeness (not required for that scope).
+/// Approves full-sync drafts that passed deterministic validation when the LLM reviewer
+/// rejects host-contract nits already encoded in connector-contract.json.
 actor ScopeAwarePluginFactoryReviewer: PluginFactoryReviewer {
     private let inner: ConfiguredPluginSafetyReviewer
 
@@ -476,18 +495,13 @@ actor ScopeAwarePluginFactoryReviewer: PluginFactoryReviewer {
         directRun: PluginFactoryExecutionResult
     ) async throws -> PluginFactoryReview {
         let review = try await inner.review(draft: draft, directRun: directRun)
-        guard !review.approved,
-              PluginFactoryScopeHints.isSendAndReceive(draft.userGoal),
-              !PluginFactoryScopeHints.isFullSync(draft.userGoal),
-              PluginFactoryScopeHints.isPaginationCompletenessRejection(review)
-        else {
-            return review
+        if let override = PluginFactoryScopeHints.approvedOverride(
+            for: review,
+            userGoal: draft.userGoal
+        ) {
+            return override
         }
-        return PluginFactoryReview(
-            decision: .approved,
-            findings: [],
-            summary: "Approved after deterministic validation (send + receive scope does not require full pagination)."
-        )
+        return review
     }
 }
 
@@ -525,20 +539,28 @@ enum PluginFactoryModelError: Error, LocalizedError, Equatable, Sendable {
 
 private func collectFactoryModelStream(
     _ stream: AsyncThrowingStream<AgentStreamEvent, Error>,
-    role: String
+    role: String,
+    timeoutNanoseconds: UInt64 = LLMHTTPTimeouts.resourceNanoseconds,
+    onFirstText: (@Sendable () async -> Void)? = nil
 ) async throws -> (text: String, usage: AgentTokenUsage?) {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(String, AgentTokenUsage?), Error>) in
         let reply = FactoryModelReplyOnce(continuation)
         let worker = Task {
             do {
-                reply.resume(returning: try await collectAgentStream(stream))
+                reply.resume(
+                    returning: try await collectFactoryAgentStream(stream, onFirstText: onFirstText)
+                )
             } catch {
-                reply.resume(throwing: error)
+                if LLMHTTPTimeouts.isTimeout(error) {
+                    reply.resume(throwing: PluginFactoryModelError.timedOut(role))
+                } else {
+                    reply.resume(throwing: error)
+                }
             }
         }
         Task {
             do {
-                try await Task.sleep(nanoseconds: 120_000_000_000)
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
             } catch {
                 return
             }
@@ -546,6 +568,28 @@ private func collectFactoryModelStream(
             reply.resume(throwing: PluginFactoryModelError.timedOut(role))
         }
     }
+}
+
+private func collectFactoryAgentStream(
+    _ stream: AsyncThrowingStream<AgentStreamEvent, Error>,
+    onFirstText: (@Sendable () async -> Void)?
+) async throws -> (text: String, usage: AgentTokenUsage?) {
+    var text = ""
+    var usage: AgentTokenUsage?
+    var didSignalFirstText = false
+    for try await event in stream {
+        switch event {
+        case .text(let chunk):
+            text += chunk
+            if !didSignalFirstText, !chunk.isEmpty {
+                didSignalFirstText = true
+                await onFirstText?()
+            }
+        case .usage(let recorded):
+            usage = recorded
+        }
+    }
+    return (text, usage)
 }
 
 private final class FactoryModelReplyOnce: @unchecked Sendable {

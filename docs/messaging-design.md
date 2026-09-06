@@ -34,9 +34,9 @@ A third sidebar mode is right: Recents / Plugins / **Messaging**.
 
 Under Messaging, one row per **connector plugin** (not every plugin). Mark connectors in `plugin.json` (`extensions.app.derrick.role: "connector"` or `secrets` + a connector profile). Do not guess from the name.
 
-Each connector opens **thread tabs**, like chat tabs, but a different session kind. Job sessions were already kept out of chat; do the same here. Key: `pluginID + vendorThreadID` (Slack channel/DM/thread, Telegram chat id).
+Each connector opens **conversation tabs** (one tab per Slack channel/DM or Telegram chat). Clicking a vendor row opens that connector, shows **every discovered conversation as a tab**, and selects the most recent. Unread badges on the vendor row and on conversation tabs. Only the selected tab loads its 100-message window.
 
-Clicking a vendor row opens that connector and **auto-opens the most recent conversation**. Unread badges on the vendor row and on conversation tabs.
+**Slack reply threads are not tabs.** A reply chain lives under a channel as a child pane (`#general › thread`). Full-sync connectors fetch `reply_count` on channel messages and `conversations.replies` when that pane opens. Send in the pane passes Slack `thread_ts`. Slack has no separate “enable threads” switch; the bot needs permission to read messages (the same history permission as the channel). If replies don’t load, Messaging explains that in the thread pane.
 
 No `/connect-slack` in chat. Opening Messaging for that connector **is** the mode. Still needed: credentials (already exist), a connected/listening switch, a channel list the first time, and per-conversation mute.
 
@@ -71,8 +71,8 @@ Save first, then notify. No agent turn.
 4. If they are in that conversation but scrolled up: skip the OS banner; show an in-thread “new messages” pill. Do not yank scroll. If they are at the bottom, append.
 5. Bursts: save every row; **one banner per thread** in a short window (“3 new messages in #general”), not one banner per message.
 6. Banner tap: wake the **main window** (not a job-result panel) and jump to **that conversation**.
-7. Vendor row click: open that connector and auto-open the most recent conversation.
-8. Thread list still exists under the vendor (badges, mute, pick another channel). Do not load every channel’s messages at once.
+7. Vendor row click: open that connector, show every conversation as a tab, and select the most recent.
+8. Do not load every channel’s messages at once. Tabs can all exist; only the selected tab loads the 100-message window.
 
 ### Conversation view
 
@@ -101,7 +101,7 @@ Unread badges on the vendor row and on conversation tabs. Mute is per conversati
 | **4** | **Plugin invoke path** | Replace direct vendor API calls with `plugin.invoke` so connectors stay vendor-agnostic guests |
 | **4.1** | Slack Socket Mode | Replace history poll in ingress with outbound WebSocket |
 | **4.2** | Echo suppression | Skip re-importing outbound messages the host already persisted on send |
-| **4.3** | DM + channel polish | DMs, thread titles, channel picker on first connect |
+| **4.3** | DM + channel polish | DMs, titles |
 | **5** | **Second connector** | Telegram long-poll adapter to prove the ingress pattern |
 | **6** | **Connector plugin deletion** | When the **last** factory release for a connector `plugin_id` is deleted, prompt the user (see below) |
 

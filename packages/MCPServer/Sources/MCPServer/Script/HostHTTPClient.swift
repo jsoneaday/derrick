@@ -55,20 +55,15 @@ public actor HostHTTPClient {
         secretAttacher = attacher
     }
 
-    public func perform(
-        method: String,
-        urlString: String,
-        headers envelopeHeaders: [String: String] = [:],
-        body: String? = nil,
-        invokeID: String = ""
-    ) async -> HostHTTPFetch {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    public func perform(_ request: HostHTTPRequest, invokeID: String = "") async -> HostHTTPFetch {
+        let trimmed = request.url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")
         }
         var currentURL = url
-        var currentMethod = method
-        var currentBody = body
+        var currentMethod = request.method
+        var currentBody = request.httpBody
+        let envelopeHeaders = request.wireHeaders
         var visitedURLs = Set([url.absoluteString])
 
         for redirectIndex in 0...Self.maxRedirects {
@@ -76,14 +71,14 @@ public actor HostHTTPClient {
                 return HostHTTPFetch(status: 0, headers: [:], body: "", error: preflightError)
             }
 
-            let request = await makeRequest(
+            let urlRequest = await makeRequest(
                 method: currentMethod,
                 url: currentURL,
                 envelopeHeaders: envelopeHeaders,
                 body: currentBody
             )
             do {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await session.data(for: urlRequest)
                 guard let http = response as? HTTPURLResponse else {
                     return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_response")
                 }
@@ -98,7 +93,7 @@ public actor HostHTTPClient {
                 guard Self.redirectStatuses.contains(status) else {
                 let body = VendorConversationMembershipFilter.sanitizedBody(
                     urlString: currentURL.absoluteString,
-                    body: String(decoding: data.prefix(1_048_576), as: UTF8.self)
+                    body: String(decoding: data.prefix(HostHTTPRequest.maxResponseBytes), as: UTF8.self)
                 )
                 return HostHTTPFetch(status: status, headers: headers, body: body, error: nil)
                 }
@@ -153,7 +148,7 @@ public actor HostHTTPClient {
         method: String,
         url: URL,
         envelopeHeaders: [String: String] = [:],
-        body: String? = nil
+        body: Data? = nil
     ) async -> URLRequest {
         var requestURL = url
         var mergedHeaders = envelopeHeaders.filter {
@@ -174,8 +169,8 @@ public actor HostHTTPClient {
         for (header, value) in mergedHeaders {
             request.setValue(value, forHTTPHeaderField: header)
         }
-        if let body, !body.isEmpty, let data = body.data(using: .utf8) {
-            request.httpBody = data
+        if let body, !body.isEmpty {
+            request.httpBody = body
         }
         if request.value(forHTTPHeaderField: "User-Agent") == nil {
             request.setValue(

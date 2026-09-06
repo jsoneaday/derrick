@@ -6,7 +6,8 @@ public enum DerrickGuestPython: Sendable {
     Python guest contract:
     - The program is a standalone Python script run as `python3 /tmp/guest.py`.
     - Read one JSON object from standard input (`sys.stdin`).
-    - Write one JSON array of envelope objects to standard output.
+    - Write one JSON array of envelope objects to standard output. Every object needs `verb` from the envelope-list schema.
+    - POST bodies go in `json`. The host decodes `http.request` as HostHTTPRequest and sends `json` as the HTTP body.
     - On the first event, emit `http.request` envelopes for host HTTP.
     - On an `http_results` event, emit `result.emit` or `message.post`.
     - The host, not the Python container, performs HTTP and supplies response bodies.
@@ -15,6 +16,7 @@ public enum DerrickGuestPython: Sendable {
     - For repeatable output, match HTTP responses by request_id, sort and de-duplicate collections
       by stable keys, and never use current time, randomness, UUIDs, response arrival order, or
       dict/set iteration order for user-visible output.
+    - Later http_results events include earlier responses plus the newest ones. Match by request_id.
 
     Minimal output pattern:
     ```python
@@ -27,6 +29,9 @@ public enum DerrickGuestPython: Sendable {
 
     Example request envelope:
     {"verb":"http.request","request_id":"news-1","method":"GET","url":"https://example.com/feed.xml"}
+
+    POST bodies: put the JSON value in `json`. The host deserializes `http.request` into HostHTTPRequest and sends `json` as the HTTP body.
+    {"verb":"http.request","request_id":"send-1","method":"POST","url":"https://example.com/api","headers":{"Content-Type":"application/json"},"json":{"channel":"C1","text":"hello"}}
 
     Example result envelope:
     {"verb":"result.emit","title":"Result","summary":"User-readable output"}

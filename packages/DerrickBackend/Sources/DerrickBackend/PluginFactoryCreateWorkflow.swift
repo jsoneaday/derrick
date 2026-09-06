@@ -58,7 +58,7 @@ enum PluginFactoryCreateWorkflow {
             try await fail(
                 workflowID: workflowID,
                 stage: "description",
-                message: "Describe what the connector should do.",
+                message: "Choose a vendor and create the connector again.",
                 repositoryProvider: repositoryProvider
             )
             return
@@ -69,10 +69,10 @@ enum PluginFactoryCreateWorkflow {
             try await log(
                 workflowID: workflowID,
                 stage: "docs",
-                message: "Reading \(vendor.displayName) API documentation…",
+                message: "Reading \(vendor.displayName) API docs. This can take a minute…",
                 repositoryProvider: repositoryProvider
             )
-            let crawlArgs = try crawlArguments(startURL: docURL, vendor: vendor, description: input.description)
+            let crawlArgs = try crawlArguments(startURL: docURL, vendor: vendor, scope: input.scope)
             let crawlResult = try await executeTool(
                 AllowedMCPTool.webCrawl.rawValue,
                 crawlArgs,
@@ -97,7 +97,7 @@ enum PluginFactoryCreateWorkflow {
             try await log(
                 workflowID: workflowID,
                 stage: "docs",
-                message: "Skipping vendor doc crawl for a custom connector — describe the API clearly in your requirements.",
+                message: "Skipping vendor doc crawl for a custom connector.",
                 repositoryProvider: repositoryProvider
             )
         }
@@ -105,7 +105,7 @@ enum PluginFactoryCreateWorkflow {
         try await log(
             workflowID: workflowID,
             stage: "factory",
-            message: "Building \(vendor.displayName) connector — generating draft, running tests, and safety review…",
+            message: "Building \(vendor.displayName) connector — waiting on the plugin builder, then tests and safety review…",
             repositoryProvider: repositoryProvider
         )
         let goal = input.connectorBuildGoal(crawlSummary: crawlSummary)
@@ -168,11 +168,16 @@ enum PluginFactoryCreateWorkflow {
     private static func crawlArguments(
         startURL: String,
         vendor: PluginFactoryCreateInput.ConnectorVendor,
-        description: String
+        scope: PluginFactoryCreateInput.ConnectorScope
     ) throws -> String {
+        let product = PluginFactoryCreateInput.defaultDescription(
+            vendor: vendor,
+            customVendorName: nil,
+            scope: scope
+        )
         let payload: [String: Any] = [
             "start_url": startURL,
-            "goal": "Summarize \(vendor.displayName) bot/API authentication, webhooks, and message send/receive endpoints relevant to: \(description)",
+            "goal": "Summarize \(vendor.displayName) bot/API authentication and message send/receive endpoints for: \(product)",
             "max_pages": 12,
             "max_depth": 2,
             "timeout_seconds": 420,

@@ -66,6 +66,14 @@ public enum MessagingMessageDirection: String, Codable, Sendable, Hashable {
     case outbound
 }
 
+/// Which messages to load for a conversation tab vs a nested Slack-style reply thread.
+public enum MessagingMessageListFilter: Sendable, Hashable {
+    /// Channel/DM feed: messages that are not replies.
+    case channelRoots
+    /// Root vendor message plus its replies (Slack `thread_ts`).
+    case replyThread(parentVendorMessageID: String)
+}
+
 public struct MessagingMessageDTO: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let threadID: String
@@ -74,6 +82,10 @@ public struct MessagingMessageDTO: Codable, Sendable, Hashable, Identifiable {
     public let sender: String
     public let body: String
     public let createdAt: Date
+    /// Slack `thread_ts` when this row is a reply. Nil for channel-root messages.
+    public var parentVendorMessageID: String?
+    /// Vendor-reported reply count on a root message (Slack `reply_count`).
+    public var replyCount: Int
 
     public init(
         id: String = UUID().uuidString,
@@ -82,7 +94,9 @@ public struct MessagingMessageDTO: Codable, Sendable, Hashable, Identifiable {
         direction: MessagingMessageDirection,
         sender: String,
         body: String,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        parentVendorMessageID: String? = nil,
+        replyCount: Int = 0
     ) {
         self.id = id
         self.threadID = threadID
@@ -91,7 +105,14 @@ public struct MessagingMessageDTO: Codable, Sendable, Hashable, Identifiable {
         self.sender = sender
         self.body = body
         self.createdAt = createdAt
+        self.parentVendorMessageID = Self.normalizedParentID(
+            parentVendorMessageID,
+            vendorMessageID: vendorMessageID
+        )
+        self.replyCount = max(0, replyCount)
     }
+
+    public var isReply: Bool { parentVendorMessageID != nil }
 
     public var cursor: MessagingMessageCursor {
         MessagingMessageCursor(createdAt: createdAt, id: id)
@@ -119,6 +140,8 @@ public struct MessagingInboundRecord: Sendable, Hashable {
     public let body: String
     public let createdAt: Date
     public let countAsUnread: Bool
+    public let parentVendorMessageID: String?
+    public let replyCount: Int
 
     public init(
         pluginID: String,
@@ -128,7 +151,9 @@ public struct MessagingInboundRecord: Sendable, Hashable {
         sender: String,
         body: String,
         createdAt: Date = .now,
-        countAsUnread: Bool = true
+        countAsUnread: Bool = true,
+        parentVendorMessageID: String? = nil,
+        replyCount: Int = 0
     ) {
         self.pluginID = pluginID
         self.vendorThreadID = vendorThreadID
@@ -138,6 +163,11 @@ public struct MessagingInboundRecord: Sendable, Hashable {
         self.body = body
         self.createdAt = createdAt
         self.countAsUnread = countAsUnread
+        self.parentVendorMessageID = MessagingMessageDTO.normalizedParentID(
+            parentVendorMessageID,
+            vendorMessageID: vendorMessageID
+        )
+        self.replyCount = max(0, replyCount)
     }
 }
 
@@ -175,4 +205,18 @@ public struct MessagingRoute: Sendable, Hashable {
 
 public enum MessagingViewport {
     public static let maxVisibleMessages = 100
+}
+
+extension MessagingMessageDTO {
+    static func normalizedParentID(_ parent: String?, vendorMessageID: String?) -> String? {
+        let trimmedParent = parent?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let trimmedVendor = vendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard let trimmedParent else { return nil }
+        if let trimmedVendor, trimmedParent == trimmedVendor { return nil }
+        return trimmedParent
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

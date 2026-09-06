@@ -3,7 +3,10 @@
 public enum PluginContract {
     public static let envelopeSchemaVersion = 1
     public static let uiSchemaVersion = 1
+    /// Guest round-trips for `script_exec`. One hop can include many HTTP calls.
     public static let maxHops = 8
+    /// Guest round-trips for live `plugin.invoke`. Connectors paginate across hops.
+    public static let maxPluginInvokeHops = 32
 
     public static let agentPluginSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
     public static let derrickExtensionNamespace = "app.derrick"

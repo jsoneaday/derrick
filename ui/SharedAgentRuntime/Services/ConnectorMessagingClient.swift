@@ -26,7 +26,8 @@ public final class ConnectorMessagingClient: @unchecked Sendable {
         pluginID: String,
         vendorThreadID: String,
         threadID: String,
-        text: String
+        text: String,
+        parentVendorMessageID: String? = nil
     ) async throws {
         let request = ConnectorOperationRequest(
             operationID: UUID().uuidString,
@@ -34,7 +35,23 @@ public final class ConnectorMessagingClient: @unchecked Sendable {
             kind: .send,
             vendorThreadID: vendorThreadID,
             threadID: threadID,
-            text: text
+            text: text,
+            parentVendorMessageID: parentVendorMessageID
+        )
+        try await run(request)
+    }
+
+    public func pollInbox(
+        pluginID: String,
+        vendorThreadID: String,
+        parentVendorMessageID: String? = nil
+    ) async throws {
+        let request = ConnectorOperationRequest(
+            operationID: UUID().uuidString,
+            pluginID: pluginID,
+            kind: .pollInbox,
+            vendorThreadID: vendorThreadID,
+            parentVendorMessageID: parentVendorMessageID
         )
         try await run(request)
     }

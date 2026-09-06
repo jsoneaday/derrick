@@ -14,11 +14,19 @@ protocol MessagingIngressAdapter: Sendable {
     /// Fetches new vendor messages and persists them. Returns rows inserted this poll.
     func pollInbox(repository: DBRepository) async throws -> [MessagingPersistResult]
 
+    /// Polls one conversation, optionally a nested reply thread (`parentVendorMessageID`).
+    func pollConversation(
+        vendorThreadID: String,
+        parentVendorMessageID: String?,
+        repository: DBRepository
+    ) async throws -> [MessagingPersistResult]
+
     /// Sends an outbound message through the connector plugin.
     func sendMessage(
         vendorThreadID: String,
         text: String,
         threadID: String,
+        parentVendorMessageID: String?,
         repository: DBRepository
     ) async throws
 }

@@ -52,7 +52,9 @@ public enum ConnectorMessagingPersistence: Sendable {
                     sender: message.sender,
                     body: message.body,
                     createdAt: message.createdAt,
-                    countAsUnread: true
+                    countAsUnread: true,
+                    parentVendorMessageID: message.parentVendorMessageID,
+                    replyCount: message.replyCount
                 )
                 let persist = try await repository.persistMessagingInbound(record)
                 if persist.inserted {
@@ -65,7 +67,9 @@ public enum ConnectorMessagingPersistence: Sendable {
                     direction: .outbound,
                     sender: message.sender,
                     body: message.body,
-                    createdAt: message.createdAt
+                    createdAt: message.createdAt,
+                    parentVendorMessageID: message.parentVendorMessageID,
+                    replyCount: message.replyCount
                 )
                 _ = try await repository.insertMessagingMessage(outbound, incrementUnread: false)
             }

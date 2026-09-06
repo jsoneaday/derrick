@@ -1,3 +1,4 @@
+# Unused when building with context `packages/` (see packages/.dockerignore).
 .git
 .build
 DerivedData

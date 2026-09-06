@@ -1,5 +1,4 @@
 import Foundation
-import Structure
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif

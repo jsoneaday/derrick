@@ -28,8 +28,9 @@ actor MCPServiceToolHost {
         )
         memoryCoordinator = coordinator
 
-        // Swift Docker execution via DockerRunnerHelper peer XPC only.
-        // UI prewarms containers and hands the helper peer endpoint at bootstrap.
+        // Docker execution via DockerRunnerHelper peer XPC only.
+        // UI prewarms the guest image. Crawler image builds in the background;
+        // a crawl that arrives during that build waits on the same task.
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
         await HostHTTPClient.shared.setSecretAttacher(PluginDeclaredSecretAttacher())

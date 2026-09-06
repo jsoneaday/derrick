@@ -30,6 +30,7 @@ public struct PluginFactorySession: Sendable {
                 let builtDraft = try await builder.makeDraft(request)
                 let draft = builtDraft.withUserGoal(userGoal)
                 currentDraft = draft
+                await logger("[plugin_factory] draft_ready")
                 return try await PluginFactory().build(
                     draft: draft,
                     executor: executor,
@@ -51,6 +52,12 @@ public struct PluginFactorySession: Sendable {
                     previousDraft: currentDraft,
                     feedback: Self.builderFeedback(from: error, userGoal: userGoal)
                 )
+            } catch {
+                await logger(
+                    "[plugin_factory] attempt=\(attempt + 1)/\(configuration.maxBuilderAttempts) " +
+                    "failed=\(pluginFactoryLogValue(error.localizedDescription))"
+                )
+                throw error
             }
         }
         throw lastError ?? PluginFactoryError.invalidSource("Factory stopped without a result.")
@@ -64,14 +71,6 @@ public struct PluginFactorySession: Sendable {
                 "Fix every item below in your next JSON draft response:",
             ]
             parts.append(contentsOf: findings.map { "- \($0)" })
-            if PluginFactoryScopeHints.isSendAndReceive(userGoal) {
-                parts.append(
-                    """
-                    Send + receive scope: use single-page sync_threads and poll_inbox (sync-1, poll-1, send-1). \
-                    Do not paginate unless every emitted request_id has an http_results fixture.
-                    """
-                )
-            }
             parts.append(
                 """
                 Connector test_input_json must use a hops array replayed by the factory. Match each http.request \
@@ -88,14 +87,12 @@ public struct PluginFactorySession: Sendable {
                 parts.append("Findings:")
                 parts.append(contentsOf: findings.map { "- \($0)" })
             }
-            if PluginFactoryScopeHints.isSendAndReceive(userGoal) {
-                parts.append(
-                    """
-                    Send + receive scope: use single-page sync_threads and poll_inbox only (sync-1, poll-1, send-1). \
-                    Do not emit sync-2/poll-2 unless test_input_json includes matching http_results fixtures.
-                    """
-                )
-            }
+            parts.append(
+                """
+                Connector protocol (do not add rules):
+                \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
+                """
+            )
             parts.append(
                 """
                 Before returning the next draft, update test_input_json to a hops array replayed by the factory:
@@ -131,6 +128,7 @@ public struct PluginFactory: Sendable {
 
         let hopRun: PluginFactoryHopTestRun
         do {
+            await logger("[plugin_factory] direct_test_started")
             hopRun = try await PluginFactoryHopTestRunner.run(
                 source: draft.guestSource,
                 testInput: draft.testInput,
@@ -175,6 +173,7 @@ public struct PluginFactory: Sendable {
 
         let review: PluginFactoryReview
         do {
+            await logger("[plugin_factory] review_started")
             review = try await reviewer.review(draft: draft, directRun: reviewRun)
         } catch {
             await logger("[plugin_factory] review failed=\(pluginFactoryLogValue(error.localizedDescription))")
@@ -198,6 +197,7 @@ public struct PluginFactory: Sendable {
 
         let artifact: Data
         do {
+            await logger("[plugin_factory] package_started")
             artifact = try await executor.packageGuestSource(source: draft.guestSource)
         } catch {
             await logger("[plugin_factory] package failed=\(pluginFactoryLogValue(error.localizedDescription))")
@@ -211,6 +211,7 @@ public struct PluginFactory: Sendable {
 
         let packagedRun: PluginFactoryHopTestRun
         do {
+            await logger("[plugin_factory] packaged_test_started")
             packagedRun = try await PluginFactoryHopTestRunner.run(
                 artifact: artifact,
                 testInput: draft.testInput,

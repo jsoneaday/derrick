@@ -40,16 +40,16 @@ enum SlackConnectorInstallReference {
         let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
         let goal = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendAndReceive,
+            scope: .fullSync,
             userDescription: "Send and receive messages in Slack channels I pick from a list."
-        ).connectorBuildGoal(crawlSummary: "Slack conversations.list, conversations.history, chat.postMessage.")
+        ).connectorBuildGoal(crawlSummary: "Slack conversations.list, conversations.history, conversations.replies, chat.postMessage.")
 
-        fputs("[install] packaging reference send+receive connector…\n", stderr)
+        fputs("[install] packaging reference full-sync connector…\n", stderr)
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 1)
         ).build(
             userGoal: goal,
-            builder: E2EFactoryBuilder(scope: .sendAndReceive),
+            builder: E2EFactoryBuilder(scope: .fullSync),
             executor: executor,
             reviewer: E2EHarnessReviewer(),
             logger: { fputs("\($0)\n", stderr) }

@@ -92,10 +92,13 @@ public enum PluginRuntimeToolModule {
                 ).encodedJSON()
             }
             guard result.exitCode == 0 else {
+                let diagnostic = diagnostic(from: result)
+                let message = ConnectorPluginExecutionMessage.userFacing(fromDetail: diagnostic)
+                    ?? "Approved plugin failed during execution (exit \(result.exitCode)): \(diagnostic)"
                 return try failure(
                     stage: .execution,
                     code: "plugin_process_failed",
-                    message: "Approved plugin failed during execution (exit \(result.exitCode)): \(diagnostic(from: result))"
+                    message: message
                 ).encodedJSON()
             }
             do {

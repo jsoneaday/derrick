@@ -168,18 +168,27 @@ public extension DBRepository {
     func listMessagingMessages(
         threadID: String,
         before: MessagingMessageCursor? = nil,
-        limit: Int = MessagingViewport.maxVisibleMessages
+        limit: Int = MessagingViewport.maxVisibleMessages,
+        filter: MessagingMessageListFilter = .channelRoots
     ) throws -> [MessagingMessageDTO] {
         let pageSize = max(1, min(limit, MessagingViewport.maxVisibleMessages))
         return try withDatabaseHandle { handle in
             var clauses = ["thread_id = \(quoted(threadID))"]
+            switch filter {
+            case .channelRoots:
+                clauses.append("(parent_vendor_message_id IS NULL OR parent_vendor_message_id = '')")
+            case .replyThread(let parentID):
+                let parent = quoted(parentID.trimmingCharacters(in: .whitespacesAndNewlines))
+                clauses.append("(vendor_message_id = \(parent) OR parent_vendor_message_id = \(parent))")
+            }
             if let before {
                 let time = quoted(Self.iso8601Formatter().string(from: before.createdAt))
                 let id = quoted(before.id)
                 clauses.append("(created_at < \(time) OR (created_at = \(time) AND id < \(id)))")
             }
             let sql = """
-            SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at
+            SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at,
+                   parent_vendor_message_id, reply_count
             FROM messaging_messages
             WHERE \(clauses.joined(separator: " AND "))
             ORDER BY created_at DESC, id DESC
@@ -235,7 +244,9 @@ public extension DBRepository {
                     direction: .inbound,
                     sender: record.sender,
                     body: record.body,
-                    createdAt: record.createdAt
+                    createdAt: record.createdAt,
+                    parentVendorMessageID: record.parentVendorMessageID,
+                    replyCount: record.replyCount
                 )
                 let insert = try insertMessagingMessageLocked(
                     candidate,
@@ -314,7 +325,8 @@ public extension DBRepository {
         let created = Self.iso8601Formatter().string(from: message.createdAt)
         try Self.execute("""
         INSERT OR IGNORE INTO messaging_messages (
-            id, thread_id, vendor_message_id, direction, sender, body, created_at
+            id, thread_id, vendor_message_id, direction, sender, body, created_at,
+            parent_vendor_message_id, reply_count
         ) VALUES (
             \(quoted(message.id)),
             \(quoted(message.threadID)),
@@ -322,12 +334,20 @@ public extension DBRepository {
             \(quoted(message.direction.rawValue)),
             \(quoted(message.sender)),
             \(quoted(message.body)),
-            \(quoted(created))
+            \(quoted(created)),
+            \(sqlValue(message.parentVendorMessageID)),
+            \(max(0, message.replyCount))
         );
         """, on: handle)
 
         if sqlite3_changes(handle) > 0 {
-            return MessagingMessageInsertResult(inserted: true, message: message)
+            try refreshReplyCountLocked(
+                threadID: message.threadID,
+                parentVendorMessageID: message.parentVendorMessageID,
+                on: handle
+            )
+            let stored = try loadMessagingMessage(id: message.id, on: handle) ?? message
+            return MessagingMessageInsertResult(inserted: true, message: stored)
         }
 
         if let vendorID = message.vendorMessageID, !vendorID.isEmpty,
@@ -336,12 +356,68 @@ public extension DBRepository {
             vendorMessageID: vendorID,
             on: handle
            ) {
-            return MessagingMessageInsertResult(inserted: false, message: existing)
+            let merged = try mergeMessagingMessageMetadataLocked(
+                existing: existing,
+                incoming: message,
+                on: handle
+            )
+            try refreshReplyCountLocked(
+                threadID: message.threadID,
+                parentVendorMessageID: merged.parentVendorMessageID,
+                on: handle
+            )
+            return MessagingMessageInsertResult(inserted: false, message: merged)
         }
         if let existing = try loadMessagingMessage(id: message.id, on: handle) {
-            return MessagingMessageInsertResult(inserted: false, message: existing)
+            let merged = try mergeMessagingMessageMetadataLocked(
+                existing: existing,
+                incoming: message,
+                on: handle
+            )
+            return MessagingMessageInsertResult(inserted: false, message: merged)
         }
         throw DBRepositoryError.sqliteOperationFailed("Messaging insert was ignored but the row was not found.")
+    }
+
+    private func mergeMessagingMessageMetadataLocked(
+        existing: MessagingMessageDTO,
+        incoming: MessagingMessageDTO,
+        on handle: OpaquePointer
+    ) throws -> MessagingMessageDTO {
+        let parentSQL = incoming.parentVendorMessageID.map { sqlValue($0) } ?? "parent_vendor_message_id"
+        try Self.execute("""
+        UPDATE messaging_messages
+        SET parent_vendor_message_id = \(parentSQL),
+            reply_count = MAX(reply_count, \(max(0, incoming.replyCount)))
+        WHERE id = \(quoted(existing.id));
+        """, on: handle)
+        return try loadMessagingMessage(id: existing.id, on: handle) ?? existing
+    }
+
+    private func refreshReplyCountLocked(
+        threadID: String,
+        parentVendorMessageID: String?,
+        on handle: OpaquePointer
+    ) throws {
+        guard let parentVendorMessageID, !parentVendorMessageID.isEmpty else { return }
+        let countSQL = """
+        SELECT COUNT(*)
+        FROM messaging_messages
+        WHERE thread_id = \(quoted(threadID))
+          AND parent_vendor_message_id = \(quoted(parentVendorMessageID));
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, countSQL, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw Self.sqliteError(handle: handle, fallback: "Failed to count messaging replies.")
+        }
+        defer { sqlite3_finalize(statement) }
+        let counted = sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int(statement, 0)) : 0
+        try Self.execute("""
+        UPDATE messaging_messages
+        SET reply_count = MAX(reply_count, \(counted))
+        WHERE thread_id = \(quoted(threadID))
+          AND vendor_message_id = \(quoted(parentVendorMessageID));
+        """, on: handle)
     }
 
     private func requireMessagingConnector(pluginID: String, on handle: OpaquePointer) throws {
@@ -425,7 +501,8 @@ public extension DBRepository {
         on handle: OpaquePointer
     ) throws -> MessagingMessageDTO? {
         let sql = """
-        SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at
+        SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at,
+               parent_vendor_message_id, reply_count
         FROM messaging_messages
         WHERE thread_id = \(quoted(threadID))
           AND vendor_message_id = \(quoted(vendorMessageID))
@@ -442,7 +519,8 @@ public extension DBRepository {
 
     private func loadMessagingMessage(id: String, on handle: OpaquePointer) throws -> MessagingMessageDTO? {
         let sql = """
-        SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at
+        SELECT id, thread_id, vendor_message_id, direction, sender, body, created_at,
+               parent_vendor_message_id, reply_count
         FROM messaging_messages
         WHERE id = \(quoted(id))
         LIMIT 1;
@@ -494,7 +572,9 @@ public extension DBRepository {
             direction: MessagingMessageDirection(rawValue: directionRaw) ?? .inbound,
             sender: try columnString(statement, index: 4),
             body: try columnString(statement, index: 5),
-            createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 6)) ?? .now
+            createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 6)) ?? .now,
+            parentVendorMessageID: columnOptionalString(statement, index: 7),
+            replyCount: Int(sqlite3_column_int(statement, 8))
         )
     }
 }

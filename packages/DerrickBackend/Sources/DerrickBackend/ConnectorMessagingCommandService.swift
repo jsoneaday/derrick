@@ -86,6 +86,19 @@ public actor ConnectorMessagingCommandService {
             switch request.kind {
             case .bootstrap:
                 try await adapter.bootstrap(repository: repository)
+            case .pollInbox:
+                guard let vendorThreadID = request.vendorThreadID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !vendorThreadID.isEmpty
+                else {
+                    throw ConnectorMessagingCommandError.invalidRequest(
+                        "pollInbox requires vendorThreadID."
+                    )
+                }
+                _ = try await adapter.pollConversation(
+                    vendorThreadID: vendorThreadID,
+                    parentVendorMessageID: request.parentVendorMessageID,
+                    repository: repository
+                )
             case .send:
                 guard let vendorThreadID = request.vendorThreadID?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !vendorThreadID.isEmpty,
@@ -101,6 +114,7 @@ public actor ConnectorMessagingCommandService {
                     vendorThreadID: vendorThreadID,
                     text: text,
                     threadID: threadID,
+                    parentVendorMessageID: request.parentVendorMessageID,
                     repository: repository
                 )
             }

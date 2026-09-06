@@ -159,7 +159,7 @@ private final class XPCAppLogSink: NSObject, DockerHelperLogSinkXPC, @unchecked 
     }
 }
 
-/// UI-owned XPC bridge and Swift runtime prewarmer.
+/// UI-owned XPC bridge and guest-image prewarmer.
 public final class XPCDockerRunner: @unchecked Sendable {
     public static let shared = XPCDockerRunner()
 
@@ -281,12 +281,8 @@ public final class XPCDockerRunner: @unchecked Sendable {
                 )
             }
             await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
-            try await GuestDockerContainerPool.shared.prewarm(
-                image: DerrickGuestRuntime.pythonGuestDockerImage,
-                executor: makeDockerExecutor()
-            )
-            await reportBootstrap(phase: .preparingImage, message: "Preparing web crawler (first launch may take several minutes)…")
-            try await DockerProductImagePrewarmer.ensureWebCrawlerImage(
+            try await OneshotDockerContainer.ensurePulledImage(
+                DerrickGuestRuntime.pythonGuestDockerImage,
                 executor: makeDockerExecutor()
             )
             prewarmState.markCompleted()

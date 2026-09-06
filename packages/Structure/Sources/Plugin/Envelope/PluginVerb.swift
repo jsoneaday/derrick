@@ -12,38 +12,9 @@ public enum PluginVerb: String, Codable, Sendable, Hashable, CaseIterable {
     case httpRequest = "http.request"
     case log
 
-    /// When `verb`/`type` is omitted, infer from payload shape (generated Swift often
-    /// returns `{title,summary}` after `http_results` or `{url}` for a fetch).
-    public static func infer(from payload: [String: PluginJSON]) -> PluginVerb? {
-        if payload["url"]?.stringValue != nil { return .httpRequest }
-        if payload["widgets"] != nil { return .uiPresent }
-        if payload["title"] != nil
-            || payload["summary"] != nil
-            || payload["text"] != nil
-            || payload["content"] != nil
-            || payload["markdown"] != nil
-            || payload["html"] != nil
-            || payload["body"] != nil {
-            return .resultEmit
-        }
-        return nil
-    }
-
-    /// Accepts official verbs plus short aliases models often emit (`result`, `message`, `http`).
+    /// Official envelope-list `verb` enum values only.
     public static func parse(_ raw: String) -> PluginVerb? {
-        if let exact = PluginVerb(rawValue: raw) { return exact }
-        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "result", "emit", "done":
-            return .resultEmit
-        case "message", "post", "text":
-            return .messagePost
-        case "http", "fetch", "netfetch", "request":
-            return .httpRequest
-        case "log", "print":
-            return .log
-        default:
-            return nil
-        }
+        PluginVerb(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     public var classification: PluginVerbClass {

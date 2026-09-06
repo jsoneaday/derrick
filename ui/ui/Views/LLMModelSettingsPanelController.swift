@@ -21,22 +21,12 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
                 modelThinkingSettings: modelThinkingSettings
             )
         )
-        let panel = NSWindow(
+        hostingController.sizingOptions = [.minSize]
+
+        let panel = LLMModelSettingsWindowChrome.makeWindow(
             contentViewController: hostingController
         )
-        panel.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        panel.title = "Settings"
-        panel.titleVisibility = .visible
-        panel.titlebarAppearsTransparent = false
-        panel.isReleasedWhenClosed = false
-        // Stay with the app; floating level often looks detached from the main window.
-        panel.level = .normal
-        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.isMovableByWindowBackground = true
-        panel.contentMinSize = NSSize(width: 800, height: 520)
-        panel.setContentSize(NSSize(width: 840, height: 560))
         panel.delegate = self
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
         center(panel, relativeTo: preferredParentWindow())
         window = panel
         installEscapeMonitor()
@@ -86,7 +76,7 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         panel.layoutIfNeeded()
         var frame = panel.frame
         if frame.width < 1 || frame.height < 1 {
-            frame.size = NSSize(width: 840, height: 560)
+            frame.size = LLMModelSettingsWindowChrome.defaultContentSize
         }
 
         if let parent {
@@ -100,6 +90,46 @@ final class LLMModelSettingsPanelController: NSObject, NSWindowDelegate {
         } else {
             panel.center()
         }
+    }
+}
+
+enum LLMModelSettingsWindowChrome {
+    static let defaultContentSize = NSSize(width: 840, height: 560)
+    static let minContentSize = NSSize(width: 800, height: 520)
+
+    static var styleMask: NSWindow.StyleMask {
+        [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+    }
+
+    /// Builds the Settings window with chrome set at init. Mutating `styleMask`
+    /// after attaching a hosting controller leaves the traffic lights flush
+    /// against the top-left edge.
+    static func makeWindow(contentViewController: NSViewController) -> NSWindow {
+        let panel = NSWindow(
+            contentRect: NSRect(origin: .zero, size: defaultContentSize),
+            styleMask: styleMask,
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Settings"
+        panel.titleVisibility = .visible
+        panel.titlebarAppearsTransparent = true
+        panel.toolbarStyle = .unified
+        panel.titlebarSeparatorStyle = .automatic
+        panel.isReleasedWhenClosed = false
+        panel.level = .normal
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.contentMinSize = minContentSize
+
+        let toolbar = NSToolbar(identifier: "Derrick.Settings")
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        toolbar.displayMode = .iconOnly
+        panel.toolbar = toolbar
+
+        panel.contentViewController = contentViewController
+        return panel
     }
 }
 

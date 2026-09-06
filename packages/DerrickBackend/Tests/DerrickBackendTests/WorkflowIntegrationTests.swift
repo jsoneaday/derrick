@@ -16,7 +16,7 @@ import Testing
 
         let input = try PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
-            scope: .sendOnly,
+            scope: .fullSync,
             userDescription: "Post alerts."
         ).encodedJSON()
 

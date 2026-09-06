@@ -19,7 +19,7 @@ final class LLMModelSettings: ObservableObject {
         }
     }
 
-    @Published var pluginBuilderModel: LLMModelChoice = .defaultHelperModel {
+    @Published var pluginBuilderModel: LLMModelChoice = .defaultPluginBuilderModel {
         didSet {
             Task { await save(pluginBuilderModel, forKey: "pluginBuilderModel") }
         }

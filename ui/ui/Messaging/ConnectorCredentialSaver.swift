@@ -28,13 +28,15 @@ enum ConnectorCredentialSaver {
                 return !draft.isEmpty
             }
         case .allowPartialUpdate:
-            let missing = fields.filter { !$0.hasStoredValue }
-            let missingFilled = missing.allSatisfy { field in
+            let missingFilled = fields.filter { !$0.hasStoredValue }.allSatisfy { field in
                 let draft = drafts[field.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 return !draft.isEmpty
             }
-            if !missingFilled { return false }
-            return true
+            guard missingFilled else { return false }
+            return fields.contains { field in
+                let draft = drafts[field.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return !draft.isEmpty
+            }
         }
     }
 }

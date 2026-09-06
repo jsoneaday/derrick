@@ -253,7 +253,9 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
 
     private func resolvedMessagingOps() -> [String] {
         if !messagingOps.isEmpty { return messagingOps }
-        return role == .connector ? ["send_message"] : []
+        return role == .connector
+            ? PluginFactoryCreateInput.ConnectorScope.fullSync.requiredMessagingOps
+            : []
     }
 
     public func draft() throws -> PluginFactoryDraft {

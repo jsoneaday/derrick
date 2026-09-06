@@ -22,9 +22,24 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         guard !trimmed.isEmpty else {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
-                The connector was not saved. Try again, or describe a simpler goal.
+                The connector was not saved. Try again.
                 """,
                 technicalDetail: nil
+            )
+        }
+
+        if isModelTimeout(trimmed) {
+            let reviewer = trimmed.lowercased().contains("safety reviewer")
+            return PluginFactoryCreateFailurePresentation(
+                summary: reviewer
+                    ? """
+                    The connector was not saved. The safety reviewer did not finish in time. Try again.
+                    """
+                    : """
+                    The connector was not saved. The plugin builder did not finish in time. \
+                    High thinking can take several minutes — try again.
+                    """,
+                technicalDetail: trimmed
             )
         }
 
@@ -32,7 +47,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
                 The connector was not saved. Derrick built a draft but the safety review could not approve it \
-                after several attempts. Try again, or narrow what the connector should do.
+                after several attempts. Try again.
                 """,
                 technicalDetail: trimmed
             )
@@ -42,7 +57,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
                 The connector was not saved. Derrick could not finish building it after several attempts. \
-                Try again, or simplify what the connector should do in your description.
+                Try again.
                 """,
                 technicalDetail: trimmed
             )
@@ -51,8 +66,7 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         if isTechnicalFactoryDetail(trimmed) {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
-                The connector was not saved. Derrick could not finish building it. Try again, \
-                or simplify your description.
+                The connector was not saved. Derrick could not finish building it. Try again.
                 """,
                 technicalDetail: trimmed
             )
@@ -62,6 +76,10 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             summary: "The connector was not saved. \(trimmed)",
             technicalDetail: nil
         )
+    }
+
+    private static func isModelTimeout(_ message: String) -> Bool {
+        LLMHTTPTimeouts.isTimeoutDescription(message)
     }
 
     private static func isFactoryDidNotSaveDetail(_ message: String) -> Bool {

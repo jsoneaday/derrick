@@ -56,7 +56,11 @@ final class MessagingStore: ObservableObject {
     var tabs: [MessagingTab] { session.tabs }
     var selectedPluginID: String? { session.selectedPluginID }
     var selectedThreadID: String? { session.selectedThreadID }
+    var selectedReplyParentVendorMessageID: String? { session.selectedReplyParentVendorMessageID }
+    var isViewingReplyThread: Bool { session.isViewingReplyThread }
     var visibleMessages: [MessagingMessageDTO] { session.visibleMessages }
+    var visibleReplyMessages: [MessagingMessageDTO] { session.visibleReplyMessages }
+    var replyThreadWarning: String? { session.replyThreadWarning }
     var scrollToBottomToken: Int { session.scrollToBottomToken }
     var scrollAnchorID: String? { session.scrollAnchorID }
     var showJumpToLatest: Bool { session.showJumpToLatest }
@@ -174,10 +178,7 @@ final class MessagingStore: ObservableObject {
             await catalog.refreshBadges()
             DerrickMessagingIngressSignal.postPoll()
         }
-        await session.openConnector(
-            pluginID: pluginID,
-            autoOpenMostRecent: !catalog.supportsThreadDiscovery(pluginID: pluginID)
-        )
+        await session.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
         guard session.selectedPluginID == pluginID else { return false }
         if repository != nil, catalog.contains(pluginID: pluginID) {
             setConnectorSyncing(true)
@@ -238,6 +239,7 @@ final class MessagingStore: ObservableObject {
                 pluginID: pluginID,
                 text: text,
                 thread: thread,
+                parentVendorMessageID: session.selectedReplyParentVendorMessageID,
                 repository: repository,
                 store: self,
                 session: session
@@ -345,6 +347,30 @@ final class MessagingStore: ObservableObject {
 
     func selectThread(id: String) async {
         await session.selectThread(id: id)
+    }
+
+    func openReplyThread(parentVendorMessageID: String) async {
+        await session.openReplyThread(parentVendorMessageID: parentVendorMessageID)
+        guard let pluginID = selectedPluginID, let thread = selectedThread else { return }
+        do {
+            try await connectorRuntime.pollConversation(
+                pluginID: pluginID,
+                vendorThreadID: thread.vendorThreadID,
+                parentVendorMessageID: parentVendorMessageID,
+                threadID: thread.id,
+                session: session
+            )
+            session.setLastError(nil)
+        } catch {
+            let mapped = ConnectorReplyThreadAccessMessage.userFacing(
+                fromVendorDetail: error.localizedDescription
+            ) ?? error.localizedDescription
+            session.setReplyThreadWarning(mapped)
+        }
+    }
+
+    func closeReplyThread() {
+        session.closeReplyThread()
     }
 
     func closeTab(id: String) {

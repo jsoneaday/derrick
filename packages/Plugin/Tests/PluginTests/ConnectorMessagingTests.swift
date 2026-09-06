@@ -35,6 +35,20 @@ import Testing
         #expect(result.sentMessage?.vendorMessageID == "2.0")
     }
 
+    @Test func parserReadsReplyThreadFields() throws {
+        let envelopes = """
+        [{"verb":"result.emit","messages":[\
+        {"vendor_thread_id":"C1","vendor_message_id":"1.0","direction":"inbound","sender":"alice","body":"root","created_at":"1","reply_count":1,"thread_ts":"1.0"},\
+        {"vendor_thread_id":"C1","vendor_message_id":"2.0","direction":"inbound","sender":"bob","body":"reply","created_at":"2","parent_vendor_message_id":"1.0"}\
+        ]}]
+        """
+        let result = try ConnectorMessagingParser.parse(envelopeJSON: Data(envelopes.utf8))
+        #expect(result.messages.count == 2)
+        #expect(result.messages[0].parentVendorMessageID == nil)
+        #expect(result.messages[0].replyCount == 1)
+        #expect(result.messages[1].parentVendorMessageID == "1.0")
+    }
+
     @Test func parserDropsThreadsMarkedInaccessible() throws {
         let envelopes = """
         [{"verb":"result.emit","threads":[\
@@ -101,5 +115,13 @@ import Testing
         #expect(throws: ConnectorMessagingError.self) {
             _ = try ConnectorMessagingParser.parse(toolOutcomeText: text)
         }
+    }
+
+    @Test func pluginFailedHopBudgetUsesHumanCopy() {
+        let error = ConnectorMessagingError.pluginFailed(
+            "Approved plugin failed during execution (exit 1): Hop budget exceeded."
+        )
+        #expect(error.errorDescription == ConnectorPluginExecutionMessage.tookTooManySteps)
+        #expect(error.errorDescription?.localizedCaseInsensitiveContains("hop") != true)
     }
 }

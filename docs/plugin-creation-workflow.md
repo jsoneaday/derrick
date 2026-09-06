@@ -11,9 +11,11 @@ This document describes the **guided plugin creation flow** in the Plugins works
 
 Creating a connector plugin is slow and multi-step: crawl vendor docs, generate code, run Docker tests, pass an independent safety review, collect Keychain credentials, then open Messaging. That work cannot block a synchronous MCP `callTool` round-trip.
 
+**The machine-readable connector JSON is the start of this path.** Every schema is loaded and checked through `GuestContract` (`hop-event`, `envelope-list`, `connector-params`, `connector-result-emit`, `connector-contract`, `connector-vendor`). `connector-contract.json` is the protocol instance; Slack HTTP bindings live in `vendors/slack.json`. Wizard, factory goal, Docker hop tests, and reviewer prompts read those files. They do not invent extra ops.
+
 The plugin creation flow therefore combines:
 
-1. **A host-owned wizard** — plain-language steps, scope presets, progress, credentials, and readable errors.
+1. A host-owned wizard — vendor, progress, credentials, and readable errors. Every new connector is full sync.
 2. **A durable workflow** — `WorkflowKind.pluginFactoryCreate` runs in derrickd with pollable progress events.
 3. **Long-running MCP effectors** — `web.crawl` and `plugin_factory_build` execute inside MCPService with explicit `ExecutionContextWire`.
 
@@ -27,7 +29,7 @@ Conversation agents are not the orchestrator for this path. The UI starts the wo
 ┌─────────────────────────────────────────────────────────────────┐
 │  Plugins workspace (SwiftUI)                                     │
 │  PluginCreationController + PluginsWorkspaceView                 │
-│  • Wizard phases (intro → type → vendor → describe → …)          │
+│  • Wizard phases (intro → type → vendor → create → …)            │
 │  • Progress checklist + status line                              │
 │  • Credentials form → Keychain                                   │
 └───────────────┬─────────────────────────────────────────────────┘
@@ -57,7 +59,7 @@ Conversation agents are not the orchestrator for this path. The UI starts the wo
 
 | Layer | Responsibility |
 |-------|----------------|
-| UI wizard | User intent, scope, credentials, navigation, friendly errors |
+| UI wizard | Vendor, credentials, navigation, friendly errors |
 | Workflow backend | Ordered steps, stage labels, terminal status, result JSON |
 | MCP factory | Model calls, Docker execution, **deterministic gates**, review, release artifact |
 | SQLite | `workflow_runs`, `workflow_events`, plugin factory releases |
@@ -70,10 +72,9 @@ The modal wizard in the Plugins workspace follows a fixed sequence:
 
 | Phase | Purpose |
 |-------|---------|
-| **Intro** | Explain plugins; offer Create or Edit |
+| **Intro** | Explain plugins; continue to create |
 | **Choose type** | Connector / News reader / Custom (only connector is live today) |
-| **Choose vendor** | Slack, Telegram, WhatsApp, Discord, Other |
-| **Describe** | Scope preset + optional free-text requirements |
+| **Choose vendor** | Slack, Telegram, WhatsApp, Discord, Other — then Create |
 | **Creating** | Checklist + live status while workflow runs |
 | **Collect credentials** | Keychain fields from manifest secrets (if any missing) |
 | **Succeeded / Failed** | Open Messaging or retry with context |
@@ -83,30 +84,26 @@ Phases are owned by `PluginCreationController` (`ui/ui/Plugins/PluginCreationCon
 **Design rules used here (reuse for other workflows):**
 
 - **Never dismiss** the modal during active work (`creating`).
-- **Map failures back to a step** (`FailureStep`: type, vendor, description, creating) so Back lands on the right screen.
+- **Map failures back to a step** (`FailureStep`: type, vendor, creating). Docs, factory, and review failures return to **vendor**, not a details field.
 - **Sanitize errors for humans**; keep raw detail behind an expandable section.
 - **Finish setup in the wizard** (credentials) instead of sending users to another surface to discover missing steps.
 
 ---
 
-## Scope presets
+## Scope
 
-Ambiguous goals cause review failures: the builder implements broad sync/receive behavior but the mock test only proves send.
+The wizard does **not** ask people to describe extra features. Creating a connector means **full sync** for that vendor: list conversations as tabs, including Slack reply threads, then send and receive. The factory goal uses the fixed product sentence, not free-text “user requirements.” Vendor docs stay a crawl for the builder; they are not a checklist of APIs in the UI.
 
-The describe step requires a **scope preset** before optional detail text:
-
-| Scope | Messaging ops | When to use |
-|-------|---------------|-------------|
-| **Send + receive** | `sync_threads`, `poll_inbox`, `send_message` | Channel list, pick one conversation, send and receive new messages |
+| Scope | Messaging ops | When used |
+|-------|---------------|-----------|
+| **Full sync** | `sync_threads`, `poll_inbox`, `send_message` (history + reply threads) | Every new connector from the wizard |
 
 Scope is stored on `PluginFactoryCreateInput.scope` and drives:
 
-- **`connectorBuildGoal()`** — scope-specific requirements (no generic “must sync and send”).
+- **`connectorBuildGoal()`** — `Scope id:` plus the canonical JSON files dumped through `GuestContract`: hop-event and envelope-list schemas, `connector-contract.json`, `connector-params.schema.json`, `connector-result-emit.schema.json`, and the vendor profile. Crawl notes may fill `may_call` HTTP details only. Hop stdin, guest stdout, and factory gates call the same `GuestContract.validate` entry point.
 - **`ConnectorReferenceBlueprint`** — vendor reference patterns and test fixture expectations injected into the factory goal.
 
-The wizard always creates **Send + receive**. Send-only and full-sync remain in the enum for already-installed plugins and older workflow payloads.
-
-Default wizard scope is **Send + receive**.
+Send-only plugins that are already installed still run; new connectors are always full sync.
 
 Types: `PluginFactoryCreateInput.ConnectorScope` in Structure.
 
@@ -117,7 +114,7 @@ Types: `PluginFactoryCreateInput.ConnectorScope` in Structure.
 `PluginFactoryCreateWorkflow` runs two MCP steps in order:
 
 1. **`docs`** — `web.crawl` from the vendor’s documentation entry URL (skipped for custom vendors without a known URL).
-2. **`factory`** — `plugin_factory_build` with a goal built from scope, user description, crawl summary, and reference blueprint.
+2. **`factory`** — `plugin_factory_build` with a goal built from the connector protocol JSON, scope id, crawl summary, and reference blueprint.
 
 On success, the workflow completes with `PluginFactoryCreateResult` JSON (`plugin_id`, `version`, `vendor`, `review_summary`).
 
@@ -173,7 +170,7 @@ Hop replay is implemented by `PluginFactoryHopTestRunner`: `test_input_json` is 
 
 ### Builder model
 
-**Builder model** (`LLMModelSettings.pluginBuilderModel`) returns JSON including:
+**Builder model** (`LLMModelSettings.pluginBuilderModel`, default **GPT 5.6 Terra** at **High** thinking) returns JSON including:
 
 - `python_source`
 - `test_input_json` — serialized JSON with a `hops` array and `http_results` fixtures
@@ -195,13 +192,15 @@ Do **not** use the reviewer as the primary gate for structural requirements alre
 
 Reviewer **thinking level** is configurable in Settings → Plugin safety reviewer (default **Medium**).
 
+Builder **thinking level** is configurable in Settings → Plugin builder (default **High**).
+
 ---
 
 ## Credentials step
 
 After the workflow completes, the wizard loads secret descriptors from the saved manifest (`PluginCredentialCatalog` / `ConnectorCredentialService`).
 
-If secrets are declared and not already in Keychain, the wizard shows **Collect credentials** before success. Values are saved with `ConnectorCredentialSaver` → `PluginSecretKeychain` — the same path Messaging uses later.
+If secrets are declared and not already in Keychain, the wizard shows **Collect credentials** before success. Values are saved with `ConnectorCredentialSaver` → `PluginSecretKeychain` — the same path Messaging uses later. To change a token later, use **Settings → Credentials** (chat API keys and plugin/connector secrets).
 
 If there are no secrets, or all are already stored, the wizard skips straight to **Connector ready**.
 
@@ -211,10 +210,10 @@ If there are no secrets, or all are already stored, the wizard skips straight to
 
 | Audience | Content |
 |----------|---------|
-| **User** | Short summary via `PluginFactoryCreateFailureMessage.presentation` — e.g. try again or a simpler goal |
+| **User** | Short summary via `PluginFactoryCreateFailureMessage.presentation` — try again |
 | **Power user** | Expandable **Technical details** with raw reviewer or factory text |
 
-Validation-heavy failures map `FailureStep` back to **description** so the user can change scope or wording and retry.
+Docs, factory, and review failures map `FailureStep` back to **vendor** so the user can pick the service again and retry.
 
 ---
 
@@ -223,6 +222,7 @@ Validation-heavy failures map `FailureStep` back to **description** so the user 
 | Setting | Location | Used by |
 |---------|----------|---------|
 | Plugin builder model | Settings → Helper models / Plugin builder | `ConfiguredPluginFactoryBuilder` |
+| Builder thinking level | Settings → Plugin builder (default High) | Builder LLM call (`ModelThinkingOption`) |
 | Plugin safety reviewer model | Settings → Plugin safety reviewer | `ConfiguredPluginSafetyReviewer` |
 | Reviewer thinking level | Settings → Plugin safety reviewer | Reviewer LLM call (`ModelThinkingOption`) |
 | Chat API key | Provider credentials | `WorkflowStartRequest.helperAPIKey` |
@@ -250,13 +250,16 @@ The wizard session uses a dedicated chat session id (`plugin-wizard`) but does n
 | Factory models | `ui/SharedAgentRuntime/Support/PluginFactoryModels.swift` |
 | MCP registration | `ui/MCPService/MCPServiceToolHost.swift` |
 | Progress strings | `packages/Structure/.../WorkflowChatProgress.swift` |
-| Connector contract | `packages/Structure/.../ConnectorMessagingContract.swift` |
+| Connector protocol JSON | `packages/Structure/Sources/Contract/Resources/contracts/connector-contract.json` |
+| Connector JSON schemas | `packages/Structure/Sources/Contract/Resources/schemas/*.schema.json` via `GuestContract` |
+| Slack vendor profile | `packages/Structure/Sources/Contract/Resources/contracts/vendors/slack.json` |
+| Connector contract prompts | `packages/Structure/.../ConnectorContractPrompts.swift` |
 
 ---
 
 ## Template for future workflows
 
-When adding a new guided flow (e.g. edit plugin, news reader, custom job wizard), follow the same shape:
+When adding a new guided flow (e.g. news reader, custom job wizard), follow the same shape:
 
 ### 1. Host-owned wizard
 
@@ -329,8 +332,8 @@ Do **not** fail the entire user workflow on the first validation miss — retry 
 
 ## End-to-end user path
 
-1. Sidebar → **Plugins** (intro modal: “Create or edit a plugin” — explains plugins and offers create or edit).
-2. **Create plugin** → Connector → Vendor → Scope + description → **Create**.
+1. Sidebar → **Plugins** (intro modal explains plugins).
+2. **Create plugin** → Connector → Vendor → **Create**.
 3. Watch checklist: docs → build/review → credentials.
 4. Enter bot token (or other secrets) → **Save and continue**.
 5. **Open Messaging** to use the new connector.

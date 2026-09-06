@@ -12,8 +12,10 @@ public enum PluginHostHopDispatcher: Sendable {
         execute: @escaping @Sendable (Data) async throws -> PluginFactoryExecutionResult
     ) async throws -> PluginFactoryExecutionResult {
         var input = initialInput
+        var accumulated = (try? PluginHopEvent.decodeValidated(initialInput))
+            ?? PluginHopEvent(kind: .manual)
         var lastResult = PluginFactoryExecutionResult(exitCode: 1)
-        let params = (try? JSONDecoder().decode(PluginHopEvent.self, from: initialInput))?.params
+        let params = accumulated.params
 
         for _ in 0..<PluginContract.maxHops {
             let result = try await execute(input)
@@ -27,7 +29,9 @@ public enum PluginHostHopDispatcher: Sendable {
             ) else {
                 return result
             }
-            input = next
+            let latest = try PluginHopEvent.decodeValidated(next)
+            accumulated = accumulated.mergingLatestHTTPResults(latest)
+            input = try accumulated.encodeValidated()
         }
 
         return PluginFactoryExecutionResult(
@@ -46,41 +50,24 @@ public enum PluginHostHopDispatcher: Sendable {
         invokeID: String,
         params: [String: PluginJSON]? = nil
     ) async -> Data? {
-        let requests = envelopes.filter { $0.verb == .httpRequest }
-        guard !requests.isEmpty else { return nil }
+        let typedRequests: [HostHTTPRequest]
+        do {
+            typedRequests = try HostHTTPRequest.all(in: envelopes)
+        } catch {
+            return nil
+        }
+        guard !typedRequests.isEmpty else { return nil }
 
         var responses: [HostHTTPResponse] = []
-        for request in requests {
-            let requestID = request.payload["request_id"]?.stringValue ?? UUID().uuidString
-            let headers = Self.envelopeHeaders(request.payload)
-            let body = request.payload["body"]?.stringValue
-            let live = await HostHTTPClient.shared.perform(
-                method: request.payload["method"]?.stringValue ?? "GET",
-                urlString: request.payload["url"]?.stringValue ?? "",
-                headers: headers,
-                body: body,
-                invokeID: invokeID
-            )
-            responses.append(live.response(requestID: requestID))
+        for request in typedRequests {
+            let live = await HostHTTPClient.shared.perform(request, invokeID: invokeID)
+            responses.append(live.response(requestID: request.requestID))
         }
 
-        return try? JSONEncoder().encode(
-            PluginHopEvent(
-                kind: .httpResults,
-                httpResults: responses,
-                params: params
-            )
-        )
-    }
-
-    private static func envelopeHeaders(_ payload: [String: PluginJSON]) -> [String: String] {
-        guard case .object(let object) = payload["headers"] else { return [:] }
-        var headers: [String: String] = [:]
-        for (key, value) in object {
-            if let string = value.stringValue {
-                headers[key] = string
-            }
-        }
-        return headers
+        return try? PluginHopEvent(
+            kind: .httpResults,
+            httpResults: responses,
+            params: params
+        ).encodeValidated()
     }
 }

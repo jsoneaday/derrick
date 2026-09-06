@@ -29,14 +29,12 @@ public struct PluginFactoryTestScript: Sendable, Hashable {
                         "test_input_json hop at index \(index) must be a JSON object."
                     )
                 }
-                try GuestContractValidation.validateHopEventJSON(hopData)
-                hops.append(try JSONDecoder().decode(PluginHopEvent.self, from: hopData))
+                hops.append(try PluginHopEvent.decodeValidated(hopData))
             }
             return PluginFactoryTestScript(hops: hops)
         }
 
-        try GuestContractValidation.validateHopEventJSON(data)
-        let hop = try JSONDecoder().decode(PluginHopEvent.self, from: data)
+        let hop = try PluginHopEvent.decodeValidated(data)
         return PluginFactoryTestScript(hops: [hop])
     }
 
@@ -57,11 +55,11 @@ public struct PluginFactoryTestScript: Sendable, Hashable {
 
     public func encoded() throws -> Data {
         if hops.count == 1, hops[0].httpResults == nil || hops[0].httpResults?.isEmpty == true {
-            return try JSONEncoder().encode(hops[0])
+            return try hops[0].encodeValidated()
         }
         let object: [String: Any] = [
             "hops": try hops.map { hop in
-                let data = try JSONEncoder().encode(hop)
+                let data = try hop.encodeValidated()
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     throw PluginFactoryError.invalidSource("Could not encode test hop.")
                 }
@@ -103,7 +101,7 @@ public enum PluginFactoryHopTestRunner: Sendable {
         var lastResult = PluginFactoryExecutionResult(exitCode: 1)
 
         for hop in script.hops {
-            let input = try JSONEncoder().encode(hop)
+            let input = try hop.encodeValidated()
             let result = try await execute(input)
             hopResults.append(result)
             lastResult = result

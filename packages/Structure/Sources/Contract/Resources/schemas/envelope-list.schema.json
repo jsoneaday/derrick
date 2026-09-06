@@ -8,6 +8,7 @@
   "items": {
     "type": "object",
     "required": ["verb"],
+    "additionalProperties": false,
     "properties": {
       "verb": {
         "type": "string",
@@ -23,7 +24,6 @@
           "log"
         ]
       },
-      "type": { "type": "string", "description": "Alias for verb" },
       "request_id": { "type": "string" },
       "method": { "type": "string" },
       "url": { "type": "string" },
@@ -32,11 +32,24 @@
       "text": { "type": "string" },
       "content": { "type": "string" },
       "html": { "type": "string" },
+      "markdown": { "type": "string" },
       "message": { "type": "string" },
       "schema_version": { "type": "integer" },
       "auth_ref": { "type": ["string", "null"] },
-      "json": true,
-      "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      "json": {
+        "description": "HTTP request body as a JSON value. HostHTTPRequest.json. The host sends this as the wire body."
+      },
+      "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+      "widgets": { "type": "array", "items": { "type": "object" } },
+      "secret_ref": { "type": "string" },
+      "reason": { "type": "string" },
+      "key": { "type": "string" },
+      "value": true,
+      "interval_seconds": { "type": "integer" },
+      "timezone": { "type": "string" },
+      "threads": { "$ref": "connector-result-emit.schema.json#/properties/threads" },
+      "messages": { "$ref": "connector-result-emit.schema.json#/properties/messages" },
+      "sent_message": { "$ref": "connector-result-emit.schema.json#/properties/sent_message" }
     }
   }
 }

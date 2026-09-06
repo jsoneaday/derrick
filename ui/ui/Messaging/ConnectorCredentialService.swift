@@ -35,6 +35,13 @@ struct ConnectorCredentialForm: View {
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if pluginID.localizedCaseInsensitiveContains("slack") {
+                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 ForEach(fields) { field in
                     fieldRow(field)
                 }

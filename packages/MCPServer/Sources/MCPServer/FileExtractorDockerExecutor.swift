@@ -1,16 +1,23 @@
 import Foundation
 import Structure
 
-/// Runs the prebuilt file extractor image with job-scoped `/data/in` and `/data/out` mounts.
+/// Runs the prebuilt file extractor in a oneshot container: create, exec, rm.
+/// Own queue (max 1). Job folders are bind-mounted; the image must already
+/// exist (`docker image inspect` happens outside the permit).
 public struct FileExtractorDockerExecutor: Sendable {
     public static let image = "derrick-file-extractor:swift-6.4-v1"
     public static let containerPrefix = "derrick-file-extractor"
     public static let maximumTimeoutSeconds = 180
 
     private let executor: DockerCLIExecutor
+    private let queue: DerrickDockerRunQueue
 
-    public init(executor: @escaping DockerCLIExecutor) {
+    public init(
+        executor: @escaping DockerCLIExecutor,
+        queue: DerrickDockerRunQueue = .extractor
+    ) {
         self.executor = executor
+        self.queue = queue
     }
 
     public func run(
@@ -24,37 +31,32 @@ public struct FileExtractorDockerExecutor: Sendable {
         guard imageCheck.exitCode == 0 else {
             throw FileExtractorDockerExecutorError.imageUnavailable(Self.image)
         }
-        let name = "\(Self.containerPrefix)-\(UUID().uuidString.lowercased())"
-        let createArguments = Self.createArguments(
-            name: name,
-            inputDirectory: inputDirectory,
-            outputDirectory: outputDirectory
-        )
+        let executor = self.executor
         do {
-            let created = try await executor(createArguments, Data(), 60)
-            guard created.exitCode == 0 else {
-                throw FileExtractorDockerExecutorError.commandFailed(
-                    "create file extractor container",
-                    detail(from: created)
+            return try await queue.withPermit {
+                try await OneshotDockerContainer.run(
+                    executor: executor,
+                    prefix: Self.containerPrefix,
+                    createArguments: { name in
+                        Self.createArguments(
+                            name: name,
+                            inputDirectory: inputDirectory,
+                            outputDirectory: outputDirectory
+                        )
+                    },
+                    createStep: "create file extractor container",
+                    startStep: "start file extractor container",
+                    body: { name in
+                        try await executor(
+                            ["exec", "-i", name, "/usr/local/bin/derrick-file-extractor"],
+                            input,
+                            timeout
+                        )
+                    }
                 )
             }
-            let started = try await executor(["start", name], Data(), 30)
-            guard started.exitCode == 0 else {
-                throw FileExtractorDockerExecutorError.commandFailed(
-                    "start file extractor container",
-                    detail(from: started)
-                )
-            }
-            let result = try await executor(
-                ["exec", "-i", name, "/usr/local/bin/derrick-file-extractor"],
-                input,
-                timeout
-            )
-            await remove(name)
-            return result
-        } catch {
-            await remove(name)
-            throw error
+        } catch let error as OneshotDockerContainerError {
+            throw mappedExtractorError(error)
         }
     }
 
@@ -81,14 +83,13 @@ public struct FileExtractorDockerExecutor: Sendable {
         ]
     }
 
-    private func remove(_ name: String) async {
-        _ = try? await executor(["rm", "-f", name], Data(), 30)
-    }
-
-    private func detail(from result: DockerCLIResult) -> String {
-        let stderr = String(decoding: result.stderr, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return stderr.isEmpty ? "exit \(result.exitCode)" : stderr
+    private func mappedExtractorError(_ error: OneshotDockerContainerError) -> Error {
+        switch error {
+        case .commandFailed(let step, let detail):
+            return FileExtractorDockerExecutorError.commandFailed(step, detail)
+        case .imageUnavailable(let detail):
+            return FileExtractorDockerExecutorError.imageUnavailable(detail)
+        }
     }
 }
 

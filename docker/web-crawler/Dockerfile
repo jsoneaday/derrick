@@ -1,11 +1,12 @@
 FROM swiftlang/swift:nightly-6.4.x-noble AS build
 
-WORKDIR /build/WebCrawler
-COPY packages/WebCrawler/Package.swift packages/WebCrawler/Package.resolved ./
-COPY packages/WebCrawler/Sources ./Sources
-COPY packages/WebCrawler/Tests ./Tests
-COPY packages/Selenops /build/Selenops
+WORKDIR /build
+COPY Structure /build/Structure
+COPY Selenops /build/Selenops
+COPY WebCrawler /build/WebCrawler
 
+WORKDIR /build/WebCrawler
+# Structure's Linux target compiles only Sources/WebCrawler (see Structure/Package.swift).
 RUN swift build -c release --product derrick-web-crawler
 
 FROM swiftlang/swift:nightly-6.4.x-noble

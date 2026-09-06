@@ -1,8 +1,8 @@
 import Foundation
 import Structure
-import WebCrawler
 
-/// Runs the prebuilt crawler image in a fresh, resource-limited container.
+/// Runs the prebuilt crawler image in a oneshot container: create, exec, rm.
+/// Own queue (max 2). Image pull/build stays outside the permit.
 ///
 /// The image is trusted product code. User input is passed only as JSON on
 /// stdin; it is never interpolated into a shell command.
@@ -13,11 +13,17 @@ public struct WebCrawlerDockerExecutor: Sendable {
     public static let dockerNetwork = "bridge"
 
     private let executor: DockerCLIExecutor
+    private let queue: DerrickDockerRunQueue
+    private let imageGate: WebCrawlerImageGate
 
     public init(
-        executor: @escaping DockerCLIExecutor
+        executor: @escaping DockerCLIExecutor,
+        queue: DerrickDockerRunQueue = .crawler,
+        imageGate: WebCrawlerImageGate = .shared
     ) {
         self.executor = executor
+        self.queue = queue
+        self.imageGate = imageGate
     }
 
     public func run(
@@ -25,46 +31,43 @@ public struct WebCrawlerDockerExecutor: Sendable {
         timeoutSeconds: Int
     ) async throws -> DockerCLIResult {
         let timeout = min(max(timeoutSeconds, 1), Self.maximumTimeoutSeconds)
-        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        try await imageGate.ensureReady(executor: executor)
         let prepared = try await WebCrawlerDockerInputPreparer.enrich(input)
-        let name = "\(Self.containerPrefix)-\(UUID().uuidString.lowercased())"
-        let proxyLease = try await WebCrawlerEgressProxy.shared.lease(forHosts: prepared.leaseHosts)
-        let createArguments = Self.createArguments(
-            name: name,
-            proxyHost: proxyLease.host,
-            proxyPort: proxyLease.port,
-            proxyToken: proxyLease.clientToken
-        )
-
+        let executor = self.executor
         do {
-            let created = try await executor(createArguments, Data(), 60)
-            guard created.exitCode == 0 else {
-                throw WebCrawlerDockerExecutorError.commandFailed(
-                    "create crawler container",
-                    detail(from: created)
-                )
+            return try await queue.withPermit {
+                let proxyLease = try await WebCrawlerEgressProxy.shared.lease(forHosts: prepared.leaseHosts)
+                do {
+                    let result = try await OneshotDockerContainer.run(
+                        executor: executor,
+                        prefix: Self.containerPrefix,
+                        createArguments: { name in
+                            Self.createArguments(
+                                name: name,
+                                proxyHost: proxyLease.host,
+                                proxyPort: proxyLease.port,
+                                proxyToken: proxyLease.clientToken
+                            )
+                        },
+                        createStep: "create crawler container",
+                        startStep: "start crawler container",
+                        body: { name in
+                            try await executor(
+                                ["exec", "-i", name, "/usr/local/bin/derrick-web-crawler"],
+                                prepared.data,
+                                timeout
+                            )
+                        }
+                    )
+                    await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
+                    return result
+                } catch {
+                    await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
+                    throw error
+                }
             }
-
-            let started = try await executor(["start", name], Data(), 30)
-            guard started.exitCode == 0 else {
-                throw WebCrawlerDockerExecutorError.commandFailed(
-                    "start crawler container",
-                    detail(from: started)
-                )
-            }
-
-            let result = try await executor(
-                ["exec", "-i", name, "/usr/local/bin/derrick-web-crawler"],
-                prepared.data,
-                timeout
-            )
-            await remove(name)
-            await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
-            return result
-        } catch {
-            await remove(name)
-            await WebCrawlerEgressProxy.shared.release(forHosts: prepared.leaseHosts)
-            throw error
+        } catch let error as OneshotDockerContainerError {
+            throw mappedCrawlerError(error)
         }
     }
 
@@ -95,14 +98,13 @@ public struct WebCrawlerDockerExecutor: Sendable {
         ]
     }
 
-    private func remove(_ name: String) async {
-        _ = try? await executor(["rm", "-f", name], Data(), 30)
-    }
-
-    private func detail(from result: DockerCLIResult) -> String {
-        let stderr = String(decoding: result.stderr, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return stderr.isEmpty ? "exit \(result.exitCode)" : stderr
+    private func mappedCrawlerError(_ error: OneshotDockerContainerError) -> Error {
+        switch error {
+        case .commandFailed(let step, let detail):
+            return WebCrawlerDockerExecutorError.commandFailed(step, detail)
+        case .imageUnavailable(let detail):
+            return WebCrawlerDockerExecutorError.imageUnavailable(detail)
+        }
     }
 }
 
