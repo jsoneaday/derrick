@@ -20,7 +20,7 @@ struct uiApp: App {
             JobResultPanelSession.isPanelOnlyLaunch = true
             JobResultPanelSession.allowsTermination = false
         }
-        RuntimeLog.shared.addSink { message in
+        RuntimeLog.shared.addUISinkOnce { message in
             Task {
                 await ServiceLogRecorder.shared.record(
                     service: DerrickServiceID.ui.shortName,

@@ -7,6 +7,9 @@ public actor ServiceLogRecorder {
 
     private var repository: DBRepository?
     private var liveHandlers: [@Sendable (ServiceLogEntry) -> Void] = []
+    private var persistCount = 0
+    private let persistTrimEvery = 64
+    private let persistKeepNewest = 2_000
 
     private init() {}
 
@@ -39,6 +42,10 @@ public actor ServiceLogRecorder {
         guard let repository else { return }
         do {
             try await repository.appendServiceLog(entry)
+            persistCount += 1
+            if persistCount % persistTrimEvery == 0 {
+                try await repository.trimServiceLogs(keepingNewest: persistKeepNewest)
+            }
         } catch {
             fputs("[ServiceLogRecorder] persist failed: \(error.localizedDescription)\n", stderr)
         }

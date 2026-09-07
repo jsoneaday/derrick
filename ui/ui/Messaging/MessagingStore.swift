@@ -60,6 +60,7 @@ final class MessagingStore: ObservableObject {
     var isViewingReplyThread: Bool { session.isViewingReplyThread }
     var visibleMessages: [MessagingMessageDTO] { session.visibleMessages }
     var visibleReplyMessages: [MessagingMessageDTO] { session.visibleReplyMessages }
+    var lastReplyPreviewByParentID: [String: String] { session.lastReplyPreviewByParentID }
     var replyThreadWarning: String? { session.replyThreadWarning }
     var scrollToBottomToken: Int { session.scrollToBottomToken }
     var scrollAnchorID: String? { session.scrollAnchorID }
@@ -226,7 +227,7 @@ final class MessagingStore: ObservableObject {
         )
     }
 
-    func sendMessage(_ text: String) async {
+    func sendMessage(_ text: String, parentVendorMessageID: String? = nil) async {
         guard let repository,
               let pluginID = selectedPluginID,
               let thread = selectedThread else {
@@ -239,7 +240,7 @@ final class MessagingStore: ObservableObject {
                 pluginID: pluginID,
                 text: text,
                 thread: thread,
-                parentVendorMessageID: session.selectedReplyParentVendorMessageID,
+                parentVendorMessageID: parentVendorMessageID,
                 repository: repository,
                 store: self,
                 session: session

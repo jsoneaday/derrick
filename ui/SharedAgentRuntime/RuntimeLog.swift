@@ -9,10 +9,21 @@ public final class RuntimeLog: @unchecked Sendable {
 
     private init() {}
 
+    private var didAddUISink = false
+
     public func addSink(_ sink: @escaping @Sendable (String) -> Void) {
         lock.lock()
+        defer { lock.unlock() }
         sinks.append(sink)
-        lock.unlock()
+    }
+
+    /// SwiftUI may reconstruct `App`; only attach the UI recorder once.
+    public func addUISinkOnce(_ sink: @escaping @Sendable (String) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didAddUISink else { return }
+        didAddUISink = true
+        sinks.append(sink)
     }
 
     public func emit(_ message: String) {

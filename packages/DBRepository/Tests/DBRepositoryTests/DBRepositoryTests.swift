@@ -526,6 +526,37 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(uiTail.map(\.message), ["second"])
     }
 
+    func testTrimServiceLogsKeepsNewestRows() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let repository = DBRepository(
+            configuration: DBRepositoryConfiguration(
+                applicationName: "ui",
+                databaseName: "derrick",
+                databaseDirectoryURL: directory,
+                username: "app-user",
+                password: "app-secret"
+            )
+        )
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        for index in 0..<5 {
+            try await repository.appendServiceLog(
+                ServiceLogEntry(
+                    service: "ui",
+                    level: .info,
+                    message: "row-\(index)",
+                    createdAt: start.addingTimeInterval(TimeInterval(index))
+                )
+            )
+        }
+        try await repository.trimServiceLogs(keepingNewest: 2)
+        let kept = try await repository.recentServiceLogs(limit: 10)
+        XCTAssertEqual(Set(kept.map(\.message)), ["row-3", "row-4"])
+    }
+
     func testReopeningExistingDatabaseCompletesQuickly() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

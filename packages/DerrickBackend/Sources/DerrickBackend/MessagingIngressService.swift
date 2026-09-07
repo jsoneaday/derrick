@@ -11,6 +11,7 @@ public final class MessagingIngressService: @unchecked Sendable {
     private let pollIntervalNanoseconds: UInt64 = 4_000_000_000
     private var channelSyncGeneration = 0
     private let channelSyncEveryPolls = 15
+    private let pollGate = PollGate()
 
     private init() {}
 
@@ -33,6 +34,19 @@ public final class MessagingIngressService: @unchecked Sendable {
     }
 
     public func pollOnce() async {
+        switch await pollGate.claim() {
+        case .skip:
+            return
+        case .run:
+            break
+        }
+        await runPollPass()
+        if await pollGate.finishShouldRunAgain() {
+            await pollOnce()
+        }
+    }
+
+    private func runPollPass() async {
         do {
             let repository = try await DaemonRuntime.shared.sharedRepository()
             let connectors = try await repository.listMessagingConnectors(listeningOnly: true)
@@ -105,5 +119,31 @@ public final class MessagingIngressService: @unchecked Sendable {
             nil
         )
         darwinObserver = nil
+    }
+}
+
+private actor PollGate {
+    enum Claim: Sendable {
+        case run
+        case skip
+    }
+
+    private var running = false
+    private var queued = false
+
+    func claim() -> Claim {
+        if running {
+            queued = true
+            return .skip
+        }
+        running = true
+        return .run
+    }
+
+    func finishShouldRunAgain() -> Bool {
+        running = false
+        let again = queued
+        queued = false
+        return again
     }
 }

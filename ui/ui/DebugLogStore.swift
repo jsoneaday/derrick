@@ -12,6 +12,7 @@ final class DebugLogStore: ObservableObject {
 
     private let formatter: DateFormatter
     private let maximumEntries = 2_000
+    private var entryIDs: Set<String> = []
 
     private init() {
         let formatter = DateFormatter()
@@ -19,7 +20,11 @@ final class DebugLogStore: ObservableObject {
         self.formatter = formatter
     }
 
+    private var liveConfigured = false
+
     func configureLiveUpdates() {
+        guard !liveConfigured else { return }
+        liveConfigured = true
         Task {
             await ServiceLogRecorder.shared.addLiveHandler { [weak self] entry in
                 Task { @MainActor in
@@ -30,17 +35,15 @@ final class DebugLogStore: ObservableObject {
     }
 
     func append(_ entry: ServiceLogEntry) {
-        if entries.contains(where: { $0.id == entry.id }) {
-            return
-        }
+        guard entryIDs.insert(entry.id).inserted else { return }
         entries.append(entry)
-        if entries.count > maximumEntries {
-            entries.removeFirst(entries.count - maximumEntries)
-        }
+        trimIfNeeded()
     }
 
     func replaceAll(_ entries: [ServiceLogEntry]) {
         self.entries = entries
+        entryIDs = Set(entries.map(\.id))
+        trimIfNeeded()
     }
 
     func mergePersisted(_ persisted: [ServiceLogEntry]) {
@@ -49,9 +52,17 @@ final class DebugLogStore: ObservableObject {
             merged[entry.id] = entry
         }
         entries = merged.values.sorted { $0.createdAt < $1.createdAt }
-        if entries.count > maximumEntries {
-            entries.removeFirst(entries.count - maximumEntries)
+        entryIDs = Set(entries.map(\.id))
+        trimIfNeeded()
+    }
+
+    private func trimIfNeeded() {
+        guard entries.count > maximumEntries else { return }
+        let overflow = entries.count - maximumEntries
+        for old in entries.prefix(overflow) {
+            entryIDs.remove(old.id)
         }
+        entries.removeFirst(overflow)
     }
 
     @MainActor

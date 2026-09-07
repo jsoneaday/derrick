@@ -20,6 +20,21 @@ public extension DBRepository {
         }
     }
 
+    /// Drops oldest rows so the debug log table cannot grow without bound.
+    func trimServiceLogs(keepingNewest limit: Int = 2_000) throws {
+        let cap = max(1, min(limit, 10_000))
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM service_logs
+            WHERE id NOT IN (
+                SELECT id FROM service_logs
+                ORDER BY created_at DESC, id DESC
+                LIMIT \(cap)
+            );
+            """, on: handle)
+        }
+    }
+
     func recentServiceLogs(service: String? = nil, limit: Int = 100) throws -> [ServiceLogEntry] {
         let cap = max(1, min(limit, 5000))
         return try withDatabaseHandle { handle in

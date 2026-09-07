@@ -221,6 +221,12 @@ final class DBMessagingTests: XCTestCase {
             filter: .replyThread(parentVendorMessageID: "171.1")
         )
         XCTAssertEqual(thread.map(\.body), ["a2", "hi this is a thread"])
+
+        let previews = try await repository.latestReplyPreviews(
+            threadID: root.thread.id,
+            parentVendorMessageIDs: ["171.1"]
+        )
+        XCTAssertEqual(previews["171.1"], "hi this is a thread")
     }
 
     func testConcurrentInboundPersistDoesNotDoubleUnread() async throws {

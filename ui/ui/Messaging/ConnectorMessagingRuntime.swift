@@ -71,6 +71,14 @@ final class ConnectorMessagingRuntime {
             text: trimmed,
             parentVendorMessageID: parentVendorMessageID
         )
+        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parent.isEmpty {
+            try? await client.pollInbox(
+                pluginID: pluginID,
+                vendorThreadID: thread.vendorThreadID,
+                parentVendorMessageID: parent
+            )
+        }
         await session.reloadMessagesForThread(id: thread.id)
         await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
         await store.catalog.refreshBadges()

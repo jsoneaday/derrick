@@ -252,6 +252,177 @@ import Testing
         #expect(replies.map(\.body) == ["hi this is a thread"])
     }
 
+    @Test func pollConversationDoesNotSendOldestWhenParentAlreadyExists() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "alice",
+                body: "root",
+                createdAt: Date(timeIntervalSince1970: 1_710_000_000),
+                replyCount: 1
+            )
+        )
+
+        final class Capture: @unchecked Sendable {
+            var oldest: String?
+            var parent: String?
+        }
+        let capture = Capture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.oldest = event.params?["oldest"]?.stringValue
+            capture.parent = event.params?["parent_vendor_message_id"]?.stringValue
+            let envelopes = """
+            [{"verb":"result.emit","messages":[{"vendor_thread_id":"C123","vendor_message_id":"171.2","direction":"inbound","sender":"U2","body":"hi this is a thread","created_at":"1710000002.000100","parent_vendor_message_id":"171.1"}]}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        _ = try await adapter.pollConversation(
+            vendorThreadID: "C123",
+            parentVendorMessageID: "171.1",
+            repository: repository
+        )
+        #expect(capture.parent == "171.1")
+        #expect(capture.oldest == nil)
+    }
+
+    @Test func pollInboxFetchesReplyThreadWhenParentReplyCountIsAhead() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "alice",
+                body: "root",
+                createdAt: Date(timeIntervalSince1970: 1_710_000_000),
+                replyCount: 1
+            )
+        )
+
+        final class Capture: @unchecked Sendable {
+            var parents: [String] = []
+            var oldests: [String?] = []
+        }
+        let capture = Capture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parents.append(event.params?["parent_vendor_message_id"]?.stringValue ?? "")
+            capture.oldests.append(event.params?["oldest"]?.stringValue)
+            let parent = event.params?["parent_vendor_message_id"]?.stringValue ?? ""
+            let envelopes: String
+            if parent.isEmpty {
+                envelopes = #"[{"verb":"result.emit","messages":[]}]"#
+            } else {
+                envelopes = """
+                [{"verb":"result.emit","messages":[{"vendor_thread_id":"C123","vendor_message_id":"171.2","direction":"inbound","sender":"U2","body":"hi this is a thread","created_at":"1710000002.000100","parent_vendor_message_id":"171.1"}]}]
+                """
+            }
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        let inserted = try await adapter.pollInbox(repository: repository)
+        #expect(capture.parents == ["", "171.1"])
+        #expect(capture.oldests[1] == nil)
+        #expect(inserted.contains(where: { $0.message.body == "hi this is a thread" }))
+        let thread = try await repository.listMessagingThreads(pluginID: "slack-connection")[0]
+        let replies = try await repository.listMessagingMessages(
+            threadID: thread.id,
+            filter: .replyThread(parentVendorMessageID: "171.1")
+        )
+        #expect(replies.map(\.body) == ["root", "hi this is a thread"])
+    }
+
+    @Test func pollInboxSyncsAtMostOneBehindReplyThreadPerPass() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "alice",
+                body: "root-a",
+                createdAt: Date(timeIntervalSince1970: 1_000),
+                replyCount: 1
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.3",
+                sender: "alice",
+                body: "root-b",
+                createdAt: Date(timeIntervalSince1970: 2_000),
+                replyCount: 1
+            )
+        )
+
+        final class Capture: @unchecked Sendable {
+            var parents: [String] = []
+        }
+        let capture = Capture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parents.append(event.params?["parent_vendor_message_id"]?.stringValue ?? "")
+            let envelopes = #"[{"verb":"result.emit","messages":[]}]"#
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        _ = try await adapter.pollInbox(repository: repository)
+        #expect(capture.parents == ["", "171.1"])
+    }
+
     @Test func pollConversationSurfacesSlackMissingScopeAsReadPermissionError() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")

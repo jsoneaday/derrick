@@ -44,6 +44,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             .first(where: { $0.pluginID == pluginID })
 
         var inserted: [MessagingPersistResult] = []
+        var replyPollsRemaining = 1
         for thread in threads {
             inserted.append(
                 contentsOf: try await pollConversation(
@@ -53,6 +54,23 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
                     connector: connector
                 )
             )
+            guard replyPollsRemaining > 0 else { continue }
+            let parents = try await replyParentsNeedingSync(
+                thread: thread,
+                repository: repository,
+                limit: replyPollsRemaining
+            )
+            for parentID in parents {
+                inserted.append(
+                    contentsOf: try await pollConversation(
+                        thread: thread,
+                        parentVendorMessageID: parentID,
+                        repository: repository,
+                        connector: connector
+                    )
+                )
+                replyPollsRemaining -= 1
+            }
         }
         return inserted
     }
@@ -85,26 +103,18 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         var params: [String: PluginJSON] = [
             "vendor_thread_id": .string(thread.vendorThreadID),
         ]
-        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !parent.isEmpty {
+        let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !parent.isEmpty {
             params["parent_vendor_message_id"] = .string(parent)
             params["thread_ts"] = .string(parent)
-        }
-        let filter: MessagingMessageListFilter = {
-            if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !parent.isEmpty {
-                return .replyThread(parentVendorMessageID: parent)
-            }
-            return .channelRoots
-        }()
-        if let cursor = try await pollCursor(
+        } else if let cursor = try await pollCursor(
             for: thread,
-            filter: filter,
+            filter: .channelRoots,
             repository: repository
         ) {
             params["since"] = .string(cursor)
             params["oldest"] = .string(cursor)
-        } else if parentVendorMessageID == nil, let baseline = pollBaseline(
+        } else if let baseline = pollBaseline(
             thread: thread,
             connector: connector
         ) {
@@ -118,7 +128,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         )
         try Self.throwIfReplyThreadBlocked(
             result: result,
-            parentVendorMessageID: parentVendorMessageID
+            parentVendorMessageID: parent.isEmpty ? nil : parent
         )
         if result.messages.isEmpty,
            result.reportsVendorFailure,
@@ -143,6 +153,42 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         if let mapped = ConnectorReplyThreadAccessMessage.userFacing(fromVendorDetail: detail) {
             throw ConnectorMessagingError.pluginFailed(mapped)
         }
+    }
+
+    /// Channel poll does not return nested replies. Pull threads whose stored
+    /// children are behind the vendor `reply_count` on the parent.
+    private func replyParentsNeedingSync(
+        thread: MessagingThreadDTO,
+        repository: DBRepository,
+        limit: Int
+    ) async throws -> [String] {
+        guard limit > 0 else { return [] }
+        let roots = try await repository.listMessagingMessages(
+            threadID: thread.id,
+            limit: MessagingViewport.maxVisibleMessages,
+            filter: .channelRoots
+        )
+        var parents: [String] = []
+        for root in roots {
+            guard parents.count < limit else { break }
+            guard let vendorID = root.vendorMessageID?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !vendorID.isEmpty,
+                  root.replyCount > 0
+            else {
+                continue
+            }
+            let threadRows = try await repository.listMessagingMessages(
+                threadID: thread.id,
+                limit: MessagingViewport.maxVisibleMessages,
+                filter: .replyThread(parentVendorMessageID: vendorID)
+            )
+            let childCount = threadRows.filter { $0.parentVendorMessageID == vendorID }.count
+            if childCount < root.replyCount {
+                parents.append(vendorID)
+            }
+        }
+        return parents
     }
 
     private func pollCursor(

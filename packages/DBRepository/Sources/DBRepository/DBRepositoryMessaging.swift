@@ -207,6 +207,44 @@ public extension DBRepository {
         }
     }
 
+    /// Latest reply body for each parent, for the channel "N replies" row.
+    func latestReplyPreviews(
+        threadID: String,
+        parentVendorMessageIDs: [String]
+    ) throws -> [String: String] {
+        let unique = Array(
+            Set(
+                parentVendorMessageIDs
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        let parents = Array(unique.prefix(MessagingViewport.maxVisibleMessages))
+        guard !parents.isEmpty else { return [:] }
+        let list = parents.map { quoted($0) }.joined(separator: ", ")
+        return try withDatabaseHandle { handle in
+            let sql = """
+            SELECT parent_vendor_message_id, body
+            FROM messaging_messages
+            WHERE thread_id = \(quoted(threadID))
+              AND parent_vendor_message_id IN (\(list))
+            ORDER BY created_at DESC, id DESC;
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                throw Self.sqliteError(handle: handle, fallback: "Failed to prepare reply preview list.")
+            }
+            defer { sqlite3_finalize(statement) }
+            var previews: [String: String] = [:]
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let parent = columnOptionalString(statement, index: 0) ?? ""
+                guard !parent.isEmpty, previews[parent] == nil else { continue }
+                previews[parent] = columnOptionalString(statement, index: 1) ?? ""
+            }
+            return previews
+        }
+    }
+
     /// Ingress write path. One IMMEDIATE transaction: ensure thread, insert-or-ignore
     /// by vendor id, bump unread only for a new row on an unmuted thread.
     func persistMessagingInbound(_ record: MessagingInboundRecord) throws -> MessagingPersistResult {

@@ -27,6 +27,7 @@ final class MessagingSessionStore: ObservableObject {
     @Published var selectedReplyParentVendorMessageID: String?
     @Published private(set) var visibleMessages: [MessagingMessageDTO] = []
     @Published private(set) var visibleReplyMessages: [MessagingMessageDTO] = []
+    @Published private(set) var lastReplyPreviewByParentID: [String: String] = [:]
     @Published var replyThreadWarning: String?
     @Published var scrollToBottomToken = 0
     @Published var scrollAnchorID: String?
@@ -148,7 +149,6 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func loadOlderIfNeeded() async {
-        guard selectedReplyParentVendorMessageID == nil else { return }
         guard let repository,
               let threadID = selectedThreadID,
               let oldest = visibleMessages.first,
@@ -174,10 +174,9 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func jumpToLatest() async {
+        await loadNewestWindow()
         if selectedReplyParentVendorMessageID != nil {
             await loadReplyWindow()
-        } else {
-            await loadNewestWindow()
         }
         showJumpToLatest = false
         showNewMessagesPill = false
@@ -262,6 +261,7 @@ final class MessagingSessionStore: ObservableObject {
     private func loadNewestWindow() async {
         guard let repository, let threadID = selectedThreadID else {
             visibleMessages = []
+            lastReplyPreviewByParentID = [:]
             hasOlder = false
             return
         }
@@ -277,6 +277,14 @@ final class MessagingSessionStore: ObservableObject {
             showJumpToLatest = false
             showNewMessagesPill = false
             scrollToBottomToken += 1
+            let parentIDs = page.compactMap { message -> String? in
+                guard message.replyCount > 0 else { return nil }
+                return message.vendorMessageID
+            }
+            lastReplyPreviewByParentID = try await repository.latestReplyPreviews(
+                threadID: threadID,
+                parentVendorMessageIDs: parentIDs
+            )
         } catch {
             lastError = error.localizedDescription
         }
