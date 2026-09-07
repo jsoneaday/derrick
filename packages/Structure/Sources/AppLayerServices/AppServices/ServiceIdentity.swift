@@ -17,6 +17,12 @@ public enum DerrickServiceID: String, Codable, Sendable, CaseIterable, Hashable 
     /// Mach service name stays `machServiceName` on `daemon`.
     public static let daemonSessionLaunchdLabel = "derrick.ui.Daemon.session"
 
+    /// Fixed launchd labels to demand-start. Do not `launchctl print gui/<uid>` to
+    /// discover SM UUID jobs — that dump hangs the sandboxed UI on the main thread.
+    public static var demandStartLaunchdLabels: [String] {
+        [daemon.rawValue, daemonSessionLaunchdLabel, jobKeepAlive.rawValue]
+    }
+
     /// App Group used for shared DB and sandboxed Mach lookup of the daemon.
     public static let appGroupID = "VUSK4B2YKQ.derrick.shared"
 

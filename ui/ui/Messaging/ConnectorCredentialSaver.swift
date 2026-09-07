@@ -15,6 +15,27 @@ enum ConnectorCredentialSaver {
         }
     }
 
+    /// Writes drafts and copies `.env` values into the shared Keychain the daemon reads.
+    static func persistRequired(
+        pluginID: String,
+        fields: [PluginCredentialFieldPresentation],
+        drafts: [String: String]
+    ) throws {
+        try savePartial(pluginID: pluginID, fields: fields, drafts: drafts)
+        PluginSecretKeychain.promoteToSharedGroup(pluginID: pluginID, fields: fields.map(\.descriptor))
+        try PluginSecretHostMirror.syncDevelopmentSecretsToKeychainOrThrow(
+            pluginID: pluginID,
+            fields: fields.map(\.descriptor)
+        )
+        let missing = PluginSecretKeychain.missingKeychainIDs(
+            pluginID: pluginID,
+            fields: fields.map(\.descriptor)
+        )
+        guard missing.isEmpty else {
+            throw PluginSecretKeychainError.notStoredForDaemon
+        }
+    }
+
     static func canSave(
         fields: [PluginCredentialFieldPresentation],
         drafts: [String: String],

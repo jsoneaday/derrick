@@ -29,6 +29,8 @@ final class AppBootstrapStatus: ObservableObject {
 
     /// Single-flight handle so concurrent SwiftUI `.task` entries join one bootstrap.
     private var inFlightBootstrap: Task<Void, Never>?
+    private var deferModalPresentation = false
+    private var deferredModalRevealTask: Task<Void, Never>?
 
     private init() {}
 
@@ -79,7 +81,7 @@ final class AppBootstrapStatus: ObservableObject {
     /// Start bootstrap UI. Idempotent while initializing; no-ops after ready
     /// (SwiftUI may re-enter `.task` — must not re-open an undismissable modal).
     @discardableResult
-    func beginLoadingSession() -> Bool {
+    func beginLoadingSession(deferModal: Bool = false) -> Bool {
         if phase == .ready {
             debugLog("[bootstrap] beginLoadingSession ignored (already ready)")
             return false
@@ -88,14 +90,37 @@ final class AppBootstrapStatus: ObservableObject {
             debugLog("[bootstrap] beginLoadingSession ignored (already initializing)")
             return false
         }
+        deferModalPresentation = deferModal
         phase = .loadingSession
         statusMessage = "Loading session store…"
         failureTitle = nil
         failureMessage = nil
         failureRecovery = .none
-        isModalPresented = true
+        if deferModal {
+            scheduleDeferredModalReveal()
+        } else {
+            isModalPresented = true
+        }
+        DerrickAppSupport.clearUIBootstrapReadyMarker()
         debugLog("[bootstrap] phase=\(phase.rawValue) \(statusMessage)")
         return true
+    }
+
+    /// Show the bootstrap modal when setup is taking longer than a beat.
+    func revealModalIfStillInitializing() {
+        guard isInitializing else { return }
+        deferModalPresentation = false
+        deferredModalRevealTask?.cancel()
+        deferredModalRevealTask = nil
+        isModalPresented = true
+    }
+
+    private func scheduleDeferredModalReveal() {
+        deferredModalRevealTask?.cancel()
+        deferredModalRevealTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            revealModalIfStillInitializing()
+        }
     }
 
     func update(phase: Phase, message: String) {
@@ -107,11 +132,16 @@ final class AppBootstrapStatus: ObservableObject {
         // Don't let a cancelled re-entrant task demote ready via failed paths above.
         self.phase = phase
         self.statusMessage = message
-        isModalPresented = true
+        if !deferModalPresentation {
+            isModalPresented = true
+        }
         debugLog("[bootstrap] phase=\(phase.rawValue) \(message)")
     }
 
     func markReady() {
+        deferredModalRevealTask?.cancel()
+        deferredModalRevealTask = nil
+        deferModalPresentation = false
         phase = .ready
         statusMessage = "Ready"
         failureTitle = nil
@@ -119,6 +149,7 @@ final class AppBootstrapStatus: ObservableObject {
         failureRecovery = .none
         isModalPresented = false
         DerrickUISessionPresence.markInteractiveSessionActive()
+        DerrickAppSupport.writeUIBootstrapReadyMarker()
         debugLog("[bootstrap] phase=ready")
     }
 
@@ -151,6 +182,9 @@ final class AppBootstrapStatus: ObservableObject {
     /// Also used by Try Again after a failure so `beginLoadingSession` can start a new flight.
     func noteBootstrapCancelled() {
         guard phase != .ready else { return }
+        deferredModalRevealTask?.cancel()
+        deferredModalRevealTask = nil
+        deferModalPresentation = false
         phase = .idle
         statusMessage = "Starting…"
         failureTitle = nil

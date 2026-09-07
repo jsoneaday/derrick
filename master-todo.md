@@ -40,11 +40,13 @@ Wizard type is already on the create form (disabled). Unlock it with a **preset 
 - Custom topic is a search/filter string, not a new plugin kind.
 - Schedule is optional and uses existing JobService delay/repeat — do not invent a second scheduler. Unscheduled plugins stay on-demand.
 
-- [ ] Enable News reader in the create wizard; keep Custom disabled.
-- [ ] Structured input (topic, source(s), mode, max count, optional schedule) → factory goal. No `User requirements:` free text.
-- [ ] Always emit source links on every item. Enforce in validation, not only in the prompt.
-- [ ] Host UI that can show a linked list (and summaries) before shipping extras.
-- [ ] Optional schedule: persist with the plugin, run via JobService, still show source links on every item.
+- [x] Enable News reader in the create wizard; keep Custom disabled.
+- [x] Structured input (topics, source(s), mode, max count, optional schedule). No free-text feature dump.
+- [x] Always emit source links on every item. Enforce in validation, not only in the prompt.
+- [x] Host UI that can show a linked list (and summaries) before shipping extras.
+- [x] Optional schedule is stored on the saved list and refreshes when the list is opened if due. JobService timer wiring can follow.
+
+News lists are **named saved argument sets** on one host news reader (not one generated plugin per list). Paywalled article URLs fail create/refresh with an explicit paywall reason; the wizard warns before submit.
 
 ### File paths: read vs convert
 

@@ -100,7 +100,7 @@ final class PluginCredentialPanelPresenter {
         values: [String: String]
     ) {
         do {
-            try ConnectorCredentialSaver.savePartial(pluginID: pluginID, fields: fields, drafts: values)
+            try ConnectorCredentialSaver.persistRequired(pluginID: pluginID, fields: fields, drafts: values)
             finish(
                 AgentApprovalDecisionDTO(
                     approvalID: request.approvalID,

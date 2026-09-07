@@ -103,7 +103,9 @@ public enum JobServiceLoginAgent {
             stderr
         )
 
-        if staleProgram {
+        // SMAppService owns the helper. Booting out session/legacy labels while SM is
+        // enabled kills the Mach service and the next UI launch hangs on connect.
+        if staleProgram, smAgent.status != .enabled, smAgent.status != .requiresApproval {
             fputs(
                 "[derrickd] session agent still points at a previous app bundle — bootout and reinstall\n",
                 stderr
@@ -117,6 +119,19 @@ public enum JobServiceLoginAgent {
         do {
             if let r = try registerViaSMAppService() {
                 smDetail = r.detail
+                let smOwnsHelper = r.isRunningOrEnabled || smAgent.status == .requiresApproval
+                if smOwnsHelper {
+                    if !isDaemonProcessRunning() {
+                        fputs("[derrickd] SM registered but no JobKeepAlive process — demand-start via launchd\n", stderr)
+                        demandStartSMDaemon()
+                    }
+                    return Result(
+                        method: .smAppService,
+                        statusDescription: r.statusDescription,
+                        isRunningOrEnabled: true,
+                        detail: "\(smDetail); mach=\(DerrickServiceID.daemon.machServiceName)"
+                    )
+                }
             }
         } catch {
             smDetail = "SM failed: \(error.localizedDescription)"
@@ -183,7 +198,24 @@ public enum JobServiceLoginAgent {
         kickstartRegisteredDaemon()
     }
 
+    /// Start the nested helper if it is not running. Does not kill or `kickstart -k`.
+    public static func ensureHelperProcessRunning() {
+        if isDaemonProcessRunning() {
+            fputs("[derrickd] helper already running\n", stderr)
+            return
+        }
+        demandStartSMDaemon()
+    }
+
     public static func kickstartRegisteredDaemon() {
+        if smAgent.status == .enabled, isDaemonProcessRunning() {
+            fputs("[derrickd] kickstart skipped — SMAppService already enabled\n", stderr)
+            return
+        }
+        if smAgent.status == .enabled, !isDaemonProcessRunning() {
+            demandStartSMDaemon()
+            return
+        }
         if !isLaunchdJobLoaded() {
             bootstrapUserLaunchAgentIfNeeded(expectedExecutable: preflightPaths().executable)
         }
@@ -281,6 +313,38 @@ public enum JobServiceLoginAgent {
         return nil
     }
 
+    private static func isDaemonProcessRunning() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        process.arguments = ["-f", "LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    /// Start the SM helper through launchd so it can check in the Mach service.
+    /// Do not `open` the helper app: that process holds the singleton lock but never
+    /// receives `VUSK4B2YKQ.derrick.shared.daemon`, and the UI hangs on connect.
+    /// Do not `launchctl print gui/<uid>`: the dump hangs the sandboxed UI.
+    private static func demandStartSMDaemon() {
+        let uid = getuid()
+        for name in DerrickServiceID.demandStartLaunchdLabels {
+            let domain = "gui/\(uid)/\(name)"
+            let status = runLaunchctlAllowFail(["kickstart", domain])
+            if status == 0 {
+                fputs("[derrickd] demand-start ok \(domain)\n", stderr)
+                return
+            }
+        }
+        fputs("[derrickd] demand-start missed — Mach XPC launch-on-demand should start derrickd\n", stderr)
+    }
+
     private static func isLaunchdDomainLoaded(_ domain: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -368,6 +432,8 @@ public enum JobServiceLoginAgent {
         let status = smAgent.status
         switch status {
         case .enabled:
+            // Re-register so BTM tracks this DerivedData bundle without prompting again.
+            try? smAgent.register()
             return Result(
                 method: .smAppService,
                 statusDescription: describe(status),

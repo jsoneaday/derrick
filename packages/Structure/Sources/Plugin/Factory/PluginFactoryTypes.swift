@@ -53,6 +53,16 @@ public struct PluginFactoryDraft: Sendable, Hashable {
             userGoal: userGoal
         )
     }
+
+    public func replacingManifest(_ manifest: PluginFactoryManifestInput) throws -> PluginFactoryDraft {
+        PluginFactoryDraft(
+            manifestJSON: try manifest.encodedJSON(),
+            guestSource: guestSource,
+            testInput: testInput,
+            skillFiles: skillFiles,
+            userGoal: userGoal
+        )
+    }
 }
 
 /// Builder-owned product facts. The factory owns the Agent Plugin schema,
@@ -64,6 +74,8 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
     public let secrets: [PluginSecretField]
     public let role: PluginRole
     public let messagingOps: [String]
+    public let authScheme: ConnectorAuthScheme?
+    public let permissions: [String]
 
     public init(
         pluginID: String,
@@ -71,14 +83,54 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
         description: String,
         secrets: [PluginSecretField] = [],
         role: PluginRole = .standard,
-        messagingOps: [String] = []
+        messagingOps: [String] = [],
+        authScheme: ConnectorAuthScheme? = nil,
+        permissions: [String] = []
     ) {
         self.pluginID = pluginID
         self.version = version
         self.description = description
-        self.secrets = secrets
         self.role = role
         self.messagingOps = messagingOps
+        self.permissions = permissions
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        self.secrets = Self.normalizedSecrets(pluginID: pluginID, secrets: secrets, role: role)
+        self.authScheme = DerrickExtensionPointers.resolvedAuthScheme(
+            declared: authScheme,
+            role: role,
+            secrets: self.secrets
+        )
+    }
+
+    public static func connector(
+        pluginID: String,
+        description: String,
+        auth: ConnectorAuthDiscovery,
+        version: String = "1.0.0",
+        messagingOps: [String] = PluginFactoryCreateInput.ConnectorScope.fullSync.requiredMessagingOps
+    ) -> PluginFactoryManifestInput {
+        PluginFactoryManifestInput(
+            pluginID: pluginID,
+            version: version,
+            description: description,
+            secrets: auth.secrets,
+            role: .connector,
+            messagingOps: messagingOps,
+            authScheme: auth.authScheme,
+            permissions: auth.permissions
+        )
+    }
+
+    /// Slack connectors always declare `bot_token` so the host can prompt or read `.env`.
+    private static func normalizedSecrets(
+        pluginID: String,
+        secrets: [PluginSecretField],
+        role: PluginRole
+    ) -> [PluginSecretField] {
+        if !secrets.isEmpty { return secrets }
+        guard role.isConnector else { return secrets }
+        return PluginSecretField.resolvedFields(pluginID: pluginID, declared: secrets)
     }
 
     public func encodedJSON() throws -> String {
@@ -104,6 +156,12 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
             if !messagingOps.isEmpty {
                 derrick["messaging_ops"] = messagingOps
             }
+            if let authScheme {
+                derrick["auth_scheme"] = authScheme.rawValue
+            }
+            if !permissions.isEmpty {
+                derrick["permissions"] = permissions
+            }
         }
         let object: [String: Any] = [
             "$schema": PluginContract.agentPluginSchema,
@@ -121,6 +179,23 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
             throw PluginFactoryError.invalidManifest("Could not encode the canonical manifest.")
         }
     }
+
+    public static func fromEncodedJSON(_ json: String) throws -> PluginFactoryManifestInput {
+        guard let data = json.data(using: .utf8) else {
+            throw PluginFactoryError.invalidManifest("Host manifest is not UTF-8.")
+        }
+        let manifest = try AgentPluginManifest.decode(data)
+        return PluginFactoryManifestInput(
+            pluginID: manifest.name.rawValue,
+            version: manifest.version ?? "1.0.0",
+            description: manifest.description ?? "",
+            secrets: manifest.derrick?.secrets ?? [],
+            role: manifest.derrick?.role ?? .standard,
+            messagingOps: manifest.derrick?.messagingOps ?? [],
+            authScheme: manifest.derrick?.authScheme,
+            permissions: manifest.derrick?.permissions ?? []
+        )
+    }
 }
 
 /// Input to the builder model. Feedback is present only after a bounded,
@@ -129,15 +204,19 @@ public struct PluginFactoryBuilderRequest: Sendable, Hashable {
     public let userGoal: String
     public let previousDraft: PluginFactoryDraft?
     public let feedback: String?
+    /// When set, the host writes `plugin.json`. The builder only supplies Python and tests.
+    public let hostManifest: PluginFactoryManifestInput?
 
     public init(
         userGoal: String,
         previousDraft: PluginFactoryDraft? = nil,
-        feedback: String? = nil
+        feedback: String? = nil,
+        hostManifest: PluginFactoryManifestInput? = nil
     ) {
         self.userGoal = userGoal
         self.previousDraft = previousDraft
         self.feedback = feedback
+        self.hostManifest = hostManifest
     }
 }
 

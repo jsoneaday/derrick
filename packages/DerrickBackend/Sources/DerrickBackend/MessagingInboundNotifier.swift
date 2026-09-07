@@ -1,16 +1,16 @@
 import Foundation
 import Structure
 
-/// Inbound connector messages → Daemon UserNotifications when the main UI is not running.
+/// Inbound connector messages → macOS notifications (open or closed UI).
 public enum MessagingInboundNotifier: Sendable {
-    /// Posts one banner per conversation that received new inbound mail this poll.
-    /// No-op while Derrick is open (badges + live refresh already cover that).
+    /// Posts one OS banner per conversation that received new inbound mail this poll.
     public static func notifyNewInbound(
         _ rows: [MessagingPersistResult],
         uiIsInteractive: Bool = DerrickUIPresence.isInteractiveUIRunning()
     ) async {
-        guard !uiIsInteractive else { return }
-        for request in notificationRequests(from: rows) {
+        _ = uiIsInteractive
+        let enriched = await enrichDisplayNames(rows)
+        for request in notificationRequests(from: enriched) {
             do {
                 try await NotificationSender.post(request)
             } catch {
@@ -26,13 +26,51 @@ public enum MessagingInboundNotifier: Sendable {
         let inbound = rows.filter {
             $0.inserted && $0.message.direction == .inbound && !$0.thread.muted
         }
-        let grouped = Dictionary(grouping: inbound, by: \.thread.id)
-        return grouped.keys.sorted().compactMap { threadID in
-            guard let group = grouped[threadID], let last = group.last else {
-                return nil
-            }
-            return request(for: group, last: last)
+        let replies = inbound.filter(\.message.isReply)
+        let roots = inbound.filter { !$0.message.isReply }
+
+        var requests: [UserNotificationRequest] = []
+        let rootGrouped = Dictionary(grouping: roots, by: \.thread.id)
+        for threadID in rootGrouped.keys.sorted() {
+            guard let group = rootGrouped[threadID], let last = group.last else { continue }
+            requests.append(request(for: group, last: last))
         }
+        for reply in replies.sorted(by: { $0.message.createdAt < $1.message.createdAt }) {
+            requests.append(request(for: [reply], last: reply))
+        }
+        return requests
+    }
+
+    private static func enrichDisplayNames(_ rows: [MessagingPersistResult]) async -> [MessagingPersistResult] {
+        var enriched: [MessagingPersistResult] = []
+        for row in rows {
+            let sender = await MessagingSenderDisplayName.resolve(
+                pluginID: row.thread.pluginID,
+                sender: row.message.sender
+            )
+            guard sender != row.message.sender else {
+                enriched.append(row)
+                continue
+            }
+            enriched.append(
+                MessagingPersistResult(
+                    inserted: row.inserted,
+                    message: MessagingMessageDTO(
+                        id: row.message.id,
+                        threadID: row.message.threadID,
+                        vendorMessageID: row.message.vendorMessageID,
+                        direction: row.message.direction,
+                        sender: sender,
+                        body: row.message.body,
+                        createdAt: row.message.createdAt,
+                        parentVendorMessageID: row.message.parentVendorMessageID,
+                        replyCount: row.message.replyCount
+                    ),
+                    thread: row.thread
+                )
+            )
+        }
+        return enriched
     }
 
     private static func request(
@@ -40,31 +78,50 @@ public enum MessagingInboundNotifier: Sendable {
         last: MessagingPersistResult
     ) -> UserNotificationRequest {
         let thread = last.thread
-        let preview = truncated(last.message.body, limit: 180)
-        let sender = last.message.sender.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lastBit = sender.isEmpty ? preview : "\(sender): \(preview)"
+        let message = last.message
+        let isReply = message.isReply
+        let preview = truncated(message.body, limit: 180)
+        let sender = message.sender.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastBit = MessagingInboundNotificationCopy.previewBody(
+            sender: sender,
+            body: preview,
+            isReply: isReply
+        )
         let body: String
         if group.count == 1 {
-            body = lastBit.isEmpty ? "New message" : lastBit
+            body = lastBit
         } else if lastBit.isEmpty {
             body = "\(group.count) new messages"
         } else {
             body = "\(group.count) new messages. \(lastBit)"
         }
-        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let channelTitle = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = channelTitle.isEmpty ? "Derrick" : channelTitle
+        let subtitle = isReply ? "Thread reply" : nil
+        let threadIdentifier: String
+        if isReply, let parent = message.parentVendorMessageID {
+            threadIdentifier = "derrick.messaging.\(thread.pluginID).\(thread.id).\(parent)"
+        } else {
+            threadIdentifier = "derrick.messaging.\(thread.pluginID).\(thread.id)"
+        }
+        var userInfo: [String: String] = [
+            UserNotificationUserInfoKey.kind.rawValue: UserNotificationKind.messagingMessage.rawValue,
+            UserNotificationUserInfoKey.pluginID.rawValue: thread.pluginID,
+            UserNotificationUserInfoKey.threadID.rawValue: thread.id,
+            UserNotificationUserInfoKey.messagingMessageID.rawValue: message.id,
+        ]
+        if let parent = message.parentVendorMessageID {
+            userInfo[UserNotificationUserInfoKey.messagingParentVendorMessageID.rawValue] = parent
+        }
         return UserNotificationRequest(
-            id: "derrick.messaging.\(thread.pluginID).\(thread.id)",
+            id: "derrick.messaging.\(thread.pluginID).\(message.id)",
             kind: .messagingMessage,
-            title: title.isEmpty ? "Derrick" : title,
+            title: title,
             body: body,
-            threadIdentifier: "derrick.messaging.\(thread.pluginID).\(thread.id)",
+            subtitle: subtitle,
+            threadIdentifier: threadIdentifier,
             timeSensitive: false,
-            userInfo: [
-                UserNotificationUserInfoKey.kind.rawValue: UserNotificationKind.messagingMessage.rawValue,
-                UserNotificationUserInfoKey.pluginID.rawValue: thread.pluginID,
-                UserNotificationUserInfoKey.threadID.rawValue: thread.id,
-                UserNotificationUserInfoKey.messagingMessageID.rawValue: last.message.id,
-            ]
+            userInfo: userInfo
         )
     }
 

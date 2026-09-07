@@ -31,10 +31,14 @@ actor ConfiguredPluginFactoryService {
         self.apiKeyProvider = apiKeyProvider
     }
 
-    func build(userGoal: String) async throws -> PluginFactoryRelease {
+    func build(
+        userGoal: String,
+        hostManifest: PluginFactoryManifestInput? = nil
+    ) async throws -> PluginFactoryRelease {
         let existingReleases = try await repository.listPluginFactoryReleaseSummaries()
         let release = try await PluginFactorySession().build(
             userGoal: userGoal,
+            hostManifest: hostManifest,
             builder: ConfiguredPluginFactoryBuilder(
                 settings: settings,
                 thinkingSettings: thinkingSettings,
@@ -148,7 +152,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         plugin_id (string), version (string), description (string), python_source (string),
         test_input_json (string containing valid JSON — a serialized object, not prose),
         skill_files (array of objects with path and body),
-        secrets (array of objects with id, label, and kind; optional),
+        secrets (array of objects with id, label, and kind; required for connector plugins),
         role (string, optional: "connector" or "standard").
         plugin_id must use lowercase letters, numbers, hyphens, and dots only
         (for example my-connector). Never use underscores in plugin_id.
@@ -239,6 +243,16 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         existingReleases: [PluginFactoryReleaseSummary]
     ) -> String {
         var sections = ["User goal:\n\(request.userGoal)"]
+        if let host = request.hostManifest {
+            sections.append(
+                """
+                The host already assigned plugin_id \(host.pluginID) and these secret ids: \
+                \(host.secrets.map(\.id).joined(separator: ", ")). \
+                Return python_source and test_input_json. Do not pick a different plugin_id or secret ids. \
+                Use {{secret:\(host.secrets.first?.id ?? "bot_token")}} in HTTP headers.
+                """
+            )
+        }
         if !existingReleases.isEmpty {
             let catalog = existingReleases
                 .map { "\($0.pluginID)@\($0.version)" }
@@ -537,7 +551,7 @@ enum PluginFactoryModelError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
-private func collectFactoryModelStream(
+func collectFactoryModelStream(
     _ stream: AsyncThrowingStream<AgentStreamEvent, Error>,
     role: String,
     timeoutNanoseconds: UInt64 = LLMHTTPTimeouts.resourceNanoseconds,

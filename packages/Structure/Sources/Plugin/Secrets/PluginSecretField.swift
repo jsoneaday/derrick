@@ -93,6 +93,37 @@ public struct PluginSecretField: Codable, Sendable, Hashable {
     public static func fields(fromManifestJSON data: Data) -> [PluginSecretField] {
         (try? AgentPluginManifest.decode(data))?.derrick?.secrets ?? []
     }
+
+    /// Canonical Slack bot token declaration. Factory drafts sometimes omit `secrets`.
+    public static let slackBotToken: PluginSecretField = {
+        do {
+            return try PluginSecretField(id: "bot_token", label: "Bot Token", kind: .token)
+        } catch {
+            preconditionFailure("bot_token is a valid plugin secret field")
+        }
+    }()
+
+    /// Declared secrets, or a Slack connector fallback so Keychain / `.env` still apply.
+    public static func resolvedFields(
+        pluginID: String,
+        declared: [PluginSecretField]
+    ) -> [PluginSecretField] {
+        if !declared.isEmpty { return declared }
+        // Factory Slack ids are often slack-connector; empty secrets still need a Keychain field.
+        guard pluginID.localizedCaseInsensitiveContains("slack") else {
+            return declared
+        }
+        return [slackBotToken]
+    }
+
+    public static func resolvedDescriptors(
+        pluginID: String,
+        fromManifestJSON json: String?
+    ) -> [PluginSecretDescriptor] {
+        let data = Data((json ?? "").utf8)
+        let declared = fields(fromManifestJSON: data)
+        return resolvedFields(pluginID: pluginID, declared: declared).map(\.descriptor)
+    }
 }
 
 public struct PluginSecretsRequiredError: Error, LocalizedError, Sendable {

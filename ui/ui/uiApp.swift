@@ -177,19 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         JobResultPresenter.interactiveSessionActive = true
         HITLLiveApprovalHandlers.wireAgentServiceClient()
         DerrickNotificationService.shared.prepare()
-        if !DerrickNotificationLaunch.hasJobResultPresentationIntent()
-            && !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent() {
-            activationObserver = NotificationCenter.default.addObserver(
-                forName: NSApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { _ in
-                Task { try? await DaemonBootstrapCoordinator.prepareForHostApp(force: false) }
-            }
-        }
     }
-
-    private var activationObserver: NSObjectProtocol?
 
     func applicationWillTerminate(_ notification: Notification) {
         guard !DerrickNotificationLaunch.hasJobResultPresentationIntent(),
@@ -197,12 +185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { return }
         DerrickUISessionPresence.clearInteractiveSession()
         DerrickNotificationService.shared.stop()
-        let sem = DispatchSemaphore(value: 0)
-        Task { @MainActor in
-            try? await JobServiceLoginAgent.ensureRegistered()
-            sem.signal()
-        }
-        _ = sem.wait(timeout: .now() + 5)
+        // Do not bootout/kickstart on quit — that kills derrickd and the next
+        // launch hangs on "Connecting to Derrick daemon".
     }
 
     private func dismissRestoredMainWindows() {

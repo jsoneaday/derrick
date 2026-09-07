@@ -198,7 +198,11 @@ final class MessagingStore: ObservableObject {
     }
 
     /// Opens a specific conversation from a notification tap.
-    func openConversation(pluginID: String, threadID: String) async -> Bool {
+    func openConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) async -> Bool {
         guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(pluginID) else {
             return false
         }
@@ -207,6 +211,10 @@ final class MessagingStore: ObservableObject {
         await session.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
         guard session.threads.contains(where: { $0.id == threadID }) else { return false }
         await session.selectThread(id: threadID)
+        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parent.isEmpty {
+            await session.openReplyThread(parentVendorMessageID: parent)
+        }
         return session.selectedPluginID == pluginID && session.selectedThreadID == threadID
     }
 

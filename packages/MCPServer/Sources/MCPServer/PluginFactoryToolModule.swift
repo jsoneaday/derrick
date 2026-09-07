@@ -15,14 +15,18 @@ public enum PluginFactoryToolModule: MCPToolModule {
                 "goal": .object([
                     "type": .string("string"),
                     "description": .string("What the user wants the Agent Plugin to do.")
-                ])
+                ]),
+                "host_manifest_json": .object([
+                    "type": .string("string"),
+                    "description": .string("Host-owned Agent Plugin plugin.json. When set, the builder only supplies Python and tests.")
+                ]),
             ]),
             "required": .array([.string("goal")])
         ])
     }
 
     public static func makeRegistration(
-        build: @escaping @Sendable (String) async throws -> PluginFactoryRelease
+        build: @escaping @Sendable (String, PluginFactoryManifestInput?) async throws -> PluginFactoryRelease
     ) -> MCPToolRegistration {
         MCPToolRegistration(
             tool: id,
@@ -34,8 +38,20 @@ public enum PluginFactoryToolModule: MCPToolModule {
             guard !goal.isEmpty else {
                 return #"{"ok":false,"error":"goal is required."}"#
             }
+            let hostManifest: PluginFactoryManifestInput?
+            if let json = arguments["host_manifest_json"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !json.isEmpty {
+                do {
+                    hostManifest = try PluginFactoryManifestInput.fromEncodedJSON(json)
+                } catch {
+                    return #"{"ok":false,"error":"host_manifest_json is not a valid Agent Plugin manifest."}"#
+                }
+            } else {
+                hostManifest = nil
+            }
             do {
-                let release = try await build(goal)
+                let release = try await build(goal, hostManifest)
                 let summary = FactoryBuildSummary(
                     pluginID: release.pluginID,
                     version: release.version,

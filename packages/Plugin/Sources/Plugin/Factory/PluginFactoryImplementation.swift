@@ -13,12 +13,13 @@ public struct PluginFactorySession: Sendable {
 
     public func build(
         userGoal: String,
+        hostManifest: PluginFactoryManifestInput? = nil,
         builder: any PluginFactoryBuilder,
         executor: any PluginFactoryExecutor,
         reviewer: any PluginFactoryReviewer,
         logger: @escaping PluginFactoryLogger = { _ in }
     ) async throws -> PluginFactoryRelease {
-        var request = PluginFactoryBuilderRequest(userGoal: userGoal)
+        var request = PluginFactoryBuilderRequest(userGoal: userGoal, hostManifest: hostManifest)
         var lastError: PluginFactoryError?
         var currentDraft: PluginFactoryDraft?
 
@@ -28,7 +29,10 @@ public struct PluginFactorySession: Sendable {
                     "[plugin_factory] attempt=\(attempt + 1)/\(configuration.maxBuilderAttempts) draft_started"
                 )
                 let builtDraft = try await builder.makeDraft(request)
-                let draft = builtDraft.withUserGoal(userGoal)
+                var draft = builtDraft.withUserGoal(userGoal)
+                if let hostManifest {
+                    draft = try draft.replacingManifest(hostManifest)
+                }
                 currentDraft = draft
                 await logger("[plugin_factory] draft_ready")
                 return try await PluginFactory().build(
@@ -50,7 +54,8 @@ public struct PluginFactorySession: Sendable {
                 request = PluginFactoryBuilderRequest(
                     userGoal: userGoal,
                     previousDraft: currentDraft,
-                    feedback: Self.builderFeedback(from: error, userGoal: userGoal)
+                    feedback: Self.builderFeedback(from: error, userGoal: userGoal),
+                    hostManifest: hostManifest
                 )
             } catch {
                 await logger(
@@ -295,6 +300,19 @@ public struct PluginFactory: Sendable {
             }
             guard !["create-plugin", "edit-plugin"].contains(manifest.name.rawValue) else {
                 throw PluginFactoryError.reservedPluginID(manifest.name.rawValue)
+            }
+            if manifest.isConnector {
+                let secrets = manifest.derrick?.secrets ?? []
+                guard !secrets.isEmpty else {
+                    throw PluginFactoryError.invalidManifest(
+                        "Connector plugins must declare extensions.app.derrick.secrets."
+                    )
+                }
+                guard manifest.derrick?.authScheme != nil else {
+                    throw PluginFactoryError.invalidManifest(
+                        "Connector plugins must declare extensions.app.derrick.auth_scheme."
+                    )
+                }
             }
             return manifest
         } catch let error as PluginFactoryError {

@@ -71,8 +71,11 @@ public actor ConnectorMessagingCommandService {
             let manifestJSON = try await repository.listLatestPluginFactoryManifests()
                 .first(where: { $0.pluginID == request.pluginID })?
                 .manifestJSON ?? ""
-            let secretFields = PluginSecretField.fields(fromManifestJSON: Data(manifestJSON.utf8))
-                .map(\.descriptor)
+            let secretFields = PluginSecretField.resolvedDescriptors(
+                pluginID: request.pluginID,
+                fromManifestJSON: manifestJSON
+            )
+            PluginSecretKeychain.promoteToSharedGroup(pluginID: request.pluginID, fields: secretFields)
             PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
                 pluginID: request.pluginID,
                 fields: secretFields

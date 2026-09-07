@@ -78,6 +78,42 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
     }
 
+    func testSchemaUpgradeDoesNotWipeExistingRows() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let artifact = Data("compiled".utf8)
+        let files: [String: Data] = [
+            "plugin.json": Data(#"{"name":"keep-me"}"#.utf8),
+            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
+            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin": artifact,
+        ]
+        let release = PluginFactoryRelease(
+            pluginID: "keep-me",
+            version: "1.0.0",
+            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
+            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
+            guestSource: "print(\"[]\")",
+            compiledArtifact: artifact,
+            skillFiles: [:],
+            contentHash: PluginContentHash.hash(files: files),
+            reviewSummary: "approved"
+        )
+        try await repository.savePluginFactoryRelease(release)
+        let url = await repository.databaseURL
+
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 4)
+        XCTAssertEqual(try schemaVersion(at: url), 4)
+        XCTAssertFalse(try tableExists(named: "news_readers", at: url))
+
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
+        XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
+        XCTAssertTrue(try tableExists(named: "news_readers", at: url))
+        let loaded = try await repository.pluginFactoryRelease(pluginID: "keep-me", version: "1.0.0")
+        XCTAssertEqual(loaded?.pluginID, "keep-me")
+        XCTAssertEqual(loaded?.contentHash, release.contentHash)
+    }
+
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")

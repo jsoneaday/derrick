@@ -22,16 +22,8 @@ enum FactoryHarnessMain {
             throw HarnessError.missingAPIKey
         }
 
-        let goal = PluginFactoryCreateInput.makeConnector(
-            vendor: .slack,
-            scope: .fullSync,
-            userDescription: ""
-        ).connectorBuildGoal(
-            crawlSummary: """
-            Slack Web API: conversations.list, conversations.history, conversations.replies, and chat.postMessage. \
-            Authenticate with a bot token in Authorization: Bearer. Responses include ok (boolean).
-            """
-        )
+        let input = try SlackConnectorFactoryInput.make(pluginID: "slack-connector-1")
+        let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("FactoryHarness: building slack full-sync connector…\n", stderr)
         let executor = PythonPluginFactoryDockerExecutor(executor: DirectShellDocker.executor())
@@ -39,6 +31,7 @@ enum FactoryHarnessMain {
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)
         ).build(
             userGoal: goal,
+            hostManifest: input.hostManifest,
             builder: LiveFactoryBuilder(apiKey: apiKey),
             executor: executor,
             reviewer: LiveFactoryReviewer(apiKey: apiKey),

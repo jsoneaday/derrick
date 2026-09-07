@@ -23,8 +23,9 @@ import Testing
             userInfo: [NSLocalizedDescriptionKey: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"]
         )
         let result = AppBootstrapStatus.classifyError(error)
-        #expect(result.title.lowercased().contains("not running") || result.title.contains("Docker"))
+        #expect(result.title == "Docker Desktop Not Running")
         #expect(result.message.lowercased().contains("start docker"))
+        #expect(result.recovery == .none)
     }
 
     @MainActor
@@ -89,6 +90,18 @@ import Testing
         #expect(!result.message.contains("#0 building"))
         #expect(!result.message.contains("derrick-web-crawler:swift-6.4-v1"))
         #expect(result.message.lowercased().contains("chat"))
+    }
+
+    @MainActor
+    @Test func deferredModalStaysHiddenUntilRevealed() {
+        let status = AppBootstrapStatus.shared
+        status.noteBootstrapCancelled()
+        #expect(status.beginLoadingSession(deferModal: true))
+        #expect(!status.isModalPresented)
+        status.revealModalIfStillInitializing()
+        #expect(status.isModalPresented)
+        status.markReady()
+        #expect(!status.isModalPresented)
     }
 
     @MainActor

@@ -104,6 +104,28 @@ import DBRepository
         )
     }
 
+    @Test func connectorCredentialSaverPersistRequiredWritesKeychain() throws {
+        let pluginID = "test-persist-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "bot_token")
+        }
+        let fields = [
+            PluginCredentialFieldPresentation(
+                id: "bot_token",
+                label: "Bot token",
+                kind: "token",
+                hasStoredValue: false
+            )
+        ]
+        try ConnectorCredentialSaver.persistRequired(
+            pluginID: pluginID,
+            fields: fields,
+            drafts: ["bot_token": "xoxb-stored"]
+        )
+        #expect(PluginSecretKeychain.hasKeychainValue(pluginID: pluginID, fieldID: "bot_token"))
+        #expect(try PluginSecretKeychain.loadFromKeychain(pluginID: pluginID, fieldID: "bot_token") == "xoxb-stored")
+    }
+
     @MainActor @Test func settingsCredentialHintPointsAtCredentialsPane() {
         guard !LLMProviderCredentialGate.usesDotenvSecrets() else { return }
         #expect(

@@ -14,6 +14,7 @@ public enum ExecutionContextCapability: String, Codable, Sendable, Hashable, Cas
 public enum WorkflowKind: String, Codable, Sendable, Hashable, CaseIterable {
     case pluginFactoryCreate = "plugin_factory_create"
     case pluginFactoryEdit = "plugin_factory_edit"
+    case connectorAuthDiscover = "connector_auth_discover"
     case jobStep = "job_step"
     case interactiveTool = "interactive_tool"
     case none

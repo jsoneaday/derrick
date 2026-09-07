@@ -13,19 +13,8 @@ public extension DBRepository {
             throw DBRepositoryError.unsupportedMigrationVersion(target)
         }
 
-        if FileManager.default.fileExists(atPath: databaseURL.path) {
-            let storedVersion = try? withDatabaseHandle { try Self.schemaVersion(on: $0) }
-            if let storedVersion, storedVersion != 0, storedVersion != target {
-                fputs(
-                    "[DBRepository] dev reset: schema version \(storedVersion) != \(target); recreating database\n",
-                    stderr
-                )
-                try Self.deleteDatabaseFiles(at: databaseURL)
-            }
-        }
-
         try withDatabaseHandle { handle in
-            var currentVersion = try Self.schemaVersion(on: handle)
+            let currentVersion = try Self.schemaVersion(on: handle)
 
             if currentVersion < target {
                 for version in (currentVersion + 1)...target {

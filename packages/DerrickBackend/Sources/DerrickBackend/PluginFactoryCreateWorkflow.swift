@@ -40,7 +40,7 @@ enum PluginFactoryCreateWorkflow {
             try await fail(
                 workflowID: workflowID,
                 stage: "type",
-                message: "Only connector plugins are supported today. News reader and custom types are coming soon.",
+                message: "Only connector plugins can be built in the factory. News lists are created from the News reader wizard.",
                 repositoryProvider: repositoryProvider
             )
             return
@@ -50,6 +50,33 @@ enum PluginFactoryCreateWorkflow {
                 workflowID: workflowID,
                 stage: "vendor",
                 message: "Choose a messaging vendor for this connector.",
+                repositoryProvider: repositoryProvider
+            )
+            return
+        }
+        guard let pluginID = input.pluginID, !pluginID.isEmpty else {
+            try await fail(
+                workflowID: workflowID,
+                stage: "name",
+                message: "Name this connector before creating it.",
+                repositoryProvider: repositoryProvider
+            )
+            return
+        }
+        guard let auth = input.auth else {
+            try await fail(
+                workflowID: workflowID,
+                stage: "auth",
+                message: "Save the connector credentials before creating it.",
+                repositoryProvider: repositoryProvider
+            )
+            return
+        }
+        guard auth.authScheme.isSupportedInWizard else {
+            try await fail(
+                workflowID: workflowID,
+                stage: "auth",
+                message: "OAuth connectors are not available yet. Use a bot token or API key.",
                 repositoryProvider: repositoryProvider
             )
             return
@@ -64,8 +91,8 @@ enum PluginFactoryCreateWorkflow {
             return
         }
 
-        var crawlSummary: String?
-        if let docURL = vendor.documentationStartURL {
+        var crawlSummary: String? = auth.crawlSummary
+        if crawlSummary == nil, let docURL = vendor.documentationStartURL {
             try await log(
                 workflowID: workflowID,
                 stage: "docs",
@@ -97,7 +124,9 @@ enum PluginFactoryCreateWorkflow {
             try await log(
                 workflowID: workflowID,
                 stage: "docs",
-                message: "Skipping vendor doc crawl for a custom connector.",
+                message: crawlSummary == nil
+                    ? "Skipping vendor doc crawl for a custom connector."
+                    : "Using the auth docs already read for this connector.",
                 repositoryProvider: repositoryProvider
             )
         }
@@ -109,7 +138,7 @@ enum PluginFactoryCreateWorkflow {
             repositoryProvider: repositoryProvider
         )
         let goal = input.connectorBuildGoal(crawlSummary: crawlSummary)
-        let buildArgs = try buildArguments(goal: goal)
+        let buildArgs = try buildArguments(goal: goal, hostManifest: input.hostManifest)
         let buildResult = try await executeTool(
             AllowedMCPTool.pluginFactoryBuild.rawValue,
             buildArgs,
@@ -159,7 +188,7 @@ enum PluginFactoryCreateWorkflow {
         let resultText = String(decoding: resultJSON, as: UTF8.self)
         try await complete(
             workflowID: workflowID,
-            message: "\(vendor.displayName) connector saved as /\(pluginID). Enter credentials to finish setup.",
+            message: "\(vendor.displayName) connector saved as /\(pluginID).",
             resultJSON: resultText,
             repositoryProvider: repositoryProvider
         )
@@ -186,8 +215,11 @@ enum PluginFactoryCreateWorkflow {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static func buildArguments(goal: String) throws -> String {
-        let payload = ["goal": goal]
+    private static func buildArguments(goal: String, hostManifest: PluginFactoryManifestInput?) throws -> String {
+        var payload: [String: Any] = ["goal": goal]
+        if let hostManifest {
+            payload["host_manifest_json"] = try hostManifest.encodedJSON()
+        }
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }

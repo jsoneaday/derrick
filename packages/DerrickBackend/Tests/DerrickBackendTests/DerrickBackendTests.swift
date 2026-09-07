@@ -123,7 +123,79 @@ import Testing
         #expect(!requests.contains { $0.userInfo[UserNotificationUserInfoKey.threadID.rawValue] == muted.id })
     }
 
-    @Test func messagingInboundNotifierSkipsWhenUIIsInteractive() async {
+    @Test func messagingInboundNotifierPostsSeparateNotificationsForThreadReplies() {
+        let thread = MessagingThreadDTO(
+            id: "thread-general",
+            pluginID: "slack-bot",
+            vendorThreadID: "C1",
+            title: "#general"
+        )
+        let root = MessagingPersistResult(
+            inserted: true,
+            message: MessagingMessageDTO(
+                id: "msg-root",
+                threadID: thread.id,
+                direction: .inbound,
+                sender: "alice",
+                body: "channel hello"
+            ),
+            thread: thread
+        )
+        let reply = MessagingPersistResult(
+            inserted: true,
+            message: MessagingMessageDTO(
+                id: "msg-reply",
+                threadID: thread.id,
+                direction: .inbound,
+                sender: "bob",
+                body: "thread hi",
+                parentVendorMessageID: "171.1"
+            ),
+            thread: thread
+        )
+        let requests = MessagingInboundNotifier.notificationRequests(from: [root, reply])
+        #expect(requests.count == 2)
+        let replyRequest = requests.first {
+            $0.userInfo[UserNotificationUserInfoKey.messagingMessageID.rawValue] == "msg-reply"
+        }
+        #expect(replyRequest?.subtitle == "Thread reply")
+        #expect(replyRequest?.body == "bob: thread hi")
+        #expect(replyRequest?.id == "derrick.messaging.slack-bot.msg-reply")
+        #expect(
+            replyRequest?.userInfo[UserNotificationUserInfoKey.messagingParentVendorMessageID.rawValue] == "171.1"
+        )
+        #expect(requests.map(\.id).sorted() == [
+            "derrick.messaging.slack-bot.msg-reply",
+            "derrick.messaging.slack-bot.msg-root",
+        ])
+    }
+
+    @Test func messagingInboundNotifierHidesOpaqueVendorActorIDs() {
+        let thread = MessagingThreadDTO(
+            id: "thread-general",
+            pluginID: "slack-bot",
+            vendorThreadID: "C1",
+            title: "#general"
+        )
+        let reply = MessagingPersistResult(
+            inserted: true,
+            message: MessagingMessageDTO(
+                id: "msg-reply",
+                threadID: thread.id,
+                direction: .inbound,
+                sender: "U07FKG8DV19",
+                body: "bt4",
+                parentVendorMessageID: "171.1"
+            ),
+            thread: thread
+        )
+        let requests = MessagingInboundNotifier.notificationRequests(from: [reply])
+        #expect(requests.count == 1)
+        #expect(requests.first?.body == "bt4")
+        #expect(requests.first?.subtitle == "Thread reply")
+    }
+
+    @Test func messagingInboundNotifierAlwaysPostsNotifications() async {
         let thread = MessagingThreadDTO(
             id: "thread-general",
             pluginID: "slack-bot",
@@ -142,7 +214,9 @@ import Testing
                 thread: thread
             )
         ]
-        #expect(!MessagingInboundNotifier.notificationRequests(from: rows).isEmpty)
+        let requests = MessagingInboundNotifier.notificationRequests(from: rows)
+        #expect(!requests.isEmpty)
         await MessagingInboundNotifier.notifyNewInbound(rows, uiIsInteractive: true)
+        await MessagingInboundNotifier.notifyNewInbound(rows, uiIsInteractive: false)
     }
 }

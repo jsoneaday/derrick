@@ -234,6 +234,7 @@ struct ContentView: View {
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
     @StateObject private var messaging = MessagingStore()
+    @ObservedObject private var news = NewsReaderStore.shared
     @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
@@ -389,6 +390,7 @@ struct ContentView: View {
                     modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
+                    news: news,
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
@@ -402,12 +404,14 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins {
+                } else if workspace != .debugLogs && workspace != .plugins && workspace != .news {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
                 case .messaging:
                     MessagingConversationView(store: messaging)
+                case .news:
+                    NewsWorkspaceView(store: news)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
                 case .plugins:
@@ -424,6 +428,13 @@ struct ContentView: View {
                                     pluginCreationController.dismissSuccess()
                                 }
                                 Task { await pluginFactoryList.reload() }
+                            }
+                        },
+                        onOpenNewsReader: { readerID in
+                            Task { @MainActor in
+                                workspace = .news
+                                await news.select(id: readerID)
+                                pluginCreationController.dismissSuccess()
                             }
                         }
                     )
@@ -470,7 +481,14 @@ struct ContentView: View {
                 return
             }
             Task { @MainActor in
-                await routeToMessagingConversation(pluginID: pluginID, threadID: threadID)
+                let parentVendorMessageID = notification.userInfo?[
+                    DerrickMessagingConversationPresentationWake.parentVendorMessageIDUserInfoKey
+                ] as? String
+                await routeToMessagingConversation(
+                    pluginID: pluginID,
+                    threadID: threadID,
+                    parentVendorMessageID: parentVendorMessageID
+                )
             }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
@@ -724,7 +742,7 @@ struct ContentView: View {
     /// Full UI client bootstrap (DB, Docker prewarm, Agent/MCP mesh). MainActor for `@State`.
     @MainActor
     private func performClientBootstrap() async {
-            guard bootstrapStatus.beginLoadingSession() || bootstrapStatus.isInitializing else {
+            guard bootstrapStatus.beginLoadingSession(deferModal: true) || bootstrapStatus.isInitializing else {
                 if bootstrapStatus.phase == .ready {
                     await syncClientSessionAfterBootstrap()
                 }
@@ -739,62 +757,26 @@ struct ContentView: View {
             }
 
             do {
-                bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
-                let repo = try await ensureSessionStoreLoaded()
-                await ServiceLogRecorder.shared.configure(repository: repo)
-                await EgressAllowlistService.shared.configure(repository: repo)
-                await ContentSensitivityGrantService.shared.configure(repository: repo)
-                await UsageLimitsService.shared.configure(repository: repo)
-                await ContainerLifecycleSettingsService.shared.configure(repository: repo)
-                await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
-                await PluginFactoryListStore.shared.configure(repository: repo)
-                pluginCreationController.configure(repository: repo)
+                bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
 
-                bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
-                try await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
+                async let daemonHealth = connectLaunchDaemon()
+                async let repository = loadLaunchRepository()
+                async let dockerPeer = prewarmLaunchDockerPeer()
 
-                // Connect derrickd before Docker prewarm so Mach XPC is not competing with
-                // long-running DockerRunnerHelper work on the same bootstrap path.
-                bootstrapStatus.update(
-                    phase: .connectingHelper,
-                    message: "Connecting to Derrick daemon…"
-                )
-                var health = try await AgentServiceClient.shared.ensureUpAndHealth()
-                for attempt in 0..<3 {
-                    guard await DaemonProcessHygiene.evictIfStaleGuestRuntime(health) else { break }
-                    AgentServiceClient.shared.dropConnectionForReconnect()
-                    bootstrapStatus.update(
-                        phase: .connectingHelper,
-                        message: "Restarting background service…"
-                    )
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    health = try await AgentServiceClient.shared.ensureUpAndHealth()
-                    if attempt == 2, DaemonProcessHygiene.isStaleConnectedDaemon(health) {
-                        throw NSError(
-                            domain: "DaemonHygiene",
-                            code: 409,
-                            userInfo: [NSLocalizedDescriptionKey:
-                                "Derrick could not replace its background service. Quit Derrick and open it again."]
-                        )
-                    }
-                }
+                let health = try await daemonHealth
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
                 )
 
-                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker runtime…")
-                _ = XPCDockerRunner.shared
+                let repo = try await repository
 
-                try await XPCDockerRunner.shared.waitUntilPrewarmed()
-                bootstrapStatus.update(phase: .connectingHelper, message: "Finishing setup…")
-
-                // Daemon MCP uses its embedded Docker helper; handoff is best-effort while UI is open.
-                do {
-                    let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
-                    try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
-                    debugLog("Docker helper peer endpoint handed to daemon MCP")
-                } catch {
-                    debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                if let peer = try await dockerPeer {
+                    do {
+                        try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
+                        debugLog("Docker helper peer endpoint handed to daemon MCP")
+                    } catch {
+                        debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                    }
                 }
 
                 sessionReady = true
@@ -803,9 +785,7 @@ struct ContentView: View {
                 await messaging.configure(repository: repo)
                 await DerrickNotificationService.shared.activateSession(repository: repo)
                 if isDebugEnabled {
-                    debugLogStore.log(
-                        "UI client ready (Docker + derrickd Agent/Job/MCP)"
-                    )
+                    debugLogStore.log("UI client ready (Docker + derrickd Agent/Job/MCP)")
                 }
             } catch is CancellationError {
                 if !sessionReady {
@@ -831,6 +811,49 @@ struct ContentView: View {
             }
 
             refreshProviderCredentialUI()
+    }
+
+    @MainActor
+    private func connectLaunchDaemon() async throws -> ServiceHealthReport {
+        bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
+        try? await JobServiceLoginAgent.ensureRegistered()
+        JobServiceLoginAgent.ensureHelperProcessRunning()
+        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+    }
+
+    @MainActor
+    private func loadLaunchRepository() async throws -> DBRepository {
+        bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
+        let repo = try await ensureSessionStoreLoaded()
+        await configureClientRepositoryServices(repository: repo)
+        return repo
+    }
+
+    @MainActor
+    private func configureClientRepositoryServices(repository: DBRepository) async {
+        await ServiceLogRecorder.shared.configure(repository: repository)
+        await EgressAllowlistService.shared.configure(repository: repository)
+        await ContentSensitivityGrantService.shared.configure(repository: repository)
+        await UsageLimitsService.shared.configure(repository: repository)
+        await ContainerLifecycleSettingsService.shared.configure(repository: repository)
+        await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
+        await PluginFactoryListStore.shared.configure(repository: repository)
+        await NewsReaderStore.shared.configure(repository: repository)
+        pluginCreationController.configure(repository: repository)
+    }
+
+    /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
+    @MainActor
+    private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
+        bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
+        _ = XPCDockerRunner.shared
+        try await XPCDockerRunner.shared.waitUntilPrewarmed()
+        do {
+            return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
+        } catch {
+            debugLog("Docker peer endpoint fetch skipped: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
@@ -865,10 +888,8 @@ struct ContentView: View {
 
         do {
             let repo = try await ensureSessionStoreLoaded()
-            await ServiceLogRecorder.shared.configure(repository: repo)
+            await configureClientRepositoryServices(repository: repo)
             sessionReady = true
-            await PluginFactoryListStore.shared.configure(repository: repo)
-            pluginCreationController.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await messaging.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
@@ -1362,8 +1383,16 @@ struct ContentView: View {
     }
 
     @discardableResult
-    private func routeToMessagingConversation(pluginID: String, threadID: String) async -> Bool {
-        let opened = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
+    private func routeToMessagingConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) async -> Bool {
+        let opened = await messaging.openConversation(
+            pluginID: pluginID,
+            threadID: threadID,
+            parentVendorMessageID: parentVendorMessageID
+        )
         guard opened else { return false }
         workspace = .messaging
         return true

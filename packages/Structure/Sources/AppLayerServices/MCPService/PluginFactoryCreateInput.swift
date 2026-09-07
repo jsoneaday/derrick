@@ -73,6 +73,17 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             case .custom: return nil
             }
         }
+
+        /// Auth/token docs only. Used before Create so the credential form matches the vendor.
+        public var authenticationDocumentationStartURL: String? {
+            switch self {
+            case .slack: return "https://api.slack.com/authentication/tokens"
+            case .telegram: return "https://core.telegram.org/bots/api#authorizing-your-bot"
+            case .whatsapp: return "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"
+            case .discord: return "https://discord.com/developers/docs/topics/oauth2"
+            case .custom: return nil
+            }
+        }
     }
 
     public let pluginType: PluginType
@@ -80,18 +91,24 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public let customVendorName: String?
     public let scope: ConnectorScope
     public let description: String
+    public let pluginID: String?
+    public let auth: ConnectorAuthDiscovery?
 
     public init(
         pluginType: PluginType,
         vendor: ConnectorVendor? = nil,
         customVendorName: String? = nil,
         scope: ConnectorScope = .fullSync,
-        description: String
+        description: String,
+        pluginID: String? = nil,
+        auth: ConnectorAuthDiscovery? = nil
     ) {
         self.pluginType = pluginType
         self.vendor = vendor
         self.customVendorName = customVendorName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.scope = scope
+        self.pluginID = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.auth = auth
         self.description = Self.resolvedDescription(
             userDescription: description,
             vendor: vendor,
@@ -103,16 +120,34 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     /// Builds connector workflow input. The factory goal uses the fixed scope sentence, not free-text extras.
     public static func makeConnector(
         vendor: ConnectorVendor,
+        pluginID: String? = nil,
+        auth: ConnectorAuthDiscovery? = nil,
         customVendorName: String? = nil,
         scope: ConnectorScope = .fullSync,
         userDescription: String = ""
     ) -> PluginFactoryCreateInput {
-        PluginFactoryCreateInput(
+        let trimmedID = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedID = trimmedID.isEmpty
+            ? ConnectorPluginNaming.defaultPluginID(vendor: vendor, existingIDs: [])
+            : trimmedID
+        return PluginFactoryCreateInput(
             pluginType: .connector,
             vendor: vendor,
             customVendorName: vendor == .custom ? customVendorName : nil,
             scope: scope,
-            description: userDescription
+            description: userDescription,
+            pluginID: resolvedID,
+            auth: auth ?? (try? ConnectorAuthDiscovery.slackBotTokenFallback())
+        )
+    }
+
+    public var hostManifest: PluginFactoryManifestInput? {
+        guard pluginType == .connector, let pluginID, let auth else { return nil }
+        return PluginFactoryManifestInput.connector(
+            pluginID: pluginID,
+            description: description,
+            auth: auth,
+            messagingOps: scope.requiredMessagingOps
         )
     }
 
@@ -145,6 +180,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         case customVendorName
         case scope
         case description
+        case pluginID
+        case auth
     }
 
     public init(from decoder: Decoder) throws {
@@ -155,12 +192,26 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         scope = try container.decodeIfPresent(ConnectorScope.self, forKey: .scope) ?? .fullSync
         let rawDescription = try container.decode(String.self, forKey: .description)
+        pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        auth = try container.decodeIfPresent(ConnectorAuthDiscovery.self, forKey: .auth)
         description = Self.resolvedDescription(
             userDescription: rawDescription,
             vendor: vendor,
             customVendorName: customVendorName,
             scope: scope
         )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pluginType, forKey: .pluginType)
+        try container.encodeIfPresent(vendor, forKey: .vendor)
+        try container.encodeIfPresent(customVendorName, forKey: .customVendorName)
+        try container.encode(scope, forKey: .scope)
+        try container.encode(description, forKey: .description)
+        try container.encodeIfPresent(pluginID, forKey: .pluginID)
+        try container.encodeIfPresent(auth, forKey: .auth)
     }
 
     public func encodedJSON() throws -> String {
@@ -181,15 +232,31 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     /// Factory goal passed to `plugin_factory_build` after vendor docs are crawled.
     public func connectorBuildGoal(crawlSummary: String?) -> String {
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
+        let summary = crawlSummary ?? auth?.crawlSummary
         do {
+            var extra: [String] = []
+            if let pluginID {
+                extra.append("Host plugin id (do not change): \(pluginID)")
+            }
+            if let auth {
+                extra.append("Host auth_scheme: \(auth.authScheme.rawValue)")
+                extra.append(
+                    "Host secrets (declare only these ids in HTTP {{secret:id}} placeholders): \(auth.secrets.map(\.id).joined(separator: ", "))"
+                )
+                if !auth.permissions.isEmpty {
+                    extra.append("Host permission labels: \(auth.permissions.joined(separator: ", "))")
+                }
+            }
+            extra.append(
+                "The host writes plugin.json. Return python_source and test_input_json only. Do not invent a plugin_id or secrets list."
+            )
             return try ConnectorContractPrompts.factoryGoal(
                 vendorLabel: vendorLabel,
                 scope: scope,
                 vendor: vendor,
-                crawlSummary: crawlSummary,
-                reference: vendor.flatMap {
-                    ConnectorReferenceBlueprint.reference(vendor: $0, scope: scope)
-                }
+                crawlSummary: summary,
+                reference: extra.joined(separator: "\n"),
+                includeVendorBindings: true
             )
         } catch {
             return """
@@ -204,6 +271,9 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public enum FailureStep: String, Sendable {
         case type
         case vendor
+        case name
+        case auth
+        case news
         case description
         case creating
     }
@@ -212,6 +282,12 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         switch stage?.lowercased() {
         case "type":
             return .type
+        case "name":
+            return .name
+        case "auth", "discover":
+            return .auth
+        case "news", "paywall":
+            return .news
         case "crawl", "docs", "vendor", "factory", "build", "review", "description":
             return .vendor
         default:

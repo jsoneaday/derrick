@@ -213,7 +213,7 @@ struct CredentialsSettingsView: View {
 
     private func savePlugin(group: PluginCredentialGroup, fields: [PluginCredentialFieldPresentation]) {
         do {
-            try ConnectorCredentialSaver.savePartial(
+            try ConnectorCredentialSaver.persistRequired(
                 pluginID: group.pluginID,
                 fields: fields,
                 drafts: drafts(for: group)

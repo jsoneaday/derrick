@@ -308,6 +308,9 @@ import Testing
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.isConnector)
         #expect(manifest.derrick?.role == .connector)
+        #expect(manifest.derrick?.secrets.map(\.id) == ["bot_token"])
+        #expect(manifest.derrick?.authScheme == .botToken)
+        #expect(draft.manifestJSON.contains("\"auth_scheme\":\"bot_token\""))
         #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"send_message\"]"))
     }
 
@@ -488,6 +491,32 @@ import Testing
         #expect(feedback.contains("Deterministic draft validation failed"))
     }
 
+    @Test func hostManifestOverlayIgnoresBuilderPluginID() async throws {
+        let executor = MultiHopRecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
+        let builder = RecordingFactoryBuilder(draft: connectorDraft(testInput: validConnectorTestInput()))
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            pluginID: "slack-connector-2",
+            auth: try ConnectorAuthDiscovery.slackBotTokenFallback(crawlSummary: "bot token")
+        )
+
+        let release = try await PluginFactorySession().build(
+            userGoal: input.connectorBuildGoal(crawlSummary: "bot token"),
+            hostManifest: input.hostManifest,
+            builder: builder,
+            executor: executor,
+            reviewer: reviewer
+        )
+
+        #expect(release.pluginID == "slack-connector-2")
+        let manifest = try AgentPluginManifest.decode(Data(release.manifestJSON.utf8))
+        #expect(manifest.name.rawValue == "slack-connector-2")
+        #expect(manifest.derrick?.authScheme == .botToken)
+        #expect(manifest.derrick?.secrets.map(\.id) == ["bot_token"])
+        #expect(!release.manifestJSON.contains("\"name\":\"slack-connection\""))
+    }
+
     @Test func missingRoleDefaultsToStandard() throws {
         let json = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
@@ -586,7 +615,7 @@ private func validConnectorTestInput() -> Data {
 private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
     let manifestJSON = """
     {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","auth_scheme":"bot_token","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],"messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
     """
     return PluginFactoryDraft(
         manifestJSON: manifestJSON,

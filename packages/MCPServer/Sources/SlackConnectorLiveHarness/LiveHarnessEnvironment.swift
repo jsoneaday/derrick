@@ -75,18 +75,8 @@ struct LiveHarnessEnvironment {
     }
 
     func buildFullSyncConnector() async throws -> PluginFactoryRelease {
-        let crawlSummary = """
-        Slack Web API chat.postMessage accepts JSON with channel and text. Authenticate with a bot token \
-        in Authorization: Bearer. Responses include ok (boolean), channel, ts, and message on success.
-        conversations.history returns messages with ts, user, text, and channel.
-        conversations.list returns channels with id, name, and is_member.
-        conversations.replies returns thread replies when parent_vendor_message_id is set.
-        """
-        let goal = PluginFactoryCreateInput.makeConnector(
-            vendor: .slack,
-            scope: .fullSync,
-            userDescription: "Send and receive messages in Slack channels I pick from a list."
-        ).connectorBuildGoal(crawlSummary: crawlSummary)
+        let input = try SlackConnectorFactoryInput.make(pluginID: Self.pluginID)
+        let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("[live] building full-sync connector via LLM factory…\n", stderr)
         let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
@@ -94,6 +84,7 @@ struct LiveHarnessEnvironment {
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)
         ).build(
             userGoal: goal,
+            hostManifest: input.hostManifest,
             builder: LiveFactoryBuilder(apiKey: apiKey),
             executor: executor,
             reviewer: ScopeAwareFactoryReviewer(inner: LiveFactoryReviewer(apiKey: apiKey)),

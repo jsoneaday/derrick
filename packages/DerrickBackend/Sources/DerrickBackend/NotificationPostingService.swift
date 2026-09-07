@@ -133,6 +133,11 @@ public actor NotificationPostingService {
             if let threadID = request.userInfo[UserNotificationUserInfoKey.threadID.rawValue] {
                 info["threadID"] = threadID
             }
+            if let parent = request.userInfo[
+                UserNotificationUserInfoKey.messagingParentVendorMessageID.rawValue
+            ] {
+                info["messagingParentVendorMessageID"] = parent
+            }
         }
         return info
     }

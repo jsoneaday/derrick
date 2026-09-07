@@ -29,6 +29,15 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
 
     private static func userPrompt(for request: PluginFactoryBuilderRequest) -> String {
         var sections = ["User goal:\n\(request.userGoal)"]
+        if let host = request.hostManifest {
+            sections.append(
+                """
+                The host already assigned plugin_id \(host.pluginID) and these secret ids: \
+                \(host.secrets.map(\.id).joined(separator: ", ")). \
+                Return python_source and test_input_json. Do not pick a different plugin_id or secret ids.
+                """
+            )
+        }
         if let previous = request.previousDraft {
             sections.append("Previous draft:\n\(previous.guestSource)")
             let previousTestInput = String(decoding: previous.testInput, as: UTF8.self)
@@ -70,7 +79,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
         plugin_id (string), version (string), description (string), python_source (string),
         test_input_json (string containing valid JSON — a serialized object, not prose),
         skill_files (array of objects with path and body),
-        secrets (array of objects with id, label, and kind; optional),
+        secrets (array of objects with id, label, and kind; required for connector plugins),
         role (string, optional: "connector" or "standard"),
         messaging_ops (array of strings, required for connector role).
         plugin_id must use lowercase letters, numbers, hyphens, and dots only

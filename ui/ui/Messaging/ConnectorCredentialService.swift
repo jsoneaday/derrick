@@ -159,7 +159,7 @@ enum ConnectorCredentialService {
         )
         guard decision.approved else { return .cancelled }
         let fields = payload.fields
-        let stillMissing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: secrets)
+        let stillMissing = PluginSecretKeychain.missingKeychainIDs(pluginID: pluginID, fields: secrets)
         if mode == .requireMissing, !stillMissing.isEmpty {
             return .cancelled
         }
