@@ -742,7 +742,7 @@ struct ContentView: View {
     /// Full UI client bootstrap (DB, Docker prewarm, Agent/MCP mesh). MainActor for `@State`.
     @MainActor
     private func performClientBootstrap() async {
-            guard bootstrapStatus.beginLoadingSession() || bootstrapStatus.isInitializing else {
+            guard bootstrapStatus.beginLoadingSession(deferModal: true) || bootstrapStatus.isInitializing else {
                 if bootstrapStatus.phase == .ready {
                     await syncClientSessionAfterBootstrap()
                 }
@@ -760,7 +760,6 @@ struct ContentView: View {
                 bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
                 try? await JobServiceLoginAgent.ensureRegistered()
                 JobServiceLoginAgent.ensureHelperProcessRunning()
-                try? await Task.sleep(nanoseconds: 500_000_000)
                 let health = try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"

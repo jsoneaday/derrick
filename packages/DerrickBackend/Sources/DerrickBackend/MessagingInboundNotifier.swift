@@ -9,7 +9,8 @@ public enum MessagingInboundNotifier: Sendable {
         uiIsInteractive: Bool = DerrickUIPresence.isInteractiveUIRunning()
     ) async {
         _ = uiIsInteractive
-        for request in notificationRequests(from: rows) {
+        let enriched = await enrichDisplayNames(rows)
+        for request in notificationRequests(from: enriched) {
             do {
                 try await NotificationSender.post(request)
             } catch {
@@ -40,6 +41,38 @@ public enum MessagingInboundNotifier: Sendable {
         return requests
     }
 
+    private static func enrichDisplayNames(_ rows: [MessagingPersistResult]) async -> [MessagingPersistResult] {
+        var enriched: [MessagingPersistResult] = []
+        for row in rows {
+            let sender = await MessagingSenderDisplayName.resolve(
+                pluginID: row.thread.pluginID,
+                sender: row.message.sender
+            )
+            guard sender != row.message.sender else {
+                enriched.append(row)
+                continue
+            }
+            enriched.append(
+                MessagingPersistResult(
+                    inserted: row.inserted,
+                    message: MessagingMessageDTO(
+                        id: row.message.id,
+                        threadID: row.message.threadID,
+                        vendorMessageID: row.message.vendorMessageID,
+                        direction: row.message.direction,
+                        sender: sender,
+                        body: row.message.body,
+                        createdAt: row.message.createdAt,
+                        parentVendorMessageID: row.message.parentVendorMessageID,
+                        replyCount: row.message.replyCount
+                    ),
+                    thread: row.thread
+                )
+            )
+        }
+        return enriched
+    }
+
     private static func request(
         for group: [MessagingPersistResult],
         last: MessagingPersistResult
@@ -49,10 +82,14 @@ public enum MessagingInboundNotifier: Sendable {
         let isReply = message.isReply
         let preview = truncated(message.body, limit: 180)
         let sender = message.sender.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lastBit = sender.isEmpty ? preview : "\(sender): \(preview)"
+        let lastBit = MessagingInboundNotificationCopy.previewBody(
+            sender: sender,
+            body: preview,
+            isReply: isReply
+        )
         let body: String
         if group.count == 1 {
-            body = lastBit.isEmpty ? (isReply ? "New thread reply" : "New message") : lastBit
+            body = lastBit
         } else if lastBit.isEmpty {
             body = "\(group.count) new messages"
         } else {

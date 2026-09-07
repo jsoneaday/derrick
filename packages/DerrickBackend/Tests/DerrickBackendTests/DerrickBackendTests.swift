@@ -170,6 +170,31 @@ import Testing
         ])
     }
 
+    @Test func messagingInboundNotifierHidesOpaqueVendorActorIDs() {
+        let thread = MessagingThreadDTO(
+            id: "thread-general",
+            pluginID: "slack-bot",
+            vendorThreadID: "C1",
+            title: "#general"
+        )
+        let reply = MessagingPersistResult(
+            inserted: true,
+            message: MessagingMessageDTO(
+                id: "msg-reply",
+                threadID: thread.id,
+                direction: .inbound,
+                sender: "U07FKG8DV19",
+                body: "bt4",
+                parentVendorMessageID: "171.1"
+            ),
+            thread: thread
+        )
+        let requests = MessagingInboundNotifier.notificationRequests(from: [reply])
+        #expect(requests.count == 1)
+        #expect(requests.first?.body == "bt4")
+        #expect(requests.first?.subtitle == "Thread reply")
+    }
+
     @Test func messagingInboundNotifierAlwaysPostsNotifications() async {
         let thread = MessagingThreadDTO(
             id: "thread-general",

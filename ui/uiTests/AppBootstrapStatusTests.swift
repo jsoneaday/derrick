@@ -93,6 +93,18 @@ import Testing
     }
 
     @MainActor
+    @Test func deferredModalStaysHiddenUntilRevealed() {
+        let status = AppBootstrapStatus.shared
+        status.noteBootstrapCancelled()
+        #expect(status.beginLoadingSession(deferModal: true))
+        #expect(!status.isModalPresented)
+        status.revealModalIfStillInitializing()
+        #expect(status.isModalPresented)
+        status.markReady()
+        #expect(!status.isModalPresented)
+    }
+
+    @MainActor
     @Test func beginAndReadyToggleModal() {
         let status = AppBootstrapStatus.shared
         // Reset shared singleton from other tests / prior ready.

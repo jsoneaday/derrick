@@ -281,10 +281,15 @@ public final class XPCDockerRunner: @unchecked Sendable {
                 )
             }
             await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
-            try await OneshotDockerContainer.ensurePulledImage(
-                DerrickGuestRuntime.pythonGuestDockerImage,
-                executor: makeDockerExecutor()
-            )
+            let executor = makeDockerExecutor()
+            let image = DerrickGuestRuntime.pythonGuestDockerImage
+            let inspect = try await executor(["image", "inspect", image], Data(), 30)
+            if inspect.exitCode != 0 {
+                await MainActor.run {
+                    AppBootstrapStatus.shared.revealModalIfStillInitializing()
+                }
+                try await OneshotDockerContainer.ensurePulledImage(image, executor: executor)
+            }
             prewarmState.markCompleted()
             await reportBootstrap(phase: .verifyingEnvironment, message: "Guest runtime ready.")
         } catch {

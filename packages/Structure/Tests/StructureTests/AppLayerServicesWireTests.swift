@@ -744,6 +744,24 @@ import Testing
         #expect(!DerrickNotificationLaunch.isJobResultPresentationLaunch([]))
     }
 
+    @Test func messagingInboundNotificationCopyHidesOpaqueVendorActorIDs() {
+        #expect(MessagingInboundNotificationCopy.isOpaqueVendorActorID("U07FKG8DV19"))
+        #expect(!MessagingInboundNotificationCopy.isOpaqueVendorActorID("alice"))
+        #expect(
+            MessagingInboundNotificationCopy.previewBody(
+                sender: "U07FKG8DV19",
+                body: "bt4",
+                isReply: true
+            ) == "bt4"
+        )
+        #expect(
+            MessagingInboundNotificationCopy.previewBody(
+                sender: "alice",
+                body: "hello"
+            ) == "alice: hello"
+        )
+    }
+
     @Test func derrickNotificationLaunchParsesMessagingConversationArgv() {
         let args = [
             "derrick",

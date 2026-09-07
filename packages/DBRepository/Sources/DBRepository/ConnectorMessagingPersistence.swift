@@ -44,12 +44,16 @@ public enum ConnectorMessagingPersistence: Sendable {
             }
             switch message.direction {
             case .inbound:
+                let sender = await MessagingSenderDisplayName.resolve(
+                    pluginID: pluginID,
+                    sender: message.sender
+                )
                 let record = MessagingInboundRecord(
                     pluginID: pluginID,
                     vendorThreadID: resolvedVendorThreadID,
                     threadTitle: thread.title,
                     vendorMessageID: message.vendorMessageID,
-                    sender: message.sender,
+                    sender: sender,
                     body: message.body,
                     createdAt: message.createdAt,
                     countAsUnread: true,
