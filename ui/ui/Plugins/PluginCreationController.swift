@@ -48,6 +48,7 @@ final class PluginCreationController: ObservableObject {
     }
 
     var canConfirmVendor: Bool {
+        guard selectedVendor.isSelectableInWizard else { return false }
         if selectedVendor == .custom {
             return !customVendorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -95,6 +96,7 @@ final class PluginCreationController: ObservableObject {
             )
             return
         }
+        selectedVendor = .slack
         phase = .chooseVendor
     }
 
@@ -111,6 +113,13 @@ final class PluginCreationController: ObservableObject {
         helperAPIKey: String?,
         helperReviewerModelJSON: String?
     ) {
+        guard selectedVendor.isSelectableInWizard else {
+            phase = .failed(
+                step: .vendor,
+                message: "Only Slack connectors can be created right now."
+            )
+            return
+        }
         guard let helperAPIKey, !helperAPIKey.isEmpty else {
             phase = .failed(
                 step: .vendor,
@@ -178,7 +187,9 @@ final class PluginCreationController: ObservableObject {
         case .failed(let step, _, _):
             switch step {
             case .type: phase = .chooseType
-            case .vendor, .description, .creating: phase = .chooseVendor
+            case .vendor, .description, .creating:
+                selectedVendor = .slack
+                phase = .chooseVendor
             }
         default:
             phase = .intro

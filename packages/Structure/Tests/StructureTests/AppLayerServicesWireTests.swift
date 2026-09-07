@@ -1344,6 +1344,17 @@ import Testing
         #expect(PluginFactoryCreateInput.ConnectorScope.wizardCases == [.fullSync])
     }
 
+    @Test func connectorWizardSelectsSlackOnly() {
+        #expect(
+            PluginFactoryCreateInput.ConnectorVendor.allCases.filter(\.isSelectableInWizard)
+                == [.slack]
+        )
+        #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("slack-connection"))
+        #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("Slack-Bot"))
+        #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("telegram-bot"))
+        #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("discord-connection"))
+    }
+
     @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,

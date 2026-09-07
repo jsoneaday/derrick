@@ -31,6 +31,9 @@ final class MessagingCatalogStore: ObservableObject {
             var syncThreads: Set<String> = []
             for row in manifests {
                 guard AgentPluginManifest.isConnector(manifestJSON: row.manifestJSON) else { continue }
+                guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(row.pluginID) else {
+                    continue
+                }
                 connectorIDs.append(row.pluginID)
                 if PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: row.manifestJSON) {
                     sendOnly.insert(row.pluginID)
@@ -49,6 +52,9 @@ final class MessagingCatalogStore: ObservableObject {
                 )
             }
             for pluginID in preservingPluginIDs where !connectorIDs.contains(pluginID) {
+                guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(pluginID) else {
+                    continue
+                }
                 connectorIDs.append(pluginID)
                 try await repository.upsertMessagingConnector(
                     MessagingConnectorDTO(

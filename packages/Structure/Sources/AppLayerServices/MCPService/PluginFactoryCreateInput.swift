@@ -56,6 +56,13 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             }
         }
 
+        /// Slack is the only vendor the wizard will create until others are ready.
+        public var isSelectableInWizard: Bool { self == .slack }
+
+        public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
+            pluginID.localizedCaseInsensitiveContains("slack")
+        }
+
         /// Primary vendor API documentation entry point for the mandatory crawl step.
         public var documentationStartURL: String? {
             switch self {

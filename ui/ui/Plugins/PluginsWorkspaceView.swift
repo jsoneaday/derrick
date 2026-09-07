@@ -92,7 +92,7 @@ struct PluginsWorkspaceView: View {
                     .foregroundStyle(.secondary)
                 typeButton(
                     title: "Connector",
-                    subtitle: "Messaging integration (Slack, Telegram, …)",
+                    subtitle: "Messaging integration (Slack)",
                     type: .connector,
                     enabled: true
                 )
@@ -117,21 +117,33 @@ struct PluginsWorkspaceView: View {
                     .foregroundStyle(.secondary)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                     ForEach(PluginFactoryCreateInput.ConnectorVendor.allCases, id: \.self) { vendor in
+                        let enabled = vendor.isSelectableInWizard
                         Button {
+                            guard enabled else { return }
                             controller.selectedVendor = vendor
                         } label: {
-                            Text(vendor.displayName)
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(
-                                    controller.selectedVendor == vendor
-                                        ? Color.accentColor.opacity(0.15)
-                                        : Color.primary.opacity(0.05)
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(spacing: 4) {
+                                Text(vendor.displayName)
+                                    .font(.subheadline.weight(.medium))
+                                if !enabled {
+                                    Text("Soon")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                enabled && controller.selectedVendor == vendor
+                                    ? Color.accentColor.opacity(0.15)
+                                    : Color.primary.opacity(enabled ? 0.05 : 0.03)
+                            )
+                            .foregroundStyle(enabled ? .primary : .secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)
+                        .disabled(!enabled)
+                        .accessibilityLabel(enabled ? vendor.displayName : "\(vendor.displayName), coming soon")
                     }
                 }
                 if controller.selectedVendor == .custom {

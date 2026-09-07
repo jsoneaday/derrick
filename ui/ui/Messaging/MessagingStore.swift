@@ -163,6 +163,9 @@ final class MessagingStore: ObservableObject {
 
     @discardableResult
     func openConnector(pluginID: String) async -> Bool {
+        guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(pluginID) else {
+            return false
+        }
         session.selectConnector(pluginID: pluginID)
         await catalog.reloadFromFactory(preservingPluginIDs: [pluginID])
         if let repository {
@@ -196,6 +199,9 @@ final class MessagingStore: ObservableObject {
 
     /// Opens a specific conversation from a notification tap.
     func openConversation(pluginID: String, threadID: String) async -> Bool {
+        guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(pluginID) else {
+            return false
+        }
         session.selectConnector(pluginID: pluginID)
         await catalog.reloadFromFactory(preservingPluginIDs: [pluginID])
         await session.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
