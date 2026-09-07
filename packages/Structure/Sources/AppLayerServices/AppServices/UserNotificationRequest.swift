@@ -49,4 +49,5 @@ public enum UserNotificationUserInfoKey: String, Sendable {
     case pluginID = "pluginID"
     case threadID = "threadID"
     case messagingMessageID = "messagingMessageID"
+    case messagingParentVendorMessageID = "messagingParentVendorMessageID"
 }

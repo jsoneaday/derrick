@@ -7,15 +7,27 @@ public enum DerrickMessagingConversationPresentationWake: Sendable {
     public static let uiOpenNotificationName = Notification.Name("derrick.openMessagingConversation")
     public static let pluginIDUserInfoKey = UserNotificationUserInfoKey.pluginID.rawValue
     public static let threadIDUserInfoKey = UserNotificationUserInfoKey.threadID.rawValue
+    public static let parentVendorMessageIDUserInfoKey =
+        UserNotificationUserInfoKey.messagingParentVendorMessageID.rawValue
     private static let pendingFileName = "pending_messaging_conversation_presentation.json"
 
     public struct Payload: Codable, Sendable, Equatable {
         public let pluginID: String
         public let threadID: String
+        public let parentVendorMessageID: String?
 
-        public init(pluginID: String, threadID: String) {
+        public init(
+            pluginID: String,
+            threadID: String,
+            parentVendorMessageID: String? = nil
+        ) {
             self.pluginID = pluginID
             self.threadID = threadID
+            self.parentVendorMessageID = parentVendorMessageID
+                .flatMap { value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
         }
 
         public var isValid: Bool {
@@ -24,8 +36,12 @@ public enum DerrickMessagingConversationPresentationWake: Sendable {
         }
     }
 
-    public static func post(pluginID: String, threadID: String) {
-        post(Payload(pluginID: pluginID, threadID: threadID))
+    public static func post(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) {
+        post(Payload(pluginID: pluginID, threadID: threadID, parentVendorMessageID: parentVendorMessageID))
     }
 
     public static func post(_ payload: Payload) {
@@ -59,10 +75,16 @@ public enum DerrickMessagingConversationPresentationWake: Sendable {
         NotificationCenter.default.post(
             name: uiOpenNotificationName,
             object: nil,
-            userInfo: [
-                pluginIDUserInfoKey: payload.pluginID,
-                threadIDUserInfoKey: payload.threadID,
-            ]
+            userInfo: {
+                var info: [String: String] = [
+                    pluginIDUserInfoKey: payload.pluginID,
+                    threadIDUserInfoKey: payload.threadID,
+                ]
+                if let parent = payload.parentVendorMessageID {
+                    info[parentVendorMessageIDUserInfoKey] = parent
+                }
+                return info
+            }()
         )
     }
 

@@ -13,6 +13,7 @@ import Testing
     @Test func executionContextSchemaExposesWorkflowKinds() throws {
         let kinds = try GuestContract.officialWorkflowKinds()
         #expect(kinds.contains("plugin_factory_create"))
+        #expect(kinds.contains("connector_auth_discover"))
         #expect(kinds.contains("none"))
     }
 

@@ -74,7 +74,15 @@ public enum DerrickNotificationLaunch: Sendable {
             || DerrickMessagingConversationPresentationWake.peekPending() != nil
     }
 
-    public static func postShowMessagingConversation(pluginID: String, threadID: String) {
-        DerrickMessagingConversationPresentationWake.post(pluginID: pluginID, threadID: threadID)
+    public static func postShowMessagingConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) {
+        DerrickMessagingConversationPresentationWake.post(
+            pluginID: pluginID,
+            threadID: threadID,
+            parentVendorMessageID: parentVendorMessageID
+        )
     }
 }

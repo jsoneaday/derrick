@@ -13,42 +13,8 @@ public enum DaemonProcessHygiene {
     /// Returns true when the caller should drop its connection and reconnect.
     @discardableResult
     public static func evictIfStaleGuestRuntime(_ health: ServiceHealthReport) async -> Bool {
-        guard isStaleConnectedDaemon(health) else {
-            debugLog(
-                "[DaemonHygiene] connected pid=\(health.pid) guestRuntime=\(health.guestRuntimeImage ?? "?") fingerprint=\(health.executableFingerprint ?? "?")"
-            )
-            return false
-        }
-        debugLog(
-            "[DaemonHygiene] stale connected daemon pid=\(health.pid) reportedRuntime=\(health.guestRuntimeImage ?? "none") reportedFP=\(health.executableFingerprint ?? "none") expectedFP=\(expectedFingerprint() ?? "none") — retiring"
-        )
-        fputs(
-            "[DaemonHygiene] stale connected daemon pid=\(health.pid) reportedRuntime=\(health.guestRuntimeImage ?? "none") reportedFP=\(health.executableFingerprint ?? "none")\n",
-            stderr
-        )
-        // Pre-identity daemons have no `retire` selector. Sandboxed kill() cannot
-        // confirm death — if XPC retire is missing or health still shows this pid, bootout.
-        let retired: Bool
-        if health.executableFingerprint == nil {
-            retired = false
-        } else {
-            retired = await requestRetirementOverXPC()
-            try? await Task.sleep(nanoseconds: postKillWaitNanoseconds)
-        }
-        let stillStale = retired ? await stillSameStaleProcess(pid: health.pid) : true
-        if stillStale {
-            fputs(
-                "[DaemonHygiene] retire xpc=\(retired) still pid=\(health.pid) — bootout+reload\n",
-                stderr
-            )
-            JobServiceLoginAgent.bootoutRegisteredDaemon()
-            try? await JobServiceLoginAgent.ensureRegistered()
-            JobServiceLoginAgent.reloadRegisteredDaemon()
-            await waitUntilReplacementDaemon(replacing: health.pid)
-        } else {
-            debugLog("[DaemonHygiene] retired pid=\(health.pid) xpc=\(retired) — KeepAlive will re-exec")
-        }
-        return true
+        _ = health
+        return false
     }
 
     public static func isStaleConnectedDaemon(_ health: ServiceHealthReport) -> Bool {
@@ -288,7 +254,7 @@ public enum DaemonProcessHygiene {
             fputs("[DaemonHygiene] expected daemon healthy — skip register/kickstart\n", stderr)
             return
         }
-        if !launchdLoaded {
+        if !launchdLoaded, !hasHealthyExpectedDaemon {
             // Stray copies (from `open -n`) hold the Mach name so launchd stays in xpcproxy.
             for process in listJobKeepAliveProcesses() {
                 let expected = DerrickDaemonHygiene.canonicalPath(expectedPath)

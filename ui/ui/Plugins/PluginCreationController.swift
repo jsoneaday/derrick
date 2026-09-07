@@ -9,10 +9,14 @@ final class PluginCreationController: ObservableObject {
         case intro
         case chooseType
         case chooseVendor
+        case chooseName
+        case chooseNews
+        case discoveringAuth
         case creating
         case collectCredentials(pluginID: String)
         case failed(step: PluginFactoryCreateInput.FailureStep, message: String, technicalDetail: String? = nil)
         case succeeded(pluginID: String)
+        case succeededNews(readerID: String)
     }
 
     struct ProgressStepState: Identifiable, Equatable {
@@ -35,6 +39,18 @@ final class PluginCreationController: ObservableObject {
     @Published var selectedVendor: PluginFactoryCreateInput.ConnectorVendor = .slack
     @Published var selectedScope: PluginFactoryCreateInput.ConnectorScope = .fullSync
     @Published var customVendorName = ""
+    @Published var connectorName = ""
+    @Published private(set) var defaultNameReady = false
+    @Published var newsName = ""
+    @Published var selectedNewsTopics: Set<NewsPresetTopic> = []
+    @Published var extraNewsTopics: [String] = []
+    @Published var newsTopicDraft = ""
+    @Published var selectedNewsSources: Set<NewsPresetSource> = []
+    @Published var extraNewsURLs: [String] = []
+    @Published var newsURLDraft = ""
+    @Published var newsMode: NewsReaderMode = .list
+    @Published var newsMaxCount = 20
+    @Published var newsSchedule: NewsReaderSchedule = .off
     @Published private(set) var credentialFields: [PluginCredentialFieldPresentation] = []
     @Published var credentialDrafts: [String: String] = [:]
 
@@ -42,9 +58,25 @@ final class PluginCreationController: ObservableObject {
     private var workflowID: String?
     private var pollAfterSeq = 0
     private var pollTask: Task<Void, Never>?
+    private var discoverTask: Task<Void, Never>?
+    private var namePrepareTask: Task<Void, Never>?
+    private var generatedConnectorName = ""
+    private var pendingAuth: ConnectorAuthDiscovery?
+    private var creationAPIKey: String?
+    private var creationReviewerModelJSON: String?
+    private var creationSessionID = ""
 
     deinit {
         pollTask?.cancel()
+        discoverTask?.cancel()
+        namePrepareTask?.cancel()
+    }
+
+    var canConfirmName: Bool {
+        guard defaultNameReady else { return false }
+        let trimmed = connectorName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return (try? PluginID.normalized(trimmed)) != nil
     }
 
     var canConfirmVendor: Bool {
@@ -55,8 +87,9 @@ final class PluginCreationController: ObservableObject {
         return true
     }
 
-    func configure(repository: DBRepository) {
-        self.repository = repository
+    var canConfirmNews: Bool {
+        let nameOK = !newsName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return nameOK && !builtNewsSources().isEmpty
     }
 
     var canSaveCredentials: Bool {
@@ -67,14 +100,24 @@ final class PluginCreationController: ObservableObject {
         )
     }
 
+    func configure(repository: DBRepository) {
+        self.repository = repository
+    }
+
     func showIntro() {
         cancelPolling()
+        discoverTask?.cancel()
+        namePrepareTask?.cancel()
+        pendingAuth = nil
         phase = .intro
         statusMessage = ""
         progressSteps = []
         credentialFields = []
         credentialDrafts = [:]
         selectedScope = .fullSync
+        connectorName = ""
+        generatedConnectorName = ""
+        defaultNameReady = false
     }
 
     func beginCreate() {
@@ -89,23 +132,179 @@ final class PluginCreationController: ObservableObject {
     }
 
     func confirmTypeSelection() {
+        if selectedType == .newsReader {
+            resetNewsDraft()
+            phase = .chooseNews
+            return
+        }
         guard selectedType == .connector else {
             phase = .failed(
                 step: .type,
-                message: "Only connector plugins are supported today. News reader and custom types are coming soon."
+                message: "Custom plugins are not available yet."
             )
             return
         }
         selectedVendor = .slack
+        refreshDefaultConnectorName()
         phase = .chooseVendor
     }
 
-    func confirmVendor() {
+    func confirmVendor(
+        sessionID: String,
+        helperAPIKey: String?,
+        helperReviewerModelJSON: String?
+    ) {
         selectedScope = .fullSync
+        creationSessionID = sessionID
+        creationAPIKey = helperAPIKey
+        creationReviewerModelJSON = helperReviewerModelJSON
+        defaultNameReady = false
+        phase = .chooseName
+        namePrepareTask?.cancel()
+        namePrepareTask = Task { @MainActor in
+            await PluginFactoryListStore.shared.reload()
+            guard !Task.isCancelled else { return }
+            refreshDefaultConnectorName()
+            defaultNameReady = true
+            startAuthDiscovery()
+        }
+    }
+
+    func confirmConnectorName() {
+        guard canConfirmName else { return }
+        if let pendingAuth {
+            presentCredentialsOrFail(auth: pendingAuth)
+        } else {
+            phase = .discoveringAuth
+            statusMessage = "Reading how this service authenticates…"
+        }
     }
 
     func goBackToTypeSelection() {
+        namePrepareTask?.cancel()
+        discoverTask?.cancel()
+        pendingAuth = nil
+        defaultNameReady = false
         phase = .chooseType
+    }
+
+    func goBackToVendor() {
+        namePrepareTask?.cancel()
+        discoverTask?.cancel()
+        pendingAuth = nil
+        defaultNameReady = false
+        phase = .chooseVendor
+    }
+
+    func addNewsTopic() {
+        let topic = newsTopicDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty else { return }
+        if !extraNewsTopics.contains(where: { $0.compare(topic, options: .caseInsensitive) == .orderedSame }) {
+            extraNewsTopics.append(topic)
+        }
+        newsTopicDraft = ""
+    }
+
+    func removeNewsTopic(_ topic: String) {
+        extraNewsTopics.removeAll { $0 == topic }
+    }
+
+    func addNewsURL() {
+        let url = newsURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return }
+        extraNewsURLs.append(url)
+        newsURLDraft = ""
+    }
+
+    func removeNewsURL(_ url: String) {
+        extraNewsURLs.removeAll { $0 == url }
+    }
+
+    func startNewsCreation() {
+        let spec = NewsReaderSpec(
+            name: newsName,
+            topics: builtNewsTopics(),
+            sources: builtNewsSources(),
+            mode: newsMode,
+            maxCount: newsMaxCount,
+            schedule: newsSchedule
+        )
+        if let blocked = spec.sources.compactMap({ source -> (NewsSource, String)? in
+            guard let url = URL(string: source.url),
+                  let reason = NewsPaywall.preflightRejection(url: url) else { return nil }
+            return (source, reason)
+        }).first {
+            phase = .failed(
+                step: .news,
+                message: NewsReaderError.paywalled(url: blocked.0.url, detail: blocked.1).errorDescription
+                    ?? "This source is behind a paywall, which is not supported yet."
+            )
+            return
+        }
+        phase = .creating
+        statusMessage = "Checking sources…"
+        progressSteps = [
+            ProgressStepState(id: "sources", title: "Check sources for paywalls", status: .active),
+            ProgressStepState(id: "fetch", title: "Fetch articles with source links", status: .pending),
+        ]
+        pollTask?.cancel()
+        pollTask = Task { @MainActor in
+            do {
+                let saved = try await NewsReaderStore.shared.create(spec)
+                setProgressStep("sources", status: .completed)
+                setProgressStep("fetch", status: .completed)
+                phase = .succeededNews(readerID: saved.id)
+            } catch let error as NewsReaderError {
+                setProgressStep("sources", status: .failed)
+                phase = .failed(
+                    step: .news,
+                    message: error.localizedDescription,
+                    technicalDetail: String(describing: error)
+                )
+            } catch {
+                setProgressStep("sources", status: .failed)
+                phase = .failed(
+                    step: .news,
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    func builtNewsTopics() -> [String] {
+        selectedNewsTopics.map(\.displayName) + extraNewsTopics
+    }
+
+    func builtNewsSources() -> [NewsSource] {
+        var sources = selectedNewsSources.map(\.source)
+        for raw in extraNewsURLs + [newsURLDraft] {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let normalized = NewsSourceURL.canonicalFetchURL(
+                URL(string: trimmed.contains("://") ? trimmed : "https://\(trimmed)")
+                    ?? URL(string: "https://news.google.com/rss")!
+            ).absoluteString
+            sources.append(NewsSource(label: hostLabel(normalized), url: normalized))
+        }
+        var seen = Set<String>()
+        return sources.filter { seen.insert($0.url).inserted }
+    }
+
+    private func resetNewsDraft() {
+        newsName = ""
+        selectedNewsTopics = []
+        extraNewsTopics = []
+        newsTopicDraft = ""
+        selectedNewsSources = []
+        extraNewsURLs = []
+        newsURLDraft = ""
+        newsMode = .list
+        newsMaxCount = 20
+        newsSchedule = .off
+    }
+
+    private func hostLabel(_ urlString: String) -> String {
+        URL(string: urlString)?.host ?? urlString
     }
 
     func startCreation(
@@ -127,6 +326,22 @@ final class PluginCreationController: ObservableObject {
             )
             return
         }
+        guard let pluginID = normalizedConnectorName(),
+              let auth = pendingAuth
+        else {
+            phase = .failed(
+                step: .name,
+                message: "Name this connector and save its credentials before creating it."
+            )
+            return
+        }
+        guard auth.authScheme.isSupportedInWizard else {
+            phase = .failed(
+                step: .auth,
+                message: "OAuth connectors are not available yet. Use a bot token or API key."
+            )
+            return
+        }
 
         selectedScope = .fullSync
         cancelPolling()
@@ -137,6 +352,8 @@ final class PluginCreationController: ObservableObject {
 
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: selectedVendor,
+            pluginID: pluginID,
+            auth: auth,
             customVendorName: selectedVendor == .custom ? customVendorName : nil,
             scope: selectedScope,
             userDescription: ""
@@ -167,16 +384,20 @@ final class PluginCreationController: ObservableObject {
     func saveCredentialsAndFinish() {
         guard case .collectCredentials(let pluginID) = phase else { return }
         do {
-            try ConnectorCredentialSaver.savePartial(
+            try ConnectorCredentialSaver.persistRequired(
                 pluginID: pluginID,
                 fields: credentialFields,
                 drafts: credentialDrafts
             )
-            setProgressStep("credentials", status: .completed)
-            phase = .succeeded(pluginID: pluginID)
+            markProgressCompleted("credentials")
+            startCreation(
+                sessionID: creationSessionID,
+                helperAPIKey: creationAPIKey,
+                helperReviewerModelJSON: creationReviewerModelJSON
+            )
         } catch {
             phase = .failed(
-                step: .creating,
+                step: .auth,
                 message: "Could not save credentials: \(error.localizedDescription)"
             )
         }
@@ -187,6 +408,9 @@ final class PluginCreationController: ObservableObject {
         case .failed(let step, _, _):
             switch step {
             case .type: phase = .chooseType
+            case .news: phase = .chooseNews
+            case .name: phase = .chooseName
+            case .auth: phase = .chooseName
             case .vendor, .description, .creating:
                 selectedVendor = .slack
                 phase = .chooseVendor
@@ -296,12 +520,14 @@ final class PluginCreationController: ObservableObject {
                     markProgressCompleted("docs")
                     markProgressCompleted("factory")
                     markProgressCompleted("review")
+                    await PluginFactoryListStore.shared.reload()
                     if let pluginID = parseSuccessPluginID(result.resultJSON) {
-                        await prepareCredentialsPhase(pluginID: pluginID)
+                        markProgressCompleted("credentials")
+                        phase = .succeeded(pluginID: pluginID)
                     } else {
-                        await PluginFactoryListStore.shared.reload()
                         if let saved = PluginFactoryListStore.shared.releases.first {
-                            await prepareCredentialsPhase(pluginID: saved.pluginID)
+                            markProgressCompleted("credentials")
+                            phase = .succeeded(pluginID: saved.pluginID)
                         } else {
                             phase = .failed(
                                 step: .creating,
@@ -346,36 +572,6 @@ final class PluginCreationController: ObservableObject {
         }
     }
 
-    private func prepareCredentialsPhase(pluginID: String) async {
-        guard let repository else {
-            phase = .succeeded(pluginID: pluginID)
-            return
-        }
-        await PluginFactoryListStore.shared.reload()
-        let descriptors = await ConnectorCredentialService.secretDescriptors(
-            pluginID: pluginID,
-            repository: repository
-        )
-        guard !descriptors.isEmpty else {
-            phase = .succeeded(pluginID: pluginID)
-            return
-        }
-        let fields = PluginCredentialFieldPresentation.presentations(
-            for: descriptors,
-            pluginID: pluginID
-        )
-        if fields.allSatisfy(\.hasStoredValue) {
-            markProgressCompleted("credentials")
-            phase = .succeeded(pluginID: pluginID)
-            return
-        }
-        credentialFields = fields
-        credentialDrafts = Dictionary(uniqueKeysWithValues: fields.map { ($0.id, "") })
-        markProgressActive("credentials")
-        statusMessage = "Enter the credentials this connector needs. They are stored in Keychain on your Mac."
-        phase = .collectCredentials(pluginID: pluginID)
-    }
-
     private func parseSuccessPluginID(_ json: String?) -> String? {
         guard let json, let data = json.data(using: .utf8),
               let result = try? JSONDecoder.service.decode(PluginFactoryCreateResult.self, from: data)
@@ -383,6 +579,133 @@ final class PluginCreationController: ObservableObject {
             return nil
         }
         return result.pluginID
+    }
+
+    private func refreshDefaultConnectorName() {
+        let existing = PluginFactoryListStore.shared.pluginIDs
+        let generated = ConnectorPluginNaming.defaultPluginID(
+            vendor: selectedVendor,
+            existingIDs: existing
+        )
+        if connectorName.isEmpty
+            || ConnectorPluginNaming.isGeneratedDefault(pluginID: connectorName, vendor: selectedVendor)
+            || connectorName == generatedConnectorName {
+            connectorName = generated
+        }
+        generatedConnectorName = generated
+    }
+
+    private func normalizedConnectorName() -> String? {
+        let trimmed = connectorName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try? PluginID.normalized(trimmed).rawValue
+    }
+
+    private func startAuthDiscovery() {
+        discoverTask?.cancel()
+        pendingAuth = nil
+        let vendor = selectedVendor
+        let sessionID = creationSessionID
+        let apiKey = creationAPIKey
+        let reviewerJSON = creationReviewerModelJSON
+        discoverTask = Task { @MainActor in
+            var summary = ""
+            if vendor.authenticationDocumentationStartURL != nil {
+                do {
+                    let inputJSON = try ConnectorAuthDiscoverInput(vendor: vendor).encodedJSON()
+                    let handle = try await WorkflowRuntimeClient.shared.startWorkflow(
+                        WorkflowStartRequest(
+                            kind: .connectorAuthDiscover,
+                            sessionID: sessionID.isEmpty ? "plugin-wizard" : sessionID,
+                            agentID: "ui",
+                            inputJSON: inputJSON,
+                            principal: .agent(
+                                sessionID: sessionID.isEmpty ? "plugin-wizard" : sessionID,
+                                agentID: "ui"
+                            ),
+                            helperAPIKey: apiKey,
+                            helperReviewerModelJSON: reviewerJSON
+                        )
+                    )
+                    var after = 0
+                    while !Task.isCancelled {
+                        let poll = try await WorkflowRuntimeClient.shared.pollWorkflowUpdate(
+                            WorkflowPollRequest(workflowID: handle.workflowID, afterSeq: after)
+                        )
+                        for event in poll.events {
+                            after = max(after, event.seq)
+                            if event.kind == "progress" {
+                                statusMessage = event.message
+                            }
+                        }
+                        if poll.status == .completed {
+                            if let json = poll.resultJSON,
+                               let data = json.data(using: .utf8),
+                               let result = try? JSONDecoder.service.decode(
+                                ConnectorAuthDiscoverResult.self,
+                                from: data
+                               ) {
+                                summary = result.crawlSummary
+                            }
+                            break
+                        }
+                        if poll.status == .failed || poll.status == .cancelled {
+                            break
+                        }
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                    }
+                } catch {
+                    summary = ""
+                }
+            }
+            guard !Task.isCancelled else { return }
+            let auth = await ConnectorAuthClassifier.classifyOrFallback(
+                vendor: vendor,
+                crawlSummary: summary,
+                apiKey: apiKey,
+                reviewerModelJSON: reviewerJSON
+            )
+            pendingAuth = auth
+            if phase == .discoveringAuth {
+                presentCredentialsOrFail(auth: auth)
+            }
+        }
+    }
+
+    private func presentCredentialsOrFail(auth: ConnectorAuthDiscovery) {
+        guard auth.authScheme.isSupportedInWizard else {
+            phase = .failed(
+                step: .auth,
+                message: "OAuth connectors are not available yet. Use a bot token or API key."
+            )
+            return
+        }
+        guard let pluginID = normalizedConnectorName() else {
+            phase = .chooseName
+            return
+        }
+        let descriptors = auth.secrets.map(\.descriptor)
+        guard !descriptors.isEmpty else {
+            phase = .failed(
+                step: .auth,
+                message: "Could not determine which credentials this connector needs."
+            )
+            return
+        }
+        PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
+            pluginID: pluginID,
+            fields: descriptors
+        )
+        let fields = PluginCredentialFieldPresentation.presentations(
+            for: descriptors,
+            pluginID: pluginID
+        )
+        credentialFields = fields
+        credentialDrafts = Dictionary(uniqueKeysWithValues: fields.map { field in
+            let env = PluginSecretDevelopmentSource.resolve(pluginID: pluginID, fieldID: field.id) ?? ""
+            return (field.id, env)
+        })
+        statusMessage = auth.setupHint ?? "Enter the credentials this connector needs. They are stored in Keychain on your Mac."
+        phase = .collectCredentials(pluginID: pluginID)
     }
 
     private func cancelPolling() {

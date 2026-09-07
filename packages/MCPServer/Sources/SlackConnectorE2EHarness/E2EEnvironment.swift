@@ -264,18 +264,11 @@ struct E2EEnvironment {
     }
 
     func buildConnector(scope: PluginFactoryCreateInput.ConnectorScope) async throws -> PluginFactoryRelease {
-        let crawlSummary = """
-        Slack Web API chat.postMessage accepts JSON with channel and text. Authenticate with a bot token \
-        in Authorization: Bearer. Responses include ok (boolean), channel, ts, and message on success.
-        conversations.history returns messages with ts, user, text, and channel.
-        conversations.list returns channels with id, name, and is_member.
-        conversations.replies returns thread replies when full sync is required.
-        """
-        let goal = PluginFactoryCreateInput.makeConnector(
-            vendor: .slack,
-            scope: scope,
+        let input = try SlackConnectorFactoryInput.make(
+            pluginID: Self.pluginID,
             userDescription: "Post alerts to Slack channels."
-        ).connectorBuildGoal(crawlSummary: crawlSummary)
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("[E2E] factory build scope=\(scope.rawValue)…\n", stderr)
         let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
@@ -283,6 +276,7 @@ struct E2EEnvironment {
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 5)
         ).build(
             userGoal: goal,
+            hostManifest: input.hostManifest,
             builder: E2EFactoryBuilder(scope: scope),
             executor: executor,
             reviewer: E2EHarnessReviewer(),

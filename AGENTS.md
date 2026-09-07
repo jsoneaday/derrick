@@ -1,14 +1,14 @@
 # Agent Instructions
 
-Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27.
-
+Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27. You must follow these instructions specifically.
 
 ## Before changing code
 
 - Read the files on the code path you are changing. Do not guess.
 - Check `Info.plist` and app configuration before assuming a code bug.
-- Find the root cause of an issue. Do not assume or guess. Then and only then proceed to create a solution.
+- When fixing issues do not assume. Make an assertion about where the problem is, confirm your assertion is true, and then fix the issue there.
 - All services must follow the Protocols in the Structure spm or update them.
+- Start new work in worktree and branch.
 
 ## Architecture
 
@@ -21,8 +21,7 @@ Desktop Agent Harness. Swift 6.4+, Xcode 27, macOS 27.
 ## Before finishing
 
 - Add or update unit tests and e2e tests when new code over 5 lines is added.
-- Verify the app builds and launches cleanly on the `ui` scheme.
-- Make sure all tests pass after any change over 5 lines.
+- Makre sure all tests pass and the feature/fix is verifiably complete.
 
 ## Communication
 

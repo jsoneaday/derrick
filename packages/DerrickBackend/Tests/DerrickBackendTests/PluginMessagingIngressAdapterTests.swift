@@ -420,7 +420,83 @@ import Testing
         }
         let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
         _ = try await adapter.pollInbox(repository: repository)
+        #expect(capture.parents == ["", "171.3"])
+    }
+
+    @Test func pollInboxRefetchesReplyThreadWhenStoredCountMatches() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "alice",
+                body: "b1",
+                createdAt: Date(timeIntervalSince1970: 1_710_000_000),
+                replyCount: 1
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.2",
+                sender: "derrick",
+                body: "at1",
+                createdAt: Date(timeIntervalSince1970: 1_710_000_001),
+                parentVendorMessageID: "171.1",
+                replyCount: 0
+            )
+        )
+
+        final class Capture: @unchecked Sendable {
+            var parents: [String] = []
+        }
+        let capture = Capture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parents.append(event.params?["parent_vendor_message_id"]?.stringValue ?? "")
+            let parent = event.params?["parent_vendor_message_id"]?.stringValue ?? ""
+            let envelopes: String
+            if parent.isEmpty {
+                envelopes = #"[{"verb":"result.emit","messages":[]}]"#
+            } else {
+                envelopes = """
+                [{"verb":"result.emit","messages":[\
+                {"vendor_thread_id":"C123","vendor_message_id":"171.1","direction":"inbound","sender":"alice","body":"b1","created_at":"1710000000.000100","reply_count":2},\
+                {"vendor_thread_id":"C123","vendor_message_id":"171.2","direction":"inbound","sender":"derrick","body":"at1","created_at":"1710000001.000100","parent_vendor_message_id":"171.1"},\
+                {"vendor_thread_id":"C123","vendor_message_id":"171.3","direction":"inbound","sender":"alice","body":"bt1","created_at":"1710000002.000100","parent_vendor_message_id":"171.1"}\
+                ]}]
+                """
+            }
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        let inserted = try await adapter.pollInbox(repository: repository)
         #expect(capture.parents == ["", "171.1"])
+        #expect(inserted.contains(where: { $0.message.body == "bt1" }))
+        let thread = try await repository.listMessagingThreads(pluginID: "slack-connection")[0]
+        let replies = try await repository.listMessagingMessages(
+            threadID: thread.id,
+            filter: .replyThread(parentVendorMessageID: "171.1")
+        )
+        #expect(replies.map(\.body) == ["b1", "at1", "bt1"])
     }
 
     @Test func pollConversationSurfacesSlackMissingScopeAsReadPermissionError() async throws {

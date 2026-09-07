@@ -84,9 +84,12 @@ actor MCPServiceToolHost {
                 }
             )
             await server.register(
-                PluginFactoryToolModule.makeRegistration { goal in
+                PluginFactoryToolModule.makeRegistration { goal, hostManifest in
                     do {
-                        let release = try await factoryService.build(userGoal: goal)
+                        let release = try await factoryService.build(
+                            userGoal: goal,
+                            hostManifest: hostManifest
+                        )
                         await MCPServiceStore.shared.log(
                             level: .info,
                             message: "plugin factory completed plugin=\(release.pluginID) version=\(release.version)",

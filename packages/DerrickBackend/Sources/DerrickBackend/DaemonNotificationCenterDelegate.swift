@@ -37,6 +37,10 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
             ?? info["pluginID"] as? String
         let threadID = info[UserNotificationUserInfoKey.threadID.rawValue] as? String
             ?? info["threadID"] as? String
+        let parentVendorMessageID = info[
+            UserNotificationUserInfoKey.messagingParentVendorMessageID.rawValue
+        ] as? String
+            ?? info["messagingParentVendorMessageID"] as? String
         completionHandler()
         if kind == UserNotificationKind.jobResult.rawValue || kind == "job-result",
            let jobResultID,
@@ -65,7 +69,8 @@ public final class DaemonNotificationCenterDelegate: NSObject, UNUserNotificatio
                 Task {
                     await DaemonUILauncher.openMessagingConversation(
                         pluginID: pluginID,
-                        threadID: threadID
+                        threadID: threadID,
+                        parentVendorMessageID: parentVendorMessageID
                     )
                 }
             }
@@ -108,8 +113,12 @@ public enum DaemonUILauncher: Sendable {
         openHITLViaOpenCLI(uiURL: uiURL, approvalID: id)
     }
 
-    public static func openMessagingConversation(pluginID: String, threadID: String) async {
-        let key = "\(pluginID)|\(threadID)"
+    public static func openMessagingConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) async {
+        let key = "\(pluginID)|\(threadID)|\(parentVendorMessageID ?? "")"
         let skip = (lastMessagingOpenedKey == key && Date().timeIntervalSince(lastMessagingOpenedAt) < 45)
         if skip {
             fputs("[derrickd] present-messaging skipped (debounce) \(key)\n", stderr)
@@ -118,7 +127,11 @@ public enum DaemonUILauncher: Sendable {
         lastMessagingOpenedKey = key
         lastMessagingOpenedAt = Date()
 
-        DerrickNotificationLaunch.postShowMessagingConversation(pluginID: pluginID, threadID: threadID)
+        DerrickNotificationLaunch.postShowMessagingConversation(
+            pluginID: pluginID,
+            threadID: threadID,
+            parentVendorMessageID: parentVendorMessageID
+        )
 
         if DerrickUIPresence.isInteractiveUIRunning() {
             fputs("[derrickd] present-messaging wake \(key) (UI already running)\n", stderr)
@@ -196,11 +209,12 @@ public enum DaemonUILauncher: Sendable {
         }
     }
 
-    /// Opens the main Derrick window — not a panel-only session — so the conversation is usable.
+    /// `open -n --args` is the most reliable way to pass argv to a GUI app.
     private static func openMessagingViaOpenCLI(uiURL: URL, pluginID: String, threadID: String) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = [
+            "-n",
             "-a", uiURL.path,
             "--args",
             DerrickNotificationLaunch.showMessagingConversationArgument,

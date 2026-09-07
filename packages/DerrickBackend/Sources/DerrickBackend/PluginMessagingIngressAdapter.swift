@@ -155,8 +155,9 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         }
     }
 
-    /// Channel poll does not return nested replies. Pull threads whose stored
-    /// children are behind the vendor `reply_count` on the parent.
+    /// Channel history does not include nested replies. Slack also excludes the
+    /// `oldest` cursor message unless `inclusive` is set, so stored `reply_count`
+    /// can stay stale after the first reply. Re-poll threaded parents, newest first.
     private func replyParentsNeedingSync(
         thread: MessagingThreadDTO,
         repository: DBRepository,
@@ -168,13 +169,12 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             limit: MessagingViewport.maxVisibleMessages,
             filter: .channelRoots
         )
-        var parents: [String] = []
-        for root in roots {
-            guard parents.count < limit else { break }
+        var behind: [String] = []
+        var active: [String] = []
+        for root in roots.reversed() {
             guard let vendorID = root.vendorMessageID?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !vendorID.isEmpty,
-                  root.replyCount > 0
+                  !vendorID.isEmpty
             else {
                 continue
             }
@@ -185,10 +185,12 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             )
             let childCount = threadRows.filter { $0.parentVendorMessageID == vendorID }.count
             if childCount < root.replyCount {
-                parents.append(vendorID)
+                behind.append(vendorID)
+            } else if root.replyCount > 0 || childCount > 0 {
+                active.append(vendorID)
             }
         }
-        return parents
+        return Array((behind + active).prefix(limit))
     }
 
     private func pollCursor(

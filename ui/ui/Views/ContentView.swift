@@ -234,6 +234,7 @@ struct ContentView: View {
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
     @StateObject private var messaging = MessagingStore()
+    @ObservedObject private var news = NewsReaderStore.shared
     @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
@@ -389,6 +390,7 @@ struct ContentView: View {
                     modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
+                    news: news,
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
@@ -402,12 +404,14 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins {
+                } else if workspace != .debugLogs && workspace != .plugins && workspace != .news {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
                 case .messaging:
                     MessagingConversationView(store: messaging)
+                case .news:
+                    NewsWorkspaceView(store: news)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
                 case .plugins:
@@ -424,6 +428,13 @@ struct ContentView: View {
                                     pluginCreationController.dismissSuccess()
                                 }
                                 Task { await pluginFactoryList.reload() }
+                            }
+                        },
+                        onOpenNewsReader: { readerID in
+                            Task { @MainActor in
+                                workspace = .news
+                                await news.select(id: readerID)
+                                pluginCreationController.dismissSuccess()
                             }
                         }
                     )
@@ -470,7 +481,14 @@ struct ContentView: View {
                 return
             }
             Task { @MainActor in
-                await routeToMessagingConversation(pluginID: pluginID, threadID: threadID)
+                let parentVendorMessageID = notification.userInfo?[
+                    DerrickMessagingConversationPresentationWake.parentVendorMessageIDUserInfoKey
+                ] as? String
+                await routeToMessagingConversation(
+                    pluginID: pluginID,
+                    threadID: threadID,
+                    parentVendorMessageID: parentVendorMessageID
+                )
             }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
@@ -739,6 +757,15 @@ struct ContentView: View {
             }
 
             do {
+                bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
+                try? await JobServiceLoginAgent.ensureRegistered()
+                JobServiceLoginAgent.ensureHelperProcessRunning()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                let health = try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+                debugLog(
+                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
+                )
+
                 bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
                 let repo = try await ensureSessionStoreLoaded()
                 await ServiceLogRecorder.shared.configure(repository: repo)
@@ -748,47 +775,15 @@ struct ContentView: View {
                 await ContainerLifecycleSettingsService.shared.configure(repository: repo)
                 await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
                 await PluginFactoryListStore.shared.configure(repository: repo)
+                await NewsReaderStore.shared.configure(repository: repo)
                 pluginCreationController.configure(repository: repo)
 
-                bootstrapStatus.update(phase: .connectingHelper, message: "Preparing Derrick daemon…")
-                try await DaemonBootstrapCoordinator.prepareForHostApp(force: true)
-
-                // Connect derrickd before Docker prewarm so Mach XPC is not competing with
-                // long-running DockerRunnerHelper work on the same bootstrap path.
-                bootstrapStatus.update(
-                    phase: .connectingHelper,
-                    message: "Connecting to Derrick daemon…"
-                )
-                var health = try await AgentServiceClient.shared.ensureUpAndHealth()
-                for attempt in 0..<3 {
-                    guard await DaemonProcessHygiene.evictIfStaleGuestRuntime(health) else { break }
-                    AgentServiceClient.shared.dropConnectionForReconnect()
-                    bootstrapStatus.update(
-                        phase: .connectingHelper,
-                        message: "Restarting background service…"
-                    )
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    health = try await AgentServiceClient.shared.ensureUpAndHealth()
-                    if attempt == 2, DaemonProcessHygiene.isStaleConnectedDaemon(health) {
-                        throw NSError(
-                            domain: "DaemonHygiene",
-                            code: 409,
-                            userInfo: [NSLocalizedDescriptionKey:
-                                "Derrick could not replace its background service. Quit Derrick and open it again."]
-                        )
-                    }
-                }
-                debugLog(
-                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
-                )
-
-                bootstrapStatus.update(phase: .connectingHelper, message: "Starting Docker runtime…")
+                // Daemon first so Mach XPC is up, then Docker must succeed before Ready.
+                // Guest containers (script_exec / plugin.invoke) need the engine.
+                bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
                 _ = XPCDockerRunner.shared
-
                 try await XPCDockerRunner.shared.waitUntilPrewarmed()
                 bootstrapStatus.update(phase: .connectingHelper, message: "Finishing setup…")
-
-                // Daemon MCP uses its embedded Docker helper; handoff is best-effort while UI is open.
                 do {
                     let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
                     try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
@@ -803,9 +798,7 @@ struct ContentView: View {
                 await messaging.configure(repository: repo)
                 await DerrickNotificationService.shared.activateSession(repository: repo)
                 if isDebugEnabled {
-                    debugLogStore.log(
-                        "UI client ready (Docker + derrickd Agent/Job/MCP)"
-                    )
+                    debugLogStore.log("UI client ready (Docker + derrickd Agent/Job/MCP)")
                 }
             } catch is CancellationError {
                 if !sessionReady {
@@ -868,6 +861,7 @@ struct ContentView: View {
             await ServiceLogRecorder.shared.configure(repository: repo)
             sessionReady = true
             await PluginFactoryListStore.shared.configure(repository: repo)
+            await NewsReaderStore.shared.configure(repository: repo)
             pluginCreationController.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await messaging.configure(repository: repo)
@@ -1362,8 +1356,16 @@ struct ContentView: View {
     }
 
     @discardableResult
-    private func routeToMessagingConversation(pluginID: String, threadID: String) async -> Bool {
-        let opened = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
+    private func routeToMessagingConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) async -> Bool {
+        let opened = await messaging.openConversation(
+            pluginID: pluginID,
+            threadID: threadID,
+            parentVendorMessageID: parentVendorMessageID
+        )
         guard opened else { return false }
         workspace = .messaging
         return true

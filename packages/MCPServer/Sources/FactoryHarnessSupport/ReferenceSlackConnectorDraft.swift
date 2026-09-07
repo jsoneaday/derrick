@@ -40,8 +40,8 @@ public enum ReferenceSlackConnectorDraft {
         let opsJSON = ops.map { "\"\($0)\"" }.joined(separator: ", ")
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "description":"Slack messaging connector","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":[\(opsJSON)]}}}
+        "description":"Slack messaging connector",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","auth_scheme":"bot_token","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],"permissions":["channels:history","channels:read","chat:write","groups:history","groups:read","im:history","im:read","mpim:history","mpim:read","users:read"],"messaging_ops":[\(opsJSON)]}}}
         """
         return PluginFactoryDraft(
             manifestJSON: manifestJSON,

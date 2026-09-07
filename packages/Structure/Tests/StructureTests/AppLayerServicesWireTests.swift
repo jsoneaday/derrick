@@ -327,6 +327,49 @@ import Testing
         #expect(resolved == "xoxb-dev-token")
     }
 
+    @Test func pluginSecretDevelopmentSourceReadsSlackBotKeyForFactoryConnectorID() {
+        let resolved = PluginSecretDevelopmentSource.resolve(
+            pluginID: "slack-connector",
+            fieldID: "bot_token",
+            environment: [
+                DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
+                "SLACK_BOT_KEY": "xoxb-dev-token",
+            ],
+            bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
+        )
+        #expect(resolved == "xoxb-dev-token")
+    }
+
+    @Test func pluginSecretDevelopmentSourceDoesNotApplySlackBotKeyToUnrelatedPlugin() {
+        let resolved = PluginSecretDevelopmentSource.resolve(
+            pluginID: "weather-tool",
+            fieldID: "bot_token",
+            environment: [
+                DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
+                "SLACK_BOT_KEY": "xoxb-dev-token",
+            ],
+            bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test func slackConnectorFallsBackToBotTokenWhenManifestOmitsSecrets() {
+        let json = """
+        {"$schema":"https://example.invalid/agent-plugin.json","name":"slack-connector","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads"]}}}
+        """
+        let descriptors = PluginSecretField.resolvedDescriptors(
+            pluginID: "slack-connector",
+            fromManifestJSON: json
+        )
+        #expect(descriptors.map(\.id) == ["bot_token"])
+        #expect(
+            PluginSecretField.resolvedDescriptors(pluginID: "weather-tool", fromManifestJSON: json).isEmpty
+        )
+    }
+
     @Test func pluginSecretResolverIgnoresDotEnvWhenNotInDevelopmentMode() throws {
         PluginSecretKeychain.deleteForTesting(
             pluginID: "test-plugin-dotenv",
@@ -423,6 +466,28 @@ import Testing
         )
         #expect(PluginSecretKeychain.hasStoredValue(pluginID: destID, fieldID: "bot_token"))
         #expect(try PluginSecretKeychain.load(pluginID: destID, fieldID: "bot_token") == "legacy-token")
+    }
+
+    @Test func pluginSecretKeychainSharedStoreIsReadableAfterSave() throws {
+        let pluginID = "test-shared-store-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "bot_token")
+        }
+        try PluginSecretKeychain.save(pluginID: pluginID, fieldID: "bot_token", value: "shared-token")
+        #expect(try PluginSecretKeychain.loadFromKeychain(pluginID: pluginID, fieldID: "bot_token") == "shared-token")
+        #expect(PluginSecretKeychain.hasKeychainValue(pluginID: pluginID, fieldID: "bot_token"))
+    }
+
+    @Test func pluginSecretKeychainMissingKeychainIDsIgnoresDotenv() throws {
+        let pluginID = "test-keychain-missing-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "bot_token")
+        }
+        let fields = [PluginSecretDescriptor(id: "bot_token", label: "Bot token", kind: "token")]
+        #expect(!PluginSecretKeychain.missingKeychainIDs(pluginID: pluginID, fields: fields).isEmpty)
+        try PluginSecretKeychain.save(pluginID: pluginID, fieldID: "bot_token", value: "stored-token")
+        #expect(PluginSecretKeychain.missingKeychainIDs(pluginID: pluginID, fields: fields).isEmpty)
+        #expect(PluginSecretKeychain.hasKeychainValue(pluginID: pluginID, fieldID: "bot_token"))
     }
 
     @Test func messageSigningRoundTrip() {
@@ -731,7 +796,7 @@ import Testing
             )
         )
         #expect(
-            DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
+            !DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
                 evictedAny: false,
                 hasHealthyExpectedDaemon: true,
                 launchdJobLoaded: false
@@ -798,6 +863,34 @@ import Testing
         #expect(DerrickServiceID.daemonSessionLaunchdLabel == "derrick.ui.Daemon.session")
         #expect(DerrickServiceID.daemonSessionLaunchdLabel != DerrickServiceID.daemon.rawValue)
         #expect(DerrickServiceID.daemon.machServiceName == "\(DerrickServiceID.appGroupID).daemon")
+        #expect(DerrickServiceID.demandStartLaunchdLabels.count == 3)
+        #expect(Set(DerrickServiceID.demandStartLaunchdLabels) == [
+            DerrickServiceID.daemon.rawValue,
+            DerrickServiceID.daemonSessionLaunchdLabel,
+            DerrickServiceID.jobKeepAlive.rawValue,
+        ])
+        #expect(DerrickServiceID.demandStartLaunchdLabels.allSatisfy { !$0.contains("application.") })
+    }
+
+    @Test func smAppSpawnHandoffDetectsRunningBoardDaemonJob() {
+        #expect(
+            DerrickDaemonHygiene.shouldHandoffSMAppSpawnToSessionAgent(
+                xpcServiceName: "application.derrick.ui.Daemon.1.2.UUID"
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldHandoffSMAppSpawnToSessionAgent(xpcServiceName: nil)
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldHandoffSMAppSpawnToSessionAgent(
+                xpcServiceName: DerrickServiceID.daemon.rawValue
+            )
+        )
+        #expect(
+            !DerrickDaemonHygiene.shouldHandoffSMAppSpawnToSessionAgent(
+                xpcServiceName: DerrickServiceID.daemonSessionLaunchdLabel
+            )
+        )
     }
 
     @Test func derrickDaemonHygieneDetectsOrphanPath() {
@@ -825,7 +918,7 @@ import Testing
             expectedExecutablePath: embedded,
             expectedExecutableModificationDate: rebuilt
         )
-        #expect(reason == .staleBuild)
+        #expect(reason == nil)
     }
 
     @Test func derrickDaemonHygieneStaleWhenAcceptedMtimeDiffers() {
@@ -839,7 +932,7 @@ import Testing
             expectedExecutableModificationDate: Date(timeIntervalSince1970: 2_000),
             lastAcceptedExecutableModificationDate: Date(timeIntervalSince1970: 1_000)
         )
-        #expect(reason == .staleBuild)
+        #expect(reason == nil)
     }
 
     @Test func derrickDaemonHygieneAcceptsFirstObserveWithoutStartDate() {
@@ -1337,6 +1430,11 @@ import Testing
         #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .vendor)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .vendor)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .type)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .name)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .auth)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .auth)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "paywall") == .news)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "news") == .news)
     }
 
     @Test func connectorWizardOffersFullSyncOnly() {
@@ -1366,7 +1464,8 @@ import Testing
         #expect(goal.contains("send_message"))
         #expect(goal.contains("sync_threads"))
         #expect(goal.contains("poll_inbox"))
-        #expect(goal.contains("Reference Slack connector blueprint"))
+        #expect(goal.contains("Host plugin id"))
+        #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
         #expect(!goal.contains("must sync and send messages"))
         #expect(!goal.contains("Post alerts to #general"))
         #expect(!goal.contains("User requirements:"))
@@ -1545,5 +1644,74 @@ import Testing
         """
         let ops = PluginFactoryValidationExpectations.messagingOps(fromManifestJSON: json)
         #expect(ops == ["send_message", "poll_inbox"])
+    }
+
+    @Test func connectorPluginNamingIncrementsAcrossExistingIDs() {
+        #expect(
+            ConnectorPluginNaming.defaultPluginID(vendor: .slack, existingIDs: [])
+                == "slack-connector-1"
+        )
+        #expect(
+            ConnectorPluginNaming.defaultPluginID(
+                vendor: .slack,
+                existingIDs: ["slack-connector-1"]
+            ) == "slack-connector-2"
+        )
+        #expect(
+            ConnectorPluginNaming.defaultPluginID(
+                vendor: .slack,
+                existingIDs: ["slack-connection", "slack-connector", "slack-connector-1"]
+            ) == "slack-connector-2"
+        )
+        #expect(ConnectorPluginNaming.isGeneratedDefault(pluginID: "slack-connector-1", vendor: .slack))
+        #expect(ConnectorPluginNaming.isGeneratedDefault(pluginID: "slack-connector", vendor: .slack))
+        #expect(!ConnectorPluginNaming.isGeneratedDefault(pluginID: "office-slack", vendor: .slack))
+    }
+
+    @Test func connectorAuthDiscoveryDecodesReviewerJSON() throws {
+        let json = """
+        {"auth_scheme":"bot_token","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],\
+        "permissions":["chat:write"],"setup_hint":"Create a Slack bot.","crawl_summary":"Bearer token."}
+        """
+        let decoded = try JSONDecoder().decode(ConnectorAuthDiscovery.self, from: Data(json.utf8))
+        #expect(decoded.authScheme == .botToken)
+        #expect(decoded.secrets.map(\.id) == ["bot_token"])
+        #expect(decoded.permissions == ["chat:write"])
+        #expect(decoded.setupHint == "Create a Slack bot.")
+        #expect(decoded.crawlSummary == "Bearer token.")
+        #expect(decoded.authScheme.isSupportedInWizard)
+        #expect(!ConnectorAuthScheme.oauth.isSupportedInWizard)
+    }
+
+    @Test func pluginFactoryCreateInputRoundTripsHostAuthAndPluginID() throws {
+        let auth = try ConnectorAuthDiscovery.slackBotTokenFallback(crawlSummary: "Slack bot tokens.")
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            pluginID: "slack-connector-2",
+            auth: auth,
+            scope: .fullSync
+        )
+        let decoded = try PluginFactoryCreateInput.decodeJSON(try input.encodedJSON())
+        #expect(decoded.pluginID == "slack-connector-2")
+        #expect(decoded.auth?.authScheme == .botToken)
+        #expect(decoded.auth?.secrets.map(\.id) == ["bot_token"])
+        #expect(decoded.auth?.crawlSummary == "Slack bot tokens.")
+        let manifest = try #require(decoded.hostManifest)
+        #expect(manifest.pluginID == "slack-connector-2")
+        #expect(manifest.authScheme == .botToken)
+        let manifestJSON = try manifest.encodedJSON()
+        #expect(manifestJSON.contains("\"auth_scheme\":\"bot_token\""))
+        #expect(manifestJSON.contains("\"name\":\"slack-connector-2\""))
+        #expect(!manifestJSON.contains("xoxb-"))
+    }
+
+    @Test func makeConnectorDefaultsDistinctGeneratedPluginIDs() {
+        let first = PluginFactoryCreateInput.makeConnector(vendor: .slack)
+        #expect(first.pluginID == "slack-connector-1")
+        let second = ConnectorPluginNaming.defaultPluginID(
+            vendor: .slack,
+            existingIDs: [first.pluginID].compactMap { $0 }
+        )
+        #expect(second == "slack-connector-2")
     }
 }

@@ -29,6 +29,7 @@ public enum ConnectorReferenceBlueprint: Sendable {
             - Only emit conversations the bot token can access; skip channels where is_member is false
             - If conversations.list returns ok false, emit title/summary with the vendor error; do not emit threads: []
             - Use conversations.history for channel poll_inbox; conversations.replies when params.parent_vendor_message_id or thread_ts is set
+            - Channel history with oldest/since must set inclusive=true so the parent message (and its reply_count) is returned
             - Use chat.postMessage for send_message (include thread_ts when sending a reply)
             """,
         ]

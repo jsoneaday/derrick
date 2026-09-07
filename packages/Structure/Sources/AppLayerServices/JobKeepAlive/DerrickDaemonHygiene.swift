@@ -18,8 +18,10 @@ public enum DerrickDaemonHygiene: Sendable {
         hostAppBundlePath: String,
         expectedExecutablePath: String,
         expectedExecutableModificationDate: Date?,
-        staleBuildTolerance: TimeInterval = 1.0
+        staleBuildTolerance _: TimeInterval = 1.0
     ) -> EvictionReason? {
+        _ = processStartDate
+        _ = expectedExecutableModificationDate
         let exe = canonicalPath(executablePath)
         let host = canonicalPath(hostAppBundlePath)
         let expected = canonicalPath(expectedExecutablePath)
@@ -33,12 +35,6 @@ public enum DerrickDaemonHygiene: Sendable {
         if exe != expected {
             return .orphanPath
         }
-        // Binary on disk is newer than process start → rebuild while daemon kept running.
-        if let mtime = expectedExecutableModificationDate,
-           let start = processStartDate,
-           mtime.timeIntervalSince(start) > staleBuildTolerance {
-            return .staleBuild
-        }
         return nil
     }
 
@@ -50,7 +46,7 @@ public enum DerrickDaemonHygiene: Sendable {
         hostAppBundlePath: String,
         expectedExecutablePath: String,
         expectedExecutableModificationDate: Date?,
-        lastAcceptedExecutableModificationDate: Date?,
+        lastAcceptedExecutableModificationDate _: Date?,
         staleBuildTolerance: TimeInterval = 1.0
     ) -> EvictionReason? {
         if let reason = evictionReason(
@@ -62,18 +58,6 @@ public enum DerrickDaemonHygiene: Sendable {
             staleBuildTolerance: staleBuildTolerance
         ) {
             return reason
-        }
-        guard processStartDate == nil,
-              let expected = expectedExecutableModificationDate
-        else {
-            return nil
-        }
-        guard let accepted = lastAcceptedExecutableModificationDate else {
-            // First observe with unknown start — accept current binary; next rebuild will differ.
-            return nil
-        }
-        if abs(expected.timeIntervalSince(accepted)) > staleBuildTolerance {
-            return .staleBuild
         }
         return nil
     }
@@ -110,14 +94,18 @@ public enum DerrickDaemonHygiene: Sendable {
             ) == nil
     }
 
-    /// After eviction: (re)register when launchd is missing, copies were removed, or we
-    /// do not have exactly one healthy process for this host app.
+    /// After eviction: (re)register when we do not have exactly one healthy process.
+    /// A missing session launchd label is not enough to restart — SMAppService jobs
+    /// use `application.derrick.ui.Daemon.<uuid>` and still run the helper.
     public static func shouldRestartDaemonAfterReconcile(
         evictedAny: Bool,
         hasHealthyExpectedDaemon: Bool,
         launchdJobLoaded: Bool = true,
         healthyExpectedDaemonCount: Int = 1
     ) -> Bool {
+        if hasHealthyExpectedDaemon, healthyExpectedDaemonCount == 1 {
+            return false
+        }
         if !launchdJobLoaded { return true }
         if healthyExpectedDaemonCount != 1 { return true }
         return evictedAny || !hasHealthyExpectedDaemon
@@ -146,6 +134,13 @@ public enum DerrickDaemonHygiene: Sendable {
             return lhs.pid > rhs.pid
         }
         return ranked.dropFirst().map(\.pid)
+    }
+
+    /// SMAppService Login Item jobs are `application.derrick.ui.Daemon.<uuid>` and do
+    /// not check in `MachServices`. Hand those off to `derrick.ui.Daemon.session`.
+    public static func shouldHandoffSMAppSpawnToSessionAgent(xpcServiceName: String?) -> Bool {
+        guard let name = xpcServiceName, !name.isEmpty else { return false }
+        return name.hasPrefix("application.\(DerrickServiceID.daemon.rawValue).")
     }
 
     /// Connected daemon should exit (KeepAlive re-execs) when guest runtime or binary identity differs.

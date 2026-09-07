@@ -9,9 +9,8 @@ enum PluginCredentialCatalog {
         repository: DBRepository
     ) async -> [PluginSecretDescriptor] {
         let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
-        guard let row = manifests.first(where: { $0.pluginID == pluginID }) else { return [] }
-        return PluginSecretField.fields(fromManifestJSON: Data(row.manifestJSON.utf8))
-            .map(\.descriptor)
+        let json = manifests.first(where: { $0.pluginID == pluginID })?.manifestJSON
+        return PluginSecretField.resolvedDescriptors(pluginID: pluginID, fromManifestJSON: json)
     }
 
     static func connectorPluginIDs(repository: DBRepository) async -> [String] {
@@ -25,8 +24,10 @@ enum PluginCredentialCatalog {
     static func pluginsWithSecrets(repository: DBRepository) async -> [PluginCredentialGroup] {
         let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
         return manifests.compactMap { row -> PluginCredentialGroup? in
-            let secrets = PluginSecretField.fields(fromManifestJSON: Data(row.manifestJSON.utf8))
-                .map(\.descriptor)
+            let secrets = PluginSecretField.resolvedDescriptors(
+                pluginID: row.pluginID,
+                fromManifestJSON: row.manifestJSON
+            )
             guard !secrets.isEmpty else { return nil }
             return PluginCredentialGroup(
                 pluginID: row.pluginID,

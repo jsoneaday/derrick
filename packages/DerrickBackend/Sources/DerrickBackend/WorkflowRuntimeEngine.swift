@@ -160,6 +160,26 @@ public actor WorkflowRuntimeEngine {
                         )
                     }
                 )
+            case .connectorAuthDiscover:
+                try await ConnectorAuthDiscoverWorkflow.run(
+                    workflowID: workflowID,
+                    request: request,
+                    baseContext: baseContext,
+                    repositoryProvider: repositoryProvider,
+                    executeTool: { toolName, argumentsJSON, context, principal, helperAPIKey, helperReviewerModelJSON, wfID, stage in
+                        try await self.executeTool(
+                            toolName: toolName,
+                            argumentsJSON: argumentsJSON,
+                            context: context,
+                            principal: principal,
+                            helperAPIKey: helperAPIKey,
+                            helperReviewerModelJSON: helperReviewerModelJSON,
+                            workflowID: wfID,
+                            stage: stage,
+                            repositoryProvider: repositoryProvider
+                        )
+                    }
+                )
             default:
                 try await failWorkflow(
                     workflowID: workflowID,

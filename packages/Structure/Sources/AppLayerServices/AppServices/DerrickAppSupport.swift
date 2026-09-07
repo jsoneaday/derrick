@@ -118,6 +118,27 @@ public enum DerrickAppSupport {
         bundleURL.standardizedFileURL.path.contains(loginItemDaemonPathMarker)
     }
 
+    /// Written when the UI finishes client bootstrap; used to verify launch does not hang.
+    public static func uiBootstrapReadyMarkerURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: applicationGroupIdentifier)?
+            .appendingPathComponent("ui-bootstrap-ready", isDirectory: false)
+    }
+
+    public static func writeUIBootstrapReadyMarker() {
+        guard let url = uiBootstrapReadyMarkerURL() else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? "ready\n".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    public static func clearUIBootstrapReadyMarker() {
+        guard let url = uiBootstrapReadyMarkerURL() else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     /// Resolve the host `derrick.ui` app bundle from an embedded or sibling JobKeepAlive layout.
     public static func hostUIApplicationURL(bundleURL: URL = Bundle.main.bundleURL) -> URL? {
         var dir = bundleURL.standardizedFileURL

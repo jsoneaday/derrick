@@ -184,6 +184,9 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
     public var runtime: String?
     public var secrets: [PluginSecretField]
     public var role: PluginRole
+    public var authScheme: ConnectorAuthScheme?
+    public var permissions: [String]
+    public var messagingOps: [String]
 
     public var isConnector: Bool { role.isConnector }
 
@@ -191,7 +194,10 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
         entrypoint: String? = nil,
         runtime: String? = nil,
         secrets: [PluginSecretField] = [],
-        role: PluginRole = .standard
+        role: PluginRole = .standard,
+        authScheme: ConnectorAuthScheme? = nil,
+        permissions: [String] = [],
+        messagingOps: [String] = []
     ) throws {
         if let entrypoint {
             self.entrypoint = try PluginPath.validateRuntimeEntrypoint(entrypoint)
@@ -205,6 +211,17 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
         }
         self.secrets = secrets
         self.role = role
+        self.permissions = permissions
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        self.messagingOps = messagingOps
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        self.authScheme = Self.resolvedAuthScheme(
+            declared: authScheme,
+            role: role,
+            secrets: secrets
+        )
     }
 
     public static func decode(_ json: PluginJSON) throws -> DerrickExtensionPointers {
@@ -218,12 +235,31 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
             }
             return string
         }
+        let secrets = try PluginSecretField.decodeList(object["secrets"])
+        let role = try decodeRole(object["role"])
         return try DerrickExtensionPointers(
             entrypoint: try path("entrypoint"),
             runtime: try path("runtime"),
-            secrets: try PluginSecretField.decodeList(object["secrets"]),
-            role: try decodeRole(object["role"])
+            secrets: secrets,
+            role: role,
+            authScheme: try decodeAuthScheme(object["auth_scheme"]),
+            permissions: try decodeStringArray(object["permissions"], key: "permissions"),
+            messagingOps: try decodeStringArray(object["messaging_ops"], key: "messaging_ops")
         )
+    }
+
+    /// Connectors without `auth_scheme` that already declare `bot_token` are treated as bot-token auth.
+    public static func resolvedAuthScheme(
+        declared: ConnectorAuthScheme?,
+        role: PluginRole,
+        secrets: [PluginSecretField]
+    ) -> ConnectorAuthScheme? {
+        if let declared { return declared }
+        guard role.isConnector else { return nil }
+        if secrets.contains(where: { $0.id == "bot_token" }) {
+            return .botToken
+        }
+        return nil
     }
 
     private static func decodeRole(_ json: PluginJSON?) throws -> PluginRole {
@@ -236,6 +272,34 @@ public struct DerrickExtensionPointers: Sendable, Hashable {
             throw PluginManifestError.invalidRole(raw)
         }
         return role
+    }
+
+    private static func decodeAuthScheme(_ json: PluginJSON?) throws -> ConnectorAuthScheme? {
+        guard let json else { return nil }
+        guard case .string(let raw) = json else {
+            throw PluginManifestError.invalidFieldType("extensions.app.derrick.auth_scheme")
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let scheme = ConnectorAuthScheme(rawValue: trimmed) else {
+            throw PluginManifestError.invalidSecretField("auth_scheme must be bot_token, api_key, basic, or oauth")
+        }
+        return scheme
+    }
+
+    private static func decodeStringArray(_ json: PluginJSON?, key: String) throws -> [String] {
+        guard let json else { return [] }
+        guard case .array(let items) = json else {
+            throw PluginManifestError.invalidFieldType("extensions.app.derrick.\(key)")
+        }
+        var values: [String] = []
+        for item in items {
+            guard case .string(let raw) = item else {
+                throw PluginManifestError.invalidFieldType("extensions.app.derrick.\(key)")
+            }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { values.append(trimmed) }
+        }
+        return values
     }
 }
 

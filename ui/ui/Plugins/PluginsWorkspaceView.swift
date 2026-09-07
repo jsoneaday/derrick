@@ -8,6 +8,7 @@ struct PluginsWorkspaceView: View {
     let helperReviewerModelJSON: String?
     let sessionID: String
     let onOpenMessagingConnector: (String) -> Void
+    var onOpenNewsReader: (String) -> Void = { _ in }
 
     var body: some View {
         ZStack {
@@ -33,7 +34,7 @@ struct PluginsWorkspaceView: View {
             minWidth: 400,
             minHeight: 0,
             maxWidth: 520,
-            maxHeight: 560,
+            maxHeight: controller.phase == .chooseNews ? 720 : 560,
             onBackdropDismiss: canDismiss ? { controller.showIntro() } : nil,
             onEscape: canDismiss ? { controller.showIntro() } : nil,
             header: {
@@ -58,7 +59,7 @@ struct PluginsWorkspaceView: View {
 
     private var canDismiss: Bool {
         switch controller.phase {
-        case .creating: return false
+        case .creating, .discoveringAuth: return false
         default: return true
         }
     }
@@ -68,10 +69,14 @@ struct PluginsWorkspaceView: View {
         case .intro: return "Create a plugin"
         case .chooseType: return "Create a plugin"
         case .chooseVendor: return "Choose a vendor"
-        case .creating: return "Creating connector"
+        case .chooseName: return "Name this connector"
+        case .chooseNews: return "News list"
+        case .discoveringAuth: return "Reading authentication docs"
+        case .creating: return controller.selectedType == .newsReader ? "Creating news list" : "Creating connector"
         case .collectCredentials: return "Connector credentials"
-        case .failed: return "Could not create connector"
+        case .failed: return controller.selectedType == .newsReader ? "Could not create news list" : "Could not create connector"
         case .succeeded: return "Connector ready"
+        case .succeededNews: return "News list ready"
         }
     }
 
@@ -98,9 +103,9 @@ struct PluginsWorkspaceView: View {
                 )
                 typeButton(
                     title: "News reader",
-                    subtitle: "Coming soon",
+                    subtitle: "Saved lists from topics and sources",
                     type: .newsReader,
-                    enabled: false
+                    enabled: true
                 )
                 typeButton(
                     title: "Custom",
@@ -163,7 +168,20 @@ struct PluginsWorkspaceView: View {
                 }
             }
 
-        case .creating:
+        case .chooseName:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Give this connector a name. You can change the default.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                TextField("Connector name", text: $controller.connectorName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("connector-plugin-name")
+            }
+
+        case .chooseNews:
+            newsReaderForm
+
+        case .discoveringAuth, .creating:
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(controller.progressSteps) { step in
                     progressStepRow(step)
@@ -193,12 +211,34 @@ struct PluginsWorkspaceView: View {
 
         case .failed(_, let message, let technicalDetail):
             VStack(alignment: .leading, spacing: 10) {
-                Label("Nothing was installed", systemImage: "minus.circle")
+                if controller.selectedType == .newsReader {
+                    Label(
+                        message.localizedCaseInsensitiveContains("paywall")
+                            ? "Blocked because of a paywall"
+                            : "News list was not created",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("Your sidebar and Messaging are unchanged.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("paywall") ? Color.orange : Color.secondary)
+                    .accessibilityIdentifier(
+                        message.localizedCaseInsensitiveContains("paywall")
+                            ? "news-paywall-blocked"
+                            : "news-create-failed"
+                    )
+                    if message.localizedCaseInsensitiveContains("paywall") {
+                        Text(NewsPaywall.userWarning)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Label("Nothing was installed", systemImage: "minus.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Your sidebar and Messaging are unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text(message)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -216,6 +256,10 @@ struct PluginsWorkspaceView: View {
 
         case .succeeded(let pluginID):
             Text("Your connector /\(pluginID) is ready. Open it to start talking in Messaging.")
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+        case .succeededNews:
+            Text("Your news list is ready. Every article includes a source link.")
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -239,7 +283,10 @@ struct PluginsWorkspaceView: View {
                 Spacer()
                 Button("Continue") { controller.confirmTypeSelection() }
                     .buttonStyle(ModalPrimaryButtonStyle())
-                    .disabled(controller.selectedType != .connector)
+                    .disabled(
+                        controller.selectedType != .connector
+                            && controller.selectedType != .newsReader
+                    )
                     .keyboardShortcut(.defaultAction)
             }
 
@@ -248,9 +295,8 @@ struct PluginsWorkspaceView: View {
                 Button("Back") { controller.goBackToTypeSelection() }
                     .buttonStyle(ModalSecondaryButtonStyle())
                 Spacer()
-                Button("Create") {
-                    controller.confirmVendor()
-                    controller.startCreation(
+                Button("Continue") {
+                    controller.confirmVendor(
                         sessionID: sessionID,
                         helperAPIKey: helperAPIKey,
                         helperReviewerModelJSON: helperReviewerModelJSON
@@ -261,13 +307,35 @@ struct PluginsWorkspaceView: View {
                 .keyboardShortcut(.defaultAction)
             }
 
-        case .creating:
+        case .chooseName:
+            HStack {
+                Button("Back") { controller.goBackToVendor() }
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                Spacer()
+                Button("Continue") { controller.confirmConnectorName() }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .disabled(!controller.canConfirmName)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+        case .chooseNews:
+            HStack {
+                Button("Back") { controller.goBackToTypeSelection() }
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                Spacer()
+                Button("Create") { controller.startNewsCreation() }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .disabled(!controller.canConfirmNews)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+        case .discoveringAuth, .creating:
             EmptyView()
 
         case .collectCredentials:
             HStack {
                 Spacer()
-                Button("Save and continue") {
+                Button("Save and create") {
                     controller.saveCredentialsAndFinish()
                 }
                 .buttonStyle(ModalPrimaryButtonStyle())
@@ -291,6 +359,18 @@ struct PluginsWorkspaceView: View {
                 Spacer()
                 Button("Open connector") {
                     onOpenMessagingConnector(pluginID)
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+
+        case .succeededNews(let readerID):
+            HStack {
+                Button("Done") { controller.dismissSuccess() }
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                Spacer()
+                Button("Open news list") {
+                    onOpenNewsReader(readerID)
                 }
                 .buttonStyle(ModalPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
@@ -404,6 +484,128 @@ struct PluginsWorkspaceView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+    }
+
+    private var newsReaderForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                TextField("Name this list", text: $controller.newsName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("news-list-name")
+                Text("Topics")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                    ForEach(NewsPresetTopic.allCases) { topic in
+                        let on = controller.selectedNewsTopics.contains(topic)
+                        Button {
+                            if on {
+                                controller.selectedNewsTopics.remove(topic)
+                            } else {
+                                controller.selectedNewsTopics.insert(topic)
+                            }
+                        } label: {
+                            Text(topic.displayName)
+                                .font(.caption.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    TextField("Add a custom topic", text: $controller.newsTopicDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { controller.addNewsTopic() }
+                    Button("Add") { controller.addNewsTopic() }
+                }
+                if !controller.extraNewsTopics.isEmpty {
+                    Text(controller.extraNewsTopics.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Sources")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                    ForEach(NewsPresetSource.allCases) { source in
+                        let on = controller.selectedNewsSources.contains(source)
+                        Button {
+                            if on {
+                                controller.selectedNewsSources.remove(source)
+                            } else {
+                                controller.selectedNewsSources.insert(source)
+                            }
+                        } label: {
+                            Text(source.source.label)
+                                .font(.caption.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    TextField("https://…", text: $controller.newsURLDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("news-url-field")
+                        .onSubmit { controller.addNewsURL() }
+                    Button("Add URL") { controller.addNewsURL() }
+                }
+                ForEach(controller.extraNewsURLs, id: \.self) { url in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(url)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Spacer()
+                            Button("Remove") { controller.removeNewsURL(url) }
+                                .font(.caption)
+                        }
+                        if let reason = newsURLPaywallReason(url) {
+                            Text(reason)
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(NewsPaywall.userWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("news-paywall-warning")
+                Picker("Mode", selection: $controller.newsMode) {
+                    ForEach(NewsReaderMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Stepper("Up to \(controller.newsMaxCount) items", value: $controller.newsMaxCount, in: 5...50, step: 5)
+                Picker("Schedule", selection: $controller.newsSchedule) {
+                    ForEach(NewsReaderSchedule.allCases, id: \.self) { schedule in
+                        Text(schedule.displayName).tag(schedule)
+                    }
+                }
+            }
+        }
+    }
+
+    private func newsURLPaywallReason(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let url = URL(string: normalized) else { return nil }
+        return NewsPaywall.preflightRejection(url: url)
     }
 }
 

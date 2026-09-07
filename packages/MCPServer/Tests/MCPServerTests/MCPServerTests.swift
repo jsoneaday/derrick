@@ -735,7 +735,7 @@ import WebCrawler
     @Test func pluginFactorySurfacesReviewFailureOutcome() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.register(
-                PluginFactoryToolModule.makeRegistration { _ in
+                PluginFactoryToolModule.makeRegistration { _, _ in
                     throw PluginFactoryError.reviewRejected(
                         summary: "The draft did not satisfy the contract.",
                         findings: ["blocking: poll_inbox is incomplete."]

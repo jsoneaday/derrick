@@ -6,6 +6,20 @@ public enum PluginSecretHostMirror: Sendable {
         pluginID: String,
         fields: [PluginSecretDescriptor]
     ) {
+        do {
+            try syncDevelopmentSecretsToKeychainOrThrow(pluginID: pluginID, fields: fields)
+        } catch {
+            fputs(
+                "[plugin-secrets] could not copy development secrets to Keychain for \(pluginID): \(error.localizedDescription)\n",
+                stderr
+            )
+        }
+    }
+
+    public static func syncDevelopmentSecretsToKeychainOrThrow(
+        pluginID: String,
+        fields: [PluginSecretDescriptor]
+    ) throws {
         guard PluginSecretDevelopmentSource.isEnabled() else { return }
         for field in fields {
             guard let value = PluginSecretDevelopmentSource.resolve(
@@ -14,8 +28,8 @@ public enum PluginSecretHostMirror: Sendable {
             ) else {
                 continue
             }
-            if (try? PluginSecretKeychain.loadFromKeychain(pluginID: pluginID, fieldID: field.id)) == nil {
-                try? PluginSecretKeychain.save(pluginID: pluginID, fieldID: field.id, value: value)
+            if !PluginSecretKeychain.hasKeychainValue(pluginID: pluginID, fieldID: field.id) {
+                try PluginSecretKeychain.save(pluginID: pluginID, fieldID: field.id, value: value)
             }
         }
     }

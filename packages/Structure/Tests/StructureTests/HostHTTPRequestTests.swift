@@ -55,6 +55,45 @@ import Testing
         #expect(body.contains(#""channel":"C07FGNJS31T""#))
         #expect(body.contains(#""oldest":"1757192222.409000""#))
         #expect(request.wireHeaders["Content-Type"] == "application/json")
+        let wire = SlackWebAPIFormEncoding.rewritten(request)
+        #expect(wire.headers["Content-Type"] == "application/x-www-form-urlencoded")
+        let form = String(decoding: try #require(wire.body), as: UTF8.self)
+        #expect(form.contains("channel=C07FGNJS31T"))
+        #expect(form.contains("oldest=1757192222.409000"))
+        #expect(form.contains("inclusive=true"))
+    }
+
+    @Test func slackReplyJSONIsSentAsFormFields() throws {
+        let envelopes = try PluginEnvelopeList.decode(
+            Data(#"""
+            [{"verb":"http.request","request_id":"replies-1","method":"POST","url":"https://slack.com/api/conversations.replies","json":{"channel":"C07FGNJS31T","ts":"1788797826.445789"}}]
+            """#.utf8)
+        )
+        let request = try #require(try HostHTTPRequest.all(in: envelopes).first)
+        let wire = SlackWebAPIFormEncoding.rewritten(request)
+        #expect(wire.headers["Content-Type"] == "application/x-www-form-urlencoded")
+        let form = String(decoding: try #require(wire.body), as: UTF8.self)
+        #expect(form == "channel=C07FGNJS31T&ts=1788797826.445789")
+    }
+
+    @Test func slackHistoryGETAddsInclusiveWhenOldestIsSet() {
+        let url = "https://slack.com/api/conversations.history?channel=C07FGNJS31T&limit=200&oldest=1788805364.385569"
+        let rewritten = SlackWebAPIFormEncoding.rewrittenURL(url)
+        #expect(rewritten.contains("inclusive=true"))
+        #expect(rewritten.contains("oldest=1788805364.385569"))
+    }
+
+    @Test func slackChatPostMessageStaysJSON() throws {
+        let envelopes = try PluginEnvelopeList.decode(
+            Data(#"""
+            [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage","headers":{"Content-Type":"application/json"},"json":{"channel":"C1","text":"hello"}}]
+            """#.utf8)
+        )
+        let request = try #require(try HostHTTPRequest.all(in: envelopes).first)
+        let wire = SlackWebAPIFormEncoding.rewritten(request)
+        #expect(wire.headers["Content-Type"] == "application/json")
+        let body = String(decoding: try #require(wire.body), as: UTF8.self)
+        #expect(body == #"{"channel":"C1","text":"hello"}"#)
     }
 
     @Test func resultEmitDoesNotDecodeAsHTTPRequest() throws {

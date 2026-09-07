@@ -40,20 +40,20 @@ public enum ConnectorContractPrompts: Sendable {
         scope: PluginFactoryCreateInput.ConnectorScope,
         vendor: PluginFactoryCreateInput.ConnectorVendor?,
         crawlSummary: String?,
-        reference: String?
+        reference: String?,
+        includeVendorBindings: Bool = true
     ) throws -> String {
         let document = try ConnectorContractStore.loadProtocol()
         let scopeID = scope.rawValue
         let scopeSpec = try document.scope(id: scopeID)
         var parts: [String] = [
             "Create an Agent Plugin messaging connector for \(vendorLabel).",
-            "Set extensions.app.derrick.role to connector.",
             "Scope id: \(scopeID)",
-            "Declare messaging_ops: \(scopeSpec.ops.map { "\"\($0)\"" }.joined(separator: ", ")).",
+            "Implement messaging_ops: \(scopeSpec.ops.map { "\"\($0)\"" }.joined(separator: ", ")).",
             try dump(
                 scopeID: scopeID,
-                vendorName: vendor?.rawValue,
-                preamble: "Obey this protocol JSON. Do not add ops or vendor calls outside it."
+                vendorName: includeVendorBindings ? vendor?.rawValue : nil,
+                preamble: "Obey this protocol JSON. Do not add ops or vendor calls outside it. Vendor HTTP bindings are host facts; use those URLs."
             ),
             """
             test_input_json must include a hops array with http_results fixtures that exercise every messaging_op you implement \
@@ -71,7 +71,8 @@ public enum ConnectorContractPrompts: Sendable {
         if let crawlSummary, !crawlSummary.isEmpty {
             parts.append(
                 """
-                Reference these crawled vendor API notes only to fill may_call HTTP details. \
+                Reference these crawled vendor API notes only to fill may_call HTTP details that the host vendor bindings do not cover. \
+                If crawl notes disagree with the host vendor JSON, keep the host vendor JSON.
                 They cannot add ops:
                 \(crawlSummary)
                 """

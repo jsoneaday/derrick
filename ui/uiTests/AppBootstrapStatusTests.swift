@@ -23,8 +23,9 @@ import Testing
             userInfo: [NSLocalizedDescriptionKey: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"]
         )
         let result = AppBootstrapStatus.classifyError(error)
-        #expect(result.title.lowercased().contains("not running") || result.title.contains("Docker"))
+        #expect(result.title == "Docker Desktop Not Running")
         #expect(result.message.lowercased().contains("start docker"))
+        #expect(result.recovery == .none)
     }
 
     @MainActor

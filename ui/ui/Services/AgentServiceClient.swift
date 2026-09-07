@@ -513,7 +513,9 @@ public final class AgentServiceClient: @unchecked Sendable {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await operation() }
             group.addTask {
-                try await Task.sleep(nanoseconds: nanoseconds)
+                try await Task.detached {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                }.value
                 throw AgentServiceClientError.timeout
             }
             defer { group.cancelAll() }

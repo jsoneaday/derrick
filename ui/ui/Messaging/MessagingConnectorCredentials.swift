@@ -17,13 +17,14 @@ enum MessagingConnectorCredentials {
             repository: repository
         )
         migrateLegacyCredentialsIfNeeded(pluginID: pluginID, secrets: secrets)
+        PluginSecretKeychain.promoteToSharedGroup(pluginID: pluginID, fields: secrets)
         PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
             pluginID: pluginID,
             fields: secrets
         )
         guard !secrets.isEmpty else { return .ok }
 
-        let missing = PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: secrets)
+        let missing = PluginSecretKeychain.missingKeychainIDs(pluginID: pluginID, fields: secrets)
         guard !missing.isEmpty else { return .ok }
 
         switch await ConnectorCredentialService.present(
@@ -32,7 +33,7 @@ enum MessagingConnectorCredentials {
             mode: .requireMissing
         ) {
         case .ok:
-            return PluginSecretKeychain.missingIDs(pluginID: pluginID, fields: secrets).isEmpty
+            return PluginSecretKeychain.missingKeychainIDs(pluginID: pluginID, fields: secrets).isEmpty
                 ? .ok
                 : .cancelled
         case .cancelled:
@@ -44,7 +45,8 @@ enum MessagingConnectorCredentials {
         pluginID: String,
         secrets: [PluginSecretDescriptor]
     ) {
-        guard pluginID == "slack-connector" else { return }
+        guard pluginID.localizedCaseInsensitiveContains("slack"),
+              pluginID != "slack-connection" else { return }
         PluginSecretKeychain.migrateStoredFields(
             from: "slack-connection",
             to: pluginID,

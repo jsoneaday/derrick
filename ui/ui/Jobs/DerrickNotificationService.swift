@@ -11,7 +11,7 @@ import UserNotifications
 /// - Live chat HITL (UI connected): modal via `HITLLiveApprovalHandlers` — no notification.
 /// - Offline HITL: posted by derrickd; tap → Allow/Deny alert in the UI.
 /// - Job completion: always notified by derrickd; tap → result panel (UI open or closed).
-/// - Connector messages: derrickd polls while Derrick is closed; tap → that conversation.
+/// - Connector messages: derrickd polls in the background; tap → that conversation.
 /// - Info/errors during UI session: modal only (`PolicyEventPresenter`), never notifications.
 @MainActor
 final class DerrickNotificationService {
@@ -21,6 +21,7 @@ final class DerrickNotificationService {
     private var presentJobResultObserver: DerrickDarwinNotifyObserver?
     private var presentHITLObserver: DerrickDarwinNotifyObserver?
     private var presentMessagingObserver: DerrickDarwinNotifyObserver?
+    private var pendingMessagingConversation: DerrickMessagingConversationPresentationWake.Payload?
     private let launchEpoch = Date()
     private var sessionReady = false
 
@@ -47,6 +48,7 @@ final class DerrickNotificationService {
             fputs("[HumanDecision] cancelled \(cancelled) stale pending approval(s) at launch\n", stderr)
         }
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        await presentQueuedMessagingConversationIfReady()
     }
 
     func stop() {
@@ -67,22 +69,57 @@ final class DerrickNotificationService {
         await resolveHITLFromNotificationTap(approvalID: id)
     }
 
-    func presentMessagingConversationWhenReady(pluginID: String, threadID: String) async {
-        for _ in 0..<40 {
+    func presentMessagingConversationWhenReady(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) async {
+        queueMessagingConversationPresentation(
+            .init(
+                pluginID: pluginID,
+                threadID: threadID,
+                parentVendorMessageID: parentVendorMessageID
+            )
+        )
+        await presentQueuedMessagingConversationIfReady()
+    }
+
+    private func queueMessagingConversationPresentation(
+        _ payload: DerrickMessagingConversationPresentationWake.Payload
+    ) {
+        guard payload.isValid else { return }
+        pendingMessagingConversation = payload
+    }
+
+    private func presentQueuedMessagingConversationIfReady() async {
+        guard let payload = pendingMessagingConversation, payload.isValid else { return }
+        for _ in 0..<120 {
             if sessionReady {
-                deliverMessagingConversation(pluginID: pluginID, threadID: threadID)
+                pendingMessagingConversation = nil
+                deliverMessagingConversation(
+                    pluginID: payload.pluginID,
+                    threadID: payload.threadID,
+                    parentVendorMessageID: payload.parentVendorMessageID
+                )
                 return
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        deliverMessagingConversation(pluginID: pluginID, threadID: threadID)
     }
 
-    private func deliverMessagingConversation(pluginID: String, threadID: String) {
+    private func deliverMessagingConversation(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String? = nil
+    ) {
         guard !JobResultPanelSession.isPanelOnlyLaunch else { return }
         DerrickMainWindowBridge.ensureMainWindow()
         DerrickMessagingConversationPresentationWake.requestOpenInUI(
-            .init(pluginID: pluginID, threadID: threadID)
+            .init(
+                pluginID: pluginID,
+                threadID: threadID,
+                parentVendorMessageID: parentVendorMessageID
+            )
         )
     }
 
@@ -291,7 +328,7 @@ final class DerrickNotificationService {
     private func registerPresentMessagingObserver() {
         guard presentMessagingObserver == nil else { return }
         if let argv = DerrickNotificationLaunch.messagingConversationToPresent() {
-            DerrickMessagingConversationPresentationWake.post(argv)
+            queueMessagingConversationPresentation(argv)
         }
         let observer = DerrickDarwinNotifyObserver(
             darwinName: DerrickMessagingConversationPresentationWake.darwinName,
@@ -301,7 +338,8 @@ final class DerrickNotificationService {
                 if let payload = DerrickMessagingConversationPresentationWake.takePending() {
                     await DerrickNotificationService.shared.presentMessagingConversationWhenReady(
                         pluginID: payload.pluginID,
-                        threadID: payload.threadID
+                        threadID: payload.threadID,
+                        parentVendorMessageID: payload.parentVendorMessageID
                     )
                 }
             }
@@ -312,8 +350,13 @@ final class DerrickNotificationService {
             Task { @MainActor in
                 await self.presentMessagingConversationWhenReady(
                     pluginID: payload.pluginID,
-                    threadID: payload.threadID
+                    threadID: payload.threadID,
+                    parentVendorMessageID: payload.parentVendorMessageID
                 )
+            }
+        } else if pendingMessagingConversation != nil {
+            Task { @MainActor in
+                await self.presentQueuedMessagingConversationIfReady()
             }
         }
     }

@@ -35,6 +35,27 @@ if installOnly || installAndRun {
     if installOnly { exit(0) }
 }
 
+if !testNotify {
+    let xpcServiceName = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"]
+    if DerrickDaemonHygiene.shouldHandoffSMAppSpawnToSessionAgent(xpcServiceName: xpcServiceName) {
+        fputs(
+            "[derrickd] SM app-spawn has no MachServices (XPC_SERVICE_NAME=\(xpcServiceName ?? "?")) — handing off to \(DerrickServiceID.daemonSessionLaunchdLabel)\n",
+            stderr
+        )
+        do {
+            try DaemonLaunchAgentInstaller.install(
+                executableURL: URL(fileURLWithPath: CommandLine.arguments[0])
+            )
+            fputs("[derrickd] session agent installed — exiting SM spawn so Mach XPC can check in\n", stderr)
+        } catch {
+            fputs("[derrickd] session agent handoff failed: \(error.localizedDescription)\n", stderr)
+        }
+        // Exit 0: KeepAlive SuccessfulExit=false must not respawn this Mach-less job.
+        _exit(0)
+    }
+    DaemonSingleton.acquireOrExit()
+}
+
 // Orphan `Products/Debug/JobKeepAlive.app` shares the DB and steals scheduled jobs but
 // cannot resolve Derrick.app Resources (.env) — refuse to run outside LoginItems.
 if !installAndRun && !testNotify && !DerrickAppSupport.isEmbeddedLoginItemDaemon() {
@@ -96,6 +117,7 @@ fputs(
     "[derrickd] starting pid=\(ProcessInfo.processInfo.processIdentifier) mach=\(DerrickServiceID.daemon.machServiceName)\n",
     stderr
 )
+fflush(stderr)
 DaemonSelfRetirement.install()
 
 let listenerDelegate = DaemonUnifiedListenerDelegate()
@@ -152,7 +174,10 @@ enum DaemonLaunchAgentInstaller {
             <key>RunAtLoad</key>
             <true/>
             <key>KeepAlive</key>
-            <true/>
+            <dict>
+                <key>SuccessfulExit</key>
+                <false/>
+            </dict>
             <key>ThrottleInterval</key>
             <integer>2</integer>
             <key>ProcessType</key>
@@ -187,7 +212,7 @@ enum DaemonLaunchAgentInstaller {
             }
         }
         _ = runLaunchctlAllowFail(["enable", domainLabel], timeoutSeconds: 3)
-        let kick = runLaunchctlAllowFail(["kickstart", "-k", domainLabel], timeoutSeconds: 12)
+        let kick = runLaunchctlAllowFail(["kickstart", domainLabel], timeoutSeconds: 12)
         if kick.status != 0 {
             fputs("[derrickd] kickstart status=\(kick.status) \(kick.output)\n", stderr)
         }

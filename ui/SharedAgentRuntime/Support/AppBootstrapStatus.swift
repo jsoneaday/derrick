@@ -94,6 +94,7 @@ final class AppBootstrapStatus: ObservableObject {
         failureMessage = nil
         failureRecovery = .none
         isModalPresented = true
+        DerrickAppSupport.clearUIBootstrapReadyMarker()
         debugLog("[bootstrap] phase=\(phase.rawValue) \(statusMessage)")
         return true
     }
@@ -119,6 +120,7 @@ final class AppBootstrapStatus: ObservableObject {
         failureRecovery = .none
         isModalPresented = false
         DerrickUISessionPresence.markInteractiveSessionActive()
+        DerrickAppSupport.writeUIBootstrapReadyMarker()
         debugLog("[bootstrap] phase=ready")
     }
 

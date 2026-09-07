@@ -19,7 +19,6 @@ enum SlackConnectorInstallReference {
     }
 
     private static func run() async throws {
-        let pluginID = "slack-connection"
         let directory = try DerrickAppSupport.databaseDirectory()
         let repository = DBRepository(
             configuration: DBRepositoryConfiguration(
@@ -33,27 +32,64 @@ enum SlackConnectorInstallReference {
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
         fputs("[install] DB: \(await repository.databaseURL.path)\n", stderr)
 
-        try await repository.deletePluginFactoryRelease(pluginID: pluginID)
-        try await repository.pruneMessagingConnectors(keeping: [])
+        try await deleteExistingConnectors(repository: repository)
 
         let dockerExecutor = DirectShellDocker.executor()
-        let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
-        let goal = PluginFactoryCreateInput.makeConnector(
-            vendor: .slack,
-            scope: .fullSync,
-            userDescription: "Send and receive messages in Slack channels I pick from a list."
-        ).connectorBuildGoal(crawlSummary: "Slack conversations.list, conversations.history, conversations.replies, chat.postMessage.")
+        let first = try await createWorkingSlackConnector(
+            pluginID: "slack-connector-1",
+            repository: repository,
+            dockerExecutor: dockerExecutor
+        )
+        let second = try await createWorkingSlackConnector(
+            pluginID: "slack-connector-2",
+            repository: repository,
+            dockerExecutor: dockerExecutor
+        )
+        guard first != second else {
+            throw InstallError("Second create reused plugin id \(first).")
+        }
+        fputs("[install] created \(first) then \(second)\n", stderr)
+    }
 
-        fputs("[install] packaging reference full-sync connector…\n", stderr)
+    private static func deleteExistingConnectors(repository: DBRepository) async throws {
+        let summaries = try await repository.listPluginFactoryReleaseSummaries()
+        var seen = Set<String>()
+        for summary in summaries {
+            let pluginID = summary.pluginID
+            guard seen.insert(pluginID).inserted else { continue }
+            let slack = pluginID.localizedCaseInsensitiveContains("slack")
+            if slack {
+                try await repository.deletePluginFactoryRelease(pluginID: pluginID)
+                fputs("[install] deleted factory release \(pluginID)\n", stderr)
+            }
+        }
+        try await repository.pruneMessagingConnectors(keeping: [])
+        fputs("[install] cleared messaging connectors\n", stderr)
+    }
+
+    private static func createWorkingSlackConnector(
+        pluginID: String,
+        repository: DBRepository,
+        dockerExecutor: @escaping DockerCLIExecutor
+    ) async throws -> String {
+        let input = try SlackConnectorFactoryInput.make(pluginID: pluginID)
+        let goal = input.connectorBuildGoal(
+            crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary
+        )
+        fputs("[install] packaging \(pluginID)…\n", stderr)
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 1)
         ).build(
             userGoal: goal,
+            hostManifest: input.hostManifest,
             builder: E2EFactoryBuilder(scope: .fullSync),
-            executor: executor,
+            executor: PythonPluginFactoryDockerExecutor(executor: dockerExecutor),
             reviewer: E2EHarnessReviewer(),
             logger: { fputs("\($0)\n", stderr) }
         )
+        guard release.pluginID == pluginID else {
+            throw InstallError("Factory saved \(release.pluginID) instead of \(pluginID).")
+        }
         try await repository.savePluginFactoryRelease(release)
         fputs("[install] saved \(release.pluginID)@\(release.version)\n", stderr)
 
@@ -70,7 +106,7 @@ enum SlackConnectorInstallReference {
         try await repository.upsertMessagingConnector(
             MessagingConnectorDTO(
                 pluginID: pluginID,
-                displayName: "Slack Connection",
+                displayName: pluginID,
                 listening: true,
                 listeningSince: Date()
             )
@@ -100,13 +136,14 @@ enum SlackConnectorInstallReference {
         let adapter = PluginMessagingIngressAdapter(pluginID: pluginID, invoker: invoker)
         try await adapter.bootstrap(repository: repository)
         let threads = try await repository.listMessagingThreads(pluginID: pluginID)
-        fputs("[install] bootstrap loaded \(threads.count) conversation(s)\n", stderr)
+        fputs("[install] \(pluginID) bootstrap loaded \(threads.count) conversation(s)\n", stderr)
         for thread in threads.prefix(8) {
             fputs("  - \(thread.title) (\(thread.vendorThreadID))\n", stderr)
         }
         guard !threads.isEmpty else {
-            throw InstallError("Bootstrap completed but no conversations were loaded.")
+            throw InstallError("Bootstrap of \(pluginID) completed but no conversations were loaded.")
         }
+        return pluginID
     }
 }
 

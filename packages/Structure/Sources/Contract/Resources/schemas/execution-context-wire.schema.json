@@ -18,6 +18,7 @@
           "enum": [
             "plugin_factory_create",
             "plugin_factory_edit",
+            "connector_auth_discover",
             "job_step",
             "interactive_tool",
             "none"
