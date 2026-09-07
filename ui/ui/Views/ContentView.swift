@@ -757,38 +757,26 @@ struct ContentView: View {
             }
 
             do {
-                bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
-                try? await JobServiceLoginAgent.ensureRegistered()
-                JobServiceLoginAgent.ensureHelperProcessRunning()
-                let health = try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+                bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
+
+                async let daemonHealth = connectLaunchDaemon()
+                async let repository = loadLaunchRepository()
+                async let dockerPeer = prewarmLaunchDockerPeer()
+
+                let health = try await daemonHealth
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
                 )
 
-                bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
-                let repo = try await ensureSessionStoreLoaded()
-                await ServiceLogRecorder.shared.configure(repository: repo)
-                await EgressAllowlistService.shared.configure(repository: repo)
-                await ContentSensitivityGrantService.shared.configure(repository: repo)
-                await UsageLimitsService.shared.configure(repository: repo)
-                await ContainerLifecycleSettingsService.shared.configure(repository: repo)
-                await OrchestrationLimitsSettingsService.shared.configure(repository: repo)
-                await PluginFactoryListStore.shared.configure(repository: repo)
-                await NewsReaderStore.shared.configure(repository: repo)
-                pluginCreationController.configure(repository: repo)
+                let repo = try await repository
 
-                // Daemon first so Mach XPC is up, then Docker must succeed before Ready.
-                // Guest containers (script_exec / plugin.invoke) need the engine.
-                bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
-                _ = XPCDockerRunner.shared
-                try await XPCDockerRunner.shared.waitUntilPrewarmed()
-                bootstrapStatus.update(phase: .connectingHelper, message: "Finishing setup…")
-                do {
-                    let dockerPeer = try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
-                    try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(dockerPeer)
-                    debugLog("Docker helper peer endpoint handed to daemon MCP")
-                } catch {
-                    debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                if let peer = try await dockerPeer {
+                    do {
+                        try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
+                        debugLog("Docker helper peer endpoint handed to daemon MCP")
+                    } catch {
+                        debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                    }
                 }
 
                 sessionReady = true
@@ -825,6 +813,49 @@ struct ContentView: View {
             refreshProviderCredentialUI()
     }
 
+    @MainActor
+    private func connectLaunchDaemon() async throws -> ServiceHealthReport {
+        bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
+        try? await JobServiceLoginAgent.ensureRegistered()
+        JobServiceLoginAgent.ensureHelperProcessRunning()
+        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+    }
+
+    @MainActor
+    private func loadLaunchRepository() async throws -> DBRepository {
+        bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
+        let repo = try await ensureSessionStoreLoaded()
+        await configureClientRepositoryServices(repository: repo)
+        return repo
+    }
+
+    @MainActor
+    private func configureClientRepositoryServices(repository: DBRepository) async {
+        await ServiceLogRecorder.shared.configure(repository: repository)
+        await EgressAllowlistService.shared.configure(repository: repository)
+        await ContentSensitivityGrantService.shared.configure(repository: repository)
+        await UsageLimitsService.shared.configure(repository: repository)
+        await ContainerLifecycleSettingsService.shared.configure(repository: repository)
+        await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
+        await PluginFactoryListStore.shared.configure(repository: repository)
+        await NewsReaderStore.shared.configure(repository: repository)
+        pluginCreationController.configure(repository: repository)
+    }
+
+    /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
+    @MainActor
+    private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
+        bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
+        _ = XPCDockerRunner.shared
+        try await XPCDockerRunner.shared.waitUntilPrewarmed()
+        do {
+            return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
+        } catch {
+            debugLog("Docker peer endpoint fetch skipped: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Opens the shared DB and model settings when this `ContentView` instance missed the first bootstrap.
     @MainActor
     private func ensureSessionStoreLoaded() async throws -> DBRepository {
@@ -857,11 +888,8 @@ struct ContentView: View {
 
         do {
             let repo = try await ensureSessionStoreLoaded()
-            await ServiceLogRecorder.shared.configure(repository: repo)
+            await configureClientRepositoryServices(repository: repo)
             sessionReady = true
-            await PluginFactoryListStore.shared.configure(repository: repo)
-            await NewsReaderStore.shared.configure(repository: repo)
-            pluginCreationController.configure(repository: repo)
             await chatSessions.configure(repository: repo)
             await messaging.configure(repository: repo)
             await DerrickNotificationService.shared.activateSession(repository: repo)
