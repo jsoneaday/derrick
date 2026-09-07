@@ -5,6 +5,23 @@ import LLMAgentClient
 import PolicyUserInteraction
 import Structure
 
+private enum AgentServiceCollectedTurnError: Error, LocalizedError {
+    case timedOut
+    case emptyOrCancelled
+    case startFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .timedOut:
+            return "Agent turn timed out."
+        case .emptyOrCancelled:
+            return "Agent turn produced no response."
+        case .startFailed(let message):
+            return message
+        }
+    }
+}
+
 private enum AgentServiceError: Error, LocalizedError {
     case notReady
     var errorDescription: String? {
@@ -60,6 +77,79 @@ actor AgentServiceTurnHost {
     private var sessionTurnTailIDs: [String: String] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var turnSessionIDs: [String: String] = [:]
+    private var collectedTurnWaiters: [String: CheckedContinuation<String, Error>] = [:]
+
+    func runCollectedTurn(
+        request: AgentTurnRequest,
+        timeoutNanoseconds: UInt64 = 300_000_000_000
+    ) async throws -> String {
+        let turnID = request.turnID
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                    Task {
+                        await self.storeCollectedWaiter(turnID: turnID, continuation: continuation)
+                        let silentContext = AgentServiceConnectionContext()
+                        let collectRequest = AgentTurnRequest(
+                            turnID: turnID,
+                            sessionID: request.sessionID,
+                            prompt: request.prompt,
+                            apiKey: request.apiKey,
+                            modelJSON: request.modelJSON,
+                            thinkingJSON: request.thinkingJSON,
+                            applicationName: request.applicationName,
+                            delivery: .collectOnly,
+                            jobID: request.jobID,
+                            parentSessionID: request.parentSessionID,
+                            profileContextJSON: request.profileContextJSON
+                        )
+                        let accepted = await self.startTurn(
+                            request: collectRequest,
+                            connectionContext: silentContext
+                        )
+                        if !accepted.ok {
+                            await self.failCollectedTurn(
+                                turnID: turnID,
+                                error: AgentServiceCollectedTurnError.startFailed(accepted.message)
+                            )
+                        }
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                await self.failCollectedTurn(
+                    turnID: turnID,
+                    error: AgentServiceCollectedTurnError.timedOut
+                )
+                throw AgentServiceCollectedTurnError.timedOut
+            }
+            guard let result = try await group.next() else {
+                throw AgentServiceCollectedTurnError.timedOut
+            }
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private func storeCollectedWaiter(
+        turnID: String,
+        continuation: CheckedContinuation<String, Error>
+    ) {
+        collectedTurnWaiters[turnID] = continuation
+    }
+
+    private func completeCollectedTurn(turnID: String, text: String) {
+        if let waiter = collectedTurnWaiters.removeValue(forKey: turnID) {
+            waiter.resume(returning: text)
+        }
+    }
+
+    private func failCollectedTurn(turnID: String, error: Error) {
+        if let waiter = collectedTurnWaiters.removeValue(forKey: turnID) {
+            waiter.resume(throwing: error)
+        }
+    }
 
     func ensureConversation(
         sessionID: String,
@@ -150,9 +240,10 @@ actor AgentServiceTurnHost {
     ) async -> AgentTurnAccepted {
         do {
             let isJobWake = request.delivery == .jobResultModal
+            let isCollectOnly = request.delivery == .collectOnly
             let sid = resolveSessionID(request: request, isJobWake: isJobWake)
             let agentOverride = isJobWake ? JobSessionID.agentID : nil
-            if !isJobWake {
+            if !isJobWake && !isCollectOnly {
                 // Cancel any stuck background wake on job-* queues so interactive chat is never blocked.
                 cancelAllJobSessionTurns()
             }
@@ -164,6 +255,9 @@ actor AgentServiceTurnHost {
             let llmModel = try JSONDecoder().decode(LLMModelChoice.self, from: request.modelJSON)
             let thinking = try request.thinkingJSON.map {
                 try JSONDecoder().decode(ModelThinkingOption.self, from: $0)
+            }
+            let profileContext = try request.profileContextJSON.map {
+                try JSONDecoder().decode(AgentProfileTurnContext.self, from: $0)
             }
             let turnID = request.turnID
             let prompt = request.prompt
@@ -182,6 +276,7 @@ actor AgentServiceTurnHost {
                     apiKey: apiKey,
                     model: llmModel,
                     thinking: thinking,
+                    profileContext: profileContext,
                     connectionContext: connectionContext,
                     delivery: delivery,
                     jobID: jobID,
@@ -271,6 +366,7 @@ actor AgentServiceTurnHost {
         apiKey: String,
         model: LLMModelChoice,
         thinking: ModelThinkingOption?,
+        profileContext: AgentProfileTurnContext?,
         connectionContext: AgentServiceConnectionContext,
         delivery: AgentTurnDelivery,
         jobID: String?,
@@ -294,7 +390,7 @@ actor AgentServiceTurnHost {
         )
         let counter = ChunkCounter()
         let responseBox = ResponseAccumulator()
-        let suppressChatStream = delivery == .jobResultModal
+        let suppressChatStream = delivery == .jobResultModal || delivery == .collectOnly
         let isJobWake = delivery == .jobResultModal
         let approvalPresenter = AgentServiceApprovalPresenter(
             turnID: turnID,
@@ -377,6 +473,7 @@ actor AgentServiceTurnHost {
                                     apiKey: apiKey,
                                     model: model,
                                     thinking: thinking,
+                                    profileContext: profileContext,
                                     approvalPresenter: approvalPresenter
                                 ) { chunk in
                                     let n = counter.increment()
@@ -449,6 +546,16 @@ actor AgentServiceTurnHost {
                         parentSessionID: parentSessionID
                     )
                 }
+            } else if delivery == .collectOnly {
+                let text = responseBox.joined.trimmingCharacters(in: .whitespacesAndNewlines)
+                if Task.isCancelled || text.isEmpty {
+                    failCollectedTurn(
+                        turnID: turnID,
+                        error: AgentServiceCollectedTurnError.emptyOrCancelled
+                    )
+                } else {
+                    completeCollectedTurn(turnID: turnID, text: text)
+                }
             } else if Task.isCancelled {
                 let err = AgentTurnErrorDTO(turnID: turnID, message: "cancelled", code: "cancelled")
                 let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
@@ -476,7 +583,9 @@ actor AgentServiceTurnHost {
                 message: "turn failed id=\(turnID): \(message)",
                 code: "turn_failed"
             )
-            if delivery != .jobResultModal {
+            if delivery == .collectOnly {
+                failCollectedTurn(turnID: turnID, error: error)
+            } else if delivery != .jobResultModal {
                 let err = AgentTurnErrorDTO(turnID: turnID, message: message, code: "stream_error")
                 let data = (try? AgentServiceXPCCodec.encodeTurnError(err)) ?? Data()
                 let delivered = Self.deliverFinish(

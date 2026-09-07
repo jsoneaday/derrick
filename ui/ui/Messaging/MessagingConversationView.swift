@@ -483,8 +483,34 @@ struct MessagingConversationView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            HStack(spacing: 12) {
+                Picker("Send mode", selection: $store.sendToAgent) {
+                    Text("You").tag(false)
+                    Text("Agent").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 180)
+
+                if store.sendToAgent {
+                    Picker("Profile", selection: $store.selectedProfileHandle) {
+                        ForEach(AgentProfileStore.shared.enabledProfiles, id: \.handle) { profile in
+                            Text(profile.displayName).tag(profile.handle)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            if store.sendToAgent {
+                Text("Tip: type $handle at the start to switch profiles (e.g. $reviewer).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField(placeholder, text: text, axis: .vertical)
+                TextField(
+                    store.sendToAgent ? "Message for $\(store.selectedProfileHandle)…" : placeholder,
+                    text: text,
+                    axis: .vertical
+                )
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
                     .focused(focused)
