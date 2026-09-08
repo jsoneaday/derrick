@@ -67,6 +67,9 @@ enum DaemonModuleBootstrap {
             InProcessServiceBridges.connectorPoll = { request in
                 try await ConnectorMessagingCommandService.shared.poll(request)
             }
+            InProcessServiceBridges.messagingAgentRoute = { route in
+                try await MessagingAgentTurnClient.handle(route: route)
+            }
             await DaemonRuntime.shared.markModuleReady(.mcp)
             fputs("[derrickd] module mcp ready\n", stderr)
             await sweepEmbeddedDockerLeftovers()

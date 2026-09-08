@@ -202,6 +202,7 @@ final class ConversationModel {
         apiKey: String,
         model: LLMModelChoice,
         thinking: ModelThinkingOption? = nil,
+        profileContext: AgentProfileTurnContext? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         onChunk: @escaping @Sendable (AgentResponseNextChunk) -> Void
     ) async throws {
@@ -223,6 +224,34 @@ final class ConversationModel {
         let orchestrator = self.orchestrator
         let workerModel = helperModelSettings.workerAgentModel
         let workerApiKey = resolveAPIKey(for: workerModel, turnFallback: apiKey) ?? apiKey
+
+        let effectiveModel: LLMModelChoice
+        let effectiveThinking: ModelThinkingOption?
+        let userRagBase: String
+        let retrievalLimit: Int
+        if let profileContext {
+            effectiveModel = (try? JSONDecoder().decode(LLMModelChoice.self, from: profileContext.modelJSON)) ?? model
+            effectiveThinking = profileContext.thinkingJSON.flatMap {
+                try? JSONDecoder().decode(ModelThinkingOption.self, from: $0)
+            } ?? thinking
+            userRagBase = [
+                profileContext.rag.useDefaultInstructions
+                    ? ragInstructions
+                    : profileContext.rag.customInstructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                        ? profileContext.rag.customInstructions!
+                        : ragInstructions,
+                profileContext.instructions.trimmingCharacters(in: .whitespacesAndNewlines),
+            ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+            retrievalLimit = profileContext.rag.useSessionMemory ? profileContext.rag.retrievalLimit : 0
+        } else {
+            effectiveModel = model
+            effectiveThinking = thinking
+            userRagBase = [ragInstructions, WorkerOverlays.userFacingWithSpawn]
+                .joined(separator: "\n\n")
+            retrievalLimit = 5
+        }
 
         let workerRunner: @Sendable (AgentRecord, AgentEnvelope) async throws -> String = { child, envelope in
             try await ExecutionContextScope.runWorkerTurn(agentRef: child.ref) {
@@ -256,22 +285,21 @@ final class ConversationModel {
         try await orchestrator.withWorkerRunner(workerRunner) {
             try await orchestrator.deliverUserMessage(prompt) { envelope in
                 try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
-                    let userRag = [ragInstructions, WorkerOverlays.userFacingWithSpawn]
-                        .joined(separator: "\n\n")
                     let pipelineStream = await Self.makePolicyStream(
                         prompt: envelope.body,
                         apiKey: apiKey,
-                        model: model,
-                        thinking: thinking,
+                        model: effectiveModel,
+                        thinking: effectiveThinking,
                         sessionKey: sessionKey,
                         memoryCoordinator: memoryCoordinator,
                         policyStore: policyStore,
                         mcpClient: toolClient,
-                        ragInstructions: userRag,
+                        ragInstructions: userRagBase,
                         mcpToolInstructions: mcpToolInstructions,
                         responseSchema: responseSchema,
                         interceptor: interceptor,
-                        approvalPresenter: approvalPresenter
+                        approvalPresenter: approvalPresenter,
+                        retrievalLimit: retrievalLimit
                     )
                     var yielded = 0
                     for try await chunk in pipelineStream {
@@ -442,7 +470,8 @@ final class ConversationModel {
         mcpToolInstructions: String,
         responseSchema: AgentSchema,
         interceptor: PolicyInterceptor,
-        approvalPresenter: (any ApprovalConfirmationPresenting)?
+        approvalPresenter: (any ApprovalConfirmationPresenting)?,
+        retrievalLimit: Int = 5
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
         switch model {
         case .gemini(let geminiModel):
@@ -459,7 +488,7 @@ final class ConversationModel {
                 thinking: thinking,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
-                retrievalLimit: 5
+                retrievalLimit: retrievalLimit
             )
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,
@@ -482,7 +511,7 @@ final class ConversationModel {
                 thinking: thinking,
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
-                retrievalLimit: 5
+                retrievalLimit: retrievalLimit
             )
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,

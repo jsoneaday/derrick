@@ -839,6 +839,7 @@ struct ContentView: View {
         await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
         await PluginFactoryListStore.shared.configure(repository: repository)
         await NewsReaderStore.shared.configure(repository: repository)
+        await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
     }
 

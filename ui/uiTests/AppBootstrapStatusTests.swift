@@ -4,6 +4,13 @@ import Testing
 
 @Suite struct AppBootstrapStatusTests {
     @MainActor
+    private func freshStatus() -> AppBootstrapStatus {
+        let status = AppBootstrapStatus.shared
+        status.resetForTesting()
+        return status
+    }
+
+    @MainActor
     @Test func classifyDockerNotInstalled() {
         let error = NSError(
             domain: "MCPServer",
@@ -94,8 +101,7 @@ import Testing
 
     @MainActor
     @Test func deferredModalStaysHiddenUntilRevealed() {
-        let status = AppBootstrapStatus.shared
-        status.noteBootstrapCancelled()
+        let status = freshStatus()
         #expect(status.beginLoadingSession(deferModal: true))
         #expect(!status.isModalPresented)
         status.revealModalIfStillInitializing()
@@ -106,13 +112,7 @@ import Testing
 
     @MainActor
     @Test func beginAndReadyToggleModal() {
-        let status = AppBootstrapStatus.shared
-        // Reset shared singleton from other tests / prior ready.
-        status.noteBootstrapCancelled()
-        if status.phase == .ready || status.phase == .failed {
-            // force idle via cancel path only works when not ready/failed — use mark then cancel n/a
-        }
-        // After ready, begin must not re-open modal.
+        let status = freshStatus()
         status.beginLoadingSession()
         #expect(status.isModalPresented || status.phase == .ready || status.phase == .loadingSession)
         if status.phase != .ready {
@@ -130,11 +130,9 @@ import Testing
 
     @MainActor
     @Test func runClientBootstrapInvokesBodyWhenAlreadyReady() async {
-        let status = AppBootstrapStatus.shared
-        if status.phase != .ready {
-            status.beginLoadingSession()
-            status.markReady()
-        }
+        let status = freshStatus()
+        status.beginLoadingSession()
+        status.markReady()
         var bodyInvoked = false
         await status.runClientBootstrap {
             bodyInvoked = true
@@ -145,26 +143,32 @@ import Testing
 
     @MainActor
     @Test func runClientBootstrapInvokesBodyForJoinerAfterReady() async {
-        let status = AppBootstrapStatus.shared
+        let status = freshStatus()
         status.beginLoadingSession()
-        let gate = AsyncGate()
+        let holdReady = AsyncGate()
+        let flightInBody = AsyncGate()
 
         let flight = Task { @MainActor in
             await status.runClientBootstrap {
-                await gate.wait()
+                await flightInBody.open()
+                await holdReady.wait()
                 status.markReady()
             }
         }
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        // Ensure the in-flight bootstrap is registered before the joiner attaches.
+        await flightInBody.wait()
 
         var joinerInvoked = false
-        await status.runClientBootstrap {
-            joinerInvoked = true
+        let joiner = Task { @MainActor in
+            await status.runClientBootstrap {
+                joinerInvoked = true
+            }
         }
 
-        await gate.open()
+        await holdReady.open()
         await flight.value
+        await joiner.value
 
         #expect(joinerInvoked)
         #expect(status.phase == .ready)
@@ -172,20 +176,7 @@ import Testing
 
     @MainActor
     @Test func cancelClearsInProgressModal() {
-        let status = AppBootstrapStatus.shared
-        // Ensure we can start: if ready, failed path is blocked — use a fresh begin only if idle/failed.
-        if status.phase == .ready {
-            // Simulate post-ready: cancel is no-op; begin ignored.
-            status.noteBootstrapCancelled()
-            #expect(status.phase == .ready)
-            return
-        }
-        if status.phase == .failed {
-            status.dismissFailure()
-        }
-        if status.isInitializing {
-            status.noteBootstrapCancelled()
-        }
+        let status = freshStatus()
         #expect(status.beginLoadingSession() == true)
         #expect(status.isModalPresented)
         status.noteBootstrapCancelled()

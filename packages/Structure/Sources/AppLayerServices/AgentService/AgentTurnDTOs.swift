@@ -6,6 +6,8 @@ public enum AgentTurnDelivery: String, Codable, Sendable, Hashable {
     case chatStream
     /// Scheduled job wake: collect completion, notify via derrickd (no chat stream).
     case jobResultModal
+    /// In-process daemon messaging relay: collect response text without UI stream.
+    case collectOnly
 }
 
 /// Request to run one user-facing conversation turn in AgentService.
@@ -22,6 +24,8 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
     public let delivery: AgentTurnDelivery
     public let jobID: String?
     public let parentSessionID: String?
+    /// Encoded `AgentProfileTurnContext` JSON when a messaging or profile-scoped turn runs.
+    public let profileContextJSON: Data?
 
     public init(
         turnID: String = UUID().uuidString,
@@ -33,7 +37,8 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         applicationName: String = DerrickAppSupport.defaultApplicationName,
         delivery: AgentTurnDelivery = .chatStream,
         jobID: String? = nil,
-        parentSessionID: String? = nil
+        parentSessionID: String? = nil,
+        profileContextJSON: Data? = nil
     ) {
         self.turnID = turnID
         self.sessionID = sessionID
@@ -45,6 +50,7 @@ public struct AgentTurnRequest: Codable, Sendable, Hashable {
         self.delivery = delivery
         self.jobID = jobID
         self.parentSessionID = parentSessionID
+        self.profileContextJSON = profileContextJSON
     }
 }
 

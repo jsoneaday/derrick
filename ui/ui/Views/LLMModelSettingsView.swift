@@ -12,6 +12,7 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
     case usageLimits
     case pluginBuilder
     case pluginSafetyReviewer
+    case agentProfiles
     case credentials
 
     var id: String { rawValue }
@@ -34,6 +35,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Plugin builder"
         case .pluginSafetyReviewer:
             return "Plugin safety reviewer"
+        case .agentProfiles:
+            return "Agent profiles"
         case .credentials:
             return "Credentials"
         }
@@ -57,6 +60,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "hammer"
         case .pluginSafetyReviewer:
             return "checkmark.shield"
+        case .agentProfiles:
+            return "person.crop.rectangle.stack"
         case .credentials:
             return "key.fill"
         }
@@ -165,6 +170,11 @@ struct LLMModelSettingsView: View {
                         pluginBuilderDetail
                     case .pluginSafetyReviewer:
                         pluginSafetyReviewerDetail
+                    case .agentProfiles:
+                        AgentProfileSettingsView(
+                            helperModelSettings: helperModelSettings,
+                            modelThinkingSettings: modelThinkingSettings
+                        )
                     case .credentials:
                         CredentialsSettingsView(repository: helperModelSettings.settingsRepository)
                     }

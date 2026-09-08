@@ -26,6 +26,8 @@ final class MessagingStore: ObservableObject {
     let session: MessagingSessionStore
     @Published private(set) var isConnectorSyncing = false
     @Published var isSending = false
+    @Published var sendToAgent = true
+    @Published var selectedProfileHandle: String = AgentProfileHandle.orchestrator
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
@@ -242,6 +244,10 @@ final class MessagingStore: ObservableObject {
     }
 
     func sendMessage(_ text: String, parentVendorMessageID: String? = nil) async {
+        if sendToAgent {
+            await sendAgentMessage(text, parentVendorMessageID: parentVendorMessageID)
+            return
+        }
         guard let repository,
               let pluginID = selectedPluginID,
               let thread = selectedThread else {
@@ -274,6 +280,56 @@ final class MessagingStore: ObservableObject {
                         threadID: thread.id,
                         vendorThreadID: thread.vendorThreadID,
                         text: text,
+                        error: detail
+                    )
+                )
+            }
+        }
+    }
+
+    func sendAgentMessage(_ text: String, parentVendorMessageID: String? = nil) async {
+        guard let repository,
+              let pluginID = selectedPluginID,
+              let thread = selectedThread else {
+            return
+        }
+        guard let resolved = AgentProfileStore.shared.resolveProfile(
+            explicitHandle: selectedProfileHandle,
+            message: text
+        ) else {
+            session.setLastError("Choose a profile and enter a message. Use $handle to override the profile.")
+            return
+        }
+        let (profile, prompt) = resolved
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await MessagingAgentRunner.runAndRelay(
+                prompt: prompt,
+                profile: profile,
+                pluginID: pluginID,
+                thread: thread,
+                parentVendorMessageID: parentVendorMessageID,
+                connectorRuntime: connectorRuntime,
+                repository: repository,
+                store: self,
+                session: session
+            )
+            session.setLastError(nil)
+        } catch {
+            let detail = error.localizedDescription
+            session.setLastError(detail)
+            Task {
+                await ServiceLogRecorder.shared.record(
+                    service: "messaging",
+                    level: .error,
+                    code: "agent_send_failed",
+                    message: "Messaging agent send failed pluginID=\(pluginID) profile=\(profile.handle): \(detail)",
+                    detailJSON: Self.messagingDetailJSON(
+                        pluginID: pluginID,
+                        threadID: thread.id,
+                        vendorThreadID: thread.vendorThreadID,
+                        text: prompt,
                         error: detail
                     )
                 )

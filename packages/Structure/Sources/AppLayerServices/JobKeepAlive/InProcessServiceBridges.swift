@@ -35,4 +35,7 @@ public enum InProcessServiceBridges: Sendable {
 
     nonisolated(unsafe) public static var connectorSubmit: SubmitConnectorOperation?
     nonisolated(unsafe) public static var connectorPoll: PollConnectorOperation?
+
+    public typealias RouteMessagingAgent = @Sendable (MessagingAgentRoute) async throws -> Void
+    nonisolated(unsafe) public static var messagingAgentRoute: RouteMessagingAgent?
 }

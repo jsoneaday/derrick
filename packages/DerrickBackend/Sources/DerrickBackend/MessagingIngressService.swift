@@ -79,6 +79,7 @@ public final class MessagingIngressService: @unchecked Sendable {
             if !newRows.isEmpty {
                 DerrickMessagingInboundSignal.postRefresh()
                 await MessagingInboundNotifier.notifyNewInbound(newRows)
+                await MessagingAgentIngressRouter.processInbound(newRows, repository: repository)
                 fputs(
                     "[MessagingIngressService] persisted \(newRows.count) inbound message(s)\n",
                     stderr
