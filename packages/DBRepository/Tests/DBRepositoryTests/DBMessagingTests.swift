@@ -330,6 +330,31 @@ final class DBMessagingTests: XCTestCase {
         XCTAssertEqual(Set(threads.map(\.vendorThreadID)), ["C1"])
     }
 
+    func testMessagingThreadDefaultAgentProfileRoundTrip() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack")
+        )
+        let thread = MessagingThreadDTO(
+            pluginID: "slack-connection",
+            vendorThreadID: "C1",
+            title: "#general"
+        )
+        try await repository.upsertMessagingThread(thread)
+
+        try await repository.setMessagingThreadDefaultAgentProfile(
+            threadID: thread.id,
+            handle: AgentProfileHandle.researcher
+        )
+        let loaded = try await repository.messagingThread(id: thread.id)
+        XCTAssertEqual(loaded?.defaultAgentProfileHandle, AgentProfileHandle.researcher)
+
+        try await repository.setMessagingThreadDefaultAgentProfile(threadID: thread.id, handle: nil)
+        let cleared = try await repository.messagingThread(id: thread.id)
+        XCTAssertNil(cleared?.defaultAgentProfileHandle)
+    }
+
     private func makeRepository() throws -> DBRepository {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

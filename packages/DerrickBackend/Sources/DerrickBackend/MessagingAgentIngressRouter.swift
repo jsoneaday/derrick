@@ -64,7 +64,12 @@ public enum MessagingAgentIngressRouter: Sendable {
             return nil
         }
 
-        guard let resolved = ConnectorMentionParser.resolvePrompt(body: body, botUserID: botUserID) else {
+        guard let resolved = ConnectorMentionParser.resolvePrompt(
+            body: body,
+            botUserID: botUserID,
+            channelDefaultProfileHandle: row.thread.defaultAgentProfileHandle,
+            profileCatalog: (try? await profileCatalog(repository: repository)) ?? []
+        ) else {
             return nil
         }
 
@@ -97,5 +102,11 @@ public enum MessagingAgentIngressRouter: Sendable {
         let role = (derrick["role"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let authScheme = (derrick["auth_scheme"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return role == "connector" && authScheme == "bot_token"
+    }
+
+    private static func profileCatalog(repository: DBRepository) async throws -> [AgentProfileCatalogEntry] {
+        try await repository.listAgentProfiles()
+            .filter(\.isEnabled)
+            .map { AgentProfileCatalogEntry(handle: $0.handle, displayName: $0.displayName) }
     }
 }

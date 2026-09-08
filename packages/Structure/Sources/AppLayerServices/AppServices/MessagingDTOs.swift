@@ -38,6 +38,8 @@ public struct MessagingThreadDTO: Codable, Sendable, Hashable, Identifiable {
     public var lastActivityAt: Date
     public var muted: Bool
     public var unreadCount: Int
+    /// When set, inbound @Derrick messages without `$handle` use this profile instead of orchestrator.
+    public var defaultAgentProfileHandle: String?
     public let createdAt: Date
 
     public init(
@@ -48,6 +50,7 @@ public struct MessagingThreadDTO: Codable, Sendable, Hashable, Identifiable {
         lastActivityAt: Date = .now,
         muted: Bool = false,
         unreadCount: Int = 0,
+        defaultAgentProfileHandle: String? = nil,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -57,6 +60,7 @@ public struct MessagingThreadDTO: Codable, Sendable, Hashable, Identifiable {
         self.lastActivityAt = lastActivityAt
         self.muted = muted
         self.unreadCount = unreadCount
+        self.defaultAgentProfileHandle = defaultAgentProfileHandle
         self.createdAt = createdAt
     }
 }
