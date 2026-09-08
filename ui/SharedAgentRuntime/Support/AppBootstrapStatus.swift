@@ -34,6 +34,21 @@ final class AppBootstrapStatus: ObservableObject {
 
     private init() {}
 
+    /// Resets shared bootstrap state between uiTests. Not for production use.
+    func resetForTesting() {
+        inFlightBootstrap?.cancel()
+        inFlightBootstrap = nil
+        deferredModalRevealTask?.cancel()
+        deferredModalRevealTask = nil
+        deferModalPresentation = false
+        phase = .idle
+        statusMessage = "Starting…"
+        failureTitle = nil
+        failureMessage = nil
+        failureRecovery = .none
+        isModalPresented = false
+    }
+
     /// Run client bootstrap once; concurrent callers await the same flight.
     /// After cancel, a later caller may start a new flight (modal was cleared).
     ///

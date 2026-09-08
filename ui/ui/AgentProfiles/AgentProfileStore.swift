@@ -85,10 +85,12 @@ final class AgentProfileStore: ObservableObject {
     }
 
     private func ensureBuiltins(repository: DBRepository) async throws {
-        let existing = try await repository.agentProfile(handle: AgentProfileHandle.orchestrator)
-        guard existing == nil else { return }
         let modelJSON = try JSONEncoder().encode(LLMModelChoice.defaultHelperModel)
-        try await repository.upsertAgentProfile(AgentProfile.orchestratorDefault(modelJSON: modelJSON))
+        for profile in AgentProfile.builtinProfiles(modelJSON: modelJSON) {
+            if try await repository.agentProfile(handle: profile.handle) == nil {
+                try await repository.upsertAgentProfile(profile)
+            }
+        }
     }
 }
 

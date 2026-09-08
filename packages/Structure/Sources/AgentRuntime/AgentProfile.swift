@@ -23,6 +23,9 @@ public struct AgentProfileRAGConfig: Codable, Sendable, Hashable {
 
 public enum AgentProfileHandle {
     public static let orchestrator = "orchestrator"
+    public static let developer = "developer"
+
+    public static let allBuiltins = [orchestrator, developer]
 
     public static func normalize(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -117,8 +120,14 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             displayName: "Orchestrator",
             handle: AgentProfileHandle.orchestrator,
             instructions: """
-            You are Derrick's default orchestrator profile. Coordinate work, stay focused on the user's \
-            request, and produce clear actionable replies. Prefer concise answers unless detail is needed.
+            You are Derrick's orchestrator — the default generalist profile.
+
+            Your job is to understand what the user wants, break work into clear steps, and \
+            coordinate execution. For implementation, debugging, code review, or technical changes, \
+            prefer delegating to the Developer profile ($developer). Summarize outcomes for the \
+            user in plain language and report blockers early.
+
+            Stay concise unless the user asks for detail.
             """,
             modelJSON: modelJSON,
             rag: .default,
@@ -126,6 +135,33 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             isBuiltin: true,
             sortOrder: 0
         )
+    }
+
+    public static func developerDefault(modelJSON: Data) -> AgentProfile {
+        AgentProfile(
+            id: "builtin-developer",
+            displayName: "Developer",
+            handle: AgentProfileHandle.developer,
+            instructions: """
+            You are Derrick's Developer profile. Focus on code, debugging, implementation plans, \
+            and concrete technical execution. Prefer actionable steps, precise file or API references \
+            when known, and working solutions over theory.
+
+            When scope is unclear, ask one focused clarifying question before diving in.
+            """,
+            modelJSON: modelJSON,
+            rag: .default,
+            isEnabled: true,
+            isBuiltin: true,
+            sortOrder: 1
+        )
+    }
+
+    public static func builtinProfiles(modelJSON: Data) -> [AgentProfile] {
+        [
+            orchestratorDefault(modelJSON: modelJSON),
+            developerDefault(modelJSON: modelJSON),
+        ]
     }
 }
 

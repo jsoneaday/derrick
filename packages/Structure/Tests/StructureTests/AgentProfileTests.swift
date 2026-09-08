@@ -36,4 +36,12 @@ import Testing
         #expect(decoded.handle == "orchestrator")
         #expect(decoded.displayName == "Orchestrator")
     }
+
+    @Test func builtinProfilesIncludeOrchestratorAndDeveloper() {
+        let modelJSON = Data(#"{"openai":"gpt-5.6-luna"}"#.utf8)
+        let profiles = AgentProfile.builtinProfiles(modelJSON: modelJSON)
+        #expect(profiles.count == 2)
+        #expect(profiles.map(\.handle).contains(AgentProfileHandle.orchestrator))
+        #expect(profiles.map(\.handle).contains(AgentProfileHandle.developer))
+    }
 }
