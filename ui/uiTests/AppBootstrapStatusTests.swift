@@ -145,24 +145,30 @@ import Testing
     @Test func runClientBootstrapInvokesBodyForJoinerAfterReady() async {
         let status = freshStatus()
         status.beginLoadingSession()
-        let gate = AsyncGate()
+        let holdReady = AsyncGate()
+        let flightInBody = AsyncGate()
 
         let flight = Task { @MainActor in
             await status.runClientBootstrap {
-                await gate.wait()
+                await flightInBody.open()
+                await holdReady.wait()
                 status.markReady()
             }
         }
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        // Ensure the in-flight bootstrap is registered before the joiner attaches.
+        await flightInBody.wait()
 
         var joinerInvoked = false
-        await status.runClientBootstrap {
-            joinerInvoked = true
+        let joiner = Task { @MainActor in
+            await status.runClientBootstrap {
+                joinerInvoked = true
+            }
         }
 
-        await gate.open()
+        await holdReady.open()
         await flight.value
+        await joiner.value
 
         #expect(joinerInvoked)
         #expect(status.phase == .ready)
