@@ -41,11 +41,8 @@ enum MessagingAgentTurnClient {
     }
 
     private static func ensureBuiltins(repository: DBRepository) async throws {
-        let modelJSON = try JSONEncoder().encode(LLMModelChoice.defaultHelperModel)
-        for profile in AgentProfile.builtinProfiles(modelJSON: modelJSON) {
-            if try await repository.agentProfile(handle: profile.handle) == nil {
-                try await repository.upsertAgentProfile(profile)
-            }
+        for profile in try AgentProfileBuiltinFactory.all() {
+            try await repository.upsertAgentProfile(profile)
         }
     }
 

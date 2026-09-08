@@ -12,6 +12,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case agentsList = "agents_list"
     case agentsSend = "agents_send"
     case agentsCancel = "agents_cancel"
+    /// Orchestrator delegates a sub-task to another agent profile ($developer, $researcher, $general).
+    case agentProfileDelegate = "agent_profile_delegate"
     /// One-shot durable job (optional delay). Local orchestration → JobService.
     case jobsCreate = "jobs_create"
     /// Recurring or one-shot schedule template. Local orchestration → JobService.
@@ -54,6 +56,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
             return "Send a message to a parent or child agent only (no peer messaging)."
         case .agentsCancel:
             return "Cancel a child agent (or self) in the current session."
+        case .agentProfileDelegate:
+            return "Delegate a task to another agent profile (developer, researcher, or general) and return its result."
         case .jobsCreate:
             return "Create a one-shot background job (optional delay). Freezes a tool call; optional wake of this agent after the tool runs."
         case .jobsScheduleCreate:

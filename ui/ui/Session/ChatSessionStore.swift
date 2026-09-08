@@ -114,8 +114,7 @@ final class ChatSessionStore: ObservableObject {
     func sendPrompt(
         _ prompt: String,
         apiKey: String,
-        model: LLMModelChoice,
-        thinking: ModelThinkingOption,
+        profileHandle: String,
         onError: @escaping (String) -> Void
     ) {
         if let selected = selectedSessionID, JobSessionID.isJobSession(selected) {
@@ -133,6 +132,21 @@ final class ChatSessionStore: ObservableObject {
         let attachments = tabs[tabIndex].pendingAttachments
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
+        guard let resolved = AgentProfileStore.shared.resolveProfile(
+            explicitHandle: profileHandle,
+            message: trimmed
+        ) else {
+            onError("Choose a profile and enter a message.")
+            return
+        }
+        let profile = resolved.profile
+        let profilePrompt = resolved.prompt
+        let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON))
+            ?? .defaultHelperModel
+        let thinking = profile.thinkingJSON.flatMap {
+            try? JSONDecoder().decode(ModelThinkingOption.self, from: $0)
+        } ?? model.defaultThinkingOption
+
         tabs[tabIndex].pendingAttachments = []
         tabs[tabIndex].turns.append(
             ChatTurn(prompt: trimmed, attachments: attachments, response: "")
@@ -140,7 +154,7 @@ final class ChatSessionStore: ObservableObject {
         tabs[tabIndex].isStreaming = true
         updateTitleIfNeeded(
             sessionID: sessionID,
-            prompt: trimmed,
+            prompt: profilePrompt,
             attachments: attachments,
             tabIndex: tabIndex
         )
@@ -148,12 +162,14 @@ final class ChatSessionStore: ObservableObject {
 
         let stagedRoot = try? ChatFileAttachmentStager.defaultRootDirectory()
         let agentPrompt = ChatFileAttachmentPromptComposer.agentPrompt(
-            userText: trimmed,
+            userText: profilePrompt,
             payloads: ChatFileAttachmentInliner.payloads(
                 attachments: attachments,
                 rootDirectory: stagedRoot
             )
         )
+
+        let profileContextJSON = try? JSONEncoder().encode(AgentProfileTurnContext(profile: profile))
 
         activeTasks[sessionID]?.cancel()
         activeTasks[sessionID] = Task {
@@ -172,7 +188,8 @@ final class ChatSessionStore: ObservableObject {
                     prompt: agentPrompt,
                     apiKey: apiKey,
                     modelJSON: modelJSON,
-                    thinkingJSON: thinkingJSON
+                    thinkingJSON: thinkingJSON,
+                    profileContextJSON: profileContextJSON
                 )
                 let stream = AgentServiceClient.shared.streamTurn(request)
                 let streamStarted = Date()

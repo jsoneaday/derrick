@@ -28,6 +28,9 @@ public enum TurnProcessContext {
     /// Fire-and-forget policy notices (failure / informational modals) when UI is connected.
     @TaskLocal public static var policyNoticePublisher: PolicyNoticePublisher?
 
+    /// Active agent profile handle for the current user-facing turn (orchestrator-only tools).
+    @TaskLocal public static var activeProfileHandle: String?
+
     /// Active `/create-plugin` or `/edit-plugin` factory turn (enables sync `web.crawl`).
     @TaskLocal public static var pluginFactoryCreationActive: Bool = false
 
