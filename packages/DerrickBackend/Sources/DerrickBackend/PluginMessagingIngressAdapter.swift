@@ -44,7 +44,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             .first(where: { $0.pluginID == pluginID })
 
         var inserted: [MessagingPersistResult] = []
-        var replyPollsRemaining = 1
+        var replyPollsRemaining = 8
         for thread in threads {
             inserted.append(
                 contentsOf: try await pollConversation(

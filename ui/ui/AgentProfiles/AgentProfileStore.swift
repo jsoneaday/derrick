@@ -103,7 +103,7 @@ enum AgentProfileStoreError: Error, LocalizedError {
         case .notReady:
             return "Agent profiles are not ready yet."
         case .invalidHandle:
-            return "Profile handle must use letters, numbers, and underscores."
+            return "Short name must use letters, numbers, and underscores."
         }
     }
 }

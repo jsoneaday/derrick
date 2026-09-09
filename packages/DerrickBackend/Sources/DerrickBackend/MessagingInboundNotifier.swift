@@ -10,7 +10,8 @@ public enum MessagingInboundNotifier: Sendable {
     ) async {
         _ = uiIsInteractive
         let enriched = await enrichDisplayNames(rows)
-        for request in notificationRequests(from: enriched) {
+        let suppressedPluginID = DerrickMessagingForegroundPresence.pluginIDForSuppressedOSNotifications()
+        for request in notificationRequests(from: enriched, suppressingPluginID: suppressedPluginID) {
             do {
                 try await NotificationSender.post(request)
             } catch {
@@ -22,12 +23,19 @@ public enum MessagingInboundNotifier: Sendable {
         }
     }
 
-    static func notificationRequests(from rows: [MessagingPersistResult]) -> [UserNotificationRequest] {
+    static func notificationRequests(
+        from rows: [MessagingPersistResult],
+        suppressingPluginID: String? = nil
+    ) -> [UserNotificationRequest] {
         let inbound = rows.filter {
             $0.inserted && $0.message.direction == .inbound && !$0.thread.muted
         }
-        let replies = inbound.filter(\.message.isReply)
-        let roots = inbound.filter { !$0.message.isReply }
+        let suppressed = suppressingPluginID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let notifiable = inbound.filter { row in
+            suppressed.isEmpty || row.thread.pluginID != suppressed
+        }
+        let replies = notifiable.filter(\.message.isReply)
+        let roots = notifiable.filter { !$0.message.isReply }
 
         var requests: [UserNotificationRequest] = []
         let rootGrouped = Dictionary(grouping: roots, by: \.thread.id)

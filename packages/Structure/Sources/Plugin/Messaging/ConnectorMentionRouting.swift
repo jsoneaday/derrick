@@ -32,6 +32,27 @@ public struct MessagingAgentRoute: Sendable, Hashable {
 public enum ConnectorMentionParser: Sendable {
     public static let botReplyPrefix = "[\(DerrickAppSupport.hostAppProductName)]"
 
+    public static func botReplyPrefix(profileHandle: String) -> String {
+        let handle = AgentProfileHandle.normalize(profileHandle)
+            ?? profileHandle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if handle.isEmpty {
+            return botReplyPrefix
+        }
+        return "[\(DerrickAppSupport.hostAppProductName):\(handle)]"
+    }
+
+    /// Slack-style thread: reply under the inbound message, or stay in an existing thread.
+    public static func agentReplyThreadParentVendorMessageID(
+        inboundVendorMessageID: String,
+        existingParentVendorMessageID: String?
+    ) -> String {
+        let existing = existingParentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !existing.isEmpty {
+            return existing
+        }
+        return inboundVendorMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public static func mentionsSlackUser(body: String, userID: String) -> Bool {
         let trimmedID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedID.isEmpty else { return false }
@@ -52,23 +73,72 @@ public enum ConnectorMentionParser: Sendable {
     }
 
     public static func isAutomatedOutboundEcho(body: String) -> Bool {
-        body.trimmingCharacters(in: .whitespacesAndNewlines)
-            .hasPrefix(botReplyPrefix)
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[") else { return false }
+        let name = DerrickAppSupport.hostAppProductName
+        return trimmed.hasPrefix("[\(name)]") || trimmed.hasPrefix("[\(name):")
     }
 
     public static func resolvePrompt(
         body: String,
-        botUserID: String
+        botUserID: String,
+        continuationProfileHandle: String? = nil
     ) -> (profileHandle: String, prompt: String)? {
-        guard mentionsSlackUser(body: body, userID: botUserID) else { return nil }
-        let withoutMention = stripSlackUserMention(body: body, userID: botUserID)
+        let mentioned = mentionsSlackUser(body: body, userID: botUserID)
+        let withoutMention = mentioned
+            ? stripSlackUserMention(body: body, userID: botUserID)
+            : body.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsed = AgentProfileTokenParser.parse(message: withoutMention)
-        let handle = parsed.handle ?? AgentProfileHandle.orchestrator
-        let prompt = parsed.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else {
-            return (handle, defaultMentionOnlyPrompt)
+        if let handle = parsed.handle {
+            return (handle, promptOrDefault(parsed.body))
         }
-        return (handle, prompt)
+        if mentioned {
+            return (AgentProfileHandle.orchestrator, promptOrDefault(parsed.body))
+        }
+        let continuation = AgentProfileHandle.normalize(continuationProfileHandle ?? "")
+        if let continuation {
+            return (continuation, promptOrDefault(withoutMention))
+        }
+        return nil
+    }
+
+    /// `$handle` token anywhere in the body, or `[Derrick:handle]` on an automated reply.
+    public static func profileHandle(inMessageBody body: String) -> String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let handle = AgentProfileTokenParser.parse(message: trimmed).handle {
+            return handle
+        }
+        let name = DerrickAppSupport.hostAppProductName
+        let prefix = "[\(name):"
+        guard trimmed.hasPrefix(prefix),
+              let close = trimmed[prefix.endIndex...].firstIndex(of: "]")
+        else {
+            return nil
+        }
+        return AgentProfileHandle.normalize(String(trimmed[prefix.endIndex..<close]))
+    }
+
+    /// Newest prior `$handle` or `[Derrick:handle]` in a Slack thread.
+    public static func continuationProfileHandle(
+        in messages: [MessagingMessageDTO],
+        excludingVendorMessageID: String?
+    ) -> String? {
+        let excluded = excludingVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        for message in messages.reversed() {
+            let vendorID = message.vendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !excluded.isEmpty, vendorID == excluded {
+                continue
+            }
+            if let handle = profileHandle(inMessageBody: message.body) {
+                return handle
+            }
+        }
+        return nil
+    }
+
+    private static func promptOrDefault(_ body: String) -> String {
+        let prompt = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return prompt.isEmpty ? defaultMentionOnlyPrompt : prompt
     }
 
     public static let defaultMentionOnlyPrompt =
@@ -145,8 +215,8 @@ public enum MessagingAgentSessionID {
 }
 
 public enum MessagingAgentOutboundFormatter {
-    public static func formatReply(_ text: String) -> String {
+    public static func formatReply(_ text: String, profileHandle: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(ConnectorMentionParser.botReplyPrefix) \(trimmed)"
+        return "\(ConnectorMentionParser.botReplyPrefix(profileHandle: profileHandle)) \(trimmed)"
     }
 }

@@ -219,4 +219,35 @@ import Testing
         await MessagingInboundNotifier.notifyNewInbound(rows, uiIsInteractive: true)
         await MessagingInboundNotifier.notifyNewInbound(rows, uiIsInteractive: false)
     }
+
+    @Test func messagingInboundNotifierSuppressesOSBannersForViewedConnector() {
+        let thread = MessagingThreadDTO(
+            id: "thread-general",
+            pluginID: "slack-bot",
+            vendorThreadID: "C1",
+            title: "#general"
+        )
+        let rows = [
+            MessagingPersistResult(
+                inserted: true,
+                message: MessagingMessageDTO(
+                    threadID: thread.id,
+                    direction: .inbound,
+                    sender: "ada",
+                    body: "hello"
+                ),
+                thread: thread
+            )
+        ]
+        let suppressed = MessagingInboundNotifier.notificationRequests(
+            from: rows,
+            suppressingPluginID: "slack-bot"
+        )
+        #expect(suppressed.isEmpty)
+        let other = MessagingInboundNotifier.notificationRequests(
+            from: rows,
+            suppressingPluginID: "other-connector"
+        )
+        #expect(other.count == 1)
+    }
 }

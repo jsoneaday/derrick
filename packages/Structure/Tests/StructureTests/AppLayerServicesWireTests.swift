@@ -138,6 +138,17 @@ import Testing
         #expect(DerrickServiceID.job.xpcServiceName == "derrick.ui.JobService")
     }
 
+    @Test func daemonSingletonLockURLUsesHomeApplicationSupport() {
+        let url = DerrickAppSupport.daemonSingletonLockURL()
+        #expect(url.lastPathComponent == "derrickd.lock")
+        #expect(url.path.contains("Library/Application Support/Derrick"))
+    }
+
+    @Test func sharedDatabaseUnavailableErrorIsLocalized() {
+        let error = DerrickAppSupportError.sharedDatabaseUnavailable("test detail")
+        #expect(error.errorDescription == "test detail")
+    }
+
     @Test func databaseDirectoryPrefersAppGroupThenHostContainer() {
         let parents = DerrickAppSupport.preferredDatabaseParentDirectories()
         #expect(!parents.isEmpty)
@@ -798,6 +809,29 @@ import Testing
         DerrickUISessionPresence.markInteractiveSessionActive()
         #expect(DerrickUISessionPresence.isInteractiveSessionActive(excludingPID: -1))
         #expect(!DerrickUISessionPresence.isInteractiveSessionActive())
+    }
+
+    @Test func derrickMessagingForegroundPresenceSuppressesViewedConnector() {
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
+        DerrickMessagingForegroundPresence.clear()
+        defer { DerrickMessagingForegroundPresence.clear() }
+        DerrickMessagingForegroundPresence.sync(
+            isMessagingWorkspace: true,
+            pluginID: "slack-connector-1",
+            isFrontmost: true
+        )
+        #expect(
+            DerrickMessagingForegroundPresence.pluginIDForSuppressedOSNotifications(excludingPID: -1)
+                == "slack-connector-1"
+        )
+        DerrickMessagingForegroundPresence.sync(
+            isMessagingWorkspace: true,
+            pluginID: "slack-connector-1",
+            isFrontmost: false
+        )
+        #expect(
+            DerrickMessagingForegroundPresence.pluginIDForSuppressedOSNotifications(excludingPID: -1) == nil
+        )
     }
 
     @Test func derrickDaemonHygieneRestartAfterOrphanEviction() {

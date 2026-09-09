@@ -50,40 +50,52 @@ public final class MessagingIngressService: @unchecked Sendable {
         do {
             let repository = try await DaemonRuntime.shared.sharedRepository()
             let connectors = try await repository.listMessagingConnectors(listeningOnly: true)
-            guard !connectors.isEmpty else { return }
-
-            channelSyncGeneration &+= 1
-            let shouldSyncChannels = channelSyncGeneration % channelSyncEveryPolls == 1
             var newRows: [MessagingPersistResult] = []
 
-            for connector in connectors {
-                guard let adapter = MessagingIngressRegistry.adapter(for: connector.pluginID) else {
-                    continue
-                }
-                guard adapter.hasCredentials() else { continue }
-                let manifestJSON = try await repository.listLatestPluginFactoryManifests()
-                    .first(where: { $0.pluginID == connector.pluginID })?
-                    .manifestJSON ?? ""
-                if shouldSyncChannels,
-                   PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: manifestJSON) {
-                    try await adapter.syncThreads(repository: repository)
-                }
-                if PluginFactoryValidationExpectations.supportsPollInbox(manifestJSON: manifestJSON) {
-                    let inserted = try await adapter.pollInbox(repository: repository)
-                    newRows.append(contentsOf: inserted.filter {
-                        $0.inserted && $0.message.direction == .inbound
-                    })
+            if !connectors.isEmpty {
+                channelSyncGeneration &+= 1
+                let shouldSyncChannels = channelSyncGeneration % channelSyncEveryPolls == 1
+
+                for connector in connectors {
+                    do {
+                        guard let adapter = MessagingIngressRegistry.adapter(for: connector.pluginID) else {
+                            continue
+                        }
+                        guard adapter.hasCredentials() else { continue }
+                        let manifestJSON = try await repository.listLatestPluginFactoryManifests()
+                            .first(where: { $0.pluginID == connector.pluginID })?
+                            .manifestJSON ?? ""
+                        if shouldSyncChannels,
+                           PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: manifestJSON) {
+                            try await adapter.syncThreads(repository: repository)
+                        }
+                        if PluginFactoryValidationExpectations.supportsPollInbox(manifestJSON: manifestJSON) {
+                            let inserted = try await adapter.pollInbox(repository: repository)
+                            newRows.append(contentsOf: inserted.filter {
+                                $0.inserted && $0.message.direction == .inbound
+                            })
+                        }
+                    } catch {
+                        fputs(
+                            "[MessagingIngressService] poll failed pluginID=\(connector.pluginID): \(error.localizedDescription)\n",
+                            stderr
+                        )
+                    }
                 }
             }
 
             if !newRows.isEmpty {
                 DerrickMessagingInboundSignal.postRefresh()
                 await MessagingInboundNotifier.notifyNewInbound(newRows)
-                await MessagingAgentIngressRouter.processInbound(newRows, repository: repository)
                 fputs(
                     "[MessagingIngressService] persisted \(newRows.count) inbound message(s)\n",
                     stderr
                 )
+            }
+            try? await repository.releaseUnansweredProfileTokenClaims()
+            let unclaimed = (try? await repository.listUnclaimedInboundMessagingMessages()) ?? []
+            if !unclaimed.isEmpty {
+                await MessagingAgentIngressRouter.processInbound(unclaimed, repository: repository)
             }
         } catch {
             fputs("[MessagingIngressService] poll failed: \(error.localizedDescription)\n", stderr)

@@ -383,4 +383,10 @@ import Testing
         #expect(store.lastError == nil)
         #expect(store.conversationLanding == .vendorConnector(pluginID: "slack-bot"))
     }
+
+    @Test func profileTokenHighlightMarksDollarHandlesGreenCandidates() {
+        let text = "$orchestrator tell me about yourself then [Derrick:developer] replied"
+        let tokens = AgentProfileTokenHighlight.ranges(in: text).map { String(text[$0]) }
+        #expect(tokens == ["$orchestrator", "developer"])
+    }
 }

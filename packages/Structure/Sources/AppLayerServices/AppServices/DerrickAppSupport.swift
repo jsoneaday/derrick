@@ -1,5 +1,16 @@
 import Foundation
 
+public enum DerrickAppSupportError: Error, LocalizedError, Sendable {
+    case sharedDatabaseUnavailable(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .sharedDatabaseUnavailable(let message):
+            return message
+        }
+    }
+}
+
 /// Shared app-support paths (UI, XPC services, JobKeepAlive use the same SQLite file).
 ///
 /// Prefer the **App Group** container so processes that are not the sandboxed UI
@@ -17,42 +28,118 @@ public enum DerrickAppSupport {
 
     public static func databaseDirectory(applicationName: String = defaultApplicationName) throws -> URL {
         let fm = FileManager.default
-        let candidates = preferredDatabaseParentDirectories()
-        guard let parent = candidates.first else {
-            throw CocoaError(.fileNoSuchFile)
+        if let groupParent = appGroupApplicationSupportURL(),
+           let directoryURL = try resolveWritableDatabaseDirectory(
+               parent: groupParent,
+               applicationName: applicationName,
+               fileManager: fm
+           ) {
+            try migrateLegacyDatabaseIfNeeded(into: directoryURL)
+            return directoryURL
         }
-        let directoryURL = parent.appendingPathComponent(applicationName, isDirectory: true)
-        try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
-        try migrateLegacyDatabaseIfNeeded(into: directoryURL)
-        return directoryURL
+        if DerrickProcessRole.isDaemon {
+            // Unsigned local builds cannot embed App Group entitlements. The UI falls back to
+            // the host container; the unsandboxed daemon must open that same path.
+            if let directoryURL = try resolveWritableDatabaseDirectory(
+                parent: hostContainerApplicationSupportURL(),
+                applicationName: applicationName,
+                fileManager: fm
+            ) {
+                try migrateLegacyDatabaseIfNeeded(into: directoryURL)
+                return directoryURL
+            }
+            throw DerrickAppSupportError.sharedDatabaseUnavailable(
+                """
+                The background service cannot open the shared database. This usually means JobKeepAlive was built without App Group entitlements.
+
+                Quit Derrick, rebuild from Xcode with your development team enabled, then open Derrick again. If it still fails, remove Derrick from Login Items, then reopen the app.
+                """
+            )
+        }
+
+        let hostParent = hostContainerApplicationSupportURL()
+        if let directoryURL = try resolveWritableDatabaseDirectory(
+            parent: hostParent,
+            applicationName: applicationName,
+            fileManager: fm
+        ) {
+            try migrateLegacyDatabaseIfNeeded(into: directoryURL)
+            return directoryURL
+        }
+
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    /// Singleton lock for `derrickd`. Lives outside the App Group so unsigned dev builds can still coordinate.
+    public static func daemonSingletonLockURL() -> URL {
+        let directory = homeApplicationSupportDirectory()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("derrickd.lock", isDirectory: false)
     }
 
     /// Ordered: App Group Application Support, host app container, process Application Support.
     public static func preferredDatabaseParentDirectories() -> [URL] {
         var urls: [URL] = []
-        let fm = FileManager.default
-
-        if let groupRoot = fm.containerURL(forSecurityApplicationGroupIdentifier: applicationGroupIdentifier) {
-            urls.append(
-                groupRoot.appendingPathComponent("Library/Application Support", isDirectory: true)
-            )
+        if let groupParent = appGroupApplicationSupportURL() {
+            urls.append(groupParent)
         }
-
-        let home = fm.homeDirectoryForCurrentUser
-        let containerSupport = home
-            .appendingPathComponent(
-                "Library/Containers/\(hostAppBundleIdentifier)/Data/Library/Application Support",
-                isDirectory: true
-            )
-        urls.append(containerSupport)
-
+        urls.append(hostContainerApplicationSupportURL())
+        let fm = FileManager.default
         if let processSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            if processSupport.standardizedFileURL != containerSupport.standardizedFileURL {
+            let host = hostContainerApplicationSupportURL()
+            if processSupport.standardizedFileURL != host.standardizedFileURL {
                 urls.append(processSupport)
             }
         }
         return urls
+    }
+
+    private static func appGroupApplicationSupportURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: applicationGroupIdentifier)?
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+    }
+
+    private static func hostContainerApplicationSupportURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Containers/\(hostAppBundleIdentifier)/Data/Library/Application Support",
+                isDirectory: true
+            )
+    }
+
+    private static func homeApplicationSupportDirectory() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Derrick", isDirectory: true)
+    }
+
+    private static func resolveWritableDatabaseDirectory(
+        parent: URL,
+        applicationName: String,
+        fileManager: FileManager
+    ) throws -> URL? {
+        let directoryURL = parent.appendingPathComponent(applicationName, isDirectory: true)
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        guard canWriteProbe(in: directoryURL, fileManager: fileManager) else {
+            return nil
+        }
+        return directoryURL
+    }
+
+    private static func canWriteProbe(in directoryURL: URL, fileManager: FileManager) -> Bool {
+        let probeURL = directoryURL.appendingPathComponent(".derrick-db-probe", isDirectory: false)
+        do {
+            try Data("ok".utf8).write(to: probeURL, options: .atomic)
+            try fileManager.removeItem(at: probeURL)
+            return true
+        } catch {
+            fputs(
+                "[DerrickAppSupport] database probe failed \(directoryURL.path): \(error.localizedDescription)\n",
+                stderr
+            )
+            return false
+        }
     }
 
     /// Copy `derrick.sqlite3` (+ WAL/SHM) from host container into the group directory when

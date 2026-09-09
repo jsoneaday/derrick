@@ -41,22 +41,104 @@ public enum AgentProfileHandle {
     }
 }
 
-/// Parses `$handle` at the start of a message body (after optional bot mention stripping).
+/// Parses `$handle` anywhere in a message (token boundary), not only at the start.
 public enum AgentProfileTokenParser {
     public static func parse(message: String) -> (handle: String?, body: String) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("$") else {
+        guard let tokenRange = AgentProfileTokenHighlight.ranges(in: trimmed).first(where: {
+            trimmed[$0].hasPrefix("$")
+        }) else {
             return (nil, trimmed)
         }
-        let remainder = String(trimmed.dropFirst())
-        guard let end = remainder.firstIndex(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) else {
-            let handle = AgentProfileHandle.normalize(remainder)
-            return (handle, "")
+        let token = String(trimmed[tokenRange])
+        let handle = AgentProfileHandle.normalize(String(token.dropFirst()))
+        var body = trimmed
+        body.removeSubrange(tokenRange)
+        let collapsed = body
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (handle, collapsed)
+    }
+}
+
+/// Ranges of `$handle` tokens (and the profile name inside `[Derrick:handle]`) for UI highlighting.
+public enum AgentProfileTokenHighlight {
+    public static func ranges(
+        in text: String,
+        productName: String = DerrickAppSupport.hostAppProductName
+    ) -> [Range<String.Index>] {
+        var found: [Range<String.Index>] = []
+        found.append(contentsOf: dollarHandleRanges(in: text))
+        found.append(contentsOf: productPrefixedHandleRanges(in: text, productName: productName))
+        return found.sorted { $0.lowerBound < $1.lowerBound }
+    }
+
+    public static func nsRanges(
+        in text: String,
+        productName: String = DerrickAppSupport.hostAppProductName
+    ) -> [NSRange] {
+        ranges(in: text, productName: productName).map { NSRange($0, in: text) }
+    }
+
+    private static func dollarHandleRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index] == "$", isTokenBoundary(before: index, in: text) {
+                let handleStart = text.index(after: index)
+                var handleEnd = handleStart
+                while handleEnd < text.endIndex, isHandleCharacter(text[handleEnd]) {
+                    handleEnd = text.index(after: handleEnd)
+                }
+                let handle = String(text[handleStart..<handleEnd])
+                if isHighlightableHandle(handle) {
+                    ranges.append(index..<handleEnd)
+                    index = handleEnd
+                    continue
+                }
+            }
+            index = text.index(after: index)
         }
-        let token = String(remainder[..<end])
-        let handle = AgentProfileHandle.normalize(token)
-        let body = String(remainder[end...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (handle, body)
+        return ranges
+    }
+
+    private static func productPrefixedHandleRanges(
+        in text: String,
+        productName: String
+    ) -> [Range<String.Index>] {
+        let needle = "[\(productName):"
+        var ranges: [Range<String.Index>] = []
+        var searchFrom = text.startIndex
+        while searchFrom < text.endIndex,
+              let prefix = text.range(of: needle, range: searchFrom..<text.endIndex) {
+            let handleStart = prefix.upperBound
+            guard let close = text[handleStart...].firstIndex(of: "]") else { break }
+            let handle = String(text[handleStart..<close])
+            if isHighlightableHandle(handle) {
+                ranges.append(handleStart..<close)
+            }
+            searchFrom = close
+            if searchFrom < text.endIndex {
+                searchFrom = text.index(after: searchFrom)
+            }
+        }
+        return ranges
+    }
+
+    private static func isHighlightableHandle(_ handle: String) -> Bool {
+        AgentProfileHandle.isValid(handle) && handle.contains(where: \.isLetter)
+    }
+
+    private static func isTokenBoundary(before index: String.Index, in text: String) -> Bool {
+        guard index > text.startIndex else { return true }
+        let previous = text[text.index(before: index)]
+        return !previous.isLetter && !previous.isNumber && previous != "_"
+    }
+
+    private static func isHandleCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { scalar in
+            CharacterSet.alphanumerics.contains(scalar) || scalar == "_"
+        }
     }
 }
 
