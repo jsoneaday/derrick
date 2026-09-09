@@ -28,7 +28,7 @@ struct AgentProfileSettingsView: View {
             Text("Agent profiles")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Profiles define how Derrick behaves when you message an agent from connectors. Address a profile with $handle (for example $orchestrator). Replies are posted as [\(DerrickAppSupport.hostAppProductName)].")
+            Text("Profiles define how Derrick behaves when you message an agent from connectors. Start a message with $ and the profile’s short name, like $orchestrator. Replies are posted as [\(DerrickAppSupport.hostAppProductName):orchestrator].")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -44,7 +44,7 @@ struct AgentProfileSettingsView: View {
                                     Text(profile.displayName)
                                     Text("$" + profile.handle)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(AgentProfileTokenColor.darkGreen)
                                 }
                                 Spacer(minLength: 0)
                                 if !profile.isEnabled {
@@ -107,8 +107,8 @@ struct AgentProfileSettingsView: View {
             }
 
             profileField(
-                title: "Handle",
-                caption: "Use as $handle in messages. Letters, numbers, and underscores only."
+                title: "Short name",
+                caption: "Put $ in front of this name in messages, like $orchestrator. Letters, numbers, and underscores only."
             ) {
                 TextField("reviewer", text: $draftHandle)
                     .textFieldStyle(.roundedBorder)

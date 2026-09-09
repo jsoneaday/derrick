@@ -420,7 +420,7 @@ import Testing
         }
         let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
         _ = try await adapter.pollInbox(repository: repository)
-        #expect(capture.parents == ["", "171.3"])
+        #expect(capture.parents == ["", "171.3", "171.1"])
     }
 
     @Test func pollInboxRefetchesReplyThreadWhenStoredCountMatches() async throws {

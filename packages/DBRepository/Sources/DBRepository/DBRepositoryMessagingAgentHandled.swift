@@ -39,4 +39,45 @@ public extension DBRepository {
             }
         }
     }
+
+    func releaseMessagingAgentHandling(pluginID: String, vendorMessageID: String) throws {
+        let trimmedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMessageID = vendorMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPluginID.isEmpty, !trimmedMessageID.isEmpty else { return }
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_agent_handled
+            WHERE plugin_id = \(quoted(trimmedPluginID))
+              AND vendor_message_id = \(quoted(trimmedMessageID));
+            """, on: handle)
+        }
+    }
+
+    /// Lets `$profile` inbound retry when a turn was claimed but never posted a reply.
+    func releaseUnansweredProfileTokenClaims() throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_agent_handled
+            WHERE rowid IN (
+                SELECT h.rowid
+                FROM messaging_agent_handled h
+                INNER JOIN messaging_threads t ON t.plugin_id = h.plugin_id
+                INNER JOIN messaging_messages m
+                  ON m.thread_id = t.id
+                 AND m.vendor_message_id = h.vendor_message_id
+                WHERE m.direction = \(quoted(MessagingMessageDirection.inbound.rawValue))
+                  AND (
+                    TRIM(m.body) LIKE '$%'
+                    OR m.body LIKE '%$%'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM messaging_messages o
+                    WHERE o.thread_id = m.thread_id
+                      AND o.direction = \(quoted(MessagingMessageDirection.outbound.rawValue))
+                      AND o.created_at >= m.created_at
+                  )
+            );
+            """, on: handle)
+        }
+    }
 }

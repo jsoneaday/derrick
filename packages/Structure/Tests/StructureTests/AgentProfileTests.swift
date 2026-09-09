@@ -21,6 +21,22 @@ import Testing
         #expect(parsed.body == "")
     }
 
+    @Test func tokenParserFindsHandleAfterGreeting() {
+        let parsed = AgentProfileTokenParser.parse(message: "hi $orchestrator how are you?")
+        #expect(parsed.handle == "orchestrator")
+        #expect(parsed.body == "hi how are you?")
+
+        let handleOnlyGreeting = AgentProfileTokenParser.parse(message: "hi $orchestrator")
+        #expect(handleOnlyGreeting.handle == "orchestrator")
+        #expect(handleOnlyGreeting.body == "hi")
+    }
+
+    @Test func tokenParserIgnoresDollarAmounts() {
+        let parsed = AgentProfileTokenParser.parse(message: "price is $100")
+        #expect(parsed.handle == nil)
+        #expect(parsed.body == "price is $100")
+    }
+
     @Test func handleValidationRejectsInvalidCharacters() {
         #expect(AgentProfileHandle.isValid("reviewer"))
         #expect(AgentProfileHandle.isValid("code_reviewer_2"))
@@ -53,5 +69,18 @@ import Testing
             AgentProfileHandle.researcher,
             AgentProfileHandle.general,
         ])
+    }
+
+    @Test func tokenHighlightFindsDollarHandlesAndPrefixedProfileNames() {
+        let inbound = "$orchestrator tell me about yourself"
+        let inboundTokens = AgentProfileTokenHighlight.ranges(in: inbound).map { String(inbound[$0]) }
+        #expect(inboundTokens == ["$orchestrator"])
+
+        let outbound = "[Derrick:developer] Fixed the build."
+        let outboundTokens = AgentProfileTokenHighlight.ranges(in: outbound).map { String(outbound[$0]) }
+        #expect(outboundTokens == ["developer"])
+
+        let ignored = AgentProfileTokenHighlight.ranges(in: "price is $100")
+        #expect(ignored.isEmpty)
     }
 }

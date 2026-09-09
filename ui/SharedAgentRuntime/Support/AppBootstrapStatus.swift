@@ -144,6 +144,17 @@ final class AppBootstrapStatus: ObservableObject {
             debugLog("[bootstrap] ignore phase=\(phase.rawValue) (already ready): \(message)")
             return
         }
+        // Parallel bootstrap: once we move past Docker prep, do not let guest-image
+        // prewarm overwrite daemon/database status in the modal.
+        if phase == .checkingDocker || phase == .preparingImage || phase == .verifyingEnvironment {
+            switch self.phase {
+            case .connectingHelper, .loadingSession:
+                debugLog("[bootstrap] ignore docker phase=\(phase.rawValue) while \(self.phase.rawValue): \(message)")
+                return
+            default:
+                break
+            }
+        }
         // Don't let a cancelled re-entrant task demote ready via failed paths above.
         self.phase = phase
         self.statusMessage = message
@@ -253,6 +264,16 @@ final class AppBootstrapStatus: ObservableObject {
             return ClassifiedFailure(
                 title: "Docker Desktop Not Running",
                 message: "Docker Desktop is installed but not running, or Derrick cannot reach the Docker engine. Start Docker Desktop, wait until it is idle, then restart Derrick."
+            )
+        }
+        if lower.contains("shared database") || lower.contains("authorization denied") {
+            return ClassifiedFailure(
+                title: "Background Service Cannot Open Database",
+                message: """
+                Derrick finished preparing Docker, but the background service could not open the shared database.
+
+                Quit Derrick completely, rebuild from Xcode with your development team enabled, then open Derrick again. If this continues, remove Derrick from Login Items and reopen the app.
+                """
             )
         }
         if lower.contains("timed out") || lower.contains("xpc call timed out") {

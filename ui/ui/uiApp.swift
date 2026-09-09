@@ -184,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               !DerrickNotificationLaunch.hasHITLApprovalPresentationIntent()
         else { return }
         DerrickUISessionPresence.clearInteractiveSession()
+        DerrickMessagingForegroundPresence.clear()
         DerrickNotificationService.shared.stop()
         // Do not bootout/kickstart on quit — that kills derrickd and the next
         // launch hangs on "Connecting to Derrick daemon".

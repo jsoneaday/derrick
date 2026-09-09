@@ -269,14 +269,30 @@ struct MessagingConversationView: View {
     }
 
     private var conversation: some View {
-        HStack(spacing: 0) {
-            channelPane
-            if store.isViewingReplyThread {
-                Divider()
-                threadPane
-                    .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
+        ZStack(alignment: .top) {
+            HStack(spacing: 0) {
+                channelPane
+                if store.isViewingReplyThread {
+                    Divider()
+                    threadPane
+                        .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
+                }
+            }
+            if let banner = store.inboundBanner, !banner.isEmpty {
+                Text(banner)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: 520)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .animation(.easeInOut(duration: 0.35), value: store.inboundBanner)
         .onChange(of: store.isViewingReplyThread) { _, open in
             if open {
                 threadComposerFocused = true
@@ -523,31 +539,9 @@ struct MessagingConversationView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            HStack(spacing: 12) {
-                Picker("Send mode", selection: $store.sendToAgent) {
-                    Text("You").tag(false)
-                    Text("Agent").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 180)
-
-                if store.sendToAgent {
-                    Picker("Profile", selection: $store.selectedProfileHandle) {
-                        ForEach(AgentProfileStore.shared.enabledProfiles, id: \.handle) { profile in
-                            Text(profile.displayName).tag(profile.handle)
-                        }
-                    }
-                    .labelsHidden()
-                }
-            }
-            if store.sendToAgent {
-                Text("Tip: type $handle at the start to switch profiles (e.g. $reviewer).")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(
-                    store.sendToAgent ? "Message for $\(store.selectedProfileHandle)…" : placeholder,
+                    placeholder,
                     text: text,
                     axis: .vertical
                 )
@@ -626,7 +620,7 @@ private struct MessagingBubble: View {
         HStack(alignment: .top, spacing: 0) {
             if message.direction == .outbound { Spacer(minLength: 80) }
             VStack(alignment: message.direction == .outbound ? .trailing : .leading, spacing: 4) {
-                Text(message.sender)
+                    Text(message.sender)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 messageBody
@@ -639,10 +633,12 @@ private struct MessagingBubble: View {
                                 Text(replyActionTitle)
                                     .font(.caption.weight(.semibold))
                                 if message.replyCount > 0, let preview = lastReplyPreview, !preview.isEmpty {
-                                    Text(preview)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                                    AgentProfileHighlightedText(
+                                        text: preview,
+                                        font: .caption2,
+                                        baseColor: .secondary
+                                    )
+                                    .lineLimit(1)
                                 }
                             }
                         }
@@ -661,25 +657,33 @@ private struct MessagingBubble: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, alignment: message.direction == .outbound ? .trailing : .leading)
             if message.direction == .inbound { Spacer(minLength: 80) }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var messageBody: some View {
-        Text(message.body)
-            .font(.system(size: 13))
-            .multilineTextAlignment(.leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(message.direction == .outbound
-                          ? Color.black.opacity(0.08)
-                          : Color.white)
-            )
-            .frame(maxWidth: 260, alignment: .leading)
-            .fixedSize(horizontal: true, vertical: false)
+        ViewThatFits(in: .horizontal) {
+            bubbleLabel
+                .fixedSize()
+                .modifier(MessagingBubbleChrome(direction: message.direction))
+            bubbleLabel
+                .fixedSize(horizontal: false, vertical: true)
+                .modifier(MessagingBubbleChrome(direction: message.direction))
+        }
+        .frame(
+            maxWidth: .infinity,
+            alignment: message.direction == .outbound ? .trailing : .leading
+        )
+    }
+
+    private var bubbleLabel: some View {
+        AgentProfileHighlightedText(
+            text: message.body,
+            font: .system(size: 13)
+        )
+        .multilineTextAlignment(.leading)
     }
 
     private var replyActionTitle: String {
@@ -690,5 +694,21 @@ private struct MessagingBubble: View {
             return "\(message.replyCount) replies"
         }
         return "Reply in thread"
+    }
+}
+
+private struct MessagingBubbleChrome: ViewModifier {
+    let direction: MessagingMessageDirection
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(direction == .outbound
+                          ? Color.black.opacity(0.08)
+                          : Color.white)
+            )
     }
 }

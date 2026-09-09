@@ -103,6 +103,11 @@ public final class AgentServiceClient: @unchecked Sendable {
                 return report
             } catch {
                 lastError = error
+                if let bootstrap = error as? AgentServiceClientError,
+                   case .bootstrapFailed(let message) = bootstrap,
+                   Self.isPermanentBootstrapFailure(message: message) {
+                    throw error
+                }
                 await MainActor.run {
                     debugLog("AgentService ensure-up attempt \(attempt + 1) failed: \(error.localizedDescription)")
                 }
@@ -111,6 +116,13 @@ public final class AgentServiceClient: @unchecked Sendable {
             }
         }
         throw lastError ?? AgentServiceClientError.unavailable
+    }
+
+    private nonisolated static func isPermanentBootstrapFailure(message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("shared database")
+            || lower.contains("authorization denied")
+            || lower.contains("app group entitlements")
     }
 
     private func requestBootstrap(

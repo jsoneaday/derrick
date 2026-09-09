@@ -102,6 +102,8 @@ public actor ConnectorMessagingCommandService {
                     parentVendorMessageID: request.parentVendorMessageID,
                     repository: repository
                 )
+                // Route on a detached task. Awaiting processInbound here deadlocks:
+                // the turn client sends through this same actor.
             case .send:
                 guard let vendorThreadID = request.vendorThreadID?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !vendorThreadID.isEmpty,
@@ -129,6 +131,9 @@ public actor ConnectorMessagingCommandService {
                 request: request
             )
             DerrickMessagingInboundSignal.postRefresh()
+            if request.kind == .pollInbox {
+                DerrickMessagingIngressSignal.postPoll()
+            }
         } catch {
             finish(request.operationID, status: .failed, error: error.localizedDescription)
             await log(

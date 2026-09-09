@@ -457,6 +457,10 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshProviderCredentialUI()
+            messaging.publishForegroundPresence(isFrontmost: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            messaging.publishForegroundPresence(isFrontmost: false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .derrickOpenMessagingConnector)) { notification in
             guard let pluginID = notification.userInfo?[PluginFactoryTurnNavigation.pluginIDUserInfoKey] as? String,
@@ -761,16 +765,16 @@ struct ContentView: View {
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
 
-                async let daemonHealth = connectLaunchDaemon()
-                async let repository = loadLaunchRepository()
+                // Prewarm Docker in parallel, but connect daemon + DB first so the modal
+                // does not sit on "Guest runtime ready" while XPC bootstrap is still retrying.
                 async let dockerPeer = prewarmLaunchDockerPeer()
 
-                let health = try await daemonHealth
+                let health = try await connectLaunchDaemon()
                 debugLog(
                     "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
                 )
 
-                let repo = try await repository
+                let repo = try await loadLaunchRepository()
 
                 if let peer = try await dockerPeer {
                     do {

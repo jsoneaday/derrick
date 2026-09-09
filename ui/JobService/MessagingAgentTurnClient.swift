@@ -28,7 +28,7 @@ enum MessagingAgentTurnClient {
             profileContextJSON: profileContextJSON
         )
         let response = try await AgentServiceTurnHost.shared.runCollectedTurn(request: request)
-        let outbound = MessagingAgentOutboundFormatter.formatReply(response)
+        let outbound = MessagingAgentOutboundFormatter.formatReply(response, profileHandle: profile.handle)
         try await sendConnectorMessage(
             route: route,
             text: outbound,

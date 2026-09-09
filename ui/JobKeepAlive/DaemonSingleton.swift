@@ -6,10 +6,7 @@ import Structure
 /// steal `VUSK4B2YKQ.derrick.shared.daemon` and hang UI "Connecting to Derrick daemon".
 enum DaemonSingleton {
     static func acquireOrExit() {
-        guard let path = lockPath() else {
-            fputs("[derrickd] singleton lock skipped — no app group container\n", stderr)
-            return
-        }
+        let path = DerrickAppSupport.daemonSingletonLockURL().path
         let fd = open(path, O_CREAT | O_RDWR, 0o644)
         guard fd >= 0 else {
             fputs("[derrickd] singleton lock open failed \(path)\n", stderr)
@@ -28,12 +25,5 @@ enum DaemonSingleton {
         // Leak `fd` for process lifetime so the exclusive lock is held until exit.
         fputs("[derrickd] singleton lock acquired pid=\(getpid()) path=\(path)\n", stderr)
         fflush(stderr)
-    }
-
-    private static func lockPath() -> String? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier)?
-            .appendingPathComponent("derrickd.lock", isDirectory: false)
-            .path
     }
 }

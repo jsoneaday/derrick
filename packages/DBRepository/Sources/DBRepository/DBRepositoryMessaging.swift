@@ -231,6 +231,52 @@ public extension DBRepository {
         }
     }
 
+    /// Inbound messages that have not yet been claimed for an agent turn.
+    func listUnclaimedInboundMessagingMessages(limit: Int = 40) throws -> [MessagingPersistResult] {
+        let pageSize = max(1, min(limit, 80))
+        return try withDatabaseHandle { handle in
+            let sql = """
+            SELECT
+                m.id, m.thread_id, m.vendor_message_id, m.direction, m.sender, m.body, m.created_at,
+                m.parent_vendor_message_id, m.reply_count,
+                t.id, t.plugin_id, t.vendor_thread_id, t.title, t.last_activity_at, t.muted,
+                t.unread_count, t.created_at
+            FROM messaging_messages m
+            INNER JOIN messaging_threads t ON t.id = m.thread_id
+            LEFT JOIN messaging_agent_handled h
+              ON h.plugin_id = t.plugin_id
+             AND h.vendor_message_id = m.vendor_message_id
+            WHERE m.direction = \(quoted(MessagingMessageDirection.inbound.rawValue))
+              AND m.vendor_message_id IS NOT NULL
+              AND TRIM(m.vendor_message_id) != ''
+              AND h.plugin_id IS NULL
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT \(pageSize);
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                throw Self.sqliteError(handle: handle, fallback: "Failed to prepare unclaimed inbound messaging list.")
+            }
+            defer { sqlite3_finalize(statement) }
+            var rows: [MessagingPersistResult] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let message = try decodeMessagingMessage(statement: statement)
+                let thread = MessagingThreadDTO(
+                    id: try columnString(statement, index: 9),
+                    pluginID: try columnString(statement, index: 10),
+                    vendorThreadID: try columnString(statement, index: 11),
+                    title: try columnString(statement, index: 12),
+                    lastActivityAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 13)) ?? .now,
+                    muted: sqlite3_column_int(statement, 14) != 0,
+                    unreadCount: Int(sqlite3_column_int(statement, 15)),
+                    createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 16)) ?? .now
+                )
+                rows.append(MessagingPersistResult(inserted: true, message: message, thread: thread))
+            }
+            return rows
+        }
+    }
+
     /// Latest reply body for each parent, for the channel "N replies" row.
     func latestReplyPreviews(
         threadID: String,

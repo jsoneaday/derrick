@@ -8,6 +8,9 @@ enum DaemonModuleBootstrap {
     static func startAllModules() async {
         // Mark in-process mesh ready before scheduler claims work.
         JobServiceMeshState.shared.markInProcessReady()
+        InProcessServiceBridges.messagingAgentRoute = { route in
+            try await MessagingAgentTurnClient.handle(route: route)
+        }
 
         do {
             _ = try await MCPServiceStore.shared.sharedRepository()
@@ -66,9 +69,6 @@ enum DaemonModuleBootstrap {
             }
             InProcessServiceBridges.connectorPoll = { request in
                 try await ConnectorMessagingCommandService.shared.poll(request)
-            }
-            InProcessServiceBridges.messagingAgentRoute = { route in
-                try await MessagingAgentTurnClient.handle(route: route)
             }
             await DaemonRuntime.shared.markModuleReady(.mcp)
             fputs("[derrickd] module mcp ready\n", stderr)
