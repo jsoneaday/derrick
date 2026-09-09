@@ -28,6 +28,35 @@ public struct MessagingAgentRoute: Sendable, Hashable {
     }
 }
 
+/// Lightweight profile row for inbound help text and routing.
+public struct AgentProfileCatalogEntry: Sendable, Hashable {
+    public let handle: String
+    public let displayName: String
+
+    public init(handle: String, displayName: String) {
+        self.handle = handle
+        self.displayName = displayName
+    }
+}
+
+public enum AgentProfileHelpFormatter: Sendable {
+    public static func mentionOnlyPrompt(catalog: [AgentProfileCatalogEntry]) -> String {
+        let lines = catalog.map { entry in
+            "- $\(entry.handle) (\(entry.displayName))"
+        }
+        let profileList = lines.isEmpty
+            ? "- $orchestrator (Orchestrator)\n- $developer (Developer)\n- $researcher (Researcher)\n- $general (General)"
+            : lines.joined(separator: "\n")
+        return """
+        The user mentioned Derrick without a specific request. Briefly list the available agent profiles:
+        \(profileList)
+
+        Explain they can start a message with $handle (for example $orchestrator or $researcher). \
+        Mention that this channel can have its own default profile in Derrick. Offer to help.
+        """
+    }
+}
+
 /// Parses connector message bodies for bot mentions and `$handle` profile tokens.
 public enum ConnectorMentionParser: Sendable {
     public static let botReplyPrefix = "[\(DerrickAppSupport.hostAppProductName)]"
@@ -58,21 +87,21 @@ public enum ConnectorMentionParser: Sendable {
 
     public static func resolvePrompt(
         body: String,
-        botUserID: String
+        botUserID: String,
+        channelDefaultProfileHandle: String? = nil,
+        profileCatalog: [AgentProfileCatalogEntry] = []
     ) -> (profileHandle: String, prompt: String)? {
         guard mentionsSlackUser(body: body, userID: botUserID) else { return nil }
         let withoutMention = stripSlackUserMention(body: body, userID: botUserID)
         let parsed = AgentProfileTokenParser.parse(message: withoutMention)
-        let handle = parsed.handle ?? AgentProfileHandle.orchestrator
+        let channelDefault = channelDefaultProfileHandle.flatMap { AgentProfileHandle.normalize($0) }
+        let handle = parsed.handle ?? channelDefault ?? AgentProfileHandle.orchestrator
         let prompt = parsed.body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
-            return (handle, defaultMentionOnlyPrompt)
+            return (handle, AgentProfileHelpFormatter.mentionOnlyPrompt(catalog: profileCatalog))
         }
         return (handle, prompt)
     }
-
-    public static let defaultMentionOnlyPrompt =
-        "The user mentioned Derrick without a specific request. Briefly explain they can use $profileName in their message (for example $orchestrator) and offer to help."
 }
 
 public enum SlackBotIdentityResolver: Sendable {

@@ -141,6 +141,30 @@ public extension DBRepository {
         }
     }
 
+    func setMessagingThreadDefaultAgentProfile(threadID: String, handle: String?) throws {
+        let trimmedID = threadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else {
+            throw DBRepositoryError.sqliteOperationFailed("Messaging thread id is required.")
+        }
+        let normalized = handle?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let valueSQL: String
+        if let normalized, !normalized.isEmpty {
+            guard AgentProfileHandle.isValid(normalized) else {
+                throw DBRepositoryError.sqliteOperationFailed("Invalid agent profile handle.")
+            }
+            valueSQL = quoted(normalized)
+        } else {
+            valueSQL = "NULL"
+        }
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE messaging_threads
+            SET default_agent_profile_handle = \(valueSQL)
+            WHERE id = \(quoted(trimmedID));
+            """, on: handle)
+        }
+    }
+
     func clearMessagingThreadUnread(id: String) throws {
         try withDatabaseHandle { handle in
             try Self.execute("""
@@ -339,7 +363,7 @@ public extension DBRepository {
         try Self.execute("""
         INSERT INTO messaging_threads (
             id, plugin_id, vendor_thread_id, title, last_activity_at,
-            muted, unread_count, created_at
+            muted, unread_count, default_agent_profile_handle, created_at
         ) VALUES (
             \(quoted(thread.id)),
             \(quoted(thread.pluginID)),
@@ -348,6 +372,7 @@ public extension DBRepository {
             \(quoted(activity)),
             \(thread.muted ? 1 : 0),
             \(max(0, thread.unreadCount)),
+            \(sqlValue(thread.defaultAgentProfileHandle)),
             \(quoted(created))
         )
         ON CONFLICT(plugin_id, vendor_thread_id) DO UPDATE SET
@@ -477,7 +502,7 @@ public extension DBRepository {
     private func loadMessagingThreads(pluginID: String, on handle: OpaquePointer) throws -> [MessagingThreadDTO] {
         let sql = """
         SELECT id, plugin_id, vendor_thread_id, title, last_activity_at,
-               muted, unread_count, created_at
+               muted, unread_count, created_at, default_agent_profile_handle
         FROM messaging_threads
         WHERE plugin_id = \(quoted(pluginID))
         ORDER BY last_activity_at DESC, id DESC;
@@ -497,7 +522,7 @@ public extension DBRepository {
     private func loadMessagingThread(id: String, on handle: OpaquePointer) throws -> MessagingThreadDTO? {
         let sql = """
         SELECT id, plugin_id, vendor_thread_id, title, last_activity_at,
-               muted, unread_count, created_at
+               muted, unread_count, created_at, default_agent_profile_handle
         FROM messaging_threads
         WHERE id = \(quoted(id))
         LIMIT 1;
@@ -518,7 +543,7 @@ public extension DBRepository {
     ) throws -> MessagingThreadDTO? {
         let sql = """
         SELECT id, plugin_id, vendor_thread_id, title, last_activity_at,
-               muted, unread_count, created_at
+               muted, unread_count, created_at, default_agent_profile_handle
         FROM messaging_threads
         WHERE plugin_id = \(quoted(pluginID))
           AND vendor_thread_id = \(quoted(vendorThreadID))
@@ -597,6 +622,7 @@ public extension DBRepository {
             lastActivityAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 4)) ?? .now,
             muted: sqlite3_column_int(statement, 5) != 0,
             unreadCount: Int(sqlite3_column_int(statement, 6)),
+            defaultAgentProfileHandle: columnOptionalString(statement, index: 8),
             createdAt: Self.iso8601Formatter().date(from: try columnString(statement, index: 7)) ?? .now
         )
     }

@@ -13,6 +13,7 @@ struct AgentProfileSettingsView: View {
     @State private var draftHandle = ""
     @State private var draftInstructions = ""
     @State private var draftModel: LLMModelChoice = .defaultHelperModel
+    @State private var draftThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
     @State private var draftRAG = AgentProfileRAGConfig.default
     @State private var draftEnabled = true
     @State private var editorError: String?
@@ -131,6 +132,32 @@ struct AgentProfileSettingsView: View {
                     }
                 }
                 .labelsHidden()
+                .onChange(of: draftModel) { _, newModel in
+                    if !newModel.thinkingOptions.contains(where: { $0.id == draftThinking.id }) {
+                        draftThinking = newModel.defaultThinkingOption
+                    }
+                }
+            }
+
+            if !draftModel.thinkingOptions.isEmpty {
+                profileField(
+                    title: "Thinking level",
+                    caption: "Reasoning depth for this profile's model."
+                ) {
+                    Picker("Thinking level", selection: Binding(
+                        get: { draftThinking.id },
+                        set: { newID in
+                            if let option = draftModel.thinkingOptions.first(where: { $0.id == newID }) {
+                                draftThinking = option
+                            }
+                        }
+                    )) {
+                        ForEach(draftModel.thinkingOptions, id: \.id) { option in
+                            Text(option.displayName).tag(option.id)
+                        }
+                    }
+                    .labelsHidden()
+                }
             }
 
             profileField(title: "RAG") {
@@ -203,6 +230,9 @@ struct AgentProfileSettingsView: View {
         draftHandle = profile.handle
         draftInstructions = profile.instructions
         draftModel = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON)) ?? .defaultHelperModel
+        draftThinking = profile.thinkingJSON.flatMap {
+            try? JSONDecoder().decode(ModelThinkingOption.self, from: $0)
+        } ?? draftModel.defaultThinkingOption
         draftRAG = profile.rag
         draftEnabled = profile.isEnabled
         editorError = nil
@@ -233,6 +263,7 @@ struct AgentProfileSettingsView: View {
         profile.handle = draftHandle.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.instructions = draftInstructions
         profile.modelJSON = (try? JSONEncoder().encode(draftModel)) ?? profile.modelJSON
+        profile.thinkingJSON = try? JSONEncoder().encode(draftThinking)
         profile.rag = draftRAG
         profile.isEnabled = draftEnabled
         do {
