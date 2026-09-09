@@ -53,12 +53,22 @@ import Testing
         #expect(decoded.displayName == "Orchestrator")
     }
 
-    @Test func builtinProfilesIncludeOrchestratorAndDeveloper() {
+    @Test func builtinProfilesIncludeAllBuiltins() {
         let modelJSON = Data(#"{"openai":"gpt-5.6-luna"}"#.utf8)
         let profiles = AgentProfile.builtinProfiles(modelJSON: modelJSON)
-        #expect(profiles.count == 2)
+        #expect(profiles.count == 4)
         #expect(profiles.map(\.handle).contains(AgentProfileHandle.orchestrator))
         #expect(profiles.map(\.handle).contains(AgentProfileHandle.developer))
+        #expect(profiles.map(\.handle).contains(AgentProfileHandle.researcher))
+        #expect(profiles.map(\.handle).contains(AgentProfileHandle.general))
+    }
+
+    @Test func delegateTargetsExcludeOrchestrator() {
+        #expect(AgentProfileHandle.delegateTargets == [
+            AgentProfileHandle.developer,
+            AgentProfileHandle.researcher,
+            AgentProfileHandle.general,
+        ])
     }
 
     @Test func tokenHighlightFindsDollarHandlesAndPrefixedProfileNames() {

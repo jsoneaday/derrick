@@ -28,6 +28,35 @@ public struct MessagingAgentRoute: Sendable, Hashable {
     }
 }
 
+/// Lightweight profile row for inbound help text and routing.
+public struct AgentProfileCatalogEntry: Sendable, Hashable {
+    public let handle: String
+    public let displayName: String
+
+    public init(handle: String, displayName: String) {
+        self.handle = handle
+        self.displayName = displayName
+    }
+}
+
+public enum AgentProfileHelpFormatter: Sendable {
+    public static func mentionOnlyPrompt(catalog: [AgentProfileCatalogEntry]) -> String {
+        let lines = catalog.map { entry in
+            "- $\(entry.handle) (\(entry.displayName))"
+        }
+        let profileList = lines.isEmpty
+            ? "- $orchestrator (Orchestrator)\n- $developer (Developer)\n- $researcher (Researcher)\n- $general (General)"
+            : lines.joined(separator: "\n")
+        return """
+        The user mentioned Derrick without a specific request. Briefly list the available agent profiles:
+        \(profileList)
+
+        Explain they can start a message with $handle (for example $orchestrator or $researcher). \
+        Mention that this channel can have its own default profile in Derrick. Offer to help.
+        """
+    }
+}
+
 /// Parses connector message bodies for bot mentions and `$handle` profile tokens.
 public enum ConnectorMentionParser: Sendable {
     public static let botReplyPrefix = "[\(DerrickAppSupport.hostAppProductName)]"
@@ -82,24 +111,38 @@ public enum ConnectorMentionParser: Sendable {
     public static func resolvePrompt(
         body: String,
         botUserID: String,
-        continuationProfileHandle: String? = nil
+        continuationProfileHandle: String? = nil,
+        channelDefaultProfileHandle: String? = nil,
+        profileCatalog: [AgentProfileCatalogEntry] = []
     ) -> (profileHandle: String, prompt: String)? {
         let mentioned = mentionsSlackUser(body: body, userID: botUserID)
         let withoutMention = mentioned
             ? stripSlackUserMention(body: body, userID: botUserID)
             : body.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsed = AgentProfileTokenParser.parse(message: withoutMention)
-        if let handle = parsed.handle {
-            return (handle, promptOrDefault(parsed.body))
-        }
-        if mentioned {
-            return (AgentProfileHandle.orchestrator, promptOrDefault(parsed.body))
-        }
+        let channelDefault = channelDefaultProfileHandle.flatMap { AgentProfileHandle.normalize($0) }
         let continuation = AgentProfileHandle.normalize(continuationProfileHandle ?? "")
-        if let continuation {
-            return (continuation, promptOrDefault(withoutMention))
+
+        let handle: String
+        let promptSource: String
+        if let parsedHandle = parsed.handle {
+            handle = parsedHandle
+            promptSource = parsed.body
+        } else if mentioned {
+            handle = channelDefault ?? AgentProfileHandle.orchestrator
+            promptSource = parsed.body
+        } else if let continuation {
+            handle = continuation
+            promptSource = withoutMention
+        } else {
+            return nil
         }
-        return nil
+
+        let prompt = promptSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        if prompt.isEmpty {
+            return (handle, AgentProfileHelpFormatter.mentionOnlyPrompt(catalog: profileCatalog))
+        }
+        return (handle, prompt)
     }
 
     /// `$handle` token anywhere in the body, or `[Derrick:handle]` on an automated reply.
@@ -135,14 +178,6 @@ public enum ConnectorMentionParser: Sendable {
         }
         return nil
     }
-
-    private static func promptOrDefault(_ body: String) -> String {
-        let prompt = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        return prompt.isEmpty ? defaultMentionOnlyPrompt : prompt
-    }
-
-    public static let defaultMentionOnlyPrompt =
-        "The user mentioned Derrick without a specific request. Briefly explain they can use $profileName in their message (for example $orchestrator) and offer to help."
 }
 
 public enum SlackBotIdentityResolver: Sendable {

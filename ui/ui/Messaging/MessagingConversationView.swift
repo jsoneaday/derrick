@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MessagingConversationView: View {
     @ObservedObject var store: MessagingStore
+    @ObservedObject private var agentProfiles = AgentProfileStore.shared
     @State private var draft = ""
     @State private var threadDraft = ""
     @State private var channelID = ""
@@ -379,6 +380,28 @@ struct MessagingConversationView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Menu {
+                Picker("Default profile", selection: channelDefaultProfileBinding) {
+                    Text("Orchestrator").tag(AgentProfileHandle.orchestrator)
+                    ForEach(agentProfiles.enabledProfiles.filter { $0.handle != AgentProfileHandle.orchestrator }, id: \.handle) { profile in
+                        Text(profile.displayName).tag(profile.handle)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(channelDefaultProfileLabel)
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.white.opacity(0.9), in: Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("Default agent profile when someone @s Derrick without $handle")
             Button {
                 Task { await store.toggleMuteSelectedThread() }
             } label: {
@@ -394,6 +417,23 @@ struct MessagingConversationView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    private var channelDefaultProfileLabel: String {
+        let handle = store.selectedThread?.defaultAgentProfileHandle ?? AgentProfileHandle.orchestrator
+        return agentProfiles.profile(handle: handle)?.displayName ?? "Orchestrator"
+    }
+
+    private var channelDefaultProfileBinding: Binding<String> {
+        Binding(
+            get: {
+                store.selectedThread?.defaultAgentProfileHandle ?? AgentProfileHandle.orchestrator
+            },
+            set: { newHandle in
+                let normalized = newHandle == AgentProfileHandle.orchestrator ? nil : newHandle
+                Task { await store.setChannelDefaultProfile(handle: normalized) }
+            }
+        )
     }
 
     private var threadHeader: some View {

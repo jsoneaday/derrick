@@ -256,6 +256,7 @@ struct ContentView: View {
     @State private var selectedProvider: LLMProviderChoice = .openai
     @State private var selectedModel: LLMModelChoice = .openai(.gpt56Luna)
     @State private var selectedThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
+    @State private var selectedProfileHandle: String = AgentProfileHandle.orchestrator
     @State private var helperModelSettings: LLMModelSettings?
     @State private var modelThinkingSettings: LLMModelThinkingSettings?
     @State private var promptFocusToken = 0
@@ -264,6 +265,7 @@ struct ContentView: View {
     @ObservedObject private var policyEventPresenter = PolicyEventPresenter.shared
     @ObservedObject private var usageLimitRaisePresenter = UsageLimitRaisePresenter.shared
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
+    @ObservedObject private var agentProfiles = AgentProfileStore.shared
     @StateObject private var pluginCreationController = PluginCreationController()
     @State private var pluginAutocompleteHighlight = 0
     @State private var pluginAutocompleteDismissed = false
@@ -1137,6 +1139,27 @@ struct ContentView: View {
                     Spacer()
 
                     Menu {
+                        Picker("Profile", selection: $selectedProfileHandle) {
+                            ForEach(agentProfiles.enabledProfiles, id: \.handle) { profile in
+                                Text(profile.displayName).tag(profile.handle)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: bottomPromptIconSize, weight: .medium))
+                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            Text(agentProfiles.profile(handle: selectedProfileHandle)?.displayName ?? "Profile")
+                                .font(.system(size: bottomPromptFontSize))
+                                .foregroundStyle(Color(nsColor: .labelColor))
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .disabled(isActiveTabStreaming)
+
+                    Menu {
                         Picker("Provider", selection: $selectedProvider) {
                             ForEach(LLMProviderChoice.allCases) { provider in
                                 Text(provider.displayName)
@@ -1371,8 +1394,7 @@ struct ContentView: View {
             chatSessions.sendPrompt(
                 currentPrompt,
                 apiKey: resolveAPIKey() ?? "",
-                model: selectedModel,
-                thinking: selectedThinking
+                profileHandle: selectedProfileHandle
             ) { message in
                 errorMessage = message
             }

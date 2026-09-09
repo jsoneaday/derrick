@@ -109,7 +109,9 @@ public enum MessagingAgentIngressRouter: Sendable {
         guard let resolved = ConnectorMentionParser.resolvePrompt(
             body: body,
             botUserID: botUserID,
-            continuationProfileHandle: continuation
+            continuationProfileHandle: continuation,
+            channelDefaultProfileHandle: row.thread.defaultAgentProfileHandle,
+            profileCatalog: (try? await profileCatalog(repository: repository)) ?? []
         ) else {
             return nil
         }
@@ -123,5 +125,11 @@ public enum MessagingAgentIngressRouter: Sendable {
             profileHandle: resolved.profileHandle,
             prompt: resolved.prompt
         )
+    }
+
+    private static func profileCatalog(repository: DBRepository) async throws -> [AgentProfileCatalogEntry] {
+        try await repository.listAgentProfiles()
+            .filter(\.isEnabled)
+            .map { AgentProfileCatalogEntry(handle: $0.handle, displayName: $0.displayName) }
     }
 }

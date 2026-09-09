@@ -140,6 +140,20 @@ final class MessagingSessionStore: ObservableObject {
         }
     }
 
+    func setDefaultAgentProfileForSelectedThread(handle: String?) async {
+        guard let repository, let thread = selectedThread else { return }
+        do {
+            try await repository.setMessagingThreadDefaultAgentProfile(
+                threadID: thread.id,
+                handle: handle
+            )
+            await reloadThreads(autoOpenMostRecent: false)
+            refreshSelectedTab()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     func setNearBottom(_ nearBottom: Bool) {
         isNearBottom = nearBottom
         if nearBottom {

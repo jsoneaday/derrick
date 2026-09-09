@@ -24,8 +24,13 @@ public struct AgentProfileRAGConfig: Codable, Sendable, Hashable {
 public enum AgentProfileHandle {
     public static let orchestrator = "orchestrator"
     public static let developer = "developer"
+    public static let researcher = "researcher"
+    public static let general = "general"
 
-    public static let allBuiltins = [orchestrator, developer]
+    public static let allBuiltins = [orchestrator, developer, researcher, general]
+
+    /// Profiles the orchestrator may delegate to via `agent_profile_delegate`.
+    public static let delegateTargets = [developer, researcher, general]
 
     public static func normalize(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -196,22 +201,29 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         rag.useSessionMemory ? rag.retrievalLimit : 0
     }
 
-    public static func orchestratorDefault(modelJSON: Data) -> AgentProfile {
+    public static func orchestratorDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
         AgentProfile(
             id: "builtin-orchestrator",
             displayName: "Orchestrator",
             handle: AgentProfileHandle.orchestrator,
             instructions: """
-            You are Derrick's orchestrator — the default generalist profile.
+            You are Derrick's orchestrator — a router-first generalist.
 
-            Your job is to understand what the user wants, break work into clear steps, and \
-            coordinate execution. For implementation, debugging, code review, or technical changes, \
-            prefer delegating to the Developer profile ($developer). Summarize outcomes for the \
-            user in plain language and report blockers early.
+            Understand what the user wants. You may research or clarify yourself before routing. \
+            Handle simple requests directly when delegation is unnecessary.
+
+            When another profile fits better, delegate with `agent_profile_delegate`:
+            - `developer` — code, debugging, implementation, technical execution
+            - `researcher` — research, summarization, synthesis from sources
+            - `general` — everyday workhorse tasks when no specialist fits
+
+            Use `general` when unsure which specialist fits. Summarize delegated outcomes in plain \
+            language and report blockers early.
 
             Stay concise unless the user asks for detail.
             """,
             modelJSON: modelJSON,
+            thinkingJSON: thinkingJSON,
             rag: .default,
             isEnabled: true,
             isBuiltin: true,
@@ -219,7 +231,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
-    public static func developerDefault(modelJSON: Data) -> AgentProfile {
+    public static func developerDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
         AgentProfile(
             id: "builtin-developer",
             displayName: "Developer",
@@ -232,6 +244,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             When scope is unclear, ask one focused clarifying question before diving in.
             """,
             modelJSON: modelJSON,
+            thinkingJSON: thinkingJSON,
             rag: .default,
             isEnabled: true,
             isBuiltin: true,
@@ -239,10 +252,53 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
-    public static func builtinProfiles(modelJSON: Data) -> [AgentProfile] {
+    public static func researcherDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
+        AgentProfile(
+            id: "builtin-researcher",
+            displayName: "Researcher",
+            handle: AgentProfileHandle.researcher,
+            instructions: """
+            You are Derrick's Researcher profile. Find, read, and synthesize information. Summarize \
+            clearly with sources when available. Prefer accurate synthesis over speculation.
+
+            When research is incomplete, say what is known, what is uncertain, and what would help next.
+            """,
+            modelJSON: modelJSON,
+            thinkingJSON: thinkingJSON,
+            rag: .default,
+            isEnabled: true,
+            isBuiltin: true,
+            sortOrder: 2
+        )
+    }
+
+    public static func generalDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
+        AgentProfile(
+            id: "builtin-general",
+            displayName: "General",
+            handle: AgentProfileHandle.general,
+            instructions: """
+            You are Derrick's General profile — the workhorse for everyday tasks: writing, planning, \
+            brainstorming, mixed requests, and anything that does not need a specialist. Be practical, \
+            direct, and helpful.
+
+            When scope is unclear, ask one focused clarifying question before proceeding.
+            """,
+            modelJSON: modelJSON,
+            thinkingJSON: thinkingJSON,
+            rag: .default,
+            isEnabled: true,
+            isBuiltin: true,
+            sortOrder: 3
+        )
+    }
+
+    public static func builtinProfiles(modelJSON: Data, thinkingJSON: Data? = nil) -> [AgentProfile] {
         [
-            orchestratorDefault(modelJSON: modelJSON),
-            developerDefault(modelJSON: modelJSON),
+            orchestratorDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
+            developerDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
+            researcherDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
+            generalDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
         ]
     }
 }

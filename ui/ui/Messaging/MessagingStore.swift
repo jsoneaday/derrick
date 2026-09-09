@@ -420,6 +420,10 @@ final class MessagingStore: ObservableObject {
         await session.toggleMuteSelectedThread()
     }
 
+    func setChannelDefaultProfile(handle: String?) async {
+        await session.setDefaultAgentProfileForSelectedThread(handle: handle)
+    }
+
     func setNearBottom(_ nearBottom: Bool) {
         session.setNearBottom(nearBottom)
     }

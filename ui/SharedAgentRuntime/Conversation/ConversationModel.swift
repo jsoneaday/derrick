@@ -23,7 +23,148 @@ final class ConversationModel {
     let mcpToolInstructions: String
     private let helperModelSettings: LLMModelSettings
     private let repository: DBRepository
-    let responseSchema: AgentSchema = AgentSchema(
+    let responseSchema: AgentSchema = ConversationModel.defaultResponseSchema
+
+    private init(
+        sessionKey: MemorySessionKey,
+        orchestrator: SessionOrchestrator,
+        memoryCoordinator: MemoryCoordinator,
+        policyStore: (any PolicyStore)?,
+        agentsOrchestrationHost: MCPLocalBridge,
+        toolClient: any ConversationToolClient,
+        ragInstructions: String,
+        mcpToolInstructions: String,
+        helperModelSettings: LLMModelSettings,
+        repository: DBRepository
+    ) {
+        self.sessionKey = sessionKey
+        self.orchestrator = orchestrator
+        self.memoryCoordinator = memoryCoordinator
+        self.policyStore = policyStore
+        self.agentsOrchestrationHost = agentsOrchestrationHost
+        self.toolClient = toolClient
+        self.ragInstructions = ragInstructions
+        self.mcpToolInstructions = mcpToolInstructions
+        self.helperModelSettings = helperModelSettings
+        self.repository = repository
+    }
+
+    static func makeDefault(
+        repository: DBRepository,
+        helperModelSettings: LLMModelSettings,
+        sessionID: String? = nil,
+        agentIDOverride: String? = nil
+    ) async throws -> ConversationModel {
+        let sessionID = sessionID ?? UUID().uuidString
+        let orchestrator = try await SessionOrchestrator.make(
+            sessionID: sessionID,
+            repository: repository
+        )
+        try await orchestrator.bootstrapUserFacingAgent()
+        let baseSessionKey = orchestrator.memorySessionKey
+        let sessionKey = agentIDOverride.map {
+            MemorySessionKey(sessionID: baseSessionKey.sessionID, agentID: $0)
+        } ?? baseSessionKey
+        let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
+        let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
+        let mcpToolInstructions = [
+            try PromptResources.mcpToolInstructions(),
+            try PromptResources.webCrawlerSkill(),
+            try PromptResources.filesExtractSkill(),
+            try PromptResources.guestSDKForModel(),
+        ].joined(separator: "\n\n")
+
+        let budget = MemoryBudget(maxTokenCount: 200_000)
+        let summarizer = ConfiguredMemorySummarizer(
+            settings: helperModelSettings,
+            systemPrompt: summarizerInstructions
+        )
+        debugLog("Memory bootstrap started session=\(sessionKey.sessionID) agent=\(sessionKey.agentID)")
+        debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
+
+        let memoryCoordinator = MemoryCoordinator(
+            store: repository,
+            summarizer: summarizer,
+            policy: TieredMemoryCompactionPolicy(),
+            budget: budget
+        )
+        let interceptor = DefaultPolicyInterceptor(
+            policy: StoreBackedCompletionContentPolicy(store: repository, applicationName: "ui")
+        )
+
+        let delegateAgentsHost = try await makeAgentsOrchestrationHost(
+            orchestrator: orchestrator,
+            sessionID: sessionKey.sessionID,
+            agentID: sessionKey.agentID,
+            helperModelSettings: helperModelSettings,
+            includeProfileDelegate: false
+        )
+
+        let profileDelegateHandler: @Sendable (String, String) async throws -> String = { handle, task in
+            guard TurnProcessContext.activeProfileHandle == AgentProfileHandle.orchestrator else {
+                throw NSError(
+                    domain: "AgentProfileDelegate",
+                    code: 403,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "agent_profile_delegate is only available to the orchestrator profile."
+                    ]
+                )
+            }
+            return try await ProfileDelegateRunner.run(
+                profileHandle: handle,
+                task: task,
+                sessionKey: sessionKey,
+                memoryCoordinator: memoryCoordinator,
+                policyStore: repository,
+                repository: repository,
+                agentsClient: delegateAgentsHost.client,
+                ragInstructions: ragInstructions,
+                mcpToolInstructions: mcpToolInstructions,
+                responseSchema: Self.defaultResponseSchema,
+                interceptor: interceptor
+            )
+        }
+
+        let agentsHost = try await makeAgentsOrchestrationHost(
+            orchestrator: orchestrator,
+            sessionID: sessionKey.sessionID,
+            agentID: sessionKey.agentID,
+            helperModelSettings: helperModelSettings,
+            includeProfileDelegate: true,
+            profileDelegateHandler: profileDelegateHandler
+        )
+        let principal = ServicePrincipal.agent(
+            sessionID: sessionKey.sessionID,
+            agentID: sessionKey.agentID
+        )
+        let toolClient = XPCConversationToolClient(
+            principal: principal,
+            agentsClient: agentsHost.client,
+            helperReviewerModelJSONProvider: {
+                await MainActor.run {
+                    try? helperModelSettings.scriptReviewerModel.encodeHelperModelWireJSON()
+                }
+            }
+        )
+        debugLog(
+            "Tools: agents_* + jobs_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))"
+        )
+        return ConversationModel(
+            sessionKey: sessionKey,
+            orchestrator: orchestrator,
+            memoryCoordinator: memoryCoordinator,
+            policyStore: repository,
+            agentsOrchestrationHost: agentsHost,
+            toolClient: toolClient,
+            ragInstructions: ragInstructions,
+            mcpToolInstructions: mcpToolInstructions,
+            helperModelSettings: helperModelSettings,
+            repository: repository
+        )
+    }
+
+    private static let defaultResponseSchema = AgentSchema(
         type: .object,
         properties: [
             "status": AgentSchema(type: .string, description: "One of: '\(AgentResponseStatus.thinking.rawValue)', '\(AgentResponseStatus.toolCall.rawValue)', '\(AgentResponseStatus.toolBatch.rawValue)', '\(AgentResponseStatus.complete.rawValue)'. CacheBust: \(UUID().uuidString)"),
@@ -64,104 +205,6 @@ final class ConversationModel {
         ],
         required: ["status"],
     )
-
-    private init(
-        sessionKey: MemorySessionKey,
-        orchestrator: SessionOrchestrator,
-        memoryCoordinator: MemoryCoordinator,
-        policyStore: (any PolicyStore)?,
-        agentsOrchestrationHost: MCPLocalBridge,
-        toolClient: any ConversationToolClient,
-        ragInstructions: String,
-        mcpToolInstructions: String,
-        helperModelSettings: LLMModelSettings,
-        repository: DBRepository
-    ) {
-        self.sessionKey = sessionKey
-        self.orchestrator = orchestrator
-        self.memoryCoordinator = memoryCoordinator
-        self.policyStore = policyStore
-        self.agentsOrchestrationHost = agentsOrchestrationHost
-        self.toolClient = toolClient
-        self.ragInstructions = ragInstructions
-        self.mcpToolInstructions = mcpToolInstructions
-        self.helperModelSettings = helperModelSettings
-        self.repository = repository
-    }
-
-    static func makeDefault(
-        repository: DBRepository,
-        helperModelSettings: LLMModelSettings,
-        sessionID: String? = nil,
-        agentIDOverride: String? = nil
-    ) async throws -> ConversationModel {
-        let sessionID = sessionID ?? UUID().uuidString
-        let orchestrator = try await SessionOrchestrator.make(
-            sessionID: sessionID,
-            repository: repository
-        )
-        try await orchestrator.bootstrapUserFacingAgent()
-        var sessionKey = orchestrator.memorySessionKey
-        if let agentIDOverride {
-            sessionKey = MemorySessionKey(sessionID: sessionKey.sessionID, agentID: agentIDOverride)
-        }
-        let ragInstructions = try PromptResources.conversationRAGInstructions(prefixTxt: PromptResources.currentDatePrefix())
-        let summarizerInstructions = try PromptResources.memorySummarizerInstructions()
-        let mcpToolInstructions = [
-            try PromptResources.mcpToolInstructions(),
-            try PromptResources.webCrawlerSkill(),
-            try PromptResources.filesExtractSkill(),
-            try PromptResources.guestSDKForModel(),
-        ].joined(separator: "\n\n")
-
-        let budget = MemoryBudget(maxTokenCount: 200_000)
-        let summarizer = ConfiguredMemorySummarizer(
-            settings: helperModelSettings,
-            systemPrompt: summarizerInstructions
-        )
-        debugLog("Memory bootstrap started session=\(sessionKey.sessionID) agent=\(sessionKey.agentID)")
-        debugLog("Database directory: \(await repository.databaseDirectoryURL.path)")
-
-        let agentsHost = try await makeAgentsOrchestrationHost(
-            orchestrator: orchestrator,
-            sessionID: sessionKey.sessionID,
-            agentID: sessionKey.agentID,
-            helperModelSettings: helperModelSettings
-        )
-        let principal = ServicePrincipal.agent(
-            sessionID: sessionKey.sessionID,
-            agentID: sessionKey.agentID
-        )
-        let toolClient = XPCConversationToolClient(
-            principal: principal,
-            agentsClient: agentsHost.client,
-            helperReviewerModelJSONProvider: {
-                await MainActor.run {
-                    try? helperModelSettings.scriptReviewerModel.encodeHelperModelWireJSON()
-                }
-            }
-        )
-        debugLog(
-            "Tools: agents_* + jobs_* local host; effectors → MCPService XPC (principal=\(principal.logLabel))"
-        )
-        return ConversationModel(
-            sessionKey: sessionKey,
-            orchestrator: orchestrator,
-            memoryCoordinator: MemoryCoordinator(
-                store: repository,
-                summarizer: summarizer,
-                policy: TieredMemoryCompactionPolicy(),
-                budget: budget
-            ),
-            policyStore: repository,
-            agentsOrchestrationHost: agentsHost,
-            toolClient: toolClient,
-            ragInstructions: ragInstructions,
-            mcpToolInstructions: mcpToolInstructions,
-            helperModelSettings: helperModelSettings,
-            repository: repository
-        )
-    }
 
     func stream(
         prompt: String,
@@ -282,6 +325,17 @@ final class ConversationModel {
             }
         }
 
+        let effectiveMcpToolInstructions: String
+        if profileContext?.handle == AgentProfileHandle.orchestrator {
+            effectiveMcpToolInstructions = [
+                mcpToolInstructions,
+                Self.profileDelegateToolInstructions,
+            ].joined(separator: "\n\n")
+        } else {
+            effectiveMcpToolInstructions = mcpToolInstructions
+        }
+
+        try await TurnProcessContext.$activeProfileHandle.withValue(profileContext?.handle) {
         try await orchestrator.withWorkerRunner(workerRunner) {
             try await orchestrator.deliverUserMessage(prompt) { envelope in
                 try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
@@ -295,7 +349,7 @@ final class ConversationModel {
                         policyStore: policyStore,
                         mcpClient: toolClient,
                         ragInstructions: userRagBase,
-                        mcpToolInstructions: mcpToolInstructions,
+                        mcpToolInstructions: effectiveMcpToolInstructions,
                         responseSchema: responseSchema,
                         interceptor: interceptor,
                         approvalPresenter: approvalPresenter,
@@ -313,7 +367,15 @@ final class ConversationModel {
                 }
             }
         }
+        }
     }
+
+    private static let profileDelegateToolInstructions = """
+    14. Profile delegation (orchestrator only; when listed in the catalog):
+       1. `agent_profile_delegate` — args `profile_handle` (developer, researcher, or general; no $) and `task` (concrete instructions). Blocks until the profile finishes; use the returned text in your next step.
+       2. Prefer `researcher` for research and summarization, `developer` for code, and `general` when no specialist fits.
+       3. Delegated profiles do not talk to the user directly; synthesize their result into your `assistant_response`.
+    """
 
     private func collectPluginCredentialsIfNeeded(
         pluginID: String,
@@ -457,7 +519,7 @@ final class ConversationModel {
     }
 
     /// Builds the existing conversation pipeline stream for one envelope body (turn engine unchanged).
-    nonisolated private static func makePolicyStream(
+    nonisolated static func makePolicyStream(
         prompt: String,
         apiKey: String,
         model: LLMModelChoice,
@@ -553,7 +615,9 @@ final class ConversationModel {
         orchestrator: SessionOrchestrator,
         sessionID: String,
         agentID: String,
-        helperModelSettings: LLMModelSettings
+        helperModelSettings: LLMModelSettings,
+        includeProfileDelegate: Bool,
+        profileDelegateHandler: (@Sendable (String, String) async throws -> String)? = nil
     ) async throws -> MCPLocalBridge {
         let principal = ServicePrincipal.agent(sessionID: sessionID, agentID: agentID)
         let placer: any JobOrderPlacing = JobServiceClientOrderPlacer(from: .agent)
@@ -587,6 +651,11 @@ final class ConversationModel {
                     try await orchestrator.cancel(agentID: agentID)
                 }
             )
+            if includeProfileDelegate, let profileDelegateHandler {
+                await server.register(
+                    AgentProfileDelegateToolModule.makeRegistration(handler: profileDelegateHandler)
+                )
+            }
             await server.register(
                 JobOrchestrationToolModule.createJobRegistration {
                     runAfterSeconds, runAtString, toolName, toolArgumentsJSON, wakeAfter, wakePrompt, description

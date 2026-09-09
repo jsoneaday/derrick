@@ -66,6 +66,29 @@ import Testing
         #expect(ignored == nil)
     }
 
+    @Test func resolvePromptUsesChannelDefaultProfile() {
+        let resolved = ConnectorMentionParser.resolvePrompt(
+            body: "<@U123> what is blocking release?",
+            botUserID: "U123",
+            channelDefaultProfileHandle: "researcher"
+        )
+        #expect(resolved?.profileHandle == AgentProfileHandle.researcher)
+        #expect(resolved?.prompt == "what is blocking release?")
+    }
+
+    @Test func mentionOnlyPromptListsProfiles() {
+        let prompt = ConnectorMentionParser.resolvePrompt(
+            body: "<@U123>",
+            botUserID: "U123",
+            profileCatalog: [
+                AgentProfileCatalogEntry(handle: "orchestrator", displayName: "Orchestrator"),
+                AgentProfileCatalogEntry(handle: "developer", displayName: "Developer"),
+            ]
+        )?.prompt
+        #expect(prompt?.contains("$orchestrator") == true)
+        #expect(prompt?.contains("$developer") == true)
+    }
+
     @Test func outboundFormatterPrefixesBotNameAndProfile() {
         let formatted = MessagingAgentOutboundFormatter.formatReply(
             "Done.",
