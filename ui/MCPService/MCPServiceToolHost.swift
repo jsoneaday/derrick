@@ -67,10 +67,6 @@ actor MCPServiceToolHost {
                     await WorkflowProgressPublisher.publish(stage: "factory", message: progress)
                 }
             },
-            apiKeyProvider: {
-                MCPServiceCallContext.shared.helperAPIKey
-                    ?? TurnProcessContext.effectiveAPIKey
-            }
         )
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(

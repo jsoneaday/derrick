@@ -13,22 +13,18 @@ actor ConfiguredPluginFactoryService {
     private let thinkingSettings: LLMModelThinkingSettings
     private let executor: any PluginFactoryExecutor
     private let logger: PluginFactoryLogger
-    private let apiKeyProvider: @Sendable () -> String?
-
     init(
         repository: DBRepository,
         settings: LLMModelSettings,
         thinkingSettings: LLMModelThinkingSettings,
         executor: any PluginFactoryExecutor,
-        logger: @escaping PluginFactoryLogger = { _ in },
-        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey }
+        logger: @escaping PluginFactoryLogger = { _ in }
     ) {
         self.repository = repository
         self.settings = settings
         self.thinkingSettings = thinkingSettings
         self.executor = executor
         self.logger = logger
-        self.apiKeyProvider = apiKeyProvider
     }
 
     func build(
@@ -43,7 +39,6 @@ actor ConfiguredPluginFactoryService {
                 settings: settings,
                 thinkingSettings: thinkingSettings,
                 existingReleases: existingReleases,
-                apiKeyProvider: apiKeyProvider,
                 logger: logger
             ),
             executor: executor,
@@ -51,7 +46,6 @@ actor ConfiguredPluginFactoryService {
                 inner: ConfiguredPluginSafetyReviewer(
                     settings: settings,
                     thinkingSettings: thinkingSettings,
-                    apiKeyProvider: apiKeyProvider,
                     logger: logger
                 )
             ),
@@ -68,20 +62,17 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     private let settings: LLMModelSettings
     private let thinkingSettings: LLMModelThinkingSettings
     private let existingReleases: [PluginFactoryReleaseSummary]
-    private let apiKeyProvider: @Sendable () -> String?
     private let logger: PluginFactoryLogger
 
     init(
         settings: LLMModelSettings,
         thinkingSettings: LLMModelThinkingSettings,
         existingReleases: [PluginFactoryReleaseSummary] = [],
-        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
         logger: @escaping PluginFactoryLogger = { _ in }
     ) {
         self.settings = settings
         self.thinkingSettings = thinkingSettings
         self.existingReleases = existingReleases
-        self.apiKeyProvider = apiKeyProvider
         self.logger = logger
     }
 
@@ -107,15 +98,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        if let key = await MainActor.run(body: {
-            AppSecretResolver().resolve(
-                account: model.provider.secretAccount,
-                environmentKeys: model.provider.apiKeyEnvironmentKeys
-            )
-        }), !key.isEmpty {
-            return key
-        }
-        return apiKeyProvider()
+        await LLMProviderCredentialGate.resolveAPIKey(for: model)
     }
 
     private func stream(
@@ -315,18 +298,15 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
 actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     private let settings: LLMModelSettings
     private let thinkingSettings: LLMModelThinkingSettings
-    private let apiKeyProvider: @Sendable () -> String?
     private let logger: PluginFactoryLogger
 
     init(
         settings: LLMModelSettings,
         thinkingSettings: LLMModelThinkingSettings,
-        apiKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
         logger: @escaping PluginFactoryLogger = { _ in }
     ) {
         self.settings = settings
         self.thinkingSettings = thinkingSettings
-        self.apiKeyProvider = apiKeyProvider
         self.logger = logger
     }
 
@@ -354,15 +334,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        if let key = await MainActor.run(body: {
-            AppSecretResolver().resolve(
-                account: model.provider.secretAccount,
-                environmentKeys: model.provider.apiKeyEnvironmentKeys
-            )
-        }), !key.isEmpty {
-            return key
-        }
-        return apiKeyProvider()
+        await LLMProviderCredentialGate.resolveAPIKey(for: model)
     }
 
     private func stream(

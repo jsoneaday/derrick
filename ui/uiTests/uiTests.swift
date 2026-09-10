@@ -205,6 +205,8 @@ import DBRepository
         #expect(LLMProviderCredentialGate.hasAPIKey(for: .openai, resolver: resolver))
         #expect(!LLMProviderCredentialGate.hasAPIKey(for: .google, resolver: resolver))
         #expect(LLMProviderCredentialGate.configuredProviders(resolver: resolver) == [.openai])
+        #expect(LLMProviderCredentialGate.resolveAPIKey(for: .openai, resolver: resolver) == "test")
+        #expect(LLMProviderCredentialGate.resolveAPIKey(for: .google, resolver: resolver) == nil)
     }
 
     @Test func llmFailureClassifierDetectsCreditErrors() {

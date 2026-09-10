@@ -111,15 +111,7 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        if let key = await MainActor.run(body: {
-            AppSecretResolver().resolve(
-                account: model.provider.secretAccount,
-                environmentKeys: model.provider.apiKeyEnvironmentKeys
-            )
-        }), !key.isEmpty {
-            return key
-        }
-        return TurnProcessContext.effectiveAPIKey
+        await LLMProviderCredentialGate.resolveAPIKey(for: model)
     }
 
     private static func makeSummary(text: String, keywords: [String], sourceTokenCount: Int) -> MemorySummary {

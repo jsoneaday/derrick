@@ -275,10 +275,7 @@ struct ContentView: View {
     }
 
     private var currentHelperAPIKey: String? {
-        secretResolver.resolve(
-            account: selectedProvider.secretAccount,
-            environmentKeys: selectedProvider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedProvider, resolver: secretResolver)
     }
 
     private var currentHelperReviewerModelJSON: String? {
@@ -1496,10 +1493,7 @@ struct ContentView: View {
     }
 
     private func resolveAPIKey() -> String? {
-        secretResolver.resolve(
-            account: selectedModel.provider.secretAccount,
-            environmentKeys: selectedModel.provider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedModel.provider, resolver: secretResolver)
     }
 
     @ViewBuilder
