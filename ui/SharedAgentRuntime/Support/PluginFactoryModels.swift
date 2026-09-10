@@ -131,49 +131,8 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
     private static func builderSystemPrompt(for userGoal: String) -> String {
         """
         You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
-        Return exactly one JSON object with these keys:
-        plugin_id (string), version (string), description (string), go_source (string),
-        test_input_json (string containing valid JSON — a serialized object, not prose),
-        skill_files (array of objects with path and body),
-        secrets (array of objects with id, label, and kind; required for connector plugins),
-        role (string, optional: "connector" or "standard").
-        plugin_id must use lowercase letters, numbers, hyphens, and dots only
-        (for example my-connector). Never use underscores in plugin_id.
-        If the plugin needs a username, password, token, or API key, declare them in secrets.
-        kind must be username, password, token, or api_key. id is a stable Keychain key
-        such as username or bot_token. label is the text shown when the user saves the value.
-        Never put real credentials in go_source.
-        Set role to "connector" when the plugin sends and receives messages with an external
-        messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
-        For role connector, include messaging_ops: an array of implemented ops
-        (send_message, poll_inbox, sync_threads). It must match the user goal scope and test_input_json.
-        The host writes messaging_ops into extensions.app.derrick in plugin.json.
-        The host lists connector plugins under Messaging. Do not guess this from the plugin_id.
-        Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
-        including the exact `$schema` field for Agent Plugin 1.0 and the fixed
-        extensions.app.derrick.entrypoint ./app.derrick/plugin.go.
-        \(DerrickGuestGo.modelContract)
+        \(ScriptExecContractPrompts.pluginFactoryBuilderGuide())
         \(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
-        Before returning the draft, self-check the implementation:
-        - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
-        - Match host responses by the emitted request_id.
-        - Use only the Go standard library (no third-party modules, raw sockets, or subprocess).
-        - The direct test input must exercise the terminal result path with matching http_results fixtures.
-        If skill_files is not needed, return an empty array. Every skill file path must be exactly
-        skills/<name>/SKILL.md.
-        For messaging connector plugins (role connector) that call a vendor HTTP API:
-        - Declare secrets in the manifest only. Never hard-code credentials.
-        - Parse each http_results body as JSON when the vendor returns JSON.
-        - test_input_json http_results must exercise success paths for every messaging_op in scope.
-        - test_input_json must be a single JSON object serialized as a string (valid JSON.parse input).
-        - test_input_json must not be empty or "{}".
-        - For connector plugins, test_input_json must use a hops array:
-          {"hops":[{"kind":"message_in_room","params":{"messaging_op":"send_message",...}},\
-          {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
-          "params":{...}}]}
-          Repeat additional hop pairs for each messaging_op in scope. request_id values in fixtures must \
-          match the http.request envelopes your go_source emits.
-        - Match http_results by request_id and de-duplicate with stable sorting; never depend on response order.
         When vendor documentation is supplied in the user prompt, use it only to fill may_call HTTP details.
         """
     }
@@ -366,22 +325,9 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
 
     private static func reviewerSystemPrompt(for userGoal: String?) -> String {
         """
-    You are Derrick's independent plugin alignment and safety reviewer.
     Review the user's goal, manifest, test_input_json, exact Go source, and direct test output.
-    Return exactly one JSON object:
-    {"decision":"approved|rejected","summary":"...","findings":[
-      {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
-    ]}
-    Reject unsafe, misleading, unrelated, non-deterministic, credential-seeking, or policy-bypassing code.
-    Apply these checks from observable evidence:
-    - A deterministic result uses stable sorting and de-duplication and does not depend on response order, current time, randomness, or UUIDs.
-    - Source-derived headline titles may be fragments; only generated explanatory summaries must be complete sentences when the manifest requires prose.
-    - `result.emit.html` is an allowed output format. Derrick sanitizes it with an allowlist before rendering. Reject executable script behavior or a deliberate sanitizer bypass, not ordinary safe HTML tags.
-    - Reject missing source-grounded parsing or claims that the direct test output does not support.
-    - For connector plugins, obey the connector protocol JSON below. If a rule is not in that JSON, do not require it.
+    \(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
     \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
-    Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
-    Reject non-Go source, raw network usage outside http.request envelopes, or missing stdin reads.
     """
     }
 

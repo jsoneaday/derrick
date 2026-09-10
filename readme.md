@@ -67,7 +67,7 @@ Before `script_exec` writes to disk, a **configured LLM reviewer** checks:
 - No secret literals in source
 - Safe handling of fetched content (no raw HTML leakage unless requested)
 
-Instructions live in `ui/SharedAgentRuntime/Resources/script_reviewer_instructions.md`. A static **Go verifier** also rejects forbidden APIs.
+Rules live in `packages/Structure/Sources/Contract/Resources/contracts/script-exec-contract.json` (same pattern as connector plugins). A static **Go verifier** also rejects forbidden APIs.
 
 ### Egress & network
 

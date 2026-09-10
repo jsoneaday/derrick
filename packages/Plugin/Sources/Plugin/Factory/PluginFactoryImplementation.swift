@@ -76,12 +76,8 @@ public struct PluginFactorySession: Sendable {
                 "Fix every item below in your next JSON draft response:",
             ]
             parts.append(contentsOf: findings.map { "- \($0)" })
-            parts.append(
-                """
-                Connector test_input_json must use a hops array replayed by the factory. Match each http.request \
-                request_id to an http_results fixture. Declare the same ops in messaging_ops and params.messaging_op.
-                """
-            )
+            parts.append(ScriptExecContractPrompts.pluginFactoryBuilderGuide())
+            parts.append(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
             return parts.joined(separator: "\n")
         case .reviewRejected(let summary, let findings):
             var parts = [
@@ -92,23 +88,8 @@ public struct PluginFactorySession: Sendable {
                 parts.append("Findings:")
                 parts.append(contentsOf: findings.map { "- \($0)" })
             }
-            parts.append(
-                """
-                Connector protocol (do not add rules):
-                \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
-                """
-            )
-            parts.append(
-                """
-                Before returning the next draft, update test_input_json to a hops array replayed by the factory:
-                {"hops":[{"kind":"message_in_room","params":{"messaging_op":"send_message",...}},\
-                {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
-                "params":{...}}]}
-                Include http_results fixtures for every messaging_op you implement. Match request_id values \
-                in fixtures to the http.request envelopes your go_source emits. De-duplicate http_results \
-                by request_id using stable sorting — do not overwrite duplicates by response order.
-                """
-            )
+            parts.append(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
+            parts.append(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
             return parts.joined(separator: "\n")
         default:
             return error.localizedDescription

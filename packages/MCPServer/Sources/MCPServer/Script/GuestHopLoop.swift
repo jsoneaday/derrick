@@ -62,6 +62,7 @@ public enum GuestHopLoop: Sendable {
                 }
                 lastSummary = envelope.payload["summary"]?.stringValue
                     ?? envelope.payload["content"]?.stringValue
+                    ?? envelope.payload["markdown"]?.stringValue
                     ?? envelope.payload["html"]?.stringValue
                     ?? envelope.payload["text"]?.stringValue
                     ?? envelope.payload["title"]?.stringValue

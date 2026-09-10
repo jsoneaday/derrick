@@ -15,7 +15,7 @@ public enum DockerWorkerRuntime: Sendable {
     /// Allowed `docker exec … sh -c` payloads for guest source I/O and in-container compile.
     public static let guestWriteSourceShell = "cat > /tmp/plugin.go"
     public static let guestCompileShell =
-        "cd /tmp && /usr/local/go/bin/go build -trimpath -ldflags=-s -w -o guest plugin.go && chmod +x guest"
+        "cd /tmp && /usr/local/go/bin/go build -trimpath -ldflags=\"-s -w\" -o guest plugin.go && chmod +x guest"
     public static let guestReadBinaryShell = "cat /tmp/guest"
 
     public static let pinnedDigest = DockerProductImageDigests.worker

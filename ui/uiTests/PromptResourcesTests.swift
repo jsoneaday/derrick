@@ -77,7 +77,7 @@ import Testing
         #expect(source.contains("package main"))
         let wrapped = try PromptResources.guestSDKForModel()
         #expect(wrapped.contains("```go"))
-        #expect(wrapped.contains("Go guest contract"))
+        #expect(wrapped.contains("script-exec-contract.json"))
     }
 
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {

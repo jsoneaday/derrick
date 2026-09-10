@@ -3,3 +3,4 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 "$ROOT/scripts/verify-no-secrets.sh" --staged
 "$ROOT/scripts/generate-connector-contract.swift" --check
+"$ROOT/scripts/generate-script-exec-contract.swift" --check

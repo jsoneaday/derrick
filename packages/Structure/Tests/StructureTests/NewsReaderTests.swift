@@ -129,6 +129,25 @@ import Structure
         #expect(already.path.contains("rss"))
     }
 
+    @Test func googleNewsTopicPageMapsToSectionRSSWhenHintMentionsTech() {
+        let topic = URL(
+            string: "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB"
+        )!
+        let mapped = NewsSourceURL.canonicalFetchURL(
+            topic,
+            contextHint: "today's technology headlines"
+        )
+        #expect(mapped.path == "/rss/headlines/section/topic/TECHNOLOGY")
+    }
+
+    @Test func googleNewsTopicPageFallsBackToGeneralRSSWithoutHint() {
+        let topic = URL(
+            string: "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB"
+        )!
+        let mapped = NewsSourceURL.canonicalFetchURL(topic)
+        #expect(mapped.path == "/rss")
+    }
+
     @Test func refreshParsesGoogleNewsHomepageViaRSS() async throws {
         let rss = """
         <?xml version="1.0"?><rss version="2.0"><channel>

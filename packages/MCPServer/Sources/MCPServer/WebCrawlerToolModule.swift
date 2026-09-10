@@ -149,15 +149,16 @@ public enum WebCrawlerToolModule: MCPToolModule {
         let timeoutSeconds = intValue(arguments["timeout_seconds"]) ?? 120
 
         guard !startURL.isEmpty else { throw WebCrawlerToolError.invalidStartURL }
-        guard let url = URL(string: startURL),
-              let scheme = url.scheme?.lowercased(),
+        guard let rawURL = URL(string: startURL),
+              let scheme = rawURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false,
-              url.user == nil,
-              url.password == nil
+              rawURL.host?.isEmpty == false,
+              rawURL.user == nil,
+              rawURL.password == nil
         else {
             throw WebCrawlerToolError.invalidStartURL
         }
+        let url = NewsSourceURL.canonicalFetchURL(rawURL, contextHint: goal)
         guard !goal.isEmpty else { throw WebCrawlerToolError.emptyGoal }
         guard goal.count <= 2_000 else { throw WebCrawlerToolError.goalTooLong }
         if let reason = maliciousGoalReason(goal) {
@@ -174,7 +175,7 @@ public enum WebCrawlerToolModule: MCPToolModule {
         }
 
         return WebCrawlerWireRequest(
-            startURL: startURL,
+            startURL: url.absoluteString,
             goal: goal,
             maxPages: maxPages,
             maxDepth: maxDepth,

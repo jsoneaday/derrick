@@ -31,10 +31,6 @@ public enum PromptResources {
         try load(named: "files_extract_skill", from: resourceRoot)
     }
 
-    public static func scriptReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
-    }
-
     public static func workerOverlay(from resourceRoot: URL? = nil) throws -> String {
         try DerrickBundledText.load("worker_overlay.md", from: resourceRoot)
     }

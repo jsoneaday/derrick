@@ -84,11 +84,11 @@ import Testing
         #expect(decoded.executableFingerprint == nil)
     }
 
-    @Test func bundledScriptReviewerInstructionsLoadFromSourceTree() throws {
-        let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
-        #expect(scriptReviewer.contains("intent alignment"))
-        #expect(scriptReviewer.contains("secret literals"))
-        #expect(scriptReviewer.contains("Go verifier"))
+    @Test func scriptExecReviewerPromptLoadsFromBundledContract() {
+        let scriptReviewer = ScriptExecContractPrompts.reviewerGuide()
+        #expect(scriptReviewer.contains("script-exec-contract.json"))
+        #expect(scriptReviewer.contains("intent_alignment"))
+        #expect(scriptReviewer.contains("If a rule is not in the JSON"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
