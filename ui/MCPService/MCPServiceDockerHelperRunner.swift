@@ -68,9 +68,9 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
         try await WorkerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())
     }
 
-    /// Build the crawler image in the background. Joins an in-flight build if one exists.
+    /// Legacy alias — same worker image as `prewarmGuestRuntime`.
     func ensureWebCrawlerImage() async throws {
-        try await WebCrawlerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())
+        try await prewarmGuestRuntime()
     }
 
     var hasPeerEndpoint: Bool {

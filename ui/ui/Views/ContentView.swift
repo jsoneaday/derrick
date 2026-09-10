@@ -726,7 +726,7 @@ struct ContentView: View {
     private var bootstrapProgressHint: String {
         switch bootstrapStatus.phase {
         case .preparingImage, .checkingDocker, .verifyingEnvironment:
-            return "First launch may download a Docker image. Keep Docker Desktop running."
+            return "Keep Docker Desktop running. The worker image may finish building in the background."
         case .connectingHelper:
             return "Starting the background helper…"
         case .loadingSession:
@@ -765,31 +765,39 @@ struct ContentView: View {
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
 
-                // Prewarm Docker in parallel, but connect daemon + DB first so the modal
-                // does not sit on "Guest runtime ready" while XPC bootstrap is still retrying.
-                async let dockerPeer = prewarmLaunchDockerPeer()
+                // Docker reachability, daemon, and DB are independent — run in parallel.
+                let dockerPeerTask = Task { try await prewarmLaunchDockerPeer() }
+                async let health = connectLaunchDaemon()
+                async let repo = loadLaunchRepository()
 
-                let health = try await connectLaunchDaemon()
+                bootstrapStatus.update(
+                    phase: .connectingHelper,
+                    message: "Connecting to Derrick daemon…"
+                )
+                let healthResult = try await health
                 debugLog(
-                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
+                    "Daemon ensure-up ok status=\(healthResult.status.rawValue) pid=\(healthResult.pid) runtime=\(healthResult.guestRuntimeImage ?? "?") detail=\(healthResult.detail ?? "")"
                 )
 
-                let repo = try await loadLaunchRepository()
-
-                if let peer = try await dockerPeer {
-                    do {
-                        try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
-                        debugLog("Docker helper peer endpoint handed to daemon MCP")
-                    } catch {
-                        debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
-                    }
-                }
+                bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
+                let repoResult = try await repo
 
                 sessionReady = true
                 bootstrapStatus.markReady()
-                await chatSessions.configure(repository: repo)
-                await messaging.configure(repository: repo)
-                await DerrickNotificationService.shared.activateSession(repository: repo)
+                await chatSessions.configure(repository: repoResult)
+                await messaging.configure(repository: repoResult)
+                await DerrickNotificationService.shared.activateSession(repository: repoResult)
+
+                Task {
+                    if let peer = try? await dockerPeerTask.value {
+                        do {
+                            try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
+                            debugLog("Docker helper peer endpoint handed to daemon MCP")
+                        } catch {
+                            debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                        }
+                    }
+                }
                 if isDebugEnabled {
                     debugLogStore.log("UI client ready (Docker + derrickd Agent/Job/MCP)")
                 }
@@ -824,7 +832,7 @@ struct ContentView: View {
         bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
         try? await JobServiceLoginAgent.ensureRegistered()
         JobServiceLoginAgent.ensureHelperProcessRunning()
-        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 4, verifyHealth: false)
     }
 
     @MainActor
@@ -853,7 +861,7 @@ struct ContentView: View {
     private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
         bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
         _ = XPCDockerRunner.shared
-        try await XPCDockerRunner.shared.waitUntilPrewarmed()
+        try await XPCDockerRunner.shared.waitUntilDockerReachable()
         do {
             return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
         } catch {

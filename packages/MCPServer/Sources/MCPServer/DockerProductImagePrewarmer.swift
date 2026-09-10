@@ -86,30 +86,14 @@ public enum DockerProductImagePrewarmer: Sendable {
     }
 }
 
-/// One in-flight worker image build per process.
+/// Legacy alias gate — delegates to `WorkerImageGate` so crawler/script paths share one build.
 public actor WebCrawlerImageGate {
     public static let shared = WebCrawlerImageGate()
-
-    private var inFlight: Task<Void, Error>?
 
     public init() {}
 
     public func ensureReady(executor: @escaping DockerCLIExecutor) async throws {
-        if let inFlight {
-            try await inFlight.value
-            return
-        }
-        let task = Task {
-            try await DockerProductImagePrewarmer.ensureWorkerImage(executor: executor)
-        }
-        inFlight = task
-        do {
-            try await task.value
-            inFlight = nil
-        } catch {
-            inFlight = nil
-            throw error
-        }
+        try await WorkerImageGate.shared.ensureReady(executor: executor)
     }
 }
 

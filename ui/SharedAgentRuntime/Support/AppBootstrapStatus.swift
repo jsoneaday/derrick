@@ -144,16 +144,11 @@ final class AppBootstrapStatus: ObservableObject {
             debugLog("[bootstrap] ignore phase=\(phase.rawValue) (already ready): \(message)")
             return
         }
-        // Parallel bootstrap: once we move past Docker prep, do not let guest-image
-        // prewarm overwrite daemon/database status in the modal.
-        if phase == .checkingDocker || phase == .preparingImage || phase == .verifyingEnvironment {
-            switch self.phase {
-            case .connectingHelper, .loadingSession:
-                debugLog("[bootstrap] ignore docker phase=\(phase.rawValue) while \(self.phase.rawValue): \(message)")
-                return
-            default:
-                break
-            }
+        // Parallel bootstrap: keep the highest-priority in-flight step visible (daemon connect
+        // beats "Opening local database…" while XPC is still retrying).
+        if isInitializing, Self.phasePriority(phase) < Self.phasePriority(self.phase) {
+            debugLog("[bootstrap] ignore lower-priority phase=\(phase.rawValue) while \(self.phase.rawValue): \(message)")
+            return
         }
         // Don't let a cancelled re-entrant task demote ready via failed paths above.
         self.phase = phase
@@ -224,6 +219,16 @@ final class AppBootstrapStatus: ObservableObject {
         guard phase == .failed else { return }
         isModalPresented = false
         debugLog("[bootstrap] failure modal dismissed")
+    }
+
+    private static func phasePriority(_ phase: Phase) -> Int {
+        switch phase {
+        case .connectingHelper: return 4
+        case .checkingDocker: return 3
+        case .preparingImage, .verifyingEnvironment: return 2
+        case .loadingSession: return 1
+        default: return 0
+        }
     }
 
     enum FailureRecovery: Equatable, Sendable {

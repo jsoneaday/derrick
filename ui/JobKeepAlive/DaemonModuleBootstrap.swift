@@ -76,9 +76,6 @@ enum DaemonModuleBootstrap {
             Task {
                 await prewarmGuestRuntimeImage()
             }
-            Task {
-                await startWebCrawlerImageInBackground()
-            }
         } catch {
             fputs("[derrickd] MCP module bootstrap failed: \(error.localizedDescription)\n", stderr)
         }
@@ -127,14 +124,4 @@ enum DaemonModuleBootstrap {
         }
     }
 
-    /// Does not block jobs or chat. A crawl that arrives during this build waits on the same task.
-    private static func startWebCrawlerImageInBackground() async {
-        guard DerrickProcessRole.isDaemon else { return }
-        do {
-            try await MCPServiceDockerHelperRunner.shared.ensureWebCrawlerImage()
-            fputs("[derrickd] web crawler image ready\n", stderr)
-        } catch {
-            fputs("[derrickd] web crawler image background build skipped: \(error.localizedDescription)\n", stderr)
-        }
-    }
 }

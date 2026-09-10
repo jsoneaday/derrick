@@ -175,6 +175,16 @@ import Testing
     }
 
     @MainActor
+    @Test func loadingSessionDoesNotOverwriteConnectingHelper() {
+        let status = freshStatus()
+        #expect(status.beginLoadingSession())
+        status.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
+        status.update(phase: .loadingSession, message: "Opening local database…")
+        #expect(status.phase == .connectingHelper)
+        #expect(status.statusMessage == "Connecting to Derrick daemon…")
+    }
+
+    @MainActor
     @Test func cancelClearsInProgressModal() {
         let status = freshStatus()
         #expect(status.beginLoadingSession() == true)
