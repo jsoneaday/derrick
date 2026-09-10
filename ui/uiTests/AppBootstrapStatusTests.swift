@@ -185,6 +185,35 @@ import Testing
     }
 
     @MainActor
+    @Test func parallelLoadingTasksTrackIndependently() {
+        let status = freshStatus()
+        #expect(status.beginLoadingSession())
+        status.beginTask(.daemon)
+        status.beginTask(.database)
+        status.beginTask(.docker)
+        #expect(status.activeLoadingTasks.map(\.id) == [.daemon, .database, .docker])
+        status.completeTask(.database)
+        #expect(status.activeLoadingTasks.map(\.id) == [.daemon, .docker])
+        status.completeTask(.daemon)
+        status.completeTask(.docker)
+        #expect(status.activeLoadingTasks.isEmpty)
+    }
+
+    @MainActor
+    @Test func phaseUpdateAddsMatchingLoadingTasks() {
+        let status = freshStatus()
+        #expect(status.beginLoadingSession())
+        status.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
+        status.update(phase: .loadingSession, message: "Opening local database…")
+        status.update(phase: .checkingDocker, message: "Checking Docker Desktop…")
+        #expect(status.activeLoadingTasks.map(\.id) == [.daemon, .database, .docker])
+        status.update(phase: .preparingImage, message: "Preparing worker image…")
+        #expect(status.activeLoadingTasks.map(\.id) == [.daemon, .database, .docker, .workerImage])
+        status.update(phase: .verifyingEnvironment, message: "Worker image ready.")
+        #expect(status.activeLoadingTasks.map(\.id) == [.daemon, .database, .docker])
+    }
+
+    @MainActor
     @Test func cancelClearsInProgressModal() {
         let status = freshStatus()
         #expect(status.beginLoadingSession() == true)

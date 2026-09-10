@@ -596,7 +596,7 @@ struct ContentView: View {
             minWidth: 380,
             minHeight: 0,
             maxWidth: 440,
-            maxHeight: bootstrapStatus.phase == .failed ? 420 : 280,
+            maxHeight: bootstrapModalMaxHeight,
             onBackdropDismiss: bootstrapStatus.phase == .failed
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
@@ -605,10 +605,7 @@ struct ContentView: View {
                 : nil,
             header: {
                 HStack(spacing: 10) {
-                    if bootstrapStatus.showsProgressIndicator {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else if bootstrapStatus.phase == .failed {
+                    if bootstrapStatus.phase == .failed {
                         Image(systemName: ModalChrome.bootstrapFailureSymbol)
                             .font(ModalChrome.symbolFont)
                             .symbolRenderingMode(.hierarchical)
@@ -626,23 +623,29 @@ struct ContentView: View {
             },
             body: {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(bootstrapStatus.statusMessage)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if bootstrapStatus.phase == .failed, let detail = bootstrapStatus.failureMessage,
-                       detail != bootstrapStatus.statusMessage {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    if bootstrapStatus.isInitializing {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(bootstrapStatus.activeLoadingTasks) { task in
+                                HStack(alignment: .top, spacing: 10) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(width: 16, height: 16)
+                                        .padding(.top, 2)
+                                    Text(task.message)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.2), value: bootstrapStatus.activeLoadingTasks)
                     }
 
-                    if bootstrapStatus.isInitializing {
-                        Text(bootstrapProgressHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if bootstrapStatus.phase == .failed {
+                        Text(bootstrapStatus.failureMessage ?? bootstrapStatus.statusMessage)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -720,17 +723,12 @@ struct ContentView: View {
         .background(WindowConfigurator())
     }
 
-    private var bootstrapProgressHint: String {
-        switch bootstrapStatus.phase {
-        case .preparingImage, .checkingDocker, .verifyingEnvironment:
-            return "Keep Docker Desktop running. The worker image may finish building in the background."
-        case .connectingHelper:
-            return "Starting the background helper…"
-        case .loadingSession:
-            return "Loading your local workspace…"
-        default:
-            return "Starting…"
+    private var bootstrapModalMaxHeight: CGFloat {
+        if bootstrapStatus.phase == .failed {
+            return 420
         }
+        let rowCount = max(bootstrapStatus.activeLoadingTasks.count, 1)
+        return CGFloat(120 + rowCount * 34)
     }
 
     @MainActor
@@ -761,23 +759,23 @@ struct ContentView: View {
 
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
+                bootstrapStatus.beginTask(.daemon)
+                bootstrapStatus.beginTask(.database)
+                bootstrapStatus.beginTask(.docker)
 
                 // Docker reachability, daemon, and DB are independent — run in parallel.
                 let dockerPeerTask = Task { try await prewarmLaunchDockerPeer() }
                 async let health = connectLaunchDaemon()
                 async let repo = loadLaunchRepository()
 
-                bootstrapStatus.update(
-                    phase: .connectingHelper,
-                    message: "Connecting to Derrick daemon…"
-                )
                 let healthResult = try await health
+                bootstrapStatus.completeTask(.daemon)
                 debugLog(
                     "Daemon ensure-up ok status=\(healthResult.status.rawValue) pid=\(healthResult.pid) runtime=\(healthResult.guestRuntimeImage ?? "?") detail=\(healthResult.detail ?? "")"
                 )
 
-                bootstrapStatus.update(phase: .loadingSession, message: "Opening local database…")
                 let repoResult = try await repo
+                bootstrapStatus.completeTask(.database)
 
                 sessionReady = true
                 bootstrapStatus.markReady()
@@ -856,9 +854,10 @@ struct ContentView: View {
     /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
     @MainActor
     private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
-        bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
+        bootstrapStatus.updateTask(.docker, message: "Starting Docker runtime…")
         _ = XPCDockerRunner.shared
         try await XPCDockerRunner.shared.waitUntilDockerReachable()
+        bootstrapStatus.completeTask(.docker)
         do {
             return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
         } catch {

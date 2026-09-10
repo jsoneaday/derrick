@@ -307,6 +307,7 @@ public final class XPCDockerRunner: @unchecked Sendable {
                 )
             }
             dockerReachableState.markCompleted()
+            await reportBootstrapTaskCompleted(.docker)
             Task {
                 await prewarmWorkerImage()
             }
@@ -410,6 +411,14 @@ public final class XPCDockerRunner: @unchecked Sendable {
             let status = AppBootstrapStatus.shared
             guard status.isInitializing else { return }
             status.update(phase: phase, message: message)
+        }
+    }
+
+    private func reportBootstrapTaskCompleted(_ id: AppBootstrapStatus.TaskID) async {
+        await MainActor.run {
+            let status = AppBootstrapStatus.shared
+            guard status.isInitializing else { return }
+            status.completeTask(id)
         }
     }
 

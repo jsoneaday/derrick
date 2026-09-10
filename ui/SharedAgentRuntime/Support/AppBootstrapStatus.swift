@@ -18,8 +18,44 @@ final class AppBootstrapStatus: ObservableObject {
         case failed
     }
 
+    /// Parallel bootstrap steps shown in the init modal. Completed steps are removed from the list.
+    enum TaskID: String, Sendable, CaseIterable, Equatable {
+        case daemon
+        case database
+        case docker
+        case workerImage
+
+        var sortOrder: Int {
+            switch self {
+            case .daemon: return 0
+            case .database: return 1
+            case .docker: return 2
+            case .workerImage: return 3
+            }
+        }
+
+        var defaultMessage: String {
+            switch self {
+            case .daemon:
+                return "Connecting to Derrick daemon…"
+            case .database:
+                return "Opening local database…"
+            case .docker:
+                return "Checking Docker Desktop…"
+            case .workerImage:
+                return "Preparing worker image…"
+            }
+        }
+    }
+
+    struct LoadingTask: Identifiable, Equatable, Sendable {
+        let id: TaskID
+        var message: String
+    }
+
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var statusMessage: String = "Starting…"
+    @Published private(set) var activeLoadingTasks: [LoadingTask] = []
     @Published private(set) var failureTitle: String?
     @Published private(set) var failureMessage: String?
     /// Extra recovery control on the failure modal (for example Open Login Items).
@@ -43,6 +79,7 @@ final class AppBootstrapStatus: ObservableObject {
         deferModalPresentation = false
         phase = .idle
         statusMessage = "Starting…"
+        activeLoadingTasks = []
         failureTitle = nil
         failureMessage = nil
         failureRecovery = .none
@@ -108,6 +145,7 @@ final class AppBootstrapStatus: ObservableObject {
         deferModalPresentation = deferModal
         phase = .loadingSession
         statusMessage = "Loading session store…"
+        activeLoadingTasks = []
         failureTitle = nil
         failureMessage = nil
         failureRecovery = .none
@@ -138,6 +176,37 @@ final class AppBootstrapStatus: ObservableObject {
         }
     }
 
+    func beginTask(_ id: TaskID, message: String? = nil) {
+        guard isInitializing else { return }
+        let label = message ?? id.defaultMessage
+        if let index = activeLoadingTasks.firstIndex(where: { $0.id == id }) {
+            activeLoadingTasks[index].message = label
+        } else {
+            activeLoadingTasks.append(LoadingTask(id: id, message: label))
+            activeLoadingTasks.sort { $0.id.sortOrder < $1.id.sortOrder }
+        }
+        if !deferModalPresentation {
+            isModalPresented = true
+        }
+        debugLog("[bootstrap] task begin \(id.rawValue): \(label)")
+    }
+
+    func updateTask(_ id: TaskID, message: String) {
+        guard isInitializing else { return }
+        if let index = activeLoadingTasks.firstIndex(where: { $0.id == id }) {
+            activeLoadingTasks[index].message = message
+        } else {
+            beginTask(id, message: message)
+        }
+        debugLog("[bootstrap] task update \(id.rawValue): \(message)")
+    }
+
+    func completeTask(_ id: TaskID) {
+        guard activeLoadingTasks.contains(where: { $0.id == id }) else { return }
+        activeLoadingTasks.removeAll { $0.id == id }
+        debugLog("[bootstrap] task complete \(id.rawValue)")
+    }
+
     func update(phase: Phase, message: String) {
         // Never re-open the modal after ready (parallel service ensure-up must not reflash it).
         if self.phase == .ready, phase != .failed, phase != .ready {
@@ -148,15 +217,36 @@ final class AppBootstrapStatus: ObservableObject {
         // beats "Opening local database…" while XPC is still retrying).
         if isInitializing, Self.phasePriority(phase) < Self.phasePriority(self.phase) {
             debugLog("[bootstrap] ignore lower-priority phase=\(phase.rawValue) while \(self.phase.rawValue): \(message)")
-            return
+        } else {
+            // Don't let a cancelled re-entrant task demote ready via failed paths above.
+            self.phase = phase
+            self.statusMessage = message
         }
-        // Don't let a cancelled re-entrant task demote ready via failed paths above.
-        self.phase = phase
-        self.statusMessage = message
+        syncLoadingTask(for: phase, message: message)
         if !deferModalPresentation {
             isModalPresented = true
         }
         debugLog("[bootstrap] phase=\(phase.rawValue) \(message)")
+    }
+
+    private func syncLoadingTask(for phase: Phase, message: String) {
+        guard isInitializing else { return }
+        switch phase {
+        case .connectingHelper:
+            beginTask(.daemon, message: message)
+        case .loadingSession:
+            if message.localizedCaseInsensitiveContains("database") {
+                beginTask(.database, message: message)
+            }
+        case .checkingDocker:
+            beginTask(.docker, message: message)
+        case .preparingImage:
+            beginTask(.workerImage, message: message)
+        case .verifyingEnvironment:
+            completeTask(.workerImage)
+        default:
+            break
+        }
     }
 
     func markReady() {
@@ -165,6 +255,7 @@ final class AppBootstrapStatus: ObservableObject {
         deferModalPresentation = false
         phase = .ready
         statusMessage = "Ready"
+        activeLoadingTasks = []
         failureTitle = nil
         failureMessage = nil
         failureRecovery = .none
@@ -208,6 +299,7 @@ final class AppBootstrapStatus: ObservableObject {
         deferModalPresentation = false
         phase = .idle
         statusMessage = "Starting…"
+        activeLoadingTasks = []
         failureTitle = nil
         failureMessage = nil
         failureRecovery = .none
