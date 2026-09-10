@@ -9,7 +9,7 @@ import Foundation
 public struct ContainerLifecyclePolicy: Sendable, Hashable {
     /// Maximum crawler containers at once (oneshot; own queue).
     public let maxNetworkContainers: Int
-    /// Maximum offline Python guest containers at once (`script_exec` / `plugin.invoke`).
+    /// Maximum offline Go guest containers at once (`script_exec` / `plugin.invoke`).
     public let maxOfflineContainers: Int
     /// Maximum file-extractor containers at once (oneshot; own queue).
     public let maxFileExtractContainers: Int

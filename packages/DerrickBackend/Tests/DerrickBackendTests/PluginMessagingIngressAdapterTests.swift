@@ -542,10 +542,10 @@ import Testing
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["send_message"]}}}
         """
         let guestSource = "import json, sys\njson.dump([], sys.stdout)"
-        let runtimeJSON = #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#
+        let runtimeJSON = #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#
         let draft = PluginFactoryRelease(
             pluginID: "slack-connection",
             version: "1.0.0",

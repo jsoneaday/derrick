@@ -13,7 +13,7 @@ public struct ExecutionContextSlots: Sendable {
     public var networkAccessPrompt: TurnProcessContextTypes.NetworkPrompt?
     public var policyDecisionPrompt: TurnProcessContextTypes.PolicyDecisionPrompt?
     public var policyNoticePublisher: TurnProcessContextTypes.PolicyNoticePublisher?
-    /// When true, `web.crawl` may run synchronously (plugin factory turns).
+    /// When true, plugin factory creation is active for this turn.
     public var pluginFactoryCreationActive: Bool
 
     public init(

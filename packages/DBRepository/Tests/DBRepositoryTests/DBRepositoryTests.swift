@@ -85,7 +85,7 @@ final class DBRepositoryTests: XCTestCase {
         let files: [String: Data] = [
             "plugin.json": Data(#"{"name":"keep-me"}"#.utf8),
             "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin.go": Data("package main".utf8),
             "app.derrick/plugin": artifact,
         ]
         let release = PluginFactoryRelease(
@@ -124,7 +124,7 @@ final class DBRepositoryTests: XCTestCase {
         let files: [String: Data] = [
             "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
             "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin.go": Data("package main".utf8),
             "app.derrick/plugin": artifact,
             "skills/weather/SKILL.md": Data("# Weather".utf8),
         ]
@@ -169,7 +169,7 @@ final class DBRepositoryTests: XCTestCase {
         let files: [String: Data] = [
             "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
             "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
+            "app.derrick/plugin.go": Data("package main".utf8),
             "app.derrick/plugin": artifact,
             "skills/weather/SKILL.md": Data("# Weather".utf8),
         ]

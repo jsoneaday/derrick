@@ -4,35 +4,46 @@ import Testing
 @testable import Plugin
 
 @Suite struct PluginFactoryTests {
-    private func guestPythonSource(emit: String = #"[]"#) -> String {
+    private func guestGoSource(summary: String = "ok") -> String {
         """
-        import json, sys
-        _ = json.load(sys.stdin)
-        json.dump(\(emit), sys.stdout)
+        package main
+
+        import (
+            "encoding/json"
+            "os"
+        )
+
+        func main() {
+            var event map[string]any
+            _ = json.NewDecoder(os.Stdin).Decode(&event)
+            enc := json.NewEncoder(os.Stdout)
+            enc.SetEscapeHTML(false)
+            _ = enc.Encode([]map[string]any{{"verb": "result.emit", "summary": "\(summary)"}})
+        }
         """
     }
 
-    @Test func guestLanguageIsAlwaysPython() {
+    @Test func guestLanguageIsGoFromRuntimeJSON() {
         let release = PluginFactoryRelease(
             pluginID: "slack-connection",
             version: "1.0.0",
             manifestJSON: "{}",
-            runtimeJSON: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#,
-            guestSource: guestPythonSource(),
+            runtimeJSON: #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#,
+            guestSource: guestGoSource(),
             compiledArtifact: Data(),
             skillFiles: [:],
             contentHash: try! PluginContentHash(hex: String(repeating: "b", count: 64)),
             reviewSummary: "ok"
         )
-        #expect(release.guestLanguage == .python)
+        #expect(release.guestLanguage == .go)
     }
 
-    @Test func pluginFactoryRuntimeDecodesPythonEntrypoint() {
+    @Test func pluginFactoryRuntimeDecodesGoEntrypoint() {
         let runtime = PluginFactoryRuntime.decode(
-            from: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#
+            from: #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#
         )
-        #expect(runtime?.language == .python)
-        #expect(runtime?.entrypoint.hasSuffix(".py") == true)
+        #expect(runtime?.language == .go)
+        #expect(runtime?.entrypoint.hasSuffix(".go") == true)
     }
 
     @Test func envelopeDecoderRejectsNestedResultAliases() {
@@ -47,7 +58,7 @@ import Testing
         let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON(),
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             testInput: Data(#"{"kind":"manual"}"#.utf8),
             skillFiles: ["skills/weather/SKILL.md": "# Weather\n\nReturn weather."]
         )
@@ -60,12 +71,12 @@ import Testing
 
         #expect(release.pluginID == "weather-tool")
         #expect(release.version == "1.2.3")
-        #expect(release.runtimeJSON.contains("\"language\":\"python\""))
-        #expect(release.runtimeJSON.contains("plugin.py"))
+        #expect(release.runtimeJSON.contains("\"language\":\"go\""))
+        #expect(release.runtimeJSON.contains("plugin.go"))
         #expect(!release.contentHash.rawValue.isEmpty)
         #expect(release.verifyIntegrity())
         var tampered = release.packageFiles()
-        tampered["app.derrick/plugin.py"] = Data("changed".utf8)
+        tampered["app.derrick/plugin.go"] = Data("changed".utf8)
         #expect(!PluginFactoryRelease.verifyIntegrity(files: tampered, expected: release.contentHash))
         #expect(await executor.draftRunCount == 1)
         #expect(await executor.packageCount == 1)
@@ -83,7 +94,7 @@ import Testing
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifestJSON(),
-                    guestSource: guestPythonSource()
+                    guestSource: guestGoSource()
                 ),
                 executor: executor,
                 reviewer: reviewer
@@ -222,7 +233,7 @@ import Testing
     @Test func reservedPluginIDsCannotBeCreated() async {
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON().replacingOccurrences(of: "weather-tool", with: "create-plugin"),
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
         )
         do {
             _ = try await PluginFactory().build(
@@ -242,13 +253,13 @@ import Testing
 
     @Test func missingSchemaIsRejectedAtTheFactoryBoundary() async {
         let manifest = """
-        {"name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
+        {"name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go"}}}
         """
         do {
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifest,
-                    guestSource: guestPythonSource()
+                    guestSource: guestGoSource()
                 ),
                 executor: RecordingFactoryExecutor(),
                 reviewer: RecordingFactoryReviewer(
@@ -268,12 +279,12 @@ import Testing
             pluginID: "weather-tool",
             version: "1.0.0",
             description: "Weather summaries.",
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
         )
         let draft = try response.draft()
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.schema == PluginContract.agentPluginSchema)
-        #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.py")
+        #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.go")
     }
 
     @Test func builderNormalizesUnderscorePluginIDAndWritesSecretLabels() throws {
@@ -281,7 +292,7 @@ import Testing
             pluginID: "slack_connection",
             version: "1.0.0",
             description: "Slack send and receive.",
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             secrets: [
                 try PluginSecretField(id: "username", label: "Slack username", kind: .username),
                 try PluginSecretField(id: "password", label: "Slack password", kind: .password),
@@ -300,7 +311,7 @@ import Testing
             pluginID: "slack-connection",
             version: "1.0.0",
             description: "Slack send and receive.",
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             role: .connector,
             messagingOps: ["send_message"]
         )
@@ -319,7 +330,7 @@ import Testing
             pluginID: "slack-connection",
             version: "1.0.0",
             description: "Slack full sync.",
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             role: .connector
         )
         let draft = try response.draft()
@@ -329,7 +340,7 @@ import Testing
     @Test func connectorTestScriptRequiresHopsAndFixtures() throws {
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
         #expect(throws: PluginFactoryError.self) {
@@ -337,7 +348,7 @@ import Testing
         }
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON,
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             testInput: Data(
                 #"{"kind":"message_in_room","params":{"messaging_op":"send_message"}}"#.utf8
             ),
@@ -374,7 +385,7 @@ import Testing
     @Test func fullSyncTestScriptRequiresReplyThreadPollHop() throws {
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
         let channelOnly = Data(
@@ -391,7 +402,7 @@ import Testing
         )
         let missingReplies = PluginFactoryDraft(
             manifestJSON: manifestJSON,
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             testInput: channelOnly,
             userGoal: fullSyncGoal()
         )
@@ -401,7 +412,7 @@ import Testing
 
         let withReplies = PluginFactoryDraft(
             manifestJSON: manifestJSON,
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             testInput: Data(
                 """
                 {"hops":[
@@ -424,7 +435,7 @@ import Testing
     @Test func dualFixtureAllowsUnsortedHttpResultsLoop() throws {
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(manifestJSON.utf8))
         let testInput = Data(
@@ -519,7 +530,7 @@ import Testing
 
     @Test func missingRoleDefaultsToStandard() throws {
         let json = """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go"}}}
         """
         let manifest = try AgentPluginManifest.decode(Data(json.utf8))
         #expect(manifest.derrick?.role == .standard)
@@ -528,7 +539,7 @@ import Testing
 
     @Test func invalidRoleIsRejected() {
         let json = """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"slack"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.0.0","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"slack"}}}
         """
         do {
             _ = try AgentPluginManifest.decode(Data(json.utf8))
@@ -555,7 +566,7 @@ import Testing
             pluginID: "weather-tool",
             version: "1.0.0",
             description: "Weather summaries.",
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             skillFiles: [
                 PluginFactorySkillFile(path: "SKILL.md", body: "Invalid layout.")
             ]
@@ -575,14 +586,14 @@ import Testing
     private func draft() -> PluginFactoryDraft {
         PluginFactoryDraft(
             manifestJSON: manifestJSON(),
-            guestSource: guestPythonSource(),
+            guestSource: guestGoSource(),
             testInput: Data(#"{"kind":"manual"}"#.utf8)
         )
     }
 
     private func manifestJSON() -> String {
         """
-        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.2.3","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py"}}}
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"weather-tool","version":"1.2.3","extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go"}}}
         """
     }
 }
@@ -615,7 +626,7 @@ private func validConnectorTestInput() -> Data {
 private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
     let manifestJSON = """
     {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","auth_scheme":"bot_token","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],"messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","auth_scheme":"bot_token","secrets":[{"id":"bot_token","label":"Bot Token","kind":"token"}],"messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
     """
     return PluginFactoryDraft(
         manifestJSON: manifestJSON,

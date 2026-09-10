@@ -105,7 +105,7 @@ public struct PluginFactorySession: Sendable {
                 {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
                 "params":{...}}]}
                 Include http_results fixtures for every messaging_op you implement. Match request_id values \
-                in fixtures to the http.request envelopes your python_source emits. De-duplicate http_results \
+                in fixtures to the http.request envelopes your go_source emits. De-duplicate http_results \
                 by request_id using stable sorting — do not overwrite duplicates by response order.
                 """
             )
@@ -262,7 +262,7 @@ public struct PluginFactory: Sendable {
         var files: [String: Data] = [
             "plugin.json": Data(draft.manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.py": Data(draft.guestSource.utf8),
+            "app.derrick/plugin.go": Data(draft.guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
         for (path, body) in draft.skillFiles {
@@ -293,9 +293,9 @@ public struct PluginFactory: Sendable {
         do {
             let manifest = try AgentPluginManifest.decode(data)
             guard let entrypoint = manifest.derrick?.entrypoint,
-                  entrypoint.hasSuffix(".py") else {
+                  entrypoint.hasSuffix(".go") else {
                 throw PluginFactoryError.invalidManifest(
-                    "extensions.app.derrick.entrypoint must point to a Python file."
+                    "extensions.app.derrick.entrypoint must point to a Go file."
                 )
             }
             guard !["create-plugin", "edit-plugin"].contains(manifest.name.rawValue) else {
@@ -323,7 +323,7 @@ public struct PluginFactory: Sendable {
     }
 
     private func validateSource(_ source: String) throws {
-        let findings = GuestPythonSourceValidator.validate(source: source)
+        let findings = GuestGoSourceValidator.validate(source: source)
         if let first = findings.first {
             throw PluginFactoryError.invalidSource(first)
         }
@@ -331,10 +331,10 @@ public struct PluginFactory: Sendable {
 
     private func runtimeJSON(for manifest: AgentPluginManifest) throws -> String {
         guard let entrypoint = manifest.derrick?.entrypoint else {
-            throw PluginFactoryError.invalidManifest("A Python entrypoint is required.")
+            throw PluginFactoryError.invalidManifest("A Go entrypoint is required.")
         }
         let object: [String: String] = [
-            "language": "python",
+            "language": "go",
             "entrypoint": entrypoint,
         ]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

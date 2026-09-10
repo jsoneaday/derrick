@@ -211,8 +211,11 @@ struct DockerRunnerXPCTests {
             ["version"],
             ["image", "inspect", "img"],
             ["pull", "img"],
-            ["exec", "-i", "c", "python3", "/tmp/guest.py"],
-            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py"],
+            ["exec", "-i", "c", DockerWorkerRuntime.guestBinaryPath],
+            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest && chmod +x /tmp/guest"],
+            ["exec", "-i", "c", "sh", "-c", DockerWorkerRuntime.guestWriteSourceShell],
+            ["exec", "c", "sh", "-c", DockerWorkerRuntime.guestCompileShell],
+            ["exec", "c", "sh", "-c", DockerWorkerRuntime.guestReadBinaryShell],
             ["exec", "-i", "c", "/usr/local/bin/derrick-web-crawler"],
             ["create", "--label", "app.derrick=runtime", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
             [
@@ -229,7 +232,7 @@ struct DockerRunnerXPCTests {
                 "--memory", "1g",
                 "--security-opt", "no-new-privileges",
                 "--cap-drop", "ALL",
-                "python:3.14.7",
+                DockerWorkerRuntime.image,
                 "/bin/sleep",
                 "infinity",
             ],
@@ -256,13 +259,13 @@ struct DockerRunnerXPCTests {
         }
     }
 
-    @Test func rejectsInvalidPythonGuestExecCommands() {
+    @Test func rejectsInvalidGoGuestExecCommands() {
         for args in [
-            ["exec", "-i", "c", "python3", "/tmp/other.py"],
-            ["exec", "-i", "c", "python3", "/tmp/guest.py", "extra"],
-            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/other.py"],
+            ["exec", "-i", "c", "python3", "/tmp/guest.py"],
+            ["exec", "-i", "c", DockerWorkerRuntime.guestBinaryPath, "extra"],
+            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/other"],
             ["exec", "-i", "c", "sh", "-c", "rm -rf /"],
-            ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest.py", "extra"],
+            ["exec", "-i", "c", "sh", "-c", "go build /tmp/plugin.go"],
             ["exec", "-i", "c", "swift", "/tmp/plugin.swift"],
             ["exec", "-i", "c", "/tmp/plugin"],
             ["exec", "-i", "c", "swiftc", "-O", "/tmp/plugin.swift", "-o", "/tmp/plugin"],
@@ -354,7 +357,7 @@ struct DockerRunnerXPCTests {
 
     @Test func rejectsCreateWithoutRuntimeLabel() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
-            "create", "--name", "c", "python:3.14.7", "/bin/sleep", "infinity",
+            "create", "--name", "c", DockerWorkerRuntime.image, "/bin/sleep", "infinity",
         ]))
         #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("create missing runtime label"))
     }

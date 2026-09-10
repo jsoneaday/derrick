@@ -11,6 +11,10 @@ public enum GuestContract: Sendable {
         case connectorParams = "connector-params.schema.json"
         case connectorResultEmit = "connector-result-emit.schema.json"
         case connectorVendor = "connector-vendor.schema.json"
+        case guestRuntime = "guest-runtime.schema.json"
+        case workerProduct = "worker-product.schema.json"
+        case webCrawlerResult = "web-crawler-result.schema.json"
+        case fileExtractorResult = "file-extractor-result.schema.json"
     }
 
     public static func loadSchemaText(_ schema: Schema) throws -> String {

@@ -83,7 +83,7 @@ enum SlackConnectorInstallReference {
             userGoal: goal,
             hostManifest: input.hostManifest,
             builder: E2EFactoryBuilder(scope: .fullSync),
-            executor: PythonPluginFactoryDockerExecutor(executor: dockerExecutor),
+            executor: GoPluginFactoryDockerExecutor(executor: dockerExecutor),
             reviewer: E2EHarnessReviewer(),
             logger: { fputs("\($0)\n", stderr) }
         )

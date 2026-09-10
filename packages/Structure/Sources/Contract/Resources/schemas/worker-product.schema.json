@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/worker-product.json",
+  "title": "Derrick trusted worker product contracts",
+  "description": "Shared stdout JSON contracts for prebuilt Go worker binaries (web crawler and file extractor). Swift host and Go workers must match these schemas.",
+  "$defs": {
+    "string_list": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "web_crawler_stop_reason": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "max_pages",
+        "max_depth",
+        "timeout",
+        "total_bytes",
+        "queue_limit",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "web_crawler_page": {
+      "type": "object",
+      "required": ["url", "depth", "status_code", "title", "text", "links_found"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string" },
+        "depth": { "type": "integer" },
+        "status_code": { "type": "integer" },
+        "content_type": { "type": "string" },
+        "title": { "type": "string" },
+        "text": { "type": "string" },
+        "links_found": { "type": "integer" }
+      }
+    },
+    "web_crawler_result": {
+      "type": "object",
+      "required": [
+        "ok",
+        "start_url",
+        "pages",
+        "stop_reason",
+        "requests_made",
+        "bytes_read",
+        "truncated",
+        "diagnostics"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "start_url": { "type": "string" },
+        "pages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/web_crawler_page" }
+        },
+        "stop_reason": { "$ref": "#/$defs/web_crawler_stop_reason" },
+        "requests_made": { "type": "integer" },
+        "bytes_read": { "type": "integer" },
+        "truncated": { "type": "boolean" },
+        "diagnostics": { "$ref": "#/$defs/string_list" }
+      }
+    },
+    "file_extractor_operation": {
+      "type": "string",
+      "enum": ["extract", "convert"]
+    },
+    "file_extractor_file_result": {
+      "type": "object",
+      "required": ["input_name", "kind", "byte_count"],
+      "additionalProperties": false,
+      "properties": {
+        "input_name": { "type": "string" },
+        "output_name": { "type": "string" },
+        "kind": { "type": "string" },
+        "byte_count": { "type": "integer" },
+        "preview": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    },
+    "file_extractor_result": {
+      "type": "object",
+      "required": ["ok", "operation", "files", "diagnostics"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "operation": { "$ref": "#/$defs/file_extractor_operation" },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/file_extractor_file_result" }
+        },
+        "diagnostics": { "$ref": "#/$defs/string_list" }
+      }
+    }
+  }
+}

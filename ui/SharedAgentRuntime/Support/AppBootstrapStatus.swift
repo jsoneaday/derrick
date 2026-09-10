@@ -240,6 +240,9 @@ final class AppBootstrapStatus: ObservableObject {
 
     /// Maps prewarm / Docker errors into a short title and user-facing explanation.
     static func classifyError(_ error: Error) -> ClassifiedFailure {
+        if let goError = error as? DerrickGoToolchainError {
+            return classifyGoToolchainError(goError)
+        }
         if let agentError = error as? JobServiceLoginAgent.AgentError {
             return classifyDaemonAgentError(agentError)
         }
@@ -336,6 +339,40 @@ final class AppBootstrapStatus: ObservableObject {
             title: "Initialization Failed",
             message: "Derrick could not finish setting up its runtime environment.\n\n\(trimmed)\n\nSee the debug log for more detail, then restart Derrick after fixing the issue."
         )
+    }
+
+    private static func classifyGoToolchainError(
+        _ error: DerrickGoToolchainError
+    ) -> ClassifiedFailure {
+        switch error {
+        case .missing:
+            return ClassifiedFailure(
+                title: "Go Toolchain Required",
+                message: """
+                Derrick could not find a Go toolchain for development diagnostics. Guest compile runs in Docker; this error is unexpected.
+
+                Quit and reopen Derrick. If it persists, reinstall Docker Desktop.
+                """
+            )
+        case .unparseable:
+            return ClassifiedFailure(
+                title: "Go Toolchain Unreadable",
+                message: """
+                Derrick could not read the installed Go version. Guest compile runs in Docker; this error is unexpected.
+
+                \(error.localizedDescription)
+                """
+            )
+        case .tooOld(_, let required):
+            return ClassifiedFailure(
+                title: "Go Toolchain Too Old",
+                message: """
+                Derrick found an older Go toolchain than \(required). Guest compile runs in Docker; this error is unexpected.
+
+                Quit and reopen Derrick.
+                """
+            )
+        }
     }
 
     private static func classifyDaemonAgentError(

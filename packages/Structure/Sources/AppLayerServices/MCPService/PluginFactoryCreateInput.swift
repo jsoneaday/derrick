@@ -248,7 +248,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 }
             }
             extra.append(
-                "The host writes plugin.json. Return python_source and test_input_json only. Do not invent a plugin_id or secrets list."
+                "The host writes plugin.json. Return go_source and test_input_json only. Do not invent a plugin_id or secrets list."
             )
             return try ConnectorContractPrompts.factoryGoal(
                 vendorLabel: vendorLabel,

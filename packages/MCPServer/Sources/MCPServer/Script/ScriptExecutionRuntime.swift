@@ -3,7 +3,7 @@ import MCP
 import Plugin
 import Structure
 
-/// Runs standalone Python guest source and dispatches host-owned capability hops.
+/// Runs standalone Go guest source and dispatches host-owned capability hops.
 public enum ScriptExecutionRuntime {
     public static func run(
         arguments: [String: Value],
@@ -16,12 +16,12 @@ public enum ScriptExecutionRuntime {
     ) async throws -> String {
         let started = Date()
         let parsed = try parse(arguments)
-        let language = GuestScriptLanguage.python
+        let language = GuestScriptLanguage.go
         logger("[script_exec] \(language.rawValue) source chars=\(parsed.script.count)")
 
         if GuestScriptLanguage.requestedLanguageIsUnsupported(arguments) {
             return finish(blocked(
-                findings: ["script_exec only runs Python. Swift guest scripts are not supported."],
+                findings: ["script_exec only runs Go. Python and other guest languages are not supported."],
                 stage: .staticValidation,
                 started: started,
                 parsed: parsed,
@@ -30,7 +30,7 @@ public enum ScriptExecutionRuntime {
         }
 
         let staticStarted = Date()
-        let staticFindings = PythonScriptVerifier.validate(
+        let staticFindings = GoScriptVerifier.validate(
             source: parsed.script,
             dependencies: parsed.dependencies
         )
@@ -113,30 +113,34 @@ public enum ScriptExecutionRuntime {
             logger("[script_exec] skipping LLM reviewer")
         }
 
+        let compileStarted = Date()
         let timeout = GuestRuntimeLimits.effectiveScriptTimeoutSeconds(
             requested: parsed.timeoutSeconds
         )
         let invokeID = UUID().uuidString
         do {
-            let executor = PythonGuestDockerExecutor(executor: stdinExecutor)
-            let result = try await GuestHopLoop.run(
-                initialEvent: initialEvent,
-                invokeID: invokeID,
-                timeoutSeconds: timeout,
-                verifier: language.verifierID,
-                execute: { input in
-                    try await executor.runSource(
-                        source: parsed.script,
-                        input: input,
-                        timeoutSeconds: timeout
-                    )
-                },
-                logger: logger,
-                hopHandler: hopHandler
-            )
+            let executor = GoGuestDockerExecutor(executor: stdinExecutor)
+            let result = try await executor.withCompiledGuest(source: parsed.script) { container in
+                try await GuestHopLoop.run(
+                    initialEvent: initialEvent,
+                    invokeID: invokeID,
+                    timeoutSeconds: timeout,
+                    verifier: language.verifierID,
+                    execute: { input in
+                        try await executor.runCompiledGuest(
+                            container: container,
+                            input: input,
+                            timeoutSeconds: timeout
+                        )
+                    },
+                    logger: logger,
+                    hopHandler: hopHandler
+                )
+            }
+            let compileMS = ScriptPhaseTiming.elapsedMS(from: compileStarted)
             let metrics = ScriptPhaseTiming.scriptMetrics(parsed.script)
             var phaseTiming = result.phaseTiming ?? ScriptPhaseTiming()
-            phaseTiming.staticValidateMS = staticValidateMS
+            phaseTiming.staticValidateMS = staticValidateMS + compileMS
             phaseTiming.totalMS = ScriptPhaseTiming.elapsedMS(from: started)
             phaseTiming.scriptCharCount = metrics.chars
             phaseTiming.scriptLineCount = metrics.lines
@@ -156,11 +160,17 @@ public enum ScriptExecutionRuntime {
                 phaseTiming: phaseTiming
             )
             return finish(decorated, logger: logger)
-        } catch let error as PythonGuestDockerExecutorError {
+        } catch let error as GoGuestDockerExecutorError {
             logger("[script_exec] guest runtime failed: \(error.localizedDescription)")
+            let stage: ScriptFailureStage
+            if case .commandFailed(let step, _) = error, step.contains("compile") {
+                stage = .typecheck
+            } else {
+                stage = .execution
+            }
             return finish(runtimeFailure(
                 findings: [error.localizedDescription],
-                stage: .execution,
+                stage: stage,
                 started: started,
                 parsed: parsed,
                 assessment: reviewerAssessment,

@@ -31,11 +31,15 @@ public enum HITLApprovalNotifier: Sendable {
 
         let isNetwork = isNetworkToolName(row.toolName)
         let host = host(fromNetworkToolName: row.toolName)
-        let title = isNetwork ? "Network access needed" : "Approval needed"
+        let blacklistPattern = blacklistPattern(from: row.argumentsJSON)
+        let title = isNetwork
+            ? (blacklistPattern == nil ? "Network access needed" : "Network blacklist")
+            : "Approval needed"
         let body: String
-        if isNetwork, let host {
-            let suffix = Self.registrableSuffix(for: host)
-            body = "Allow *.\(suffix)? Tap to approve or deny. Always Allow covers all subdomains."
+        if isNetwork, let blacklistPattern {
+            body = "This request matches blacklist \(blacklistPattern). Tap to allow this run, remove from blacklist, or deny."
+        } else if isNetwork, let host {
+            body = "Network access to \(host). Tap to approve or deny."
         } else {
             let preview = truncated(row.argumentsJSON, limit: 160)
             body = preview.isEmpty
@@ -80,12 +84,13 @@ public enum HITLApprovalNotifier: Sendable {
         return host.isEmpty ? nil : host
     }
 
-    /// Last two labels — same rule as egress permanent allow (`*.apple.com` ← `securemetrics.apple.com`).
-    private static func registrableSuffix(for host: String) -> String {
-        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let parts = normalized.split(separator: ".").map(String.init)
-        guard parts.count >= 2 else { return normalized }
-        return parts.suffix(2).joined(separator: ".")
+    private static func blacklistPattern(from argumentsJSON: String) -> String? {
+        guard let data = argumentsJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["kind"] as? String == "blacklist" else {
+            return nil
+        }
+        return object["pattern"] as? String
     }
 
     private static func truncated(_ text: String, limit: Int) -> String {

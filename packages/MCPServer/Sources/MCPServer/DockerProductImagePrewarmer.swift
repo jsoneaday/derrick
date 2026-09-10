@@ -2,29 +2,45 @@ import Foundation
 import DockerRunnerXPC
 import Structure
 
-/// Ensures trusted product Docker images exist (pull or local build).
+/// Ensures trusted product Docker images exist (local build) and match pinned digests.
 public enum DockerProductImagePrewarmer: Sendable {
-    public static func ensureWebCrawlerImage(
+    public static func ensureWorkerImage(
         executor: @escaping DockerCLIExecutor
     ) async throws {
         try await ensureImage(
-            tag: DockerProductImagePolicy.webCrawlerImage,
-            dockerfileRelativePath: DockerProductImagePolicy.webCrawlerDockerfileRelativePath,
-            contextRelativePath: DockerProductImagePolicy.webCrawlerBuildContextRelativePath,
+            tag: DockerProductImagePolicy.workerImage,
+            dockerfileRelativePath: DockerProductImagePolicy.workerDockerfileRelativePath,
+            contextRelativePath: DockerProductImagePolicy.workerBuildContextRelativePath,
+            pinnedDigest: DockerWorkerRuntime.pinnedDigest,
+            buildValidator: DockerProductImagePolicy.isAllowedWorkerBuild,
             executor: executor,
             buildTimeoutSeconds: 1_200
         )
+    }
+
+    /// Legacy alias used by crawler startup paths.
+    public static func ensureWebCrawlerImage(
+        executor: @escaping DockerCLIExecutor
+    ) async throws {
+        try await ensureWorkerImage(executor: executor)
     }
 
     public static func ensureImage(
         tag: String,
         dockerfileRelativePath: String,
         contextRelativePath: String,
+        pinnedDigest: DockerImageDigest,
+        buildValidator: @escaping (String, String, String) -> Bool,
         executor: @escaping DockerCLIExecutor,
         buildTimeoutSeconds: Int = 1_200
     ) async throws {
         let inspect = try await executor(["image", "inspect", tag], Data(), 30)
         if inspect.exitCode == 0 {
+            try await DockerImageInspector.verifyPinned(
+                tag: tag,
+                expected: pinnedDigest,
+                executor: executor
+            )
             return
         }
 
@@ -38,6 +54,9 @@ public enum DockerProductImagePrewarmer: Sendable {
         let context = repoRoot.appendingPathComponent(contextRelativePath)
         guard FileManager.default.fileExists(atPath: context.path) else {
             throw DockerProductImagePrewarmerError.dockerfileMissing(context.path)
+        }
+        guard buildValidator(dockerfile.path, tag, context.path) else {
+            throw DockerProductImagePrewarmerError.buildFailed(tag, "build policy rejected image build")
         }
 
         let build = try await executor(
@@ -58,14 +77,16 @@ public enum DockerProductImagePrewarmer: Sendable {
                 detail.isEmpty ? "exit \(build.exitCode)" : detail
             )
         }
+
+        try await DockerImageInspector.verifyPinned(
+            tag: tag,
+            expected: pinnedDigest,
+            executor: executor
+        )
     }
 }
 
-/// One in-flight crawler image build per process.
-///
-/// Chat and daemon start this in the background. A `web.crawl` that arrives
-/// while it is still running waits on the same task and does not start a second
-/// `docker build`.
+/// One in-flight worker image build per process.
 public actor WebCrawlerImageGate {
     public static let shared = WebCrawlerImageGate()
 
@@ -79,7 +100,7 @@ public actor WebCrawlerImageGate {
             return
         }
         let task = Task {
-            try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+            try await DockerProductImagePrewarmer.ensureWorkerImage(executor: executor)
         }
         inFlight = task
         do {
@@ -97,8 +118,6 @@ public enum DockerProductImagePrewarmerError: Error, LocalizedError, Equatable, 
     case dockerfileMissing(String)
     case buildFailed(String, String)
 
-    /// First compiler `error:` line, if the docker build log has one. Not shown as the
-    /// user-facing `errorDescription` (that stays a short human sentence).
     public var compilerDiagnostic: String? {
         switch self {
         case .buildFailed(_, let detail):
@@ -111,11 +130,11 @@ public enum DockerProductImagePrewarmerError: Error, LocalizedError, Equatable, 
     public var errorDescription: String? {
         switch self {
         case .repositoryRootNotFound:
-            return "The web crawler image is not installed and Derrick could not find its source to build it."
+            return "The worker image is not installed and Derrick could not find its source to build it."
         case .dockerfileMissing:
-            return "The web crawler image is not installed and Derrick could not find its build files."
+            return "The worker image is not installed and Derrick could not find its build files."
         case .buildFailed:
-            return "Derrick could not build the web crawler image. Make sure Docker Desktop is running, has enough disk space, and can reach the network."
+            return "Derrick could not build the worker image. Make sure Docker Desktop is running, has enough disk space, and can reach the network."
         }
     }
 

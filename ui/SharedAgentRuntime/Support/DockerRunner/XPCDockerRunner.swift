@@ -280,18 +280,11 @@ public final class XPCDockerRunner: @unchecked Sendable {
                     ]
                 )
             }
-            await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
+            await reportBootstrap(phase: .preparingImage, message: "Preparing worker image…")
             let executor = makeDockerExecutor()
-            let image = DerrickGuestRuntime.pythonGuestDockerImage
-            let inspect = try await executor(["image", "inspect", image], Data(), 30)
-            if inspect.exitCode != 0 {
-                await MainActor.run {
-                    AppBootstrapStatus.shared.revealModalIfStillInitializing()
-                }
-                try await OneshotDockerContainer.ensurePulledImage(image, executor: executor)
-            }
+            try await WorkerImageGate.shared.ensureReady(executor: executor)
             prewarmState.markCompleted()
-            await reportBootstrap(phase: .verifyingEnvironment, message: "Guest runtime ready.")
+            await reportBootstrap(phase: .verifyingEnvironment, message: "Worker image ready.")
         } catch {
             debugLog("Guest runtime prewarming failed: \(error.localizedDescription)")
             prewarmState.markFailed(error)

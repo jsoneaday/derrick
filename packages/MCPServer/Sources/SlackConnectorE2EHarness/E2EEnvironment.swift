@@ -271,7 +271,7 @@ struct E2EEnvironment {
         let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("[E2E] factory build scope=\(scope.rawValue)…\n", stderr)
-        let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
+        let executor = GoPluginFactoryDockerExecutor(executor: dockerExecutor)
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 5)
         ).build(

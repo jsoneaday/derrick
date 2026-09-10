@@ -12,12 +12,11 @@ public enum DerrickGuestRuntime: Sendable {
     /// Leftover Swift guest image tag reported by older daemons. Hygiene retires a mismatch.
     public static let swiftPluginDockerImage = "swiftlang/swift:nightly-6.4.x-noble"
 
-    /// Pullable Python image for offline guests (script_exec primary).
-    public static let pythonGuestDockerImage = "python:3.14.7"
+    /// Unified Go worker image for offline guests (`script_exec` / `plugin.invoke`).
+    public static let guestDockerImage = DockerWorkerRuntime.image
 
-    /// Custom image with uv for packaged connector plugins.
-    /// Build: `docker build -f docker/guest-runtime/Dockerfile -t derrick-guest-runtime:python-v1 .`
-    public static let pythonGuestDockerImageWithUV = "derrick-guest-runtime:python-v1"
+    /// Legacy Python image reported by older daemons. Hygiene retires a mismatch.
+    public static let legacyPythonGuestDockerImage = "python:3.14.7"
 }
 
 public struct ServiceHealthReport: Codable, Sendable, Hashable {

@@ -28,6 +28,11 @@ Always respond using the required JSON schema (`thinking` / `tool_call` / `tool_
 
 When presenting a list of choices, options, steps, items, or alternative paths to the user, ALWAYS format them as a clean Markdown bulleted list (using `-` or `*`) or a numbered list (using `1.`, `2.`), instead of writing them as plain paragraphs.
 
+## Website crawling (`web.crawl`)
+
+- Call `web.crawl` **directly** in live chat for typical same-origin crawls; wait for the result in the same turn.
+- Use `jobs_create` with `tool_name` `web.crawl` only when you judge the crawl is likely to take **more than about one minute** (large `max_pages`, deep `max_depth`, or long `timeout_seconds`). Set `wake_after: true` and a short `wake_prompt` so the user gets a notification when it finishes.
+
 ## Scheduled jobs (`jobs_create`)
 
 - `wake_after` (default **true**): when **true**, the agent is woken after a **successful** run to summarize the tool result and the user gets a notification + result panel. When **false**, success is silent (no wake, no notification).

@@ -144,8 +144,8 @@ public enum ScriptExecutionVerifier {
 
     private static func readonlyViolations(in script: String) -> [String] {
         let patterns: [(String, String)] = [
-            (#"(?m)\bopen\s*\("#, "Readonly mode cannot mutate filesystem."),
-            (#"(?m)\b(subprocess|os\.system|os\.popen|socket|urllib|requests|httpx)\b"#, "Readonly mode cannot execute nested commands or access the network.")
+            (#"os\.(Open|ReadFile|WriteFile|Remove|Create|Mkdir)"#, "Readonly mode cannot mutate filesystem."),
+            (#"\"net/http\"|\"net\"|exec\.Command|crypto/tls"#, "Readonly mode cannot execute nested commands or access the network.")
         ]
         return patterns.compactMap { pattern, message in
             script.range(of: pattern, options: .regularExpression) != nil ? message : nil
@@ -159,7 +159,7 @@ extension ScriptExecutionResult {
         durationMS: Int,
         maxSeconds: Int = GuestRuntimeLimits.containerRunMaxTTLSeconds,
         phaseTiming: ScriptPhaseTiming? = nil,
-        verifier: String = "python-check-v1"
+        verifier: String = "go-check-v1"
     ) -> ScriptExecutionResult {
         let explanation = GuestRuntimeLimits.containerLeaseExceededExplanation(maxSeconds: maxSeconds)
         return ScriptExecutionResult(

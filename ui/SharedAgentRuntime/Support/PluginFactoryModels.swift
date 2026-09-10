@@ -149,7 +149,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         """
         You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
         Return exactly one JSON object with these keys:
-        plugin_id (string), version (string), description (string), python_source (string),
+        plugin_id (string), version (string), description (string), go_source (string),
         test_input_json (string containing valid JSON — a serialized object, not prose),
         skill_files (array of objects with path and body),
         secrets (array of objects with id, label, and kind; required for connector plugins),
@@ -159,7 +159,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         If the plugin needs a username, password, token, or API key, declare them in secrets.
         kind must be username, password, token, or api_key. id is a stable Keychain key
         such as username or bot_token. label is the text shown when the user saves the value.
-        Never put real credentials in python_source.
+        Never put real credentials in go_source.
         Set role to "connector" when the plugin sends and receives messages with an external
         messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
         For role connector, include messaging_ops: an array of implemented ops
@@ -168,13 +168,13 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
         The host lists connector plugins under Messaging. Do not guess this from the plugin_id.
         Do not return manifest_json. The host creates the canonical Agent Plugin manifest,
         including the exact `$schema` field for Agent Plugin 1.0 and the fixed
-        extensions.app.derrick.entrypoint ./app.derrick/plugin.py.
-        \(DerrickGuestPython.modelContract)
+        extensions.app.derrick.entrypoint ./app.derrick/plugin.go.
+        \(DerrickGuestGo.modelContract)
         \(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
         Before returning the draft, self-check the implementation:
         - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
         - Match host responses by the emitted request_id.
-        - Use only the Python standard library (no pip, requests, urllib, socket, or subprocess).
+        - Use only the Go standard library (no third-party modules, raw sockets, or subprocess).
         - The direct test input must exercise the terminal result path with matching http_results fixtures.
         If skill_files is not needed, return an empty array. Every skill file path must be exactly
         skills/<name>/SKILL.md.
@@ -189,7 +189,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
           {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
           "params":{...}}]}
           Repeat additional hop pairs for each messaging_op in scope. request_id values in fixtures must \
-          match the http.request envelopes your python_source emits.
+          match the http.request envelopes your go_source emits.
         - Match http_results by request_id and de-duplicate with stable sorting; never depend on response order.
         When vendor documentation is supplied in the user prompt, use it only to fill may_call HTTP details.
         """
@@ -201,7 +201,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             "plugin_id": AgentSchema(type: .string),
             "version": AgentSchema(type: .string),
             "description": AgentSchema(type: .string),
-            "python_source": AgentSchema(type: .string),
+            "go_source": AgentSchema(type: .string),
             "test_input_json": AgentSchema(type: .string),
             "skill_files": AgentSchema(
                 type: .array,
@@ -233,7 +233,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             ),
         ],
         required: [
-            "plugin_id", "version", "description", "python_source",
+            "plugin_id", "version", "description", "go_source",
             "test_input_json", "skill_files",
         ]
     )
@@ -248,7 +248,7 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
                 """
                 The host already assigned plugin_id \(host.pluginID) and these secret ids: \
                 \(host.secrets.map(\.id).joined(separator: ", ")). \
-                Return python_source and test_input_json. Do not pick a different plugin_id or secret ids. \
+                Return go_source and test_input_json. Do not pick a different plugin_id or secret ids. \
                 Use {{secret:\(host.secrets.first?.id ?? "bot_token")}} in HTTP headers.
                 """
             )
@@ -395,7 +395,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     private static func reviewerSystemPrompt(for userGoal: String?) -> String {
         """
     You are Derrick's independent plugin alignment and safety reviewer.
-    Review the user's goal, manifest, test_input_json, exact Python source, and direct test output.
+    Review the user's goal, manifest, test_input_json, exact Go source, and direct test output.
     Return exactly one JSON object:
     {"decision":"approved|rejected","summary":"...","findings":[
       {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
@@ -409,7 +409,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
     - For connector plugins, obey the connector protocol JSON below. If a rule is not in that JSON, do not require it.
     \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
     Compilation success is not approval. Do not rewrite the code or approve a draft that fails these checks.
-    Reject Swift source, socket/urllib/requests usage, or missing stdin reads.
+    Reject non-Go source, raw network usage outside http.request envelopes, or missing stdin reads.
     """
     }
 
@@ -449,7 +449,7 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
         test_input_json:
         \(String(decoding: draft.testInput, as: UTF8.self))
 
-        Python source:
+        Go source:
         \(draft.guestSource)
 
         Direct test output:

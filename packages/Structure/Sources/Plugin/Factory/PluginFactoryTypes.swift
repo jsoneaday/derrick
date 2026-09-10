@@ -2,9 +2,9 @@ import Foundation
 
 public typealias PluginFactoryLogger = @Sendable (String) async -> Void
 
-/// The factory creates Agent Plugin packages whose Derrick entrypoint is Python.
-/// A draft is a standalone file: the container runs it with `python3 /tmp/guest.py`.
-/// A released version stores UTF-8 source as the packaged artifact.
+/// The factory creates Agent Plugin packages whose Derrick entrypoint is Go.
+/// A draft is compiled to a Linux binary and run as `/tmp/guest` in the worker image.
+/// A released version stores the compiled binary as the packaged artifact.
 public struct PluginFactoryDraft: Sendable, Hashable {
     public let manifestJSON: String
     public let guestSource: String
@@ -146,7 +146,7 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
             throw PluginFactoryError.invalidManifest("Version is required.")
         }
         var derrick: [String: Any] = [
-            "entrypoint": "./app.derrick/plugin.py",
+            "entrypoint": "./app.derrick/plugin.go",
         ]
         if !secrets.isEmpty {
             derrick["secrets"] = secrets.map(\.jsonObject)
@@ -204,7 +204,7 @@ public struct PluginFactoryBuilderRequest: Sendable, Hashable {
     public let userGoal: String
     public let previousDraft: PluginFactoryDraft?
     public let feedback: String?
-    /// When set, the host writes `plugin.json`. The builder only supplies Python and tests.
+    /// When set, the host writes `plugin.json`. The builder only supplies Go source and tests.
     public let hostManifest: PluginFactoryManifestInput?
 
     public init(
@@ -288,7 +288,8 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case pluginID = "plugin_id"
         case version, description
-        case guestSource = "python_source"
+        case guestSource = "go_source"
+        case legacyPythonSource = "python_source"
         case legacySwiftSource = "swift_source"
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
@@ -303,6 +304,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         version = try container.decode(String.self, forKey: .version)
         description = try container.decode(String.self, forKey: .description)
         guestSource = try container.decodeIfPresent(String.self, forKey: .guestSource)
+            ?? container.decodeIfPresent(String.self, forKey: .legacyPythonSource)
             ?? container.decode(String.self, forKey: .legacySwiftSource)
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
@@ -380,12 +382,17 @@ public struct PluginFactoryExecutionResult: Sendable, Hashable {
     }
 }
 
-/// The host supplies this adapter. Its production implementation runs these
-/// commands inside the restricted Linux Swift Docker container.
+/// The host supplies this adapter. Its production implementation compiles and
+/// runs guests inside the pinned Go worker Docker container.
 public protocol PluginFactoryExecutor: Sendable {
     func runGuestSource(source: String, input: Data) async throws -> PluginFactoryExecutionResult
     func packageGuestSource(source: String) async throws -> Data
     func runPackagedArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult
+}
+
+/// Optional compile-once hop replay for factory direct tests.
+public protocol PluginFactoryCompiledGuestExecutor: PluginFactoryExecutor {
+    func runGuestSourceHops(source: String, testInput: Data) async throws -> PluginFactoryHopTestRun
 }
 
 public enum PluginReviewDecision: String, Sendable, Hashable {
@@ -529,7 +536,7 @@ public struct PluginFactoryRelease: Sendable, Hashable {
         var files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.py": Data(guestSource.utf8),
+            "app.derrick/plugin.go": Data(guestSource.utf8),
             "app.derrick/plugin": compiledArtifact,
         ]
         for (path, body) in skillFiles {
@@ -571,15 +578,15 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         case .invalidSkillPath(let path):
             return "Invalid skill path '\(path)'. Skill path must be skills/<name>/SKILL.md."
         case .reservedPluginID(let id): return "The plugin id '\(id)' is reserved by Derrick."
-        case .invalidSource(let message): return "Invalid Python guest source: \(message)"
-        case .directRunFailed(let message): return "Python draft test failed: \(message)"
-        case .invalidDirectOutput(let message): return "Python draft returned invalid plugin output: \(message)"
+        case .invalidSource(let message): return "Invalid Go guest source: \(message)"
+        case .directRunFailed(let message): return "Go draft test failed: \(message)"
+        case .invalidDirectOutput(let message): return "Go draft returned invalid plugin output: \(message)"
         case .reviewRejected(let summary, let findings):
             let detail = findings.isEmpty
                 ? summary
                 : "\(summary) \(findings.joined(separator: " "))"
             return "Plugin review rejected the draft: \(detail)"
-        case .packageFailed(let message): return "Python plugin packaging failed: \(message)"
+        case .packageFailed(let message): return "Go plugin packaging failed: \(message)"
         case .packagedRunFailed(let message): return "Packaged plugin test failed: \(message)"
         case .invalidPackagedOutput(let message): return "Packaged plugin returned invalid output: \(message)"
         case .draftValidationFailed(let findings):

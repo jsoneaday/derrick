@@ -88,7 +88,7 @@ import Testing
         let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
         #expect(scriptReviewer.contains("intent alignment"))
         #expect(scriptReviewer.contains("secret literals"))
-        #expect(scriptReviewer.contains("Python verifier"))
+        #expect(scriptReviewer.contains("Go verifier"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
@@ -369,7 +369,7 @@ import Testing
     @Test func slackConnectorFallsBackToBotTokenWhenManifestOmitsSecrets() {
         let json = """
         {"$schema":"https://example.invalid/agent-plugin.json","name":"slack-connector","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads"]}}}
         """
         let descriptors = PluginSecretField.resolvedDescriptors(
             pluginID: "slack-connector",
@@ -1022,15 +1022,15 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
             !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
-                reportedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.guestDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1038,7 +1038,7 @@ import Testing
                 reportedFingerprint: "old",
                 expectedFingerprint: "new",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1046,7 +1046,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: "stale-guest:old",
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1054,7 +1054,7 @@ import Testing
                 reportedFingerprint: nil,
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1062,7 +1062,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: nil,
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
     }
@@ -1317,12 +1317,12 @@ import Testing
         )
     }
 
-    @Test func effectorAdmissionDeniesLiveChatWithoutContext() {
+    @Test func effectorAdmissionAllowsLiveChatWithoutContext() {
         #expect(
             EffectorAdmissionPolicy.allowsSyncWebCrawl(
                 context: nil,
                 principal: .agent(sessionID: "s1", agentID: "a1")
-            ) == false
+            )
         )
     }
 

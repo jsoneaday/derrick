@@ -838,7 +838,6 @@ struct ContentView: View {
     @MainActor
     private func configureClientRepositoryServices(repository: DBRepository) async {
         await ServiceLogRecorder.shared.configure(repository: repository)
-        await EgressAllowlistService.shared.configure(repository: repository)
         await ContentSensitivityGrantService.shared.configure(repository: repository)
         await UsageLimitsService.shared.configure(repository: repository)
         await ContainerLifecycleSettingsService.shared.configure(repository: repository)

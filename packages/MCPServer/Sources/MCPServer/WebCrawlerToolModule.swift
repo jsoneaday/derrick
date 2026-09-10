@@ -63,6 +63,17 @@ public enum WebCrawlerToolModule: MCPToolModule {
                     ).encodedJSON()
                 }
 
+                do {
+                    try GuestContractValidation.validateWebCrawlerResultJSON(dockerResult.stdout)
+                } catch {
+                    return try failure(
+                        status: .failed,
+                        stage: .execution,
+                        code: "web_crawl_invalid_output",
+                        message: "Crawler returned invalid JSON output."
+                    ).encodedJSON()
+                }
+
                 guard let result = try? JSONDecoder().decode(
                     WebCrawlerWireResult.self,
                     from: dockerResult.stdout
@@ -273,6 +284,13 @@ private struct WebCrawlerWireResult: Decodable, Sendable {
         case ok
         case stopReason = "stop_reason"
         case diagnostics
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        stopReason = try container.decode(String.self, forKey: .stopReason)
+        diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
     }
 }
 

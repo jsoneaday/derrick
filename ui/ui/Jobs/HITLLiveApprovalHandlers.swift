@@ -166,51 +166,11 @@ enum HITLLiveApprovalHandlers {
     }
 
     private static func presentNetworkAccess(_ request: AgentNetworkAccessRequestDTO) async -> AgentNetworkAccessDecisionDTO {
-        let event = PolicyUserEventFactory.egressAccessRequest(
-            host: request.host,
-            toolName: request.toolName,
-            correlationId: request.requestID
+        // Blacklist-only egress: public hosts are allowed by default. Blacklist hits use PolicyEventBus.
+        AgentNetworkAccessDecisionDTO(
+            requestID: request.requestID,
+            decision: "once",
+            actor: "blacklist-only-auto"
         )
-        let decision = await AppEventBus.shared.initDecision(event)
-        switch decision {
-        case .approvedOnce(let actor):
-            await EgressAllowlistService.shared.applyUserNetworkDecision(
-                host: request.host,
-                decision: .approvedOnce(actor: actor)
-            )
-            return AgentNetworkAccessDecisionDTO(
-                requestID: request.requestID,
-                decision: "once",
-                actor: actor ?? "ui-modal-once"
-            )
-        case .approvedPermanently(let actor):
-            await EgressAllowlistService.shared.applyUserNetworkDecision(
-                host: request.host,
-                decision: .approvedPermanently(actor: actor)
-            )
-            return AgentNetworkAccessDecisionDTO(
-                requestID: request.requestID,
-                decision: "always",
-                actor: actor ?? "ui-modal-always"
-            )
-        case .timedOut:
-            return AgentNetworkAccessDecisionDTO(
-                requestID: request.requestID,
-                decision: "timeout",
-                actor: "ui-modal-timeout"
-            )
-        case .dismissed:
-            return AgentNetworkAccessDecisionDTO(
-                requestID: request.requestID,
-                decision: "dismissed",
-                actor: "ui-modal-dismissed"
-            )
-        case .approved, .denied:
-            return AgentNetworkAccessDecisionDTO(
-                requestID: request.requestID,
-                decision: "deny",
-                actor: "ui-modal-deny"
-            )
-        }
     }
 }

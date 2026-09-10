@@ -77,7 +77,10 @@ public enum PluginFactoryHopTestRunner: Sendable {
         testInput: Data,
         executor: any PluginFactoryExecutor
     ) async throws -> PluginFactoryHopTestRun {
-        try await run(testInput: testInput) { input in
+        if let compiled = executor as? any PluginFactoryCompiledGuestExecutor {
+            return try await compiled.runGuestSourceHops(source: source, testInput: testInput)
+        }
+        return try await run(testInput: testInput) { input in
             try await executor.runGuestSource(source: source, input: input)
         }
     }

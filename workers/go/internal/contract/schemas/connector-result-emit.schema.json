@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/connector-result-emit.json",
+  "title": "Connector result.emit payload",
+  "description": "Structured fields the host persists from a connector terminal envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["vendor_thread_id", "title"],
+        "additionalProperties": false,
+        "properties": {
+          "vendor_thread_id": { "type": "string" },
+          "title": { "type": "string" },
+          "is_member": { "type": "boolean" },
+          "accessible": { "type": "boolean" }
+        }
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["vendor_thread_id", "vendor_message_id", "direction", "sender", "body", "created_at"],
+        "additionalProperties": false,
+        "properties": {
+          "vendor_thread_id": { "type": "string" },
+          "vendor_message_id": { "type": "string" },
+          "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+          "sender": { "type": "string" },
+          "body": { "type": "string" },
+          "created_at": { "type": ["string", "number"] },
+          "parent_vendor_message_id": { "type": "string" },
+          "thread_ts": { "type": "string" },
+          "reply_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "sent_message": {
+      "type": "object",
+      "required": ["vendor_message_id", "created_at"],
+      "additionalProperties": false,
+      "properties": {
+        "vendor_message_id": { "type": ["string", "number"] },
+        "created_at": { "type": ["string", "number"] }
+      }
+    },
+    "title": { "type": "string" },
+    "summary": { "type": "string" }
+  }
+}

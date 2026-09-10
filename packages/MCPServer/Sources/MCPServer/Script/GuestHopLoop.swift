@@ -2,7 +2,7 @@ import Foundation
 import Plugin
 import Structure
 
-/// Shared host hop loop for offline Python guest programs.
+/// Shared host hop loop for offline Go guest programs.
 public enum GuestHopLoop: Sendable {
     public typealias HTTPResultEventBuilder = @Sendable (
         [PluginEnvelope],

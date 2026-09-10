@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/file-extractor-result.json",
+  "title": "File extractor worker stdout",
+  "description": "JSON object written to stdout by derrick-file-extractor.",
+  "$ref": "worker-product.schema.json#/$defs/file_extractor_result"
+}

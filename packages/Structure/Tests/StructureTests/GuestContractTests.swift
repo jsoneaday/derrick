@@ -10,6 +10,12 @@ import Testing
         }
     }
 
+    @Test func guestRuntimeSchemaRequiresGoLanguage() throws {
+        let schema = try GuestContract.loadSchemaObject(.guestRuntime)
+        let language = (schema["properties"] as? [String: Any])?["language"] as? [String: Any]
+        #expect(language?["const"] as? String == "go")
+    }
+
     @Test func executionContextSchemaExposesWorkflowKinds() throws {
         let kinds = try GuestContract.officialWorkflowKinds()
         #expect(kinds.contains("plugin_factory_create"))
@@ -102,6 +108,38 @@ import Testing
         let json = #"[{"verb":"result.emit","threads":[{"vendor_thread_id":"C1"}]}]"#
         #expect(throws: GuestContractError.self) {
             try GuestContract.validate(json: Data(json.utf8), against: .envelopeList)
+        }
+    }
+
+    @Test func webCrawlerResultValidationAcceptsMinimalSuccess() throws {
+        let json = """
+        {"ok":true,"start_url":"https://example.com/","pages":[],"stop_reason":"completed","requests_made":0,"bytes_read":0,"truncated":false,"diagnostics":[]}
+        """
+        try GuestContractValidation.validateWebCrawlerResultJSON(Data(json.utf8))
+    }
+
+    @Test func webCrawlerResultValidationRejectsNullDiagnostics() {
+        let json = """
+        {"ok":true,"start_url":"https://example.com/","pages":[],"stop_reason":"completed","requests_made":0,"bytes_read":0,"truncated":false,"diagnostics":null}
+        """
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateWebCrawlerResultJSON(Data(json.utf8))
+        }
+    }
+
+    @Test func fileExtractorResultValidationAcceptsMinimalSuccess() throws {
+        let json = """
+        {"ok":true,"operation":"extract","files":[],"diagnostics":[]}
+        """
+        try GuestContractValidation.validateFileExtractorResultJSON(Data(json.utf8))
+    }
+
+    @Test func fileExtractorResultValidationRejectsNullFiles() {
+        let json = """
+        {"ok":false,"operation":"extract","files":null,"diagnostics":[]}
+        """
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateFileExtractorResultJSON(Data(json.utf8))
         }
     }
 }

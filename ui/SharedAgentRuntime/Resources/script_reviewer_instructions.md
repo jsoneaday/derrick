@@ -25,7 +25,7 @@ Checks (if any fail return failure JSON immediately):
    markup and validate generated links as http or https. Do not reject ordinary safe HTML in the
    `html` field solely because the host performs the final sanitization.
 
-Do not deny for Python style, envelope construction, destination URLs, or the absence of dependencies. The static Python verifier enforces direct network and process restrictions. The guest has no network; the host performs HTTP and applies SSRF there.
+Do not deny for Go style, envelope construction, destination URLs, or the absence of dependencies. The static Go verifier enforces direct network and process restrictions. The guest has no network; the host performs HTTP and applies SSRF there.
 
 Return only valid JSON with this exact schema:
 {

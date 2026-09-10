@@ -19,18 +19,18 @@ public enum PluginPath {
         return trimmed
     }
 
-    /// Python factory entrypoints are standalone files run by `python3`.
-    public static func validatePythonEntrypoint(_ raw: String) throws -> String {
+    /// Go factory entrypoints are standalone `package main` files compiled to `/tmp/guest`.
+    public static func validateGoEntrypoint(_ raw: String) throws -> String {
         let path = try validateRelative(raw)
-        guard path.hasSuffix(".py") else {
+        guard path.hasSuffix(".go") else {
             throw PluginManifestError.invalidEntrypoint(raw)
         }
         return path
     }
 
-    /// Accepts the supported Derrick guest runtime source file (.py).
+    /// Accepts the supported Derrick guest runtime source file (.go).
     public static func validateRuntimeEntrypoint(_ raw: String) throws -> String {
-        try validatePythonEntrypoint(raw)
+        try validateGoEntrypoint(raw)
     }
 
     public static func resolve(root: URL, relative: String) throws -> URL {
