@@ -9,6 +9,10 @@ public enum NewsSourceURL {
         guard isGoogleNewsHost(host) else { return url }
         let path = url.path.lowercased()
         if path.contains("/rss") || path.hasSuffix(".xml") {
+            if !path.contains("/headlines/section/topic/"),
+               let section = googleNewsSection(from: contextHint) {
+                return googleNewsSectionRSS(section: section)
+            }
             return url
         }
         if path.contains("/topics/") {

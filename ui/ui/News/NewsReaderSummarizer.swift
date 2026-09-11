@@ -16,7 +16,9 @@ struct NewsReaderSummarizer: NewsSummaryGenerating {
             prompt,
             system: """
             You summarize news for the user. Write clear prose in plain English.
-            Include markdown links to the original articles using the URLs provided.
+            Use bullet points. Include markdown links to the original articles using the URLs provided.
+            Do not add a title or markdown heading for the list name.
+            Cover every article provided when possible.
             Do not invent stories or URLs.
             """,
             temperature: 0.2

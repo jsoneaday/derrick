@@ -51,6 +51,12 @@ import Structure
         }
     }
 
+    @Test func canonicalFetchURLUpgradesGeneralGoogleNewsRSSForTechHint() {
+        let url = URL(string: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en")!
+        let canonical = NewsSourceURL.canonicalFetchURL(url, contextHint: "tech-news Tech")
+        #expect(canonical.path.contains("/headlines/section/topic/TECHNOLOGY"))
+    }
+
     @Test func workerRequestEncodesModeAndSources() throws {
         let request = NewsReaderWorkerRequest(
             mode: .rss,

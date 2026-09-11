@@ -28,3 +28,29 @@ func TestCanonicalFetchURLRewritesGoogleNewsHomepage(t *testing.T) {
 		t.Fatalf("expected RSS rewrite, got %q", got)
 	}
 }
+
+func TestCanonicalFetchURLUpgradesGeneralGoogleNewsRSSForTechHint(t *testing.T) {
+	got := CanonicalFetchURL(
+		"https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+		"tech-news Tech",
+	)
+	want := "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestFilterTopicsKeepsUnmatchedArticlesWhenFewMatches(t *testing.T) {
+	articles := []Article{
+		{Title: "TechCrunch story", URL: "https://example.com/a"},
+		{Title: "Wall Street earnings", URL: "https://example.com/b"},
+		{Title: "Another market report", URL: "https://example.com/c"},
+	}
+	got := filterTopics(articles, []string{"Tech"})
+	if len(got) != 3 {
+		t.Fatalf("expected all articles when only one matches, got %d", len(got))
+	}
+	if got[0].Title != "TechCrunch story" {
+		t.Fatalf("expected matched article first, got %q", got[0].Title)
+	}
+}

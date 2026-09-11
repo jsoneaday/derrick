@@ -82,11 +82,12 @@ struct NewsWorkspaceView: View {
                    let summary = store.selectedReader?.summaryText,
                    !summary.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Summary")
+                        Text("AI summary")
                             .font(.subheadline.weight(.semibold))
-                        Text(LocalizedStringKey(summary))
-                            .font(.body)
-                            .textSelection(.enabled)
+                        Text("A digest of the articles below.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        MarkdownResponseView(text: summary, allowsCSVExport: false)
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,10 +98,12 @@ struct NewsWorkspaceView: View {
                     ForEach(store.items) { item in
                         articleCard(item)
                     }
-                } else {
+                } else if !store.items.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Sources")
-                            .font(.caption.weight(.semibold))
+                        Text("Articles (\(store.items.count))")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Stories fetched from your feeds. The header feed count is how many RSS sources are configured, not how many articles appear here.")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                         ForEach(store.items) { item in
                             HStack(alignment: .top, spacing: 8) {

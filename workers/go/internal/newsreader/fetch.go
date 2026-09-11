@@ -81,19 +81,36 @@ func filterTopics(articles []Article, topics []string) []Article {
 		return articles
 	}
 	matched := make([]Article, 0, len(articles))
+	unmatched := make([]Article, 0, len(articles))
 	for _, article := range articles {
 		hay := strings.ToLower(article.Title + " " + article.Detail)
-		for _, needle := range needles {
-			if strings.Contains(hay, needle) {
-				matched = append(matched, article)
-				break
-			}
+		if topicMatches(hay, needles) {
+			matched = append(matched, article)
+		} else {
+			unmatched = append(unmatched, article)
 		}
 	}
 	if len(matched) == 0 {
 		return articles
 	}
+	// Prefer topic matches, but keep other articles when filtering would drop too many
+	// (for example WSJ headlines that do not literally contain "tech").
+	if len(matched) < 3 && len(unmatched) > 0 {
+		out := make([]Article, 0, len(articles))
+		out = append(out, matched...)
+		out = append(out, unmatched...)
+		return out
+	}
 	return matched
+}
+
+func topicMatches(hay string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(hay, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueArticles(articles []Article) []Article {

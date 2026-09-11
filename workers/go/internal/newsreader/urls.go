@@ -16,6 +16,11 @@ func CanonicalFetchURL(raw string, contextHint string) string {
 	}
 	path := strings.ToLower(parsed.Path)
 	if strings.Contains(path, "/rss") || strings.HasSuffix(path, ".xml") {
+		if !strings.Contains(path, "/headlines/section/topic/") {
+			if section := googleNewsSection(contextHint); section != "" {
+				return "https://news.google.com/rss/headlines/section/topic/" + section + "?hl=en-US&gl=US&ceid=US:en"
+			}
+		}
 		return raw
 	}
 	if strings.Contains(path, "/topics/") {
