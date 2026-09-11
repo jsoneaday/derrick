@@ -846,7 +846,10 @@ struct ContentView: View {
         await ContainerLifecycleSettingsService.shared.configure(repository: repository)
         await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
         await PluginFactoryListStore.shared.configure(repository: repository)
-        await NewsReaderStore.shared.configure(repository: repository)
+        await NewsReaderStore.shared.configure(
+            repository: repository,
+            summarizerSettings: helperModelSettings
+        )
         await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
     }

@@ -33,4 +33,25 @@ public enum DockerImageInspector: Sendable {
             throw DockerImageDigestError.digestMismatch(tag: tag, expected: expected, actual: actual)
         }
     }
+
+    /// Returns false when the image exists but predates required worker binaries (e.g. news reader).
+    public static func workerImageHasCurrentBinaries(
+        tag: String = DockerWorkerRuntime.image,
+        executor: @escaping DockerCLIExecutor
+    ) async -> Bool {
+        let format = "{{index .Config.Labels \"\(DockerWorkerRuntime.binariesLabelKey)\"}}"
+        do {
+            let response = try await executor(
+                ["image", "inspect", "--format", format, tag],
+                Data(),
+                30
+            )
+            guard response.exitCode == 0 else { return false }
+            let label = String(decoding: response.stdout, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return label == DockerWorkerRuntime.binariesLabelValue
+        } catch {
+            return false
+        }
+    }
 }

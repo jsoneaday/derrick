@@ -1205,6 +1205,7 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.createLabelArguments == ["--label", "app.derrick=runtime"])
         #expect(DerrickDockerRuntimeIdentity.namePrefixes == [
             "derrick-web-crawler",
+            "derrick-news-reader",
             "derrick-guest-runtime",
             "derrick-swift-runtime",
             "derrick-file-extractor",
@@ -1214,10 +1215,10 @@ import Testing
         #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
         #expect(
             DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
-                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + ["python:3.14.7"]
+                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + [DockerWorkerRuntime.image]
             )
         )
-        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", "python:3.14.7"]))
+        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", DockerWorkerRuntime.image]))
     }
 
     @Test func webCrawlerProductImageBuildUsesPackagesContext() {
@@ -1476,17 +1477,18 @@ import Testing
         #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
     }
 
-    @Test func connectorFactoryFailureReturnsToVendorStep() {
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .type)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .name)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .auth)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .auth)
+    @Test func pluginStudioFailureMapsToSkillFirstSteps() {
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .credentials)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .credentials)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "paywall") == .news)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "news") == .news)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "goal") == .goal)
     }
 
     @Test func connectorWizardOffersFullSyncOnly() {

@@ -234,6 +234,10 @@ final class DaemonUnifiedExportedObject: NSObject, DerrickDaemonServiceXPC, @unc
         mcp.searchTools(requestJSON: requestJSON, withReply: reply)
     }
 
+    func runNewsReader(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        mcp.runNewsReader(requestJSON: requestJSON, withReply: reply)
+    }
+
     // MARK: - Workflow runtime
 
     func startWorkflow(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {

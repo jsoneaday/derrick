@@ -176,6 +176,25 @@ public final class MCPServiceClient: @unchecked Sendable {
         }
     }
 
+    public func runNewsReader(requestJSON: Data, timeoutSeconds: Int = 180) async throws -> NewsReaderRunResult {
+        if DerrickProcessRole.isDaemon, let run = InProcessServiceBridges.runNewsReader {
+            return try await run(requestJSON)
+        }
+        nonisolated(unsafe) let proxy = try remoteProxy()
+        let payload = requestJSON as NSData
+        return try await invoke(timeout: MCPToolCallTimeouts.newsReaderNanoseconds) {
+            try await withCheckedThrowingContinuation { cont in
+                proxy.runNewsReader(requestJSON: payload) { data in
+                    do {
+                        cont.resume(returning: try MCPServiceXPCCodec.decodeNewsReaderRunResult(data as Data))
+                    } catch {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
     public func searchTools(principal: ServicePrincipal, query: String = "") async throws -> MCPToolSearchResultDTO {
         if DerrickProcessRole.isDaemon, let search = InProcessServiceBridges.mcpSearchTools {
             return try await search(principal, query)

@@ -1,13 +1,26 @@
 import Foundation
 
 public enum NewsReaderMode: String, Codable, Sendable, Hashable, CaseIterable {
+    case rss
     case list
-    case summaries
+    case summary
 
     public var displayName: String {
         switch self {
-        case .list: return "List articles"
-        case .summaries: return "Summaries"
+        case .rss: return "RSS feed"
+        case .list: return "Crawl site"
+        case .summary: return "AI summary"
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "rss": self = .rss
+        case "list": self = .list
+        case "summary", "summaries": self = .summary
+        default:
+            self = .rss
         }
     }
 }
@@ -46,6 +59,7 @@ public struct NewsReaderSpec: Codable, Sendable, Hashable, Identifiable {
     public var mode: NewsReaderMode
     public var maxCount: Int
     public var schedule: NewsReaderSchedule
+    public var summaryText: String?
     public var lastError: String?
     public var lastFetchedAt: Date?
     public var createdAt: Date
@@ -56,9 +70,10 @@ public struct NewsReaderSpec: Codable, Sendable, Hashable, Identifiable {
         name: String,
         topics: [String],
         sources: [NewsSource],
-        mode: NewsReaderMode = .list,
+        mode: NewsReaderMode = .rss,
         maxCount: Int = 20,
         schedule: NewsReaderSchedule = .off,
+        summaryText: String? = nil,
         lastError: String? = nil,
         lastFetchedAt: Date? = nil,
         createdAt: Date = .now,
@@ -71,6 +86,7 @@ public struct NewsReaderSpec: Codable, Sendable, Hashable, Identifiable {
         self.mode = mode
         self.maxCount = min(50, max(1, maxCount))
         self.schedule = schedule
+        self.summaryText = summaryText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.lastError = lastError
         self.lastFetchedAt = lastFetchedAt
         self.createdAt = createdAt
@@ -132,29 +148,45 @@ public enum NewsPresetTopic: String, Sendable, CaseIterable, Identifiable {
 }
 
 public enum NewsPresetSource: String, Sendable, CaseIterable, Identifiable {
-    case bbcWorld
-    case npr
-    case bbcTech
-    case hn
     case googleNews
+    case foxNews
+    case newsmax
+    case nationalReview
+    case wsj
 
     public var id: String { rawValue }
 
     public var source: NewsSource {
         switch self {
-        case .bbcWorld:
-            return NewsSource(id: rawValue, label: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml")
-        case .npr:
-            return NewsSource(id: rawValue, label: "NPR", url: "https://feeds.npr.org/1001/rss.xml")
-        case .bbcTech:
-            return NewsSource(id: rawValue, label: "BBC Technology", url: "https://feeds.bbci.co.uk/news/technology/rss.xml")
-        case .hn:
-            return NewsSource(id: rawValue, label: "Hacker News", url: "https://hnrss.org/frontpage")
         case .googleNews:
             return NewsSource(
                 id: rawValue,
                 label: "Google News",
                 url: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+            )
+        case .foxNews:
+            return NewsSource(
+                id: rawValue,
+                label: "Fox News",
+                url: "https://moxie.foxnews.com/google-publisher/latest.xml"
+            )
+        case .newsmax:
+            return NewsSource(
+                id: rawValue,
+                label: "Newsmax",
+                url: "https://www.newsmax.com/rss/Newsfront/"
+            )
+        case .nationalReview:
+            return NewsSource(
+                id: rawValue,
+                label: "National Review",
+                url: "https://www.nationalreview.com/feed/"
+            )
+        case .wsj:
+            return NewsSource(
+                id: rawValue,
+                label: "Wall Street Journal",
+                url: "https://feeds.a.dj.com/rss/RSSWorldNews.xml"
             )
         }
     }
@@ -167,6 +199,8 @@ public enum NewsReaderError: Error, Sendable, Equatable, LocalizedError {
     case emptyName
     case fetchFailed(url: String, detail: String)
     case notReady
+    case summarizerUnavailable
+    case workerUnavailable(String)
 
     public var errorDescription: String? {
         switch self {
@@ -182,6 +216,16 @@ public enum NewsReaderError: Error, Sendable, Equatable, LocalizedError {
             return "Could not read \(url). \(detail)"
         case .notReady:
             return "News lists are not ready yet. Try again in a moment."
+        case .summarizerUnavailable:
+            return "Add an API key in Settings before creating an AI summary list."
+        case .workerUnavailable(let detail):
+            return "News reader worker is not available. \(detail)"
         }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

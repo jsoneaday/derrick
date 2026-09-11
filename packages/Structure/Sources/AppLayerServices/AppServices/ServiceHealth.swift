@@ -14,9 +14,6 @@ public enum DerrickGuestRuntime: Sendable {
 
     /// Unified Go worker image for offline guests (`script_exec` / `plugin.invoke`).
     public static let guestDockerImage = DockerWorkerRuntime.image
-
-    /// Legacy Python image reported by older daemons. Hygiene retires a mismatch.
-    public static let legacyPythonGuestDockerImage = "python:3.14.7"
 }
 
 public struct ServiceHealthReport: Codable, Sendable, Hashable {

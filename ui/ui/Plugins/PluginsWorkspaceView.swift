@@ -10,6 +10,9 @@ struct PluginsWorkspaceView: View {
     let onOpenMessagingConnector: (String) -> Void
     var onOpenNewsReader: (String) -> Void = { _ in }
 
+    @State private var newsTopicDraft = ""
+    @State private var newsURLDraft = ""
+
     var body: some View {
         ZStack {
             Color(red: 252.0 / 255.0, green: 252.0 / 255.0, blue: 250.0 / 255.0)
@@ -33,8 +36,8 @@ struct PluginsWorkspaceView: View {
             isPresented: true,
             minWidth: 400,
             minHeight: 0,
-            maxWidth: 520,
-            maxHeight: controller.phase == .chooseNews ? 720 : 560,
+            maxWidth: 560,
+            maxHeight: modalMaxHeight,
             onBackdropDismiss: canDismiss ? { controller.showIntro() } : nil,
             onEscape: canDismiss ? { controller.showIntro() } : nil,
             header: {
@@ -57,6 +60,13 @@ struct PluginsWorkspaceView: View {
         )
     }
 
+    private var modalMaxHeight: CGFloat {
+        switch controller.phase {
+        case .skill, .preview: return 720
+        default: return 560
+        }
+    }
+
     private var canDismiss: Bool {
         switch controller.phase {
         case .creating, .discoveringAuth: return false
@@ -67,17 +77,31 @@ struct PluginsWorkspaceView: View {
     private var modalTitle: String {
         switch controller.phase {
         case .intro: return "Create a plugin"
-        case .chooseType: return "Create a plugin"
-        case .chooseVendor: return "Choose a vendor"
-        case .chooseName: return "Name this connector"
-        case .chooseNews: return "News list"
+        case .goal: return "What should it do?"
+        case .skill: return "Define the skill"
+        case .preview: return "Preview"
         case .discoveringAuth: return "Reading authentication docs"
-        case .creating: return controller.selectedType == .newsReader ? "Creating news list" : "Creating connector"
-        case .collectCredentials: return "Connector credentials"
-        case .failed: return controller.selectedType == .newsReader ? "Could not create news list" : "Could not create connector"
-        case .succeeded: return "Connector ready"
-        case .succeededNews: return "News list ready"
+        case .creating: return creatingTitle
+        case .collectCredentials: return "Plugin credentials"
+        case .failed: return failureTitle
+        case .succeeded(_, let outcome):
+            return outcome == .newsList ? "News list ready" : "Plugin ready"
         }
+    }
+
+    private var creatingTitle: String {
+        switch controller.skillDraft.plannedKind {
+        case .newsDigest: return "Creating news list"
+        case .messagingConnector: return "Creating connector"
+        case .customCapability: return "Building plugin"
+        }
+    }
+
+    private var failureTitle: String {
+        if case .failed(let step, _, _) = controller.phase, step == .news {
+            return "Could not create news list"
+        }
+        return "Could not create plugin"
     }
 
     @ViewBuilder
@@ -85,101 +109,31 @@ struct PluginsWorkspaceView: View {
         switch controller.phase {
         case .intro:
             Text("""
-            A plugin is a small program that extends the capabilities of Derrick. This form will guide you through the process of building your own unique and secure plugins.
+            Describe what you want Derrick to do. Derrick will draft a skill, show you a preview, and build a secure plugin package.
             """)
             .font(.body)
             .fixedSize(horizontal: false, vertical: true)
 
-        case .chooseType:
+        case .goal:
             VStack(alignment: .leading, spacing: 10) {
-                Text("What kind of plugin do you want?")
+                Text("What do you want Derrick to do?")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                typeButton(
-                    title: "Connector",
-                    subtitle: "Messaging integration (Slack)",
-                    type: .connector,
-                    enabled: true
+                TextField(
+                    "e.g. Send Slack messages from Messaging, or fetch tech headlines",
+                    text: controller.skillDraftBinding(\.goal),
+                    axis: .vertical
                 )
-                typeButton(
-                    title: "News reader",
-                    subtitle: "Saved lists from topics and sources",
-                    type: .newsReader,
-                    enabled: true
-                )
-                typeButton(
-                    title: "Custom",
-                    subtitle: "Coming soon",
-                    type: .custom,
-                    enabled: false
-                )
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3...6)
+                .accessibilityIdentifier("plugin-goal-field")
             }
 
-        case .chooseVendor:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Which service should this connector use?")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                    ForEach(PluginFactoryCreateInput.ConnectorVendor.allCases, id: \.self) { vendor in
-                        let enabled = vendor.isSelectableInWizard
-                        Button {
-                            guard enabled else { return }
-                            controller.selectedVendor = vendor
-                        } label: {
-                            VStack(spacing: 4) {
-                                Text(vendor.displayName)
-                                    .font(.subheadline.weight(.medium))
-                                if !enabled {
-                                    Text("Soon")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(
-                                enabled && controller.selectedVendor == vendor
-                                    ? Color.accentColor.opacity(0.15)
-                                    : Color.primary.opacity(enabled ? 0.05 : 0.03)
-                            )
-                            .foregroundStyle(enabled ? .primary : .secondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!enabled)
-                        .accessibilityLabel(enabled ? vendor.displayName : "\(vendor.displayName), coming soon")
-                    }
-                }
-                if controller.selectedVendor == .custom {
-                    TextField("Vendor name", text: $controller.customVendorName)
-                        .textFieldStyle(.roundedBorder)
-                }
-                Text("This connector lists conversations as tabs, including reply threads, then sends and receives new messages.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-                if controller.selectedVendor == .slack {
-                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+        case .skill:
+            skillBuilderForm
 
-        case .chooseName:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Give this connector a name. You can change the default.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                TextField("Connector name", text: $controller.connectorName)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("connector-plugin-name")
-            }
-
-        case .chooseNews:
-            newsReaderForm
+        case .preview:
+            previewForm
 
         case .discoveringAuth, .creating:
             VStack(alignment: .leading, spacing: 14) {
@@ -198,7 +152,7 @@ struct PluginsWorkspaceView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if controller.selectedVendor == .slack {
+                if controller.skillDraft.inferredConnectorVendor == .slack {
                     Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -210,58 +164,10 @@ struct PluginsWorkspaceView: View {
             }
 
         case .failed(_, let message, let technicalDetail):
-            VStack(alignment: .leading, spacing: 10) {
-                if controller.selectedType == .newsReader {
-                    Label(
-                        message.localizedCaseInsensitiveContains("paywall")
-                            ? "Blocked because of a paywall"
-                            : "News list was not created",
-                        systemImage: "exclamationmark.triangle.fill"
-                    )
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(message.localizedCaseInsensitiveContains("paywall") ? Color.orange : Color.secondary)
-                    .accessibilityIdentifier(
-                        message.localizedCaseInsensitiveContains("paywall")
-                            ? "news-paywall-blocked"
-                            : "news-create-failed"
-                    )
-                    if message.localizedCaseInsensitiveContains("paywall") {
-                        Text(NewsPaywall.userWarning)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else {
-                    Label("Nothing was installed", systemImage: "minus.circle")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Your sidebar and Messaging are unchanged.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text(message)
-                    .font(.body)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-                if let technicalDetail, !technicalDetail.isEmpty {
-                    DisclosureGroup("Technical details") {
-                        Text(technicalDetail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
+            failureBody(message: message, technicalDetail: technicalDetail)
 
-        case .succeeded(let pluginID):
-            Text("Your connector /\(pluginID) is ready. Open it to start talking in Messaging.")
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-        case .succeededNews:
-            Text("Your news list is ready. Every article includes a source link.")
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+        case .succeeded(let pluginID, let outcome):
+            successBody(pluginID: pluginID, outcome: outcome)
         }
     }
 
@@ -271,62 +177,48 @@ struct PluginsWorkspaceView: View {
         case .intro:
             HStack {
                 Spacer()
-                Button("Create plugin") { controller.beginCreate() }
+                Button("Begin") { controller.beginCreate() }
                     .buttonStyle(ModalPrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }
 
-        case .chooseType:
+        case .goal:
             HStack {
                 Button("Back") { controller.showIntro() }
                     .buttonStyle(ModalSecondaryButtonStyle())
                 Spacer()
-                Button("Continue") { controller.confirmTypeSelection() }
+                Button("Continue") { controller.continueFromGoal() }
                     .buttonStyle(ModalPrimaryButtonStyle())
-                    .disabled(
-                        controller.selectedType != .connector
-                            && controller.selectedType != .newsReader
-                    )
+                    .disabled(!controller.canContinueFromGoal)
                     .keyboardShortcut(.defaultAction)
             }
 
-        case .chooseVendor:
+        case .skill:
             HStack {
-                Button("Back") { controller.goBackToTypeSelection() }
+                Button("Back") { controller.goBackToGoal() }
                     .buttonStyle(ModalSecondaryButtonStyle())
                 Spacer()
-                Button("Continue") {
-                    controller.confirmVendor(
+                Button("Preview") { controller.continueToPreview() }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .disabled(!controller.canContinueFromSkill)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+        case .preview:
+            HStack {
+                Button("Back") { controller.goBackToSkill() }
+                    .buttonStyle(ModalSecondaryButtonStyle())
+                Spacer()
+                Button(buildButtonTitle) {
+                    controller.confirmPreview(
                         sessionID: sessionID,
                         helperAPIKey: helperAPIKey,
                         helperReviewerModelJSON: helperReviewerModelJSON
                     )
                 }
                 .buttonStyle(ModalPrimaryButtonStyle())
-                .disabled(!sessionReady || !controller.canConfirmVendor)
+                .disabled(!sessionReady || !controller.canContinueFromSkill)
                 .keyboardShortcut(.defaultAction)
-            }
-
-        case .chooseName:
-            HStack {
-                Button("Back") { controller.goBackToVendor() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                Spacer()
-                Button("Continue") { controller.confirmConnectorName() }
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .disabled(!controller.canConfirmName)
-                    .keyboardShortcut(.defaultAction)
-            }
-
-        case .chooseNews:
-            HStack {
-                Button("Back") { controller.goBackToTypeSelection() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                Spacer()
-                Button("Create") { controller.startNewsCreation() }
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .disabled(!controller.canConfirmNews)
-                    .keyboardShortcut(.defaultAction)
             }
 
         case .discoveringAuth, .creating:
@@ -352,28 +244,448 @@ struct PluginsWorkspaceView: View {
                     .buttonStyle(ModalSecondaryButtonStyle())
             }
 
-        case .succeeded(let pluginID):
+        case .succeeded(let pluginID, let outcome):
             HStack {
-                Button("Done") { controller.dismissSuccess() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                Spacer()
-                Button("Open connector") {
-                    onOpenMessagingConnector(pluginID)
+                if outcome != .plugin || controller.skillDraft.plannedKind == .messagingConnector {
+                    Button("Done") { controller.dismissSuccess() }
+                        .buttonStyle(ModalSecondaryButtonStyle())
                 }
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
+                Spacer()
+                switch outcome {
+                case .newsList:
+                    Button("Open news list") {
+                        onOpenNewsReader(pluginID)
+                    }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                case .plugin where controller.skillDraft.plannedKind == .messagingConnector:
+                    Button("Open connector") {
+                        onOpenMessagingConnector(pluginID)
+                    }
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                case .plugin:
+                    Button("Done") { controller.dismissSuccess() }
+                        .buttonStyle(ModalPrimaryButtonStyle())
+                        .keyboardShortcut(.defaultAction)
+                }
             }
 
-        case .succeededNews(let readerID):
-            HStack {
-                Button("Done") { controller.dismissSuccess() }
-                    .buttonStyle(ModalSecondaryButtonStyle())
-                Spacer()
-                Button("Open news list") {
-                    onOpenNewsReader(readerID)
+        }
+    }
+
+    private var buildButtonTitle: String {
+        switch controller.skillDraft.plannedKind {
+        case .newsDigest: return "Create"
+        default: return "Build plugin"
+        }
+    }
+
+    private var skillBuilderForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                plannedKindBadge
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Purpose")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("What this plugin does", text: controller.skillDraftBinding(\.purpose), axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
                 }
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("When to use")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    FlowLayout(spacing: 8) {
+                        ForEach(PluginSkillDraft.Trigger.allCases, id: \.self) { trigger in
+                            triggerChip(trigger)
+                        }
+                    }
+                }
+
+                examplesSection
+
+                if controller.skillDraft.plannedKind == .newsDigest {
+                    newsFieldsSection
+                }
+
+                nameFieldSection
+
+                if let blocked = controller.skillDraft.buildBlockedReason {
+                    Text(blocked)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var plannedKindBadge: some View {
+        let (label, icon) = plannedKindPresentation
+        return Label(label, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.05), in: Capsule())
+    }
+
+    private var plannedKindPresentation: (String, String) {
+        switch controller.skillDraft.plannedKind {
+        case .messagingConnector:
+            let vendor = controller.skillDraft.inferredConnectorVendor?.displayName ?? "Messaging"
+            return ("\(vendor) connector", "bubble.left.and.bubble.right")
+        case .newsDigest:
+            return ("News list", "newspaper")
+        case .customCapability:
+            return ("Custom capability", "wand.and.stars")
+        }
+    }
+
+    private var examplesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Examples")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Add example") { controller.addExample() }
+                    .font(.caption)
+            }
+            ForEach(controller.skillDraft.examples) { example in
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("You say…", text: exampleBinding(example.id, field: .userSays))
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Plugin does…", text: exampleBinding(example.id, field: .pluginDoes))
+                        .textFieldStyle(.roundedBorder)
+                    if controller.skillDraft.examples.count > 1 {
+                        Button("Remove") { controller.removeExample(id: example.id) }
+                            .font(.caption)
+                    }
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private enum ExampleField { case userSays, pluginDoes }
+
+    private func exampleBinding(_ id: String, field: ExampleField) -> Binding<String> {
+        Binding(
+            get: {
+                guard let index = controller.skillDraft.examples.firstIndex(where: { $0.id == id }) else {
+                    return ""
+                }
+                switch field {
+                case .userSays: return controller.skillDraft.examples[index].userSays
+                case .pluginDoes: return controller.skillDraft.examples[index].pluginDoes
+                }
+            },
+            set: { newValue in
+                switch field {
+                case .userSays: controller.updateExample(id: id, userSays: newValue)
+                case .pluginDoes: controller.updateExample(id: id, pluginDoes: newValue)
+                }
+            }
+        )
+    }
+
+    private var newsFieldsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Topics")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                ForEach(NewsPresetTopic.allCases) { topic in
+                    let on = controller.skillDraft.newsTopics.contains(topic.displayName)
+                    Button {
+                        if on {
+                            controller.removeNewsTopic(topic.displayName)
+                        } else if !controller.skillDraft.newsTopics.contains(topic.displayName) {
+                            controller.addNewsTopicFromPreset(topic.displayName)
+                        }
+                    } label: {
+                        Text(topic.displayName)
+                            .font(.caption.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                TextField("Add a custom topic", text: $newsTopicDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addNewsTopicFromDraft() }
+                Button("Add") { addNewsTopicFromDraft() }
+            }
+            Text("Sources")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                ForEach(NewsPresetSource.allCases) { source in
+                    let url = source.source.url
+                    let on = controller.skillDraft.newsSourceURLs.contains(url)
+                    Button {
+                        if on {
+                            controller.removeNewsURL(url)
+                        } else {
+                            controller.addNewsURL(url)
+                        }
+                    } label: {
+                        Text(source.source.label)
+                            .font(.caption.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                TextField("https://…", text: $newsURLDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("news-url-field")
+                    .onSubmit { addNewsURLFromDraft() }
+                Button("Add URL") { addNewsURLFromDraft() }
+            }
+            ForEach(controller.skillDraft.newsSourceURLs, id: \.self) { url in
+                HStack {
+                    Text(url)
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Remove") { controller.removeNewsURL(url) }
+                        .font(.caption)
+                }
+            }
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(NewsPaywall.userWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func addNewsTopicFromDraft() {
+        let topic = newsTopicDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty else { return }
+        controller.addNewsTopicFromPreset(topic)
+        newsTopicDraft = ""
+    }
+
+    private func triggerChip(_ trigger: PluginSkillDraft.Trigger) -> some View {
+        let available = controller.skillDraft.isTriggerAvailable(trigger)
+        let on = available && controller.skillDraft.triggers.contains(trigger)
+        return Button {
+            controller.toggleTrigger(trigger)
+        } label: {
+            Text(trigger.label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(chipBackground(on: on, available: available))
+                .foregroundStyle(available ? .primary : .tertiary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!available)
+        .help(triggerHelp(trigger, available: available))
+    }
+
+    private func chipBackground(on: Bool, available: Bool) -> Color {
+        guard available else { return Color.primary.opacity(0.03) }
+        return on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05)
+    }
+
+    private func triggerHelp(
+        _ trigger: PluginSkillDraft.Trigger,
+        available: Bool
+    ) -> String {
+        guard !available else { return "" }
+        switch controller.skillDraft.plannedKind {
+        case .newsDigest:
+            switch trigger {
+            case .mention:
+                return "News lists live in the sidebar, not as /slash commands."
+            case .messaging:
+                return "News lists are not messaging connectors."
+            default:
+                return "Not available for news lists."
+            }
+        case .messagingConnector:
+            switch trigger {
+            case .schedule:
+                return "Connectors respond in Messaging, not on a timer."
+            default:
+                return "Not available for messaging connectors."
+            }
+        case .customCapability:
+            switch trigger {
+            case .messaging:
+                return "Only messaging connectors use the Messaging tab."
+            default:
+                return "Not available for this plugin type."
+            }
+        }
+    }
+
+    private var nameFieldSection: some View {
+        let isNews = controller.skillDraft.plannedKind == .newsDigest
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(isNews ? "List name" : "Plugin name")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(isNews ? "List name" : "Plugin name", text: controller.skillDraftBinding(\.pluginName))
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("connector-plugin-name")
+            if isNews {
+                Text("This name appears in the sidebar. News lists are not slash commands.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if controller.canConfirmPluginName {
+                Text("Invoke this plugin in chat as /\(normalizedPluginID()).")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("Use letters, numbers, and hyphens (for example tech-news).")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func normalizedPluginID() -> String {
+        let trimmed = controller.skillDraft.pluginName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalized = try? PluginID.normalized(trimmed) {
+            return normalized.rawValue
+        }
+        return trimmed.isEmpty ? "plugin" : trimmed
+    }
+
+    private func addNewsURLFromDraft() {
+        controller.addNewsURL(newsURLDraft)
+        newsURLDraft = ""
+    }
+
+    private var previewForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                plannedKindBadge
+
+                nameFieldSection
+
+                if controller.skillDraft.plannedKind == .newsDigest {
+                    Text(
+                        "Display mode: \(PluginSkillDraftPlanner.inferNewsMode(from: controller.skillDraft).displayName)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Scenarios")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(controller.skillDraft.previewScenarios(), id: \.self) { scenario in
+                        Text(scenario)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Package")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(controller.skillDraft.packageOutline(), id: \.self) { line in
+                        Label(line, systemImage: "doc")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("SKILL.md")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(controller.skillDraft.skillMarkdown())
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func failureBody(message: String, technicalDetail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if case .failed(let step, _, _) = controller.phase, step == .news {
+                Label(
+                    message.localizedCaseInsensitiveContains("paywall")
+                        ? "Blocked because of a paywall"
+                        : "News list was not created",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(message.localizedCaseInsensitiveContains("paywall") ? Color.orange : Color.secondary)
+            } else {
+                Label("Nothing was installed", systemImage: "minus.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Your sidebar and Messaging are unchanged.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(message)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            if let technicalDetail, !technicalDetail.isEmpty {
+                DisclosureGroup("Technical details") {
+                    Text(technicalDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func successBody(pluginID: String, outcome: PluginCreationController.SuccessOutcome) -> some View {
+        switch outcome {
+        case .newsList:
+            Text("Your news list is ready. Every article includes a source link.")
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+        case .plugin:
+            if controller.skillDraft.plannedKind == .messagingConnector {
+                Text("Your connector /\(pluginID) is ready. Open it to start talking in Messaging.")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Your plugin /\(pluginID) is ready.")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -443,169 +755,47 @@ struct PluginsWorkspaceView: View {
             set: { controller.credentialDrafts[id] = $0 }
         )
     }
+}
 
-    private func typeButton(
-        title: String,
-        subtitle: String,
-        type: PluginFactoryCreateInput.PluginType,
-        enabled: Bool
-    ) -> some View {
-        Button {
-            guard enabled else { return }
-            controller.selectType(type)
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(enabled ? .primary : .secondary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !enabled {
-                    Text("Soon")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else if controller.selectedType == type {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                controller.selectedType == type && enabled
-                    ? Color.accentColor.opacity(0.12)
-                    : Color.primary.opacity(enabled ? 0.05 : 0.03)
+/// Simple horizontal flow for trigger chips when `Layout` is unavailable.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrange(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(proposal: proposal, subviews: subviews)
+        for (index, frame) in result.frames.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(frame.size)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
     }
 
-    private var newsReaderForm: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                TextField("Name this list", text: $controller.newsName)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("news-list-name")
-                Text("Topics")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
-                    ForEach(NewsPresetTopic.allCases) { topic in
-                        let on = controller.selectedNewsTopics.contains(topic)
-                        Button {
-                            if on {
-                                controller.selectedNewsTopics.remove(topic)
-                            } else {
-                                controller.selectedNewsTopics.insert(topic)
-                            }
-                        } label: {
-                            Text(topic.displayName)
-                                .font(.caption.weight(.medium))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                HStack {
-                    TextField("Add a custom topic", text: $controller.newsTopicDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { controller.addNewsTopic() }
-                    Button("Add") { controller.addNewsTopic() }
-                }
-                if !controller.extraNewsTopics.isEmpty {
-                    Text(controller.extraNewsTopics.joined(separator: ", "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("Sources")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
-                    ForEach(NewsPresetSource.allCases) { source in
-                        let on = controller.selectedNewsSources.contains(source)
-                        Button {
-                            if on {
-                                controller.selectedNewsSources.remove(source)
-                            } else {
-                                controller.selectedNewsSources.insert(source)
-                            }
-                        } label: {
-                            Text(source.source.label)
-                                .font(.caption.weight(.medium))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(on ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                HStack {
-                    TextField("https://…", text: $controller.newsURLDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("news-url-field")
-                        .onSubmit { controller.addNewsURL() }
-                    Button("Add URL") { controller.addNewsURL() }
-                }
-                ForEach(controller.extraNewsURLs, id: \.self) { url in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(url)
-                                .font(.caption)
-                                .lineLimit(1)
-                            Spacer()
-                            Button("Remove") { controller.removeNewsURL(url) }
-                                .font(.caption)
-                        }
-                        if let reason = newsURLPaywallReason(url) {
-                            Text(reason)
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text(NewsPaywall.userWarning)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.caption)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("news-paywall-warning")
-                Picker("Mode", selection: $controller.newsMode) {
-                    ForEach(NewsReaderMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                Stepper("Up to \(controller.newsMaxCount) items", value: $controller.newsMaxCount, in: 5...50, step: 5)
-                Picker("Schedule", selection: $controller.newsSchedule) {
-                    ForEach(NewsReaderSchedule.allCases, id: \.self) { schedule in
-                        Text(schedule.displayName).tag(schedule)
-                    }
-                }
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var frames: [CGRect] = []
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
             }
+            frames.append(CGRect(x: x, y: y, width: size.width, height: size.height))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
         }
-    }
 
-    private func newsURLPaywallReason(_ raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let normalized = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let url = URL(string: normalized) else { return nil }
-        return NewsPaywall.preflightRejection(url: url)
+        return (CGSize(width: maxWidth, height: y + rowHeight), frames)
     }
 }
 

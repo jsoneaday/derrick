@@ -36,12 +36,19 @@ public enum DockerProductImagePrewarmer: Sendable {
     ) async throws {
         let inspect = try await executor(["image", "inspect", tag], Data(), 30)
         if inspect.exitCode == 0 {
-            try await DockerImageInspector.verifyPinned(
+            let binariesCurrent = await DockerImageInspector.workerImageHasCurrentBinaries(
                 tag: tag,
-                expected: pinnedDigest,
                 executor: executor
             )
-            return
+            if binariesCurrent {
+                try await DockerImageInspector.verifyPinned(
+                    tag: tag,
+                    expected: pinnedDigest,
+                    executor: executor
+                )
+                return
+            }
+            // Stale worker image (missing news reader, etc.). Rebuild overwrites the tag.
         }
 
         guard let repoRoot = DerrickRepositoryRoot.locate() else {

@@ -56,7 +56,7 @@ struct NewsWorkspaceView: View {
                 .foregroundStyle(.secondary)
             Text("No news lists yet")
                 .font(.title3.weight(.semibold))
-            Text("Create a News reader from Plugins. You can pick several topics and several sources.")
+            Text("Create a news list from Plugins. Derrick fetches articles in Docker, then shows them here.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -77,11 +77,14 @@ struct NewsWorkspaceView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                 }
-                if store.selectedReader?.mode == .summaries, !store.items.isEmpty {
+
+                if store.selectedReader?.mode == .summary,
+                   let summary = store.selectedReader?.summaryText,
+                   !summary.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Summary")
                             .font(.subheadline.weight(.semibold))
-                        Text(NewsReaderRefresh.digest(from: store.items))
+                        Text(LocalizedStringKey(summary))
                             .font(.body)
                             .textSelection(.enabled)
                     }
@@ -89,31 +92,34 @@ struct NewsWorkspaceView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
                 }
-                ForEach(store.items) { item in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Link(destination: URL(string: item.sourceURL) ?? URL(string: "https://example.com")!) {
-                            Text(item.title)
-                                .font(.body.weight(.semibold))
-                                .multilineTextAlignment(.leading)
-                        }
-                        HStack(spacing: 8) {
-                            Text(item.sourceLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Link("Source", destination: URL(string: item.sourceURL) ?? URL(string: "https://example.com")!)
-                                .font(.caption.weight(.semibold))
-                        }
-                        if let summary = item.summary, !summary.isEmpty, store.selectedReader?.mode == .list {
-                            Text(summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(4)
+
+                if store.selectedReader?.mode != .summary {
+                    ForEach(store.items) { item in
+                        articleCard(item)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Sources")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(store.items) { item in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("•")
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Link(item.title, destination: URL(string: item.sourceURL) ?? URL(string: "https://example.com")!)
+                                        .font(.caption.weight(.semibold))
+                                    Text(item.sourceLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
                 }
+
                 if store.items.isEmpty, store.lastError == nil, store.selectedReader?.lastError == nil {
                     Text("No articles yet. Refresh this list.")
                         .font(.subheadline)
@@ -122,6 +128,36 @@ struct NewsWorkspaceView: View {
             }
             .padding(24)
         }
+    }
+
+    @ViewBuilder
+    private func articleCard(_ item: NewsItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Link(destination: URL(string: item.sourceURL) ?? URL(string: "https://example.com")!) {
+                Text(item.title)
+                    .font(.body.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+            }
+            HStack(spacing: 8) {
+                Text(item.sourceLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let host = URL(string: item.sourceURL)?.host {
+                    Link(host, destination: URL(string: item.sourceURL) ?? URL(string: "https://example.com")!)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+            }
+            if let summary = item.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func headerSubtitle(_ reader: NewsReaderSpec) -> String {

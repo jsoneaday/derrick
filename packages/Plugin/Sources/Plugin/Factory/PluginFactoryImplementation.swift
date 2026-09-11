@@ -240,10 +240,14 @@ public struct PluginFactory: Sendable {
         }
 
         let runtimeJSON = try runtimeJSON(for: manifest)
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: draft.manifestJSON
+        )
         var files: [String: Data] = [
             "plugin.json": Data(draft.manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.go": Data(draft.guestSource.utf8),
+            guestPath: Data(draft.guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
         for (path, body) in draft.skillFiles {

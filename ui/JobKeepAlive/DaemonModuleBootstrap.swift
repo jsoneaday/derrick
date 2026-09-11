@@ -37,6 +37,9 @@ enum DaemonModuleBootstrap {
                 let tools = try await MCPServiceToolHost.shared.searchTools(query: query, principal: principal)
                 return MCPToolSearchResultDTO(ok: true, tools: tools, message: "ok")
             }
+            InProcessServiceBridges.runNewsReader = { requestJSON in
+                try await MCPServiceToolHost.shared.runNewsReader(requestJSON: requestJSON)
+            }
             InProcessServiceBridges.jobLocalProxy = JobServiceExportedObject()
             InProcessServiceBridges.jobNetworkPreflight = { toolName, argumentsJSON, jobID in
                 let repo = try await JobServiceStore.shared.sharedRepository()
@@ -99,7 +102,7 @@ enum DaemonModuleBootstrap {
     }
 
     /// Remove leftover runtime containers before the job scheduler starts.
-    /// Guest image pull stays in the background so a cold Python pull does not block jobs.
+    /// Guest image pull stays in the background so a cold worker image pull does not block jobs.
     private static func sweepEmbeddedDockerLeftovers() async {
         guard DerrickProcessRole.isDaemon else { return }
         do {

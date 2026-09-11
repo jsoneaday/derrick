@@ -23,6 +23,39 @@ import Testing
         """
     }
 
+    @Test func releaseVerifiesWithEntrypointGuestPath() throws {
+        let runtimeJSON = #"{"entrypoint":"./app.derrick/plugin.go","language":"go"}"#
+        let manifestJSON = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connector-1","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector"}}}
+        """
+        let guestSource = "package main\n"
+        let artifact = Data("binary".utf8)
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: manifestJSON
+        )
+        #expect(guestPath == "app.derrick/plugin.go")
+        let files: [String: Data] = [
+            "plugin.json": Data(manifestJSON.utf8),
+            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
+            guestPath: Data(guestSource.utf8),
+            "app.derrick/plugin": artifact,
+        ]
+        let release = PluginFactoryRelease(
+            pluginID: "slack-connector-1",
+            version: "1.0.0",
+            manifestJSON: manifestJSON,
+            runtimeJSON: runtimeJSON,
+            guestSource: guestSource,
+            compiledArtifact: artifact,
+            skillFiles: [:],
+            contentHash: PluginContentHash.hash(files: files),
+            reviewSummary: "ok"
+        )
+        #expect(release.verifyIntegrity())
+    }
+
     @Test func guestLanguageIsGoFromRuntimeJSON() {
         let release = PluginFactoryRelease(
             pluginID: "slack-connection",
@@ -121,9 +154,17 @@ import Testing
                 draft: PluginFactoryDraft(
                     manifestJSON: manifestJSON(),
                     guestSource: """
-                    import json, sys
-                    _ = json.load(sys.stdin)
-                    print("not a plugin envelope")
+                    package main
+
+                    import (
+                        "encoding/json"
+                        "os"
+                    )
+
+                    func main() {
+                        _ = json.NewDecoder(os.Stdin).Decode(&map[string]any{})
+                        os.Stdout.WriteString("not a plugin envelope")
+                    }
                     """,
                     testInput: Data(#"{"kind":"manual"}"#.utf8)
                 ),
@@ -132,10 +173,7 @@ import Testing
             )
             Issue.record("Expected invalid output")
         } catch let error as PluginFactoryError {
-            #expect(
-                error.localizedDescription.contains("invalid plugin output")
-                    || error.localizedDescription.contains("Python draft test failed")
-            )
+            #expect(error.localizedDescription.contains("invalid plugin output"))
             #expect(await reviewer.callCount == 0)
         }
     }
@@ -457,17 +495,7 @@ import Testing
         )
         let draft = PluginFactoryDraft(
             manifestJSON: manifestJSON,
-            guestSource: """
-            import json, sys
-            event = json.load(sys.stdin)
-            for item in event.get("http_results") or []:
-                if item.get("request_id") == "send-1":
-                    body = json.loads(item.get("body") or "{}")
-                    if body.get("ok"):
-                        json.dump([{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1.0"}}], sys.stdout)
-                        sys.exit(0)
-            json.dump([{"verb":"result.emit","summary":"failed"}], sys.stdout)
-            """,
+            guestSource: connectorGuestGoSource(),
             testInput: testInput,
             userGoal: fullSyncGoal()
         )
@@ -630,18 +658,45 @@ private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
     """
     return PluginFactoryDraft(
         manifestJSON: manifestJSON,
-        guestSource: """
-        import json, sys
-        event = json.load(sys.stdin)
-        def emit(v):
-            json.dump(v, sys.stdout, separators=(",", ":"))
-        if event.get("http_results"):
-            emit([{"verb":"result.emit","sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}])
-        else:
-            emit([{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage"}])
-        """,
+        guestSource: connectorGuestGoSource(),
         testInput: testInput
     )
+}
+
+private func connectorGuestGoSource() -> String {
+    """
+    package main
+
+    import (
+        "encoding/json"
+        "os"
+    )
+
+    func main() {
+        var event map[string]any
+        _ = json.NewDecoder(os.Stdin).Decode(&event)
+        if _, ok := event["http_results"]; ok {
+            enc := json.NewEncoder(os.Stdout)
+            enc.SetEscapeHTML(false)
+            _ = enc.Encode([]map[string]any{{
+                "verb": "result.emit",
+                "sent_message": map[string]any{
+                    "vendor_message_id": "1.0",
+                    "created_at": "1710000001.0",
+                },
+            }})
+            return
+        }
+        enc := json.NewEncoder(os.Stdout)
+        enc.SetEscapeHTML(false)
+        _ = enc.Encode([]map[string]any{{
+            "verb": "http.request",
+            "request_id": "send-1",
+            "method": "POST",
+            "url": "https://slack.com/api/chat.postMessage",
+        }})
+    }
+    """
 }
 
 private actor SequenceFactoryBuilder: PluginFactoryBuilder {

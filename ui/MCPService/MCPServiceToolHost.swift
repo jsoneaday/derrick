@@ -195,6 +195,36 @@ actor MCPServiceToolHost {
         return made
     }
 
+    func runNewsReader(requestJSON: Data, timeoutSeconds: Int = 180) async throws -> NewsReaderRunResult {
+        _ = try await ensureReady()
+        let executor = NewsReaderDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
+        let result = try await executor.run(input: requestJSON, timeoutSeconds: timeoutSeconds)
+        let stderrText = String(decoding: result.stderr, as: UTF8.self)
+        if result.exitCode != 0 {
+            let detail = newsReaderFailureDetail(exitCode: result.exitCode, stderr: stderrText)
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "news reader failed: \(detail)",
+                code: "news_reader_failed"
+            )
+            return NewsReaderRunResult(
+                ok: false,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                message: detail
+            )
+        }
+        guard !result.stdout.isEmpty else {
+            return NewsReaderRunResult(
+                ok: false,
+                message: "News reader returned no output."
+            )
+        }
+        return NewsReaderRunResult(ok: true, stdout: result.stdout, stderr: result.stderr)
+    }
+
     func searchTools(query: String, principal: ServicePrincipal) async throws -> [MCPToolDescriptorDTO] {
         let client = try await ensureReady().client
         await MCPServiceStore.shared.log(
@@ -357,4 +387,16 @@ private func pluginFactoryFailureDetail(for error: Error) -> String {
         return factoryError.localizedDescription
     }
     return error.localizedDescription
+}
+
+private func newsReaderFailureDetail(exitCode: Int32, stderr: String) -> String {
+    if exitCode == 126 {
+        return """
+        The worker image on this Mac is missing the news reader binary. Quit Derrick completely and reopen it so the worker image can rebuild, then try again.
+        """
+    }
+    if !stderr.isEmpty {
+        return stderr
+    }
+    return "exit \(exitCode)"
 }

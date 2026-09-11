@@ -12,7 +12,7 @@ public extension DBRepository {
             try Self.execute("""
             INSERT INTO news_readers (
                 id, name, topics_json, sources_json, mode, max_count, schedule,
-                last_error, last_fetched_at, created_at, updated_at
+                summary_text, last_error, last_fetched_at, created_at, updated_at
             ) VALUES (
                 \(quoted(spec.id)),
                 \(quoted(spec.name)),
@@ -21,6 +21,7 @@ public extension DBRepository {
                 \(quoted(spec.mode.rawValue)),
                 \(spec.maxCount),
                 \(quoted(spec.schedule.rawValue)),
+                \(sqlValue(spec.summaryText)),
                 \(sqlValue(spec.lastError)),
                 \(sqlValue(spec.lastFetchedAt.map { Self.iso8601Formatter().string(from: $0) })),
                 \(quoted(Self.iso8601Formatter().string(from: spec.createdAt))),
@@ -33,6 +34,7 @@ public extension DBRepository {
                 mode = excluded.mode,
                 max_count = excluded.max_count,
                 schedule = excluded.schedule,
+                summary_text = excluded.summary_text,
                 last_error = excluded.last_error,
                 last_fetched_at = excluded.last_fetched_at,
                 updated_at = excluded.updated_at;
@@ -44,7 +46,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let sql = """
             SELECT id, name, topics_json, sources_json, mode, max_count, schedule,
-                   last_error, last_fetched_at, created_at, updated_at
+                   summary_text, last_error, last_fetched_at, created_at, updated_at
             FROM news_readers
             ORDER BY updated_at DESC;
             """
@@ -97,7 +99,7 @@ public extension DBRepository {
             SELECT id, reader_id, title, source_url, source_label, summary, published_at, fetched_at
             FROM news_items
             WHERE reader_id = \(quoted(readerID))
-            ORDER BY fetched_at DESC;
+            ORDER BY COALESCE(published_at, fetched_at) DESC;
             """
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
@@ -126,13 +128,14 @@ public extension DBRepository {
             name: text(1),
             topics: topics,
             sources: sources,
-            mode: NewsReaderMode(rawValue: text(4)) ?? .list,
+            mode: NewsReaderMode(rawValue: text(4)) ?? .rss,
             maxCount: Int(sqlite3_column_int(statement, 5)),
             schedule: NewsReaderSchedule(rawValue: text(6)) ?? .off,
-            lastError: optionalText(7),
-            lastFetchedAt: optionalText(8).flatMap { Self.iso8601Formatter().date(from: $0) },
-            createdAt: Self.iso8601Formatter().date(from: text(9)) ?? .now,
-            updatedAt: Self.iso8601Formatter().date(from: text(10)) ?? .now
+            summaryText: optionalText(7),
+            lastError: optionalText(8),
+            lastFetchedAt: optionalText(9).flatMap { Self.iso8601Formatter().date(from: $0) },
+            createdAt: Self.iso8601Formatter().date(from: text(10)) ?? .now,
+            updatedAt: Self.iso8601Formatter().date(from: text(11)) ?? .now
         )
     }
 

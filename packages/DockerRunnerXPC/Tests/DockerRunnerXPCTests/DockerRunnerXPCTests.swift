@@ -240,6 +240,7 @@ struct DockerRunnerXPCTests {
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"],
             ["exec", "-i", "c", "/usr/local/bin/derrick-file-extractor"],
+            ["exec", "-i", "c", DockerWorkerRuntime.newsReaderBinary],
             [
                 "create",
                 "--label",
@@ -261,7 +262,7 @@ struct DockerRunnerXPCTests {
 
     @Test func rejectsInvalidGoGuestExecCommands() {
         for args in [
-            ["exec", "-i", "c", "python3", "/tmp/guest.py"],
+            ["exec", "-i", "c", "python3", "/tmp/guest.go"],
             ["exec", "-i", "c", DockerWorkerRuntime.guestBinaryPath, "extra"],
             ["exec", "-i", "c", "sh", "-c", "cat > /tmp/other"],
             ["exec", "-i", "c", "sh", "-c", "rm -rf /"],

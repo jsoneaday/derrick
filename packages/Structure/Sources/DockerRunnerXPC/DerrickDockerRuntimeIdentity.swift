@@ -14,6 +14,7 @@ public enum DerrickDockerRuntimeIdentity: Sendable {
     /// Name prefixes for current and unlabeled leftover containers.
     public static let namePrefixes = [
         "derrick-web-crawler",
+        "derrick-news-reader",
         "derrick-guest-runtime",
         "derrick-swift-runtime",
         "derrick-file-extractor",

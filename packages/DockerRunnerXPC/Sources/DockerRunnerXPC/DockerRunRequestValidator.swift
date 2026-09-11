@@ -213,6 +213,7 @@ public enum DockerRunRequestValidator: Sendable {
             }
         case DockerWorkerRuntime.crawlerBinary,
              DockerWorkerRuntime.extractorBinary,
+             DockerWorkerRuntime.newsReaderBinary,
              DockerWorkerRuntime.guestBinaryPath:
             guard args == [command] else {
                 return .disallowedDockerFlag("exec \(command)")

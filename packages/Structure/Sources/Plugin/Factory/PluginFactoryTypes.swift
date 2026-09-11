@@ -289,7 +289,6 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         case pluginID = "plugin_id"
         case version, description
         case guestSource = "go_source"
-        case legacyPythonSource = "python_source"
         case legacySwiftSource = "swift_source"
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
@@ -304,7 +303,6 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
         version = try container.decode(String.self, forKey: .version)
         description = try container.decode(String.self, forKey: .description)
         guestSource = try container.decodeIfPresent(String.self, forKey: .guestSource)
-            ?? container.decodeIfPresent(String.self, forKey: .legacyPythonSource)
             ?? container.decode(String.self, forKey: .legacySwiftSource)
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
@@ -533,10 +531,14 @@ public struct PluginFactoryRelease: Sendable, Hashable {
     }
 
     public func packageFiles() -> [String: Data] {
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: manifestJSON
+        )
         var files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.go": Data(guestSource.utf8),
+            guestPath: Data(guestSource.utf8),
             "app.derrick/plugin": compiledArtifact,
         ]
         for (path, body) in skillFiles {

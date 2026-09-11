@@ -14,18 +14,30 @@ final class NewsReaderStore: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var repository: DBRepository?
-    private let client: any NewsHTTPClient
+    private let worker: any NewsWorkerRunning
+    private var summarizer: NewsReaderSummarizer?
 
-    init(client: any NewsHTTPClient = URLSessionNewsHTTPClient()) {
-        self.client = client
+    init(
+        worker: any NewsWorkerRunning = MCPServiceNewsWorker(),
+        summarizer: NewsReaderSummarizer? = nil
+    ) {
+        self.worker = worker
+        self.summarizer = summarizer
+    }
+
+    func attachSummarizer(_ settings: LLMModelSettings) {
+        self.summarizer = NewsReaderSummarizer(settings: settings)
     }
 
     var selectedReader: NewsReaderSpec? {
         readers.first { $0.id == selectedReaderID }
     }
 
-    func configure(repository: DBRepository) async {
+    func configure(repository: DBRepository, summarizerSettings: LLMModelSettings? = nil) async {
         self.repository = repository
+        if let summarizerSettings {
+            attachSummarizer(summarizerSettings)
+        }
         await reload()
     }
 
@@ -62,14 +74,19 @@ final class NewsReaderStore: ObservableObject {
         }
         var next = spec
         next.updatedAt = .now
-        let items = try await NewsReaderRefresh.validateAndFetch(spec: next, client: client)
+        let fetched = try await NewsReaderRefresh.validateAndFetch(
+            spec: next,
+            worker: worker,
+            summarizer: summarizer
+        )
         next.lastFetchedAt = .now
         next.lastError = nil
+        next.summaryText = fetched.summaryText
         try await repository.upsertNewsReader(next)
-        try await repository.replaceNewsItems(readerID: next.id, items: items)
-        await reload()
+        try await repository.replaceNewsItems(readerID: next.id, items: fetched.items)
         selectedReaderID = next.id
-        self.items = items
+        self.items = fetched.items
+        await reload()
         return next
     }
 
@@ -78,13 +95,18 @@ final class NewsReaderStore: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let fetched = try await NewsReaderRefresh.validateAndFetch(spec: reader, client: client)
+            let fetched = try await NewsReaderRefresh.validateAndFetch(
+                spec: reader,
+                worker: worker,
+                summarizer: summarizer
+            )
             reader.lastFetchedAt = .now
             reader.lastError = nil
             reader.updatedAt = .now
+            reader.summaryText = fetched.summaryText
             try await repository.upsertNewsReader(reader)
-            try await repository.replaceNewsItems(readerID: reader.id, items: fetched)
-            items = fetched
+            try await repository.replaceNewsItems(readerID: reader.id, items: fetched.items)
+            items = fetched.items
             lastError = nil
             await reload()
         } catch {

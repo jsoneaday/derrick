@@ -177,4 +177,21 @@ final class MCPServiceExportedObject: NSObject, MCPServiceXPC {
             }
         }
     }
+
+    func runNewsReader(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void) {
+        let data = requestJSON as Data
+        Task {
+            do {
+                let result = try await MCPServiceToolHost.shared.runNewsReader(requestJSON: data)
+                reply((try MCPServiceXPCCodec.encodeNewsReaderRunResult(result)) as NSData)
+            } catch {
+                fputs("[MCPService] runNewsReader failed: \(error.localizedDescription)\n", stderr)
+                let result = NewsReaderRunResult(ok: false, message: error.localizedDescription)
+                reply(
+                    (try? MCPServiceXPCCodec.encodeNewsReaderRunResult(result)) as NSData?
+                        ?? Data("{}".utf8) as NSData
+                )
+            }
+        }
+    }
 }

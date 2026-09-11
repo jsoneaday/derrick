@@ -34,6 +34,11 @@ func ValidateFileExtractorResultJSON(data []byte) error {
 	return validate("file-extractor-result.schema.json", data)
 }
 
+// ValidateNewsReaderResultJSON checks news reader stdout against news-reader-result.schema.json.
+func ValidateNewsReaderResultJSON(data []byte) error {
+	return validate("news-reader-result.schema.json", data)
+}
+
 func validate(schemaName string, data []byte) error {
 	compiler := jsonschema.NewCompiler()
 	if err := loadSchemas(compiler); err != nil {

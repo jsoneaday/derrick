@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS news_readers (
     mode TEXT NOT NULL,
     max_count INTEGER NOT NULL,
     schedule TEXT NOT NULL,
+    summary_text TEXT,
     last_error TEXT,
     last_fetched_at TEXT,
     created_at TEXT NOT NULL,

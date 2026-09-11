@@ -282,6 +282,60 @@ import WebCrawler
         #expect(allowed?.contains("docs.slack.dev") == true)
     }
 
+    @Test func workerImageLabelDetectsMissingNewsReaderBinary() async {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "image", args.contains("inspect"), args.contains("--format") {
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let current = await DockerImageInspector.workerImageHasCurrentBinaries(executor: executor)
+        #expect(!current)
+    }
+
+    @Test func newsReaderContainerCreateAndExecPassDockerValidator() {
+        let createArgs = NewsReaderDockerExecutor.createArguments(
+            name: "derrick-news-reader-test",
+            proxyHost: "172.17.0.1",
+            proxyPort: 3128,
+            proxyToken: "token"
+        )
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: createArgs, timeoutSeconds: 60)
+            ) == nil
+        )
+        let execArgs = DockerHostLaunch.dockerCLIArguments([
+            "exec", "-i", "derrick-news-reader-test", NewsReaderDockerExecutor.binaryPath,
+        ])
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: execArgs, timeoutSeconds: 60)
+            ) == nil
+        )
+    }
+
+    @Test func newsReaderInputPreparerUsesSourceHostsNotCrawlerStartURL() async throws {
+        let input = try JSONEncoder.service.encode(
+            NewsReaderWorkerRequest(
+                mode: .rss,
+                sources: [
+                    NewsSource(label: "Google News", url: "https://news.google.com/rss?hl=en-US"),
+                ],
+                topics: ["Tech"],
+                maxCount: 20
+            )
+        )
+
+        let prepared = try await NewsReaderDockerInputPreparer.enrich(input)
+        #expect(prepared.leaseHosts.contains("news.google.com"))
+        let decoded = try JSONDecoder.service.decode(NewsReaderWorkerRequest.self, from: prepared.data)
+        #expect(decoded.sources.count == 1)
+        #expect(decoded.sources[0].url.contains("news.google.com"))
+    }
+
     @Test func dockerProductImagePrewarmerSkipsBuildWhenImagePresent() async throws {
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in
@@ -895,7 +949,7 @@ import WebCrawler
 
     @Test func oneshotEnsurePulledImageSkipsPullWhenImageExists() async throws {
         let recorder = DockerCallRecorder()
-        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+        try await OneshotDockerContainer.ensurePulledImage(DockerWorkerRuntime.image) { arguments, _, _ in
             await recorder.append(arguments)
             return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -906,7 +960,7 @@ import WebCrawler
 
     @Test func oneshotEnsurePulledImagePullsWhenMissing() async throws {
         let recorder = DockerCallRecorder()
-        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+        try await OneshotDockerContainer.ensurePulledImage(DockerWorkerRuntime.image) { arguments, _, _ in
             await recorder.append(arguments)
             if arguments.first == "image" {
                 return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
@@ -915,7 +969,7 @@ import WebCrawler
         }
         let calls = await recorder.calls
         #expect(calls.contains { $0.starts(with: ["image", "inspect"]) })
-        #expect(calls.contains { $0.first == "pull" && $0.contains("python:3.14.7") })
+        #expect(calls.contains { $0.first == "pull" && $0.contains(DockerWorkerRuntime.image) })
     }
 
     @Test func dockerRunQueueSerializesWhenMaxIsOne() async throws {
@@ -963,7 +1017,7 @@ import WebCrawler
                     return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
                 },
                 prefix: "derrick-guest-runtime",
-                createArguments: { name in ["create", "--name", name, "python:3.14.7"] },
+                createArguments: { name in ["create", "--name", name, DockerWorkerRuntime.image] },
                 createStep: "create guest runtime container",
                 startStep: "start guest runtime container",
                 body: { _ in

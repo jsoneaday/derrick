@@ -11,7 +11,8 @@ final class DBNewsReaderTests: XCTestCase {
             name: "Markets",
             topics: ["Financial", "rates"],
             sources: [NewsSource(label: "BBC", url: "https://feeds.bbci.co.uk/news/world/rss.xml")],
-            mode: .summaries,
+            mode: .summary,
+            summaryText: "Markets moved higher.",
             maxCount: 10,
             schedule: .daily
         )
@@ -20,7 +21,8 @@ final class DBNewsReaderTests: XCTestCase {
         XCTAssertEqual(listed.count, 1)
         XCTAssertEqual(listed[0].name, "Markets")
         XCTAssertEqual(listed[0].topics, ["Financial", "rates"])
-        XCTAssertEqual(listed[0].mode, .summaries)
+        XCTAssertEqual(listed[0].mode, .summary)
+        XCTAssertEqual(listed[0].summaryText, "Markets moved higher.")
 
         let item = NewsItem(
             readerID: spec.id,
