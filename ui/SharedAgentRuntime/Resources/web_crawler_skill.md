@@ -3,8 +3,10 @@
 Use the `web.crawl` MCP tool for website crawling. Do not generate a crawler
 script with `script_exec`.
 
-Submit every crawl through `jobs_create` so the user receives the result in a
-notification banner.
+Call `web.crawl` directly in live chat for typical crawls. Submit through
+`jobs_create` only when the crawl is likely to take more than about one minute
+(large page budget, deep site, or long timeout). Background crawls should use
+`wake_after: true` so the user gets a notification banner when they finish.
 
 Required `web.crawl` arguments:
 

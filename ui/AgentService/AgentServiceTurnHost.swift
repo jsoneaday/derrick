@@ -223,7 +223,6 @@ actor AgentServiceTurnHost {
                 LLMModelSettings(repository: repo)
             }
             helperModelSettings = settings
-            await EgressAllowlistService.shared.configure(repository: repo)
             await ContentSensitivityGrantService.shared.configure(repository: repo)
             await UsageLimitsService.shared.configure(repository: repo)
             await ContainerLifecycleSettingsService.shared.configure(repository: repo)

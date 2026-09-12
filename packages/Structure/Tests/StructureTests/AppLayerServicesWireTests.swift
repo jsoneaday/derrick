@@ -84,11 +84,11 @@ import Testing
         #expect(decoded.executableFingerprint == nil)
     }
 
-    @Test func bundledScriptReviewerInstructionsLoadFromSourceTree() throws {
-        let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
-        #expect(scriptReviewer.contains("intent alignment"))
-        #expect(scriptReviewer.contains("secret literals"))
-        #expect(scriptReviewer.contains("Python verifier"))
+    @Test func scriptExecReviewerPromptLoadsFromBundledContract() {
+        let scriptReviewer = ScriptExecContractPrompts.reviewerGuide()
+        #expect(scriptReviewer.contains("script-exec-contract.json"))
+        #expect(scriptReviewer.contains("intent_alignment"))
+        #expect(scriptReviewer.contains("If a rule is not in the JSON"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
@@ -369,7 +369,7 @@ import Testing
     @Test func slackConnectorFallsBackToBotTokenWhenManifestOmitsSecrets() {
         let json = """
         {"$schema":"https://example.invalid/agent-plugin.json","name":"slack-connector","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads"]}}}
         """
         let descriptors = PluginSecretField.resolvedDescriptors(
             pluginID: "slack-connector",
@@ -1022,15 +1022,15 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
             !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
-                reportedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.guestDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1038,7 +1038,7 @@ import Testing
                 reportedFingerprint: "old",
                 expectedFingerprint: "new",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1046,7 +1046,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: "stale-guest:old",
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1054,7 +1054,7 @@ import Testing
                 reportedFingerprint: nil,
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1062,7 +1062,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: nil,
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
     }
@@ -1214,10 +1214,10 @@ import Testing
         #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
         #expect(
             DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
-                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + ["python:3.14.7"]
+                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + [DockerWorkerRuntime.image]
             )
         )
-        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", "python:3.14.7"]))
+        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", DockerWorkerRuntime.image]))
     }
 
     @Test func webCrawlerProductImageBuildUsesPackagesContext() {
@@ -1317,12 +1317,12 @@ import Testing
         )
     }
 
-    @Test func effectorAdmissionDeniesLiveChatWithoutContext() {
+    @Test func effectorAdmissionAllowsLiveChatWithoutContext() {
         #expect(
             EffectorAdmissionPolicy.allowsSyncWebCrawl(
                 context: nil,
                 principal: .agent(sessionID: "s1", agentID: "a1")
-            ) == false
+            )
         )
     }
 
@@ -1476,17 +1476,16 @@ import Testing
         #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
     }
 
-    @Test func connectorFactoryFailureReturnsToVendorStep() {
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .type)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .name)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .auth)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .auth)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "paywall") == .news)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "news") == .news)
+    @Test func pluginStudioFailureMapsToSkillFirstSteps() {
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .credentials)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .credentials)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "goal") == .goal)
     }
 
     @Test func connectorWizardOffersFullSyncOnly() {

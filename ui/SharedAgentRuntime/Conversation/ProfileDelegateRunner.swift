@@ -40,7 +40,7 @@ enum ProfileDelegateRunner {
         let thinking = profileContext.thinkingJSON.flatMap {
             try? JSONDecoder().decode(ModelThinkingOption.self, from: $0)
         }
-        let apiKey = TurnProcessContext.effectiveAPIKey ?? ""
+        let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: model) ?? ""
 
         let delegateSessionKey = MemorySessionKey(
             sessionID: sessionKey.sessionID,

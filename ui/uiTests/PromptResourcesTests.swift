@@ -74,10 +74,10 @@ import Testing
 
     @Test func loadsGuestSDKFromResourcesDirectory() throws {
         let source = try PromptResources.guestSDKSource()
-        #expect(source.contains("standalone Python script"))
+        #expect(source.contains("package main"))
         let wrapped = try PromptResources.guestSDKForModel()
-        #expect(wrapped.contains("```python"))
-        #expect(wrapped.contains("Python guest contract"))
+        #expect(wrapped.contains("```go"))
+        #expect(wrapped.contains("script-exec-contract.json"))
     }
 
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {

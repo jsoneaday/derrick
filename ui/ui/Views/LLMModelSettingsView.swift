@@ -349,7 +349,7 @@ struct LLMModelSettingsView: View {
             Text("Multi-agent")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel script_exec runs wait in line (one Python guest container at a time). Crawls and file conversions have their own lines.")
+            Text("Caps for agents_spawn and worker turns in a chat session. New tabs use saved values; open tabs keep the limits they started with. Parallel script_exec runs wait in line (one Go guest container at a time). Crawls and file conversions have their own lines.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

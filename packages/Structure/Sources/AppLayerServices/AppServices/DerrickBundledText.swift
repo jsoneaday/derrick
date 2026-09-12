@@ -50,7 +50,7 @@ public enum DerrickBundledText: Sendable {
     public static func formatCodeForModel(
         _ source: String,
         heading: String,
-        language: String = "python"
+        language: String = "go"
     ) -> String {
         """
         # \(heading)

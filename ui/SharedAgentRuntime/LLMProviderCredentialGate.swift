@@ -1,14 +1,40 @@
 import Foundation
 import Structure
 
-/// Whether an LLM provider has a usable API key (Keychain or `.env`, per `AppSecretResolver`).
+/// Provider credential checks and API key resolution (Keychain or `.env`, per `AppSecretResolver`).
 @MainActor
 enum LLMProviderCredentialGate {
-    static func hasAPIKey(for provider: LLMProviderChoice, resolver: AppSecretResolver) -> Bool {
+    /// One key per provider — the single resolution path for chat, reviewers, workers, and jobs.
+    static func resolveAPIKey(
+        for provider: LLMProviderChoice,
+        resolver: AppSecretResolver = AppSecretResolver()
+    ) -> String? {
         resolver.resolve(
             account: provider.secretAccount,
             environmentKeys: provider.apiKeyEnvironmentKeys
-        ) != nil
+        )
+    }
+
+    static func resolveAPIKey(
+        for model: LLMModelChoice,
+        resolver: AppSecretResolver = AppSecretResolver()
+    ) -> String? {
+        resolveAPIKey(for: model.provider, resolver: resolver)
+    }
+
+    /// Off-main callers (AgentService, MCPService, jobs).
+    static func resolveAPIKey(for provider: LLMProviderChoice) async -> String? {
+        await MainActor.run {
+            resolveAPIKey(for: provider)
+        }
+    }
+
+    static func resolveAPIKey(for model: LLMModelChoice) async -> String? {
+        await resolveAPIKey(for: model.provider)
+    }
+
+    static func hasAPIKey(for provider: LLMProviderChoice, resolver: AppSecretResolver) -> Bool {
+        resolveAPIKey(for: provider, resolver: resolver) != nil
     }
 
     static func configuredProviders(resolver: AppSecretResolver) -> [LLMProviderChoice] {

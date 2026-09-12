@@ -45,7 +45,7 @@ public struct MCPToolCallRequest: Codable, Sendable, Hashable {
     /// JSON `HelperModelWire` for script security reviewer model selection.
     /// When nil, MCPService uses the default helper model.
     public let helperReviewerModelJSON: String?
-    /// When true, MCPService allows synchronous `web.crawl` (interactive `/create-plugin` turns).
+    /// When true, plugin factory creation is active for this call.
     /// Deprecated: use `executionContextJSON` (ExecutionContextWire).
     public let pluginFactoryCreationActive: Bool
     /// JSON `ExecutionContextWire` for cross-boundary policy and effector admission.

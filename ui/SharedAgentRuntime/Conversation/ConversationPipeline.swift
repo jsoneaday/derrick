@@ -122,11 +122,6 @@ struct ConversationPipeline<Client: ConversationStreamingClient & Sendable>: Sen
         if !toolInstructions.isEmpty {
             sections.append(toolInstructions)
         }
-        if !toolInstructions.contains("Python guest contract:") {
-            if let sdk = try? PromptResources.guestSDKForModel() {
-                sections.append(sdk)
-            }
-        }
         return sections.joined(separator: "\n\n")
     }
 

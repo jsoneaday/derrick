@@ -5,9 +5,8 @@ import Plugin
 import PolicyUserInteraction
 import Structure
 
-/// Before a scheduled network tool runs, ensure hosts are allowlisted.
-/// Uncovered hosts use the HITL **banner** path (not live chat modals / schedule preflight).
-///
+/// Before a scheduled network tool runs, prompt only on blacklist hits.
+/// Public HTTPS is allowed by default; hard-blocked SSRF targets are denied without a prompt.
 public enum JobNetworkPreflight {
     public static func approveScriptNetworkIfNeeded(
         toolName: String,
@@ -30,6 +29,13 @@ public enum JobNetworkPreflight {
         }
         guard !hosts.isEmpty else { return }
 
+        let hardBlockPolicy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
+        for host in hosts {
+            if hardBlockPolicy.isHardBlockedHostname(host) {
+                throw JobNetworkPreflightError.hardBlocked(host: host)
+            }
+        }
+
         let blacklist = try await repository.listEgressBlacklist()
         let exceptions = try await repository.listEgressBlacklistExceptions()
         for host in hosts {
@@ -40,13 +46,15 @@ public enum JobNetworkPreflight {
             ) else {
                 continue
             }
+            let argumentsJSON = blacklistArgumentsJSON(host: host, entry: entry, toolName: toolName)
             let decision = await HITLOfflineNetworkService.awaitDecision(
                 host: host,
                 toolName: toolName,
                 turnID: "job-\(jobID)",
                 isJobContext: true,
                 repository: repository,
-                timeoutNanoseconds: 300_000_000_000
+                timeoutNanoseconds: 300_000_000_000,
+                argumentsJSON: argumentsJSON
             )
             switch decision {
             case .approved, .approvedOnce:
@@ -62,83 +70,28 @@ public enum JobNetworkPreflight {
             }
         }
 
-        let suffixes = try await loadEnabledSuffixes(repository: repository)
-
-        let policy = DefaultDestinationPolicy(allowedDomainSuffixes: suffixes)
-        var uncovered: [String] = []
-        for host in hosts {
-            if policy.isHardBlockedHostname(host) {
-                throw JobNetworkPreflightError.hardBlocked(host: host)
-            }
-            if policy.isHostCoveredByAllowlist(host) {
-                continue
-            }
-            uncovered.append(host)
-        }
-        guard !uncovered.isEmpty else {
-            fputs(
-                "[JobNetworkPreflight] job=\(jobID) hosts covered count=\(hosts.count)\n",
-                stderr
-            )
-            return
-        }
-
         fputs(
-            "[JobNetworkPreflight] job=\(jobID) banner approval needed hosts=\(uncovered.joined(separator: ","))\n",
+            "[JobNetworkPreflight] job=\(jobID) ok hosts=\(hosts.count)\n",
             stderr
         )
-
-        var sessionGrants: [String] = []
-        var allowedSuffixes = suffixes
-        for host in uncovered {
-            let coverage = DefaultDestinationPolicy(allowedDomainSuffixes: allowedSuffixes)
-            if coverage.isHostCoveredByAllowlist(host) {
-                continue
-            }
-            // Session grants from earlier Allow Once in this preflight (suffix-scoped).
-            let sessionPolicy = DefaultDestinationPolicy(allowedDomainSuffixes: [])
-            sessionPolicy.grantSessionHosts(sessionGrants)
-            if sessionPolicy.isHostCoveredByAllowlist(host) {
-                continue
-            }
-            let decision = await HITLOfflineNetworkService.awaitDecision(
-                host: host,
-                toolName: toolName,
-                turnID: "job-\(jobID)",
-                isJobContext: true,
-                repository: repository,
-                timeoutNanoseconds: 300_000_000_000
-            )
-            switch decision {
-            case .approvedPermanently(let actor):
-                let suffix = EgressHostExtractor.permanentSuffix(for: host)
-                try await repository.saveEgressAllowedDomainSuffix(
-                    EgressAllowedDomainSuffix(suffix: suffix, source: actor ?? "job-banner", enabled: true)
-                )
-                allowedSuffixes = try await loadEnabledSuffixes(repository: repository)
-                fputs(
-                    "[JobNetworkPreflight] always host=\(host) suffix=\(suffix) actor=\(actor ?? "?")\n",
-                    stderr
-                )
-            case .approved(let actor), .approvedOnce(let actor):
-                sessionGrants.append(host)
-                fputs(
-                    "[JobNetworkPreflight] once host=\(host) actor=\(actor ?? "?")\n",
-                    stderr
-                )
-            case .denied(let actor):
-                throw JobNetworkPreflightError.denied(host: host, actor: actor)
-            case .dismissed:
-                throw JobNetworkPreflightError.denied(host: host, actor: "system-dismissed")
-            case .timedOut:
-                throw JobNetworkPreflightError.denied(host: host, actor: "system-timeout")
-            }
-        }
-
     }
 
-    private static func loadEnabledSuffixes(repository: DBRepository) async throws -> [String] {
-        let rows = try await repository.loadEgressAllowedDomainSuffixes(includeDisabled: false)
-        return rows.filter(\.enabled).map(\.suffix)
+    private static func blacklistArgumentsJSON(
+        host: String,
+        entry: BlacklistEntry,
+        toolName: String
+    ) -> String {
+        let payload: [String: String] = [
+            "host": host,
+            "url": "https://\(host)",
+            "toolName": toolName,
+            "kind": "blacklist",
+            "pattern": entry.displayPattern,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return #"{"host":"\#(host)","toolName":"\#(toolName)","kind":"blacklist","pattern":"\#(entry.displayPattern)"}"#
+        }
+        return json
     }
 }

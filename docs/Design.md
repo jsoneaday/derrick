@@ -10,4 +10,4 @@ This application is Protocol first. All major features must have a Protocol and 
 
 ## Plugins
 - Plugins are using the Agent Plugin standard
-- Plugins run in the plugins docker containers as either Python or Go (Go is not yet supported)
+- Plugins and `script_exec` run in the unified Go worker Docker image (`derrick-worker:go-v1`)

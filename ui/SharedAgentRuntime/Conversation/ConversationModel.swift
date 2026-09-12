@@ -266,7 +266,7 @@ final class ConversationModel {
         let interceptor = makeContentPolicyInterceptor()
         let orchestrator = self.orchestrator
         let workerModel = helperModelSettings.workerAgentModel
-        let workerApiKey = resolveAPIKey(for: workerModel, turnFallback: apiKey) ?? apiKey
+        let workerApiKey = await LLMProviderCredentialGate.resolveAPIKey(for: workerModel) ?? apiKey
 
         let effectiveModel: LLMModelChoice
         let effectiveThinking: ModelThinkingOption?
@@ -593,21 +593,6 @@ final class ConversationModel {
         return DefaultPolicyInterceptor(policy: policy)
     }
 
-    /// API key for a helper/worker model: keychain/env for its provider, else the active turn key.
-    private func resolveAPIKey(for model: LLMModelChoice, turnFallback: String) -> String? {
-        if let key = AppSecretResolver().resolve(
-            account: model.provider.secretAccount,
-            environmentKeys: model.provider.apiKeyEnvironmentKeys
-        ), !key.isEmpty {
-            return key
-        }
-        if let turnKey = TurnProcessContext.effectiveAPIKey, !turnKey.isEmpty {
-            return turnKey
-        }
-        let trimmed = turnFallback.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
     /// In-process host for orchestration tools (`agents_*`, `jobs_*`). Not used for MCP effectors.
     /// `nonisolated`: tool handlers must not hop to MainActor while the turn awaits the MCP local bridge
     /// (that pattern deadlocks when runTurn is MainActor-isolated).
@@ -727,13 +712,14 @@ final class ConversationModel {
             wakePrompt: wakePrompt,
             description: description
         )
+        let providerAPIKey = await LLMProviderCredentialGate.resolveAPIKey(for: .defaultHelperModel)
         let request = try JobOrderBuilder.createJobRequest(
             from: input,
             principal: principal,
             source: .agent,
             sessionID: sessionID,
             agentID: agentID,
-            helperAPIKey: TurnProcessContext.effectiveAPIKey,
+            helperAPIKey: providerAPIKey,
             helperReviewerModelJSON: reviewerJSON
         )
         debugLog("[jobs_create] calling JobService createJob…")
@@ -787,13 +773,14 @@ final class ConversationModel {
             wakePrompt: wakePrompt,
             enabled: true
         )
+        let providerAPIKey = await LLMProviderCredentialGate.resolveAPIKey(for: .defaultHelperModel)
         let request = try JobOrderBuilder.createScheduleRequest(
             from: input,
             principal: principal,
             source: .agent,
             sessionID: sessionID,
             agentID: agentID,
-            helperAPIKey: TurnProcessContext.effectiveAPIKey,
+            helperAPIKey: providerAPIKey,
             helperReviewerModelJSON: reviewerJSON
         )
         let schedule = try await placer.createSchedule(request)

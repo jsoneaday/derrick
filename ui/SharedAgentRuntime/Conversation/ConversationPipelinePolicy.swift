@@ -877,7 +877,7 @@ extension ConversationPipeline {
     private static func longRunningToolProgressMessage(for toolName: String) -> String? {
         switch toolName {
         case AllowedMCPTool.webCrawl.rawValue:
-            return "Crawling vendor documentation. This may take a few minutes…"
+            return "Fetching web content. This may take a few minutes…"
         case AllowedMCPTool.pluginFactoryBuild.rawValue:
             return "Building the plugin (code generation, Docker tests, and safety review). This may take several minutes…"
         default:

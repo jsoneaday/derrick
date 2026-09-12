@@ -22,7 +22,7 @@ public enum DaemonProcessHygiene {
             reportedFingerprint: health.executableFingerprint,
             expectedFingerprint: expectedFingerprint(),
             reportedGuestRuntime: health.guestRuntimeImage,
-            expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+            expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
         )
     }
 

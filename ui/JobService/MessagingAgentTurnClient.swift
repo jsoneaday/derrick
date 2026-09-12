@@ -11,7 +11,7 @@ enum MessagingAgentTurnClient {
         let profile = try await resolveProfile(handle: route.profileHandle, repository: repository)
         let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON))
             ?? .defaultHelperModel
-        let apiKey = await resolveAPIKey(for: model) ?? ""
+        let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: model) ?? ""
         let profileContextJSON = try JSONEncoder().encode(AgentProfileTurnContext(profile: profile))
         let sessionID = MessagingAgentSessionID.make(
             pluginID: route.pluginID,
@@ -58,14 +58,6 @@ enum MessagingAgentTurnClient {
             return orchestrator
         }
         throw MessagingAgentTurnClientError.profileUnavailable(handle)
-    }
-
-    @MainActor
-    private static func resolveAPIKey(for model: LLMModelChoice) -> String? {
-        AppSecretResolver().resolve(
-            account: model.provider.secretAccount,
-            environmentKeys: model.provider.apiKeyEnvironmentKeys
-        )
     }
 
     private static func sendConnectorMessage(

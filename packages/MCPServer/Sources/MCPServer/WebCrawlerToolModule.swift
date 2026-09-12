@@ -63,6 +63,17 @@ public enum WebCrawlerToolModule: MCPToolModule {
                     ).encodedJSON()
                 }
 
+                do {
+                    try GuestContractValidation.validateWebCrawlerResultJSON(dockerResult.stdout)
+                } catch {
+                    return try failure(
+                        status: .failed,
+                        stage: .execution,
+                        code: "web_crawl_invalid_output",
+                        message: "Crawler returned invalid JSON output."
+                    ).encodedJSON()
+                }
+
                 guard let result = try? JSONDecoder().decode(
                     WebCrawlerWireResult.self,
                     from: dockerResult.stdout
@@ -138,15 +149,16 @@ public enum WebCrawlerToolModule: MCPToolModule {
         let timeoutSeconds = intValue(arguments["timeout_seconds"]) ?? 120
 
         guard !startURL.isEmpty else { throw WebCrawlerToolError.invalidStartURL }
-        guard let url = URL(string: startURL),
-              let scheme = url.scheme?.lowercased(),
+        guard let rawURL = URL(string: startURL),
+              let scheme = rawURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false,
-              url.user == nil,
-              url.password == nil
+              rawURL.host?.isEmpty == false,
+              rawURL.user == nil,
+              rawURL.password == nil
         else {
             throw WebCrawlerToolError.invalidStartURL
         }
+        let url = NewsSourceURL.canonicalFetchURL(rawURL, contextHint: goal)
         guard !goal.isEmpty else { throw WebCrawlerToolError.emptyGoal }
         guard goal.count <= 2_000 else { throw WebCrawlerToolError.goalTooLong }
         if let reason = maliciousGoalReason(goal) {
@@ -163,7 +175,7 @@ public enum WebCrawlerToolModule: MCPToolModule {
         }
 
         return WebCrawlerWireRequest(
-            startURL: startURL,
+            startURL: url.absoluteString,
             goal: goal,
             maxPages: maxPages,
             maxDepth: maxDepth,
@@ -273,6 +285,13 @@ private struct WebCrawlerWireResult: Decodable, Sendable {
         case ok
         case stopReason = "stop_reason"
         case diagnostics
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        stopReason = try container.decode(String.self, forKey: .stopReason)
+        diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
     }
 }
 

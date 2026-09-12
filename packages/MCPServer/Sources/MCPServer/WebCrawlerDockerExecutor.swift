@@ -7,23 +7,20 @@ import Structure
 /// The image is trusted product code. User input is passed only as JSON on
 /// stdin; it is never interpolated into a shell command.
 public struct WebCrawlerDockerExecutor: Sendable {
-    public static let image = "derrick-web-crawler:swift-6.4-v1"
+    public static let image = DockerWorkerRuntime.image
     public static let containerPrefix = "derrick-web-crawler"
+    public static let binaryPath = DockerWorkerRuntime.crawlerBinary
     public static let maximumTimeoutSeconds = 900
     public static let dockerNetwork = "bridge"
 
     private let executor: DockerCLIExecutor
     private let queue: DerrickDockerRunQueue
-    private let imageGate: WebCrawlerImageGate
-
     public init(
         executor: @escaping DockerCLIExecutor,
-        queue: DerrickDockerRunQueue = .crawler,
-        imageGate: WebCrawlerImageGate = .shared
+        queue: DerrickDockerRunQueue = .crawler
     ) {
         self.executor = executor
         self.queue = queue
-        self.imageGate = imageGate
     }
 
     public func run(
@@ -31,7 +28,7 @@ public struct WebCrawlerDockerExecutor: Sendable {
         timeoutSeconds: Int
     ) async throws -> DockerCLIResult {
         let timeout = min(max(timeoutSeconds, 1), Self.maximumTimeoutSeconds)
-        try await imageGate.ensureReady(executor: executor)
+        try await WorkerImageGate.shared.ensureReady(executor: executor)
         let prepared = try await WebCrawlerDockerInputPreparer.enrich(input)
         let executor = self.executor
         do {
@@ -53,7 +50,7 @@ public struct WebCrawlerDockerExecutor: Sendable {
                         startStep: "start crawler container",
                         body: { name in
                             try await executor(
-                                ["exec", "-i", name, "/usr/local/bin/derrick-web-crawler"],
+                                ["exec", "-i", name, Self.binaryPath],
                                 prepared.data,
                                 timeout
                             )

@@ -42,7 +42,7 @@ actor MCPServiceToolHost {
             LLMModelThinkingSettings(repository: repo)
         }
         await factoryThinkingSettings.loadSettings()
-        let factoryExecutor = PythonPluginFactoryDockerExecutor(
+        let factoryExecutor = GoPluginFactoryDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let webCrawlerExecutor = WebCrawlerDockerExecutor(
@@ -67,10 +67,6 @@ actor MCPServiceToolHost {
                     await WorkflowProgressPublisher.publish(stage: "factory", message: progress)
                 }
             },
-            apiKeyProvider: {
-                MCPServiceCallContext.shared.helperAPIKey
-                    ?? TurnProcessContext.effectiveAPIKey
-            }
         )
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
@@ -233,32 +229,6 @@ actor MCPServiceToolHost {
                 message: "Tool \(toolName) is owned by AgentService, not MCPService."
             )
         }
-        if toolName == AllowedMCPTool.webCrawl.rawValue,
-           !EffectorAdmissionPolicy.allowsSyncWebCrawl(
-               context: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)
-                   ?? legacyExecutionContext(from: request),
-               principal: request.principal
-           ) {
-            let outcome = ToolExecutionOutcome.failure(
-                status: .blocked,
-                stage: .validation,
-                diagnostics: [
-                    ToolExecutionOutcome.Diagnostic(
-                        code: "web_crawl_requires_notification",
-                        message: "web.crawl must be submitted through jobs_create so the result can arrive in a notification banner."
-                    )
-                ],
-                retry: ToolExecutionOutcome.Retry(allowed: false)
-            )
-            return MCPToolCallResultDTO(
-                requestID: request.requestID,
-                ok: true,
-                isError: true,
-                text: (try? outcome.encodedJSON()) ?? "",
-                message: "Submit web.crawl through jobs_create for notification delivery."
-            )
-        }
-
         let sessionKey: MemorySessionKey
         switch request.principal {
         case .agent(let sessionID, let agentID):

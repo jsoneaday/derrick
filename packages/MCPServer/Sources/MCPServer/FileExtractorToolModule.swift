@@ -64,8 +64,17 @@ public enum FileExtractorToolModule: MCPToolModule {
                 let payload = try JSONEncoder().encode(workerRequest)
                 let dockerResult = try await run(payload, workspace, parsed.timeoutSeconds)
                 let workerJSON = String(decoding: dockerResult.stdout, as: UTF8.self)
-                let worker = (try? JSONDecoder().decode(FileExtractorWireResult.self, from: dockerResult.stdout))
-                    ?? FileExtractorWireResult(ok: false, files: [], diagnostics: [workerJSON])
+                let worker: FileExtractorWireResult
+                if (try? GuestContractValidation.validateFileExtractorResultJSON(dockerResult.stdout)) != nil {
+                    worker = (try? JSONDecoder().decode(FileExtractorWireResult.self, from: dockerResult.stdout))
+                        ?? FileExtractorWireResult(ok: false, files: [], diagnostics: [workerJSON])
+                } else {
+                    worker = FileExtractorWireResult(
+                        ok: false,
+                        files: [],
+                        diagnostics: ["File extractor returned invalid JSON output."]
+                    )
+                }
                 let exported = (try? workspace.publishOutputs()) ?? []
                 if dockerResult.exitCode != 0 && !worker.ok {
                     return try failure(

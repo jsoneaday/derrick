@@ -79,7 +79,7 @@ struct LiveHarnessEnvironment {
         let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("[live] building full-sync connector via LLM factory…\n", stderr)
-        let executor = PythonPluginFactoryDockerExecutor(executor: dockerExecutor)
+        let executor = GoPluginFactoryDockerExecutor(executor: dockerExecutor)
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)
         ).build(

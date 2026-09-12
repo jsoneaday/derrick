@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/guest-runtime.json",
+  "title": "Derrick offline guest runtime",
+  "description": "Canonical I/O contract for script_exec and plugin.invoke guests. Trusted worker stdout (crawler, extractor) is defined in worker-product.schema.json. Swift host and Go workers must match these schemas.",
+  "type": "object",
+  "required": ["language", "stdin", "stdout"],
+  "additionalProperties": false,
+  "properties": {
+    "language": {
+      "type": "string",
+      "const": "go",
+      "description": "Guest implementation language."
+    },
+    "stdin": {
+      "description": "One hop event JSON object read from standard input.",
+      "$ref": "hop-event.schema.json"
+    },
+    "stdout": {
+      "description": "Envelope list JSON array written to standard output.",
+      "$ref": "envelope-list.schema.json"
+    },
+    "binary": {
+      "type": "string",
+      "const": "/tmp/guest",
+      "description": "Linux guest binary path inside the worker container."
+    }
+  }
+}

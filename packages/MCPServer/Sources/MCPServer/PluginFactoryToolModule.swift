@@ -18,7 +18,7 @@ public enum PluginFactoryToolModule: MCPToolModule {
                 ]),
                 "host_manifest_json": .object([
                     "type": .string("string"),
-                    "description": .string("Host-owned Agent Plugin plugin.json. When set, the builder only supplies Python and tests.")
+                    "description": .string("Host-owned Agent Plugin plugin.json. When set, the builder only supplies Go source and tests.")
                 ]),
             ]),
             "required": .array([.string("goal")])

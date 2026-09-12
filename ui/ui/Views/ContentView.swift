@@ -234,7 +234,6 @@ struct ContentView: View {
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
     @StateObject private var messaging = MessagingStore()
-    @ObservedObject private var news = NewsReaderStore.shared
     @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
@@ -275,10 +274,7 @@ struct ContentView: View {
     }
 
     private var currentHelperAPIKey: String? {
-        secretResolver.resolve(
-            account: selectedProvider.secretAccount,
-            environmentKeys: selectedProvider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedProvider, resolver: secretResolver)
     }
 
     private var currentHelperReviewerModelJSON: String? {
@@ -392,7 +388,6 @@ struct ContentView: View {
                     modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
-                    news: news,
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
@@ -406,14 +401,12 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins && workspace != .news {
+                } else if workspace != .debugLogs && workspace != .plugins {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
                 case .messaging:
                     MessagingConversationView(store: messaging)
-                case .news:
-                    NewsWorkspaceView(store: news)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
                 case .plugins:
@@ -430,13 +423,6 @@ struct ContentView: View {
                                     pluginCreationController.dismissSuccess()
                                 }
                                 Task { await pluginFactoryList.reload() }
-                            }
-                        },
-                        onOpenNewsReader: { readerID in
-                            Task { @MainActor in
-                                workspace = .news
-                                await news.select(id: readerID)
-                                pluginCreationController.dismissSuccess()
                             }
                         }
                     )
@@ -599,7 +585,7 @@ struct ContentView: View {
             minWidth: 380,
             minHeight: 0,
             maxWidth: 440,
-            maxHeight: bootstrapStatus.phase == .failed ? 420 : 280,
+            maxHeight: bootstrapModalMaxHeight,
             onBackdropDismiss: bootstrapStatus.phase == .failed
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
@@ -608,10 +594,7 @@ struct ContentView: View {
                 : nil,
             header: {
                 HStack(spacing: 10) {
-                    if bootstrapStatus.showsProgressIndicator {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else if bootstrapStatus.phase == .failed {
+                    if bootstrapStatus.phase == .failed {
                         Image(systemName: ModalChrome.bootstrapFailureSymbol)
                             .font(ModalChrome.symbolFont)
                             .symbolRenderingMode(.hierarchical)
@@ -629,23 +612,29 @@ struct ContentView: View {
             },
             body: {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(bootstrapStatus.statusMessage)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if bootstrapStatus.phase == .failed, let detail = bootstrapStatus.failureMessage,
-                       detail != bootstrapStatus.statusMessage {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    if bootstrapStatus.isInitializing {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(bootstrapStatus.activeLoadingTasks) { task in
+                                HStack(alignment: .top, spacing: 10) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(width: 16, height: 16)
+                                        .padding(.top, 2)
+                                    Text(task.message)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.2), value: bootstrapStatus.activeLoadingTasks)
                     }
 
-                    if bootstrapStatus.isInitializing {
-                        Text(bootstrapProgressHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if bootstrapStatus.phase == .failed {
+                        Text(bootstrapStatus.failureMessage ?? bootstrapStatus.statusMessage)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -723,17 +712,12 @@ struct ContentView: View {
         .background(WindowConfigurator())
     }
 
-    private var bootstrapProgressHint: String {
-        switch bootstrapStatus.phase {
-        case .preparingImage, .checkingDocker, .verifyingEnvironment:
-            return "First launch may download a Docker image. Keep Docker Desktop running."
-        case .connectingHelper:
-            return "Starting the background helper…"
-        case .loadingSession:
-            return "Loading your local workspace…"
-        default:
-            return "Starting…"
+    private var bootstrapModalMaxHeight: CGFloat {
+        if bootstrapStatus.phase == .failed {
+            return 420
         }
+        let rowCount = max(bootstrapStatus.activeLoadingTasks.count, 1)
+        return CGFloat(120 + rowCount * 34)
     }
 
     @MainActor
@@ -764,32 +748,40 @@ struct ContentView: View {
 
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
+                bootstrapStatus.beginTask(.daemon)
+                bootstrapStatus.beginTask(.database)
+                bootstrapStatus.beginTask(.docker)
 
-                // Prewarm Docker in parallel, but connect daemon + DB first so the modal
-                // does not sit on "Guest runtime ready" while XPC bootstrap is still retrying.
-                async let dockerPeer = prewarmLaunchDockerPeer()
+                // Docker reachability, daemon, and DB are independent — run in parallel.
+                let dockerPeerTask = Task { try await prewarmLaunchDockerPeer() }
+                async let health = connectLaunchDaemon()
+                async let repo = loadLaunchRepository()
 
-                let health = try await connectLaunchDaemon()
+                let healthResult = try await health
+                bootstrapStatus.completeTask(.daemon)
                 debugLog(
-                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
+                    "Daemon ensure-up ok status=\(healthResult.status.rawValue) pid=\(healthResult.pid) runtime=\(healthResult.guestRuntimeImage ?? "?") detail=\(healthResult.detail ?? "")"
                 )
 
-                let repo = try await loadLaunchRepository()
-
-                if let peer = try await dockerPeer {
-                    do {
-                        try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
-                        debugLog("Docker helper peer endpoint handed to daemon MCP")
-                    } catch {
-                        debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
-                    }
-                }
+                let repoResult = try await repo
+                bootstrapStatus.completeTask(.database)
 
                 sessionReady = true
                 bootstrapStatus.markReady()
-                await chatSessions.configure(repository: repo)
-                await messaging.configure(repository: repo)
-                await DerrickNotificationService.shared.activateSession(repository: repo)
+                await chatSessions.configure(repository: repoResult)
+                await messaging.configure(repository: repoResult)
+                await DerrickNotificationService.shared.activateSession(repository: repoResult)
+
+                Task {
+                    if let peer = try? await dockerPeerTask.value {
+                        do {
+                            try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
+                            debugLog("Docker helper peer endpoint handed to daemon MCP")
+                        } catch {
+                            debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                        }
+                    }
+                }
                 if isDebugEnabled {
                     debugLogStore.log("UI client ready (Docker + derrickd Agent/Job/MCP)")
                 }
@@ -824,7 +816,7 @@ struct ContentView: View {
         bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
         try? await JobServiceLoginAgent.ensureRegistered()
         JobServiceLoginAgent.ensureHelperProcessRunning()
-        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 4, verifyHealth: false)
     }
 
     @MainActor
@@ -838,13 +830,11 @@ struct ContentView: View {
     @MainActor
     private func configureClientRepositoryServices(repository: DBRepository) async {
         await ServiceLogRecorder.shared.configure(repository: repository)
-        await EgressAllowlistService.shared.configure(repository: repository)
         await ContentSensitivityGrantService.shared.configure(repository: repository)
         await UsageLimitsService.shared.configure(repository: repository)
         await ContainerLifecycleSettingsService.shared.configure(repository: repository)
         await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
         await PluginFactoryListStore.shared.configure(repository: repository)
-        await NewsReaderStore.shared.configure(repository: repository)
         await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
     }
@@ -852,9 +842,10 @@ struct ContentView: View {
     /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
     @MainActor
     private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
-        bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
+        bootstrapStatus.updateTask(.docker, message: "Starting Docker runtime…")
         _ = XPCDockerRunner.shared
-        try await XPCDockerRunner.shared.waitUntilPrewarmed()
+        try await XPCDockerRunner.shared.waitUntilDockerReachable()
+        bootstrapStatus.completeTask(.docker)
         do {
             return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
         } catch {
@@ -1489,10 +1480,7 @@ struct ContentView: View {
     }
 
     private func resolveAPIKey() -> String? {
-        secretResolver.resolve(
-            account: selectedModel.provider.secretAccount,
-            environmentKeys: selectedModel.provider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedModel.provider, resolver: secretResolver)
     }
 
     @ViewBuilder

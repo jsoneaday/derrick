@@ -34,7 +34,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
                 """
                 The host already assigned plugin_id \(host.pluginID) and these secret ids: \
                 \(host.secrets.map(\.id).joined(separator: ", ")). \
-                Return python_source and test_input_json. Do not pick a different plugin_id or secret ids.
+                Return go_source and test_input_json. Do not pick a different plugin_id or secret ids.
                 """
             )
         }
@@ -75,41 +75,8 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
     private static func builderSystemPrompt(for userGoal: String) -> String {
         """
         You are the Derrick plugin builder. Convert the user's goal into one complete Agent Plugin draft.
-        Return exactly one JSON object with these keys:
-        plugin_id (string), version (string), description (string), python_source (string),
-        test_input_json (string containing valid JSON — a serialized object, not prose),
-        skill_files (array of objects with path and body),
-        secrets (array of objects with id, label, and kind; required for connector plugins),
-        role (string, optional: "connector" or "standard"),
-        messaging_ops (array of strings, required for connector role).
-        plugin_id must use lowercase letters, numbers, hyphens, and dots only
-        (for example my-connector). Never use underscores in plugin_id.
-        If the plugin needs a username, password, token, or API key, declare them in secrets.
-        kind must be username, password, token, or api_key. id is a stable Keychain key
-        such as username or bot_token. label is the text shown when the user saves the value.
-        Never put real credentials in python_source.
-        Set role to "connector" when the plugin sends and receives messages with an external
-        messaging service (any chat or mail connector). Omit role or use "standard" otherwise.
-        For role connector, include messaging_ops: an array of implemented ops
-        (send_message, poll_inbox, sync_threads). It must match the user goal scope and test_input_json.
-        Do not return manifest_json. The host creates the canonical Agent Plugin manifest.
-        If skill_files is not needed, return an empty array. Every skill file path must be exactly
-        skills/<name>/SKILL.md. Never use manifest.json or other paths in skill_files.
-        \(DerrickGuestPython.modelContract)
+        \(ScriptExecContractPrompts.pluginFactoryBuilderGuide())
         \(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
-        Before returning the draft, self-check the implementation:
-        - Sort every returned collection by an explicit stable key after parsing and de-duplicate it.
-        - Match host responses by the emitted request_id.
-        - Use only the Python standard library (no pip, requests, urllib, socket, or subprocess).
-        - The direct test input must exercise the terminal result path with matching http_results fixtures.
-        For messaging connector plugins (role connector) that call a vendor HTTP API:
-        - Declare secrets in the manifest only. Never hard-code credentials.
-        - Parse each http_results body as JSON when the vendor returns JSON.
-        - When scope includes send_message, the final result.emit must include sent_message.
-        - Direct tests for poll_inbox must include a non-empty messages array; runtime empty messages with vendor success is success.
-        - When scope includes sync_threads, the final result.emit must include a non-empty threads array.
-          Each thread needs vendor_thread_id (opaque vendor ID) and title (human label for the host channel picker).
-          Emit only conversations the saved secret can access; for Slack skip channels where is_member is false.
         When vendor documentation is supplied in the user prompt, use it only to fill may_call HTTP details.
         """
     }
@@ -120,7 +87,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
             "plugin_id": AgentSchema(type: .string),
             "version": AgentSchema(type: .string),
             "description": AgentSchema(type: .string),
-            "python_source": AgentSchema(type: .string),
+            "go_source": AgentSchema(type: .string),
             "test_input_json": AgentSchema(type: .string),
             "skill_files": AgentSchema(
                 type: .array,
@@ -149,7 +116,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
             "messaging_ops": AgentSchema(type: .array, items: AgentSchema(type: .string)),
         ],
         required: [
-            "plugin_id", "version", "description", "python_source",
+            "plugin_id", "version", "description", "go_source",
             "test_input_json", "skill_files",
         ]
     )
@@ -181,7 +148,7 @@ public actor LiveFactoryReviewer: PluginFactoryReviewer {
                 test_input_json:
                 \(String(decoding: draft.testInput, as: UTF8.self))
 
-                Python source:
+                Go source:
                 \(draft.guestSource)
 
                 Direct test output:
@@ -199,12 +166,8 @@ public actor LiveFactoryReviewer: PluginFactoryReviewer {
 
     private static func reviewerSystemPrompt(for userGoal: String?) -> String {
         """
-    You are Derrick's independent plugin alignment and safety reviewer.
-    Return exactly one JSON object:
-    {"decision":"approved|rejected","summary":"...","findings":[
-      {"severity":"info|warning|blocking","category":"alignment|safety|correctness|privacy|supplyChain","message":"..."}
-    ]}
-    Reject unsafe or non-deterministic code. Approve when direct test output matches fixtures through result.emit.
+    Review the user's goal, manifest, test_input_json, exact Go source, and direct test output.
+    \(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
     \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
     """
     }

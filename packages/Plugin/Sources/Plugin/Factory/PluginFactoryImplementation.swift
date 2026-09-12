@@ -76,12 +76,8 @@ public struct PluginFactorySession: Sendable {
                 "Fix every item below in your next JSON draft response:",
             ]
             parts.append(contentsOf: findings.map { "- \($0)" })
-            parts.append(
-                """
-                Connector test_input_json must use a hops array replayed by the factory. Match each http.request \
-                request_id to an http_results fixture. Declare the same ops in messaging_ops and params.messaging_op.
-                """
-            )
+            parts.append(ScriptExecContractPrompts.pluginFactoryBuilderGuide())
+            parts.append(ConnectorContractPrompts.builderGuide(forUserGoal: userGoal))
             return parts.joined(separator: "\n")
         case .reviewRejected(let summary, let findings):
             var parts = [
@@ -92,23 +88,8 @@ public struct PluginFactorySession: Sendable {
                 parts.append("Findings:")
                 parts.append(contentsOf: findings.map { "- \($0)" })
             }
-            parts.append(
-                """
-                Connector protocol (do not add rules):
-                \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
-                """
-            )
-            parts.append(
-                """
-                Before returning the next draft, update test_input_json to a hops array replayed by the factory:
-                {"hops":[{"kind":"message_in_room","params":{"messaging_op":"send_message",...}},\
-                {"kind":"http_results","http_results":[{"request_id":"...","status":200,"body":"..."}],\
-                "params":{...}}]}
-                Include http_results fixtures for every messaging_op you implement. Match request_id values \
-                in fixtures to the http.request envelopes your python_source emits. De-duplicate http_results \
-                by request_id using stable sorting — do not overwrite duplicates by response order.
-                """
-            )
+            parts.append(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
+            parts.append(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
             return parts.joined(separator: "\n")
         default:
             return error.localizedDescription
@@ -259,10 +240,14 @@ public struct PluginFactory: Sendable {
         }
 
         let runtimeJSON = try runtimeJSON(for: manifest)
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: draft.manifestJSON
+        )
         var files: [String: Data] = [
             "plugin.json": Data(draft.manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.py": Data(draft.guestSource.utf8),
+            guestPath: Data(draft.guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
         for (path, body) in draft.skillFiles {
@@ -293,9 +278,9 @@ public struct PluginFactory: Sendable {
         do {
             let manifest = try AgentPluginManifest.decode(data)
             guard let entrypoint = manifest.derrick?.entrypoint,
-                  entrypoint.hasSuffix(".py") else {
+                  entrypoint.hasSuffix(".go") else {
                 throw PluginFactoryError.invalidManifest(
-                    "extensions.app.derrick.entrypoint must point to a Python file."
+                    "extensions.app.derrick.entrypoint must point to a Go file."
                 )
             }
             guard !["create-plugin", "edit-plugin"].contains(manifest.name.rawValue) else {
@@ -323,7 +308,7 @@ public struct PluginFactory: Sendable {
     }
 
     private func validateSource(_ source: String) throws {
-        let findings = GuestPythonSourceValidator.validate(source: source)
+        let findings = GuestGoSourceValidator.validate(source: source)
         if let first = findings.first {
             throw PluginFactoryError.invalidSource(first)
         }
@@ -331,10 +316,10 @@ public struct PluginFactory: Sendable {
 
     private func runtimeJSON(for manifest: AgentPluginManifest) throws -> String {
         guard let entrypoint = manifest.derrick?.entrypoint else {
-            throw PluginFactoryError.invalidManifest("A Python entrypoint is required.")
+            throw PluginFactoryError.invalidManifest("A Go entrypoint is required.")
         }
         let object: [String: String] = [
-            "language": "python",
+            "language": "go",
             "entrypoint": entrypoint,
         ]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

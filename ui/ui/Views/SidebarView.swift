@@ -10,7 +10,6 @@ struct SidebarView: View {
     @ObservedObject var modelThinkingSettings: LLMModelThinkingSettings
     @ObservedObject var chatSessions: ChatSessionStore
     @ObservedObject var messaging: MessagingStore
-    @ObservedObject var news: NewsReaderStore
     @Binding var workspace: AppWorkspace
     var isDebugEnabled: Bool = false
     /// Reference type must not be recreated every `View` value; hold via `@State`.
@@ -81,17 +80,6 @@ struct SidebarView: View {
                     workspace = .messaging
                     Task { await messaging.syncConnectorsFromFactory() }
                 }
-                SidebarActionRow(
-                    row: SidebarRow(
-                        id: "news",
-                        icon: "newspaper.fill",
-                        title: "News",
-                        isProminent: workspace == .news
-                    )
-                ) {
-                    workspace = .news
-                    Task { await news.reload() }
-                }
                 if isDebugEnabled {
                     SidebarActionRow(
                         row: SidebarRow(
@@ -110,8 +98,6 @@ struct SidebarView: View {
                 pluginsList
             } else if workspace == .messaging {
                 messagingList
-            } else if workspace == .news {
-                newsList
             } else if workspace == .debugLogs {
                 debugLogsHint
             } else {
@@ -289,46 +275,6 @@ struct SidebarView: View {
         }
     }
 
-    private var newsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Saved lists")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.top, 4)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if news.readers.isEmpty {
-                        Text("No news lists yet")
-                            .font(.system(size: sideMenuRecentsFontSize))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(news.readers) { reader in
-                            Button {
-                                workspace = .news
-                                Task { await news.select(id: reader.id) }
-                            } label: {
-                                Text(reader.name)
-                                    .font(.system(size: sideMenuRecentsFontSize))
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .foregroundStyle(
-                                        news.selectedReaderID == reader.id
-                                            ? Color.primary
-                                            : Color.primary.opacity(0.9)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     private var pluginsList: some View {
         VStack(alignment: .leading, spacing: 8) {
             ScrollView {
@@ -439,7 +385,6 @@ struct SidebarView: View {
         modelThinkingSettings: LLMModelThinkingSettings(repository: repo),
         chatSessions: store,
         messaging: MessagingStore(),
-        news: NewsReaderStore.shared,
         workspace: .constant(.chats)
     )
 }

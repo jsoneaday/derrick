@@ -164,11 +164,13 @@ public final class XPCDockerRunner: @unchecked Sendable {
     public static let shared = XPCDockerRunner()
 
     private static let serviceName = "derrick.ui.DockerRunnerHelper"
-    private static let prewarmWaitCeilingSeconds: UInt64 = 1_200
+    private static let dockerReachableWaitCeilingSeconds: UInt64 = 60
+    private static let imagePrewarmWaitCeilingSeconds: UInt64 = 1_200
 
     private let connection: NSXPCConnection
     private let appLogSink: XPCAppLogSink
-    private let prewarmState = PrewarmState()
+    private let dockerReachableState = PrewarmState()
+    private let imagePrewarmState = PrewarmState()
 
     public init() {
         let sink = XPCAppLogSink()
@@ -206,11 +208,12 @@ public final class XPCDockerRunner: @unchecked Sendable {
         }
     }
 
-    public func waitUntilPrewarmed() async throws {
-        if prewarmState.isCompleted() {
+    /// Waits until Docker Desktop responds. Does not wait for the worker image build.
+    public func waitUntilDockerReachable() async throws {
+        if dockerReachableState.isCompleted() {
             return
         }
-        if let failure = prewarmState.failureIfCompleted() {
+        if let failure = dockerReachableState.failureIfCompleted() {
             throw failure
         }
         let timeout = NSError(
@@ -218,11 +221,34 @@ public final class XPCDockerRunner: @unchecked Sendable {
             code: 504,
             userInfo: [
                 NSLocalizedDescriptionKey:
-                    "Guest runtime setup timed out after \(Self.prewarmWaitCeilingSeconds)s."
+                    "Docker Desktop did not respond within \(Self.dockerReachableWaitCeilingSeconds)s."
             ]
         )
-        try await prewarmState.wait(
-            timeoutNanoseconds: Self.prewarmWaitCeilingSeconds * 1_000_000_000,
+        try await dockerReachableState.wait(
+            timeoutNanoseconds: Self.dockerReachableWaitCeilingSeconds * 1_000_000_000,
+            timeoutError: timeout
+        )
+    }
+
+    /// Waits until the worker image is built or verified. Joins an in-flight background build.
+    public func waitUntilPrewarmed() async throws {
+        try await waitUntilDockerReachable()
+        if imagePrewarmState.isCompleted() {
+            return
+        }
+        if let failure = imagePrewarmState.failureIfCompleted() {
+            throw failure
+        }
+        let timeout = NSError(
+            domain: "XPCDockerRunner",
+            code: 504,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Worker image setup timed out after \(Self.imagePrewarmWaitCeilingSeconds)s."
+            ]
+        )
+        try await imagePrewarmState.wait(
+            timeoutNanoseconds: Self.imagePrewarmWaitCeilingSeconds * 1_000_000_000,
             timeoutError: timeout
         )
     }
@@ -280,21 +306,28 @@ public final class XPCDockerRunner: @unchecked Sendable {
                     ]
                 )
             }
-            await reportBootstrap(phase: .preparingImage, message: "Preparing guest runtime…")
-            let executor = makeDockerExecutor()
-            let image = DerrickGuestRuntime.pythonGuestDockerImage
-            let inspect = try await executor(["image", "inspect", image], Data(), 30)
-            if inspect.exitCode != 0 {
-                await MainActor.run {
-                    AppBootstrapStatus.shared.revealModalIfStillInitializing()
-                }
-                try await OneshotDockerContainer.ensurePulledImage(image, executor: executor)
+            dockerReachableState.markCompleted()
+            await reportBootstrapTaskCompleted(.docker)
+            Task {
+                await prewarmWorkerImage()
             }
-            prewarmState.markCompleted()
-            await reportBootstrap(phase: .verifyingEnvironment, message: "Guest runtime ready.")
         } catch {
-            debugLog("Guest runtime prewarming failed: \(error.localizedDescription)")
-            prewarmState.markFailed(error)
+            debugLog("Docker reachability check failed: \(error.localizedDescription)")
+            dockerReachableState.markFailed(error)
+            imagePrewarmState.markFailed(error)
+        }
+    }
+
+    private func prewarmWorkerImage() async {
+        do {
+            await reportBootstrap(phase: .preparingImage, message: "Preparing worker image…")
+            let executor = makeDockerExecutor()
+            try await WorkerImageGate.shared.ensureReady(executor: executor)
+            imagePrewarmState.markCompleted()
+            await reportBootstrap(phase: .verifyingEnvironment, message: "Worker image ready.")
+        } catch {
+            debugLog("Worker image prewarm failed: \(error.localizedDescription)")
+            imagePrewarmState.markFailed(error)
         }
     }
 
@@ -378,6 +411,14 @@ public final class XPCDockerRunner: @unchecked Sendable {
             let status = AppBootstrapStatus.shared
             guard status.isInitializing else { return }
             status.update(phase: phase, message: message)
+        }
+    }
+
+    private func reportBootstrapTaskCompleted(_ id: AppBootstrapStatus.TaskID) async {
+        await MainActor.run {
+            let status = AppBootstrapStatus.shared
+            guard status.isInitializing else { return }
+            status.completeTask(id)
         }
     }
 

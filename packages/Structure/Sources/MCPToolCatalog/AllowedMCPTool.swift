@@ -43,7 +43,7 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     public var defaultDescription: String {
         switch self {
         case .scriptExec:
-            return "Run declared standalone Python in a constrained Docker container after verification. Emit HTTP request envelopes; the host performs the request."
+            return "Run declared standalone Go in a constrained Docker container after verification. Emit HTTP request envelopes; the host performs the request."
         case .sessionMemorySearch:
             return "Search prior session memory entries with optional query and paging."
         case .agentsSpawn:
@@ -69,7 +69,7 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
         case .pluginInvoke:
             return "Run one approved compiled Agent Plugin by id with a JSON input object."
         case .webCrawl:
-            return "Crawl a bounded same-origin website in an isolated Swift container and return structured page summaries."
+            return "Crawl a bounded same-origin website in an isolated container and return structured page summaries. Call directly in chat; use jobs_create only for crawls likely to exceed about one minute."
         case .filesExtract:
             return "Extract text or convert attached chat files (PDF, DOCX, XLSX, CSV, HTML) in an isolated Swift container. Call this tool directly; do not submit it through jobs_create."
         }

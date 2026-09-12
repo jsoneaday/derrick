@@ -93,11 +93,9 @@ public enum DockerRunRequestValidator: Sendable {
             return .disallowedDockerSubcommand(subcommand)
         }
 
-        if subcommand == "image" {
-            guard let second = dockerArgs.dropFirst().first,
-                  DockerHostLaunch.allowedImageSubcommands.contains(second) else {
-                return .disallowedDockerSubcommand("image \(dockerArgs.dropFirst().first ?? "<missing>")")
-            }
+        if subcommand == "image",
+           let error = validateImageArguments(dockerArgs) {
+            return error
         }
         if subcommand == "exec",
            let error = validateExecArguments(dockerArgs) {
@@ -206,20 +204,17 @@ public enum DockerRunRequestValidator: Sendable {
         case "sh":
             guard args.count == 3,
                   args[1] == "-c",
-                  args[2] == "cat > /tmp/guest.py"
+                  args[2] == "cat > /tmp/guest && chmod +x /tmp/guest"
+                      || args[2] == DockerWorkerRuntime.guestWriteSourceShell
+                      || args[2] == DockerWorkerRuntime.guestCompileShell
+                      || args[2] == DockerWorkerRuntime.guestReadBinaryShell
             else {
                 return .disallowedDockerFlag("exec \(command)")
             }
-        case "python3":
-            guard args.count == 2, args[1] == "/tmp/guest.py" else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "/usr/local/bin/derrick-web-crawler":
-            guard args == ["/usr/local/bin/derrick-web-crawler"] else {
-                return .disallowedDockerFlag("exec \(command)")
-            }
-        case "/usr/local/bin/derrick-file-extractor":
-            guard args == ["/usr/local/bin/derrick-file-extractor"] else {
+        case DockerWorkerRuntime.crawlerBinary,
+             DockerWorkerRuntime.extractorBinary,
+             DockerWorkerRuntime.guestBinaryPath:
+            guard args == [command] else {
                 return .disallowedDockerFlag("exec \(command)")
             }
         default:
@@ -244,12 +239,45 @@ public enum DockerRunRequestValidator: Sendable {
         guard args.count == 5 else {
             return .disallowedDockerFlag("build extra arguments")
         }
-        guard DockerProductImagePolicy.isAllowedWebCrawlerBuild(
+        if DockerProductImagePolicy.isAllowedWorkerBuild(
             dockerfilePath: dockerfile,
             imageTag: tag,
             contextPath: context
-        ) else {
-            return .disallowedDockerFlag("build product image")
+        ) {
+            return nil
+        }
+        if DockerProductImagePolicy.isAllowedWebCrawlerBuild(
+            dockerfilePath: dockerfile,
+            imageTag: tag,
+            contextPath: context
+        ) {
+            return nil
+        }
+        return .disallowedDockerFlag("build product image")
+    }
+
+    private static func validateImageArguments(
+        _ dockerArgs: [String]
+    ) -> DockerRunRequestValidationError? {
+        let args = Array(dockerArgs.dropFirst())
+        guard let second = args.first,
+              DockerHostLaunch.allowedImageSubcommands.contains(second) else {
+            return .disallowedDockerSubcommand("image \(args.first ?? "<missing>")")
+        }
+        guard second == "inspect" else { return nil }
+        if args.count == 2 {
+            return nil
+        }
+        guard args.count == 4,
+              args[1] == "--format",
+              args[2] == "{{.Id}}" else {
+            return .disallowedDockerFlag("image inspect")
+        }
+        let tag = args[3]
+        guard tag == DockerWorkerRuntime.image
+            || tag == DockerProductImagePolicy.webCrawlerImage
+            || tag == DerrickGuestRuntime.guestDockerImage else {
+            return .disallowedDockerFlag("image inspect tag")
         }
         return nil
     }
