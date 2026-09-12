@@ -1,6 +1,5 @@
 import SwiftUI
 import DBRepository
-import Plugin
 import Structure
 
 private let sideMenuRecentsFontSize = CGFloat(12)
@@ -15,7 +14,6 @@ struct SidebarView: View {
     /// Reference type must not be recreated every `View` value; hold via `@State`.
     @State private var helperModelSettingsPanelController = LLMModelSettingsPanelController()
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
-    @State private var expandedPluginIDs: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -49,36 +47,11 @@ struct SidebarView: View {
                     row: SidebarRow(
                         id: "chats",
                         icon: "message.fill",
-                        title: "Chats",
+                        title: "Chat",
                         isProminent: workspace == .chats
                     )
                 ) {
                     workspace = .chats
-                }
-                SidebarActionRow(
-                    row: SidebarRow(
-                        id: "plugins",
-                        icon: "puzzlepiece.extension.fill",
-                        title: "Plugins",
-                        isProminent: workspace == .plugins
-                    )
-                ) {
-                    workspace = .plugins
-                    Task {
-                        await pluginFactoryList.reload()
-                        await messaging.syncConnectorsFromFactory()
-                    }
-                }
-                SidebarActionRow(
-                    row: SidebarRow(
-                        id: "messaging",
-                        icon: "bubble.left.and.bubble.right.fill",
-                        title: "Messaging",
-                        isProminent: workspace == .messaging
-                    )
-                ) {
-                    workspace = .messaging
-                    Task { await messaging.syncConnectorsFromFactory() }
                 }
                 if isDebugEnabled {
                     SidebarActionRow(
@@ -94,15 +67,10 @@ struct SidebarView: View {
                 }
             }
 
-            if workspace == .plugins {
-                pluginsList
-            } else if workspace == .messaging {
-                messagingList
-            } else if workspace == .debugLogs {
+            if workspace == .debugLogs {
                 debugLogsHint
-            } else {
-                recentsList
             }
+            recentsList
 
             Spacer()
 
@@ -142,10 +110,6 @@ struct SidebarView: View {
         .task {
             await pluginFactoryList.reload()
             await messaging.syncConnectorsFromFactory()
-        }
-        .onChange(of: workspace) { _, newValue in
-            guard newValue == .messaging else { return }
-            Task { await messaging.syncConnectorsFromFactory() }
         }
         .onChange(of: chatSessions.selectedTab?.turns.count ?? 0) { _, _ in
             Task {
@@ -220,154 +184,6 @@ struct SidebarView: View {
             }
         }
     }
-
-    private var messagingList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Connectors")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.top, 4)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if messaging.connectors.isEmpty {
-                        Text("No messaging connectors yet")
-                            .font(.system(size: sideMenuRecentsFontSize))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(messaging.connectors) { connector in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Button {
-                                    workspace = .messaging
-                                    Task { await messaging.openConnector(pluginID: connector.pluginID) }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Text(connector.displayName)
-                                            .font(.system(size: sideMenuRecentsFontSize))
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .foregroundStyle(
-                                                messaging.selectedPluginID == connector.pluginID
-                                                    ? Color.primary
-                                                    : Color.primary.opacity(0.9)
-                                            )
-                                        let unread = messaging.unreadTotal(for: connector.pluginID)
-                                        if unread > 0 {
-                                            MessagingUnreadBadge(count: unread)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    if let error = messaging.lastError {
-                        Text(error)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var pluginsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if pluginFactoryList.releases.isEmpty {
-                        Text("No plugins yet")
-                            .font(.system(size: sideMenuRecentsFontSize))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        pluginGroupRows(pluginFactoryList.groups)
-                    }
-                    if let error = pluginFactoryList.lastError {
-                        Text(error)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func pluginSectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
-    }
-
-    @ViewBuilder
-    private func pluginGroupRows(_ groups: [PluginFactoryReleaseGroup]) -> some View {
-        ForEach(groups) { group in
-            VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    if expandedPluginIDs.contains(group.pluginID) {
-                        expandedPluginIDs.remove(group.pluginID)
-                    } else {
-                        expandedPluginIDs.insert(group.pluginID)
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: expandedPluginIDs.contains(group.pluginID)
-                            ? "chevron.down"
-                            : "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("/\(group.pluginID)")
-                                .font(.system(size: sideMenuRecentsFontSize, design: .monospaced))
-                                .lineLimit(1)
-                            Text(group.releases.count == 1
-                                ? "v\(group.latest?.version ?? "")"
-                                : "\(group.releases.count) versions")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if expandedPluginIDs.contains(group.pluginID) {
-                    ForEach(group.releases) { release in
-                        HStack(alignment: .top, spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("v\(release.version)")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(release.reviewSummary)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Button {
-                                Task { await pluginFactoryList.delete(release) }
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Delete \(release.pluginID) \(release.version)")
-                        }
-                        .padding(.leading, 18)
-                    }
-                }
-            }
-        }
-    }
-
 }
 
 #Preview {

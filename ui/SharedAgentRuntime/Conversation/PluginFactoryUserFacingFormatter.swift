@@ -71,24 +71,24 @@ enum PluginFactoryUserFacingFormatter {
                     return """
                     **Plugin approved and saved.**
 
-                    Open **Messaging → \(pluginID)** to connect and sync. Taking you there now.
+                    Open **Chat → /\(pluginID)** to connect and sync. Taking you there now.
                     """
                 }
                 return """
                 **Plugin approved and saved.**
 
-                Open **Messaging → \(pluginID)** to connect and sync.
+                Open **Chat → /\(pluginID)** to connect and sync.
                 """
             }
             return """
-            Plugin **\(pluginID)** was saved. Open **Messaging → \(pluginID)** to add credentials and connect.
+            Plugin **\(pluginID)** was saved. Open **Chat → /\(pluginID)** to add credentials and connect.
             """
         }
         if credentialsReady {
             return """
             **Plugin approved and saved.**
 
-            Run **\(pluginID)** from Plugins when you are ready.
+            Run **/\(pluginID)** in Chat when you are ready.
             """
         }
         return """

@@ -28,6 +28,8 @@ final class MessagingStore: ObservableObject {
     @Published private(set) var isConnectorSyncing = false
     @Published var isSending = false
     @Published private(set) var inboundBanner: String?
+    @Published private(set) var inboundBannerPluginID: String?
+    @Published private(set) var inboundBannerThreadID: String?
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
@@ -176,7 +178,7 @@ final class MessagingStore: ObservableObject {
     }
 
     @discardableResult
-    func openConnector(pluginID: String) async -> Bool {
+    func openConnector(pluginID: String, autoOpenMostRecent: Bool = true) async -> Bool {
         guard PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID(pluginID) else {
             return false
         }
@@ -196,7 +198,7 @@ final class MessagingStore: ObservableObject {
             await catalog.refreshBadges()
             DerrickMessagingIngressSignal.postPoll()
         }
-        await session.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
+        await session.openConnector(pluginID: pluginID, autoOpenMostRecent: autoOpenMostRecent)
         guard session.selectedPluginID == pluginID else { return false }
         publishForegroundPresence()
         primeInboundMessageIDs()
@@ -485,11 +487,22 @@ final class MessagingStore: ObservableObject {
         }
         inboundBannerTask?.cancel()
         inboundBanner = text
+        inboundBannerPluginID = session.selectedPluginID
+        inboundBannerThreadID = newest.threadID
         inboundBannerTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
             inboundBanner = nil
+            inboundBannerPluginID = nil
+            inboundBannerThreadID = nil
         }
+    }
+
+    func clearInboundBanner() {
+        inboundBannerTask?.cancel()
+        inboundBanner = nil
+        inboundBannerPluginID = nil
+        inboundBannerThreadID = nil
     }
 
     private static func messagingDetailJSON(

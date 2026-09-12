@@ -150,6 +150,23 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         }
     }
 
+    public static func makeFromSpecDraft(
+        _ spec: PluginSpecDraft,
+        auth: ConnectorAuthDiscovery? = nil,
+        existingPluginIDs: [String] = []
+    ) throws -> PluginFactoryCreateInput {
+        guard spec.isBuildable else {
+            throw PluginCreatorSpecError.notBuildable
+        }
+        var skill = spec.asSkillDraft()
+        PluginSkillDraftPlanner.applyGoal(
+            skill.goal,
+            to: &skill,
+            existingPluginIDs: existingPluginIDs
+        )
+        return try makeFromSkillDraft(skill, auth: auth)
+    }
+
     /// Builds connector workflow input. The factory goal uses the fixed scope sentence, not free-text extras.
     public static func makeConnector(
         vendor: ConnectorVendor,

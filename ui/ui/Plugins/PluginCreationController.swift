@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class PluginCreationController: ObservableObject {
     enum Phase: Equatable {
+        case idle
         case intro
         case goal
         case skill
@@ -35,10 +36,11 @@ final class PluginCreationController: ObservableObject {
         var status: Status
     }
 
-    @Published private(set) var phase: Phase = .intro
+    @Published private(set) var phase: Phase = .idle
     @Published private(set) var statusMessage = ""
     @Published private(set) var progressSteps: [ProgressStepState] = []
     @Published var skillDraft = PluginSkillDraft()
+    @Published private(set) var completedSpec: PluginSpecDraft?
     @Published private(set) var credentialFields: [PluginCredentialFieldPresentation] = []
     @Published var credentialDrafts: [String: String] = [:]
 
@@ -55,6 +57,15 @@ final class PluginCreationController: ObservableObject {
     deinit {
         pollTask?.cancel()
         discoverTask?.cancel()
+    }
+
+    var showsFactoryChrome: Bool {
+        switch phase {
+        case .idle, .intro, .goal, .skill, .preview:
+            return false
+        case .discoveringAuth, .creating, .collectCredentials, .failed, .succeeded:
+            return true
+        }
     }
 
     var canContinueFromGoal: Bool {
@@ -101,6 +112,19 @@ final class PluginCreationController: ObservableObject {
         )
     }
 
+    func hide() {
+        cancelPolling()
+        discoverTask?.cancel()
+        pendingAuth = nil
+        phase = .idle
+        statusMessage = ""
+        progressSteps = []
+        credentialFields = []
+        credentialDrafts = [:]
+        skillDraft = PluginSkillDraft()
+        completedSpec = nil
+    }
+
     func showIntro() {
         cancelPolling()
         discoverTask?.cancel()
@@ -111,6 +135,28 @@ final class PluginCreationController: ObservableObject {
         credentialFields = []
         credentialDrafts = [:]
         skillDraft = PluginSkillDraft()
+        completedSpec = nil
+    }
+
+    func beginFromCompletedSpec(
+        _ spec: PluginSpecDraft,
+        sessionID: String,
+        helperAPIKey: String?,
+        helperReviewerModelJSON: String?
+    ) {
+        completedSpec = spec
+        var skill = spec.asSkillDraft()
+        PluginSkillDraftPlanner.applyGoal(
+            skill.goal,
+            to: &skill,
+            existingPluginIDs: PluginFactoryListStore.shared.pluginIDs
+        )
+        skillDraft = skill
+        confirmPreview(
+            sessionID: sessionID,
+            helperAPIKey: helperAPIKey,
+            helperReviewerModelJSON: helperReviewerModelJSON
+        )
     }
 
     func beginCreate() {
@@ -241,7 +287,7 @@ final class PluginCreationController: ObservableObject {
     }
 
     func dismissSuccess() {
-        showIntro()
+        hide()
     }
 
     private func startFactoryCreation() {
@@ -253,7 +299,16 @@ final class PluginCreationController: ObservableObject {
             return
         }
         do {
-            let input = try PluginFactoryCreateInput.makeFromSkillDraft(skillDraft, auth: pendingAuth)
+            let input: PluginFactoryCreateInput
+            if let completedSpec {
+                input = try PluginFactoryCreateInput.makeFromSpecDraft(
+                    completedSpec,
+                    auth: pendingAuth,
+                    existingPluginIDs: PluginFactoryListStore.shared.pluginIDs
+                )
+            } else {
+                throw PluginCreatorSpecError.notBuildable
+            }
             cancelPolling()
             phase = .creating
             statusMessage = "Building your plugin…"

@@ -10,32 +10,28 @@ struct PluginsWorkspaceView: View {
     let onOpenMessagingConnector: (String) -> Void
 
     var body: some View {
-        ZStack {
-            Color(red: 252.0 / 255.0, green: 252.0 / 255.0, blue: 250.0 / 255.0)
-                .ignoresSafeArea()
-
-            VStack(spacing: 12) {
-                Image(systemName: "puzzlepiece.extension")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
-                Text("Plugins")
-                    .font(.title2.weight(.semibold))
-                Text("Installed plugins appear in the sidebar. Use Messaging to talk to connector plugins.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-            }
-            .padding(32)
-        }
-        .modalPopup(
-            isPresented: true,
+        Color.clear
+            .ignoresSafeArea()
+            .modalPopup(
+            isPresented: controller.phase != .idle,
             minWidth: 400,
             minHeight: 0,
             maxWidth: 560,
             maxHeight: modalMaxHeight,
-            onBackdropDismiss: canDismiss ? { controller.showIntro() } : nil,
-            onEscape: canDismiss ? { controller.showIntro() } : nil,
+            onBackdropDismiss: canDismiss ? {
+                if controller.phase == .intro {
+                    controller.hide()
+                } else {
+                    controller.showIntro()
+                }
+            } : nil,
+            onEscape: canDismiss ? {
+                if controller.phase == .intro {
+                    controller.hide()
+                } else {
+                    controller.showIntro()
+                }
+            } : nil,
             header: {
                 Text(modalTitle)
                     .font(.headline)
@@ -58,6 +54,7 @@ struct PluginsWorkspaceView: View {
 
     private var modalMaxHeight: CGFloat {
         switch controller.phase {
+        case .idle: return 560
         case .skill, .preview: return 720
         default: return 560
         }
@@ -65,13 +62,14 @@ struct PluginsWorkspaceView: View {
 
     private var canDismiss: Bool {
         switch controller.phase {
-        case .creating, .discoveringAuth: return false
+        case .idle, .creating, .discoveringAuth: return false
         default: return true
         }
     }
 
     private var modalTitle: String {
         switch controller.phase {
+        case .idle: return "Create a plugin"
         case .intro: return "Create a plugin"
         case .goal: return "What should it do?"
         case .skill: return "Define the skill"
@@ -99,6 +97,8 @@ struct PluginsWorkspaceView: View {
     @ViewBuilder
     private var modalBody: some View {
         switch controller.phase {
+        case .idle:
+            EmptyView()
         case .intro:
             Text("""
             Describe what you want Derrick to do. Derrick will draft a skill, show you a preview, and build a secure plugin package.
@@ -166,6 +166,8 @@ struct PluginsWorkspaceView: View {
     @ViewBuilder
     private var modalFooter: some View {
         switch controller.phase {
+        case .idle:
+            EmptyView()
         case .intro:
             HStack {
                 Spacer()

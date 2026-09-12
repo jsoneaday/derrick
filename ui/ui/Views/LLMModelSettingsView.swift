@@ -3,13 +3,14 @@ import DBRepository
 import LLMAgentClient
 import Structure
 
-private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
+enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case helperModels
     case multiAgent
     case containers
     case networkBlacklist
     case sensitiveContent
     case usageLimits
+    case plugins
     case pluginBuilder
     case pluginSafetyReviewer
     case agentProfiles
@@ -31,6 +32,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "Sensitive content"
         case .usageLimits:
             return "Usage limits"
+        case .plugins:
+            return "Plugins"
         case .pluginBuilder:
             return "Plugin builder"
         case .pluginSafetyReviewer:
@@ -56,6 +59,8 @@ private enum LLMModelSettingsSidebarItem: String, CaseIterable, Identifiable, Ha
             return "eye.slash"
         case .usageLimits:
             return "gauge.with.dots.needle.67percent"
+        case .plugins:
+            return "puzzlepiece.extension.fill"
         case .pluginBuilder:
             return "hammer"
         case .pluginSafetyReviewer:
@@ -166,6 +171,8 @@ struct LLMModelSettingsView: View {
                         sensitiveContentDetail
                     case .usageLimits:
                         usageLimitsDetail
+                    case .plugins:
+                        PluginFactorySettingsListView()
                     case .pluginBuilder:
                         pluginBuilderDetail
                     case .pluginSafetyReviewer:

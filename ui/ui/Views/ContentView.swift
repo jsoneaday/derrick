@@ -399,17 +399,32 @@ struct ContentView: View {
             }
 
             VStack(spacing: 0) {
-                if workspace == .messaging {
-                    MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins {
+                if workspace != .debugLogs {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
-                case .messaging:
-                    MessagingConversationView(store: messaging)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
-                case .plugins:
+                case .chats:
+                    if chatSessions.selectedTab?.surface == .thread {
+                        MessagingConversationView(
+                            store: messaging,
+                            onInboundBannerTap: {
+                                Task { @MainActor in
+                                    await openInboundBannerConversation()
+                                }
+                            }
+                        )
+                    } else if let surface = chatSessions.selectedTab?.surface,
+                              surface == .generatedView || surface == .file || surface == .image {
+                        PluginPresentTabBody(surface: surface)
+                    } else {
+                        mainPanel
+                    }
+                }
+            }
+            .overlay {
+                if pluginCreationController.showsFactoryChrome {
                     PluginsWorkspaceView(
                         controller: pluginCreationController,
                         sessionReady: sessionReady,
@@ -418,27 +433,47 @@ struct ContentView: View {
                         sessionID: pluginWizardSessionID,
                         onOpenMessagingConnector: { pluginID in
                             Task { @MainActor in
-                                let opened = await routeToMessagingConnector(pluginID)
+                                let opened = await routeToPluginTab(
+                                    pluginID,
+                                    present: pluginCreationController.completedSpec?.present
+                                )
                                 if opened {
-                                    pluginCreationController.dismissSuccess()
+                                    pluginCreationController.hide()
                                 }
                                 Task { await pluginFactoryList.reload() }
                             }
                         }
                     )
-                default:
-                    mainPanel
                 }
             }
         }
         .onChange(of: workspace) { _, newValue in
-            messaging.setWorkspaceActive(newValue == .messaging)
-            if newValue == .plugins {
-                pluginCreationController.showIntro()
+            messaging.setWorkspaceActive(
+                newValue == .chats && chatSessions.selectedTab?.surface == .thread
+            )
+        }
+        .onChange(of: messaging.selectedThreadID) { _, threadID in
+            guard workspace == .chats,
+                  let threadID,
+                  let pluginID = messaging.selectedPluginID,
+                  chatSessions.selectedTab?.surface == .thread
+            else {
+                return
+            }
+            let title = messaging.selectedThread?.title ?? "/\(pluginID)"
+            chatSessions.openOrFocusThread(
+                pluginID: pluginID,
+                threadID: threadID,
+                title: title
+            )
+        }
+        .onChange(of: chatSessions.selectedSessionID) { _, _ in
+            Task { @MainActor in
+                await syncSelectedChatTabWithMessaging()
             }
         }
         .onAppear {
-            messaging.setWorkspaceActive(workspace == .messaging)
+            messaging.setWorkspaceActive(chatSessions.selectedTab?.surface == .thread)
             refreshProviderCredentialUI()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -455,7 +490,7 @@ struct ContentView: View {
                 return
             }
             Task { @MainActor in
-                await routeToMessagingConnector(pluginID)
+                await routeToPluginTab(pluginID)
             }
         }
         .onReceive(NotificationCenter.default.publisher(
@@ -476,11 +511,26 @@ struct ContentView: View {
                 let parentVendorMessageID = notification.userInfo?[
                     DerrickMessagingConversationPresentationWake.parentVendorMessageIDUserInfoKey
                 ] as? String
-                await routeToMessagingConversation(
+                await routeToThreadTab(
                     pluginID: pluginID,
                     threadID: threadID,
                     parentVendorMessageID: parentVendorMessageID
                 )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginCreation)) { _ in
+            workspace = .chats
+            bindPluginCreatorCompletion()
+            chatSessions.openOrFocusPluginCreator()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginInChat)) { notification in
+            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
+                  !pluginID.isEmpty
+            else {
+                return
+            }
+            Task { @MainActor in
+                await routeToPluginTab(pluginID)
             }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
@@ -837,6 +887,7 @@ struct ContentView: View {
         await PluginFactoryListStore.shared.configure(repository: repository)
         await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
+        bindPluginCreatorCompletion()
     }
 
     /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
@@ -1376,10 +1427,11 @@ struct ContentView: View {
         promptFocusToken += 1
 
         Task { @MainActor in
-            if let pluginID = Self.slashPluginID(from: currentPrompt),
-               await isMessagingConnector(pluginID) {
-                await routeToMessagingConnector(pluginID)
-                return
+            if let pluginID = Self.slashPluginID(from: currentPrompt) {
+                await routeToPluginTab(pluginID)
+                if await isMessagingConnector(pluginID) {
+                    return
+                }
             }
 
             chatSessions.sendPrompt(
@@ -1392,28 +1444,91 @@ struct ContentView: View {
         }
     }
 
-    @discardableResult
-    private func routeToMessagingConnector(_ pluginID: String) async -> Bool {
-        let opened = await messaging.openConnector(pluginID: pluginID)
-        guard opened else { return false }
-        workspace = .messaging
-        return true
+    private func bindPluginCreatorCompletion() {
+        chatSessions.onPluginSpecComplete = { spec in
+            pluginCreationController.beginFromCompletedSpec(
+                spec,
+                sessionID: pluginWizardSessionID,
+                helperAPIKey: currentHelperAPIKey,
+                helperReviewerModelJSON: currentHelperReviewerModelJSON
+            )
+        }
     }
 
     @discardableResult
-    private func routeToMessagingConversation(
+    private func routeToPluginTab(_ pluginID: String, present: PluginPresent? = nil) async -> Bool {
+        workspace = .chats
+        let connector = await isMessagingConnector(pluginID)
+        let binding: ChatTabSurfacePolicy.Binding
+        if let present {
+            binding = ChatTabSurfacePolicy.bind(present: present)
+        } else {
+            binding = ChatTabSurfacePolicy.bind(isMessagingConnector: connector)
+        }
+        switch binding {
+        case .decided(let surface):
+            chatSessions.openOrFocusPlugin(
+                pluginID: pluginID,
+                surface: surface,
+                title: "/\(pluginID)"
+            )
+            guard surface == .thread else { return true }
+            let opened = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
+            messaging.setWorkspaceActive(true)
+            return opened
+        case .needsHumanChoice:
+            // The human is asked only when the host cannot decide. Slice 1 never asks.
+            chatSessions.openOrFocusPlugin(
+                pluginID: pluginID,
+                surface: .conversation,
+                title: "/\(pluginID)"
+            )
+            return true
+        }
+    }
+
+    @discardableResult
+    private func routeToThreadTab(
         pluginID: String,
         threadID: String,
         parentVendorMessageID: String? = nil
     ) async -> Bool {
+        workspace = .chats
         let opened = await messaging.openConversation(
             pluginID: pluginID,
             threadID: threadID,
             parentVendorMessageID: parentVendorMessageID
         )
         guard opened else { return false }
-        workspace = .messaging
+        let title = messaging.selectedThread?.title ?? "/\(pluginID)"
+        chatSessions.openOrFocusThread(
+            pluginID: pluginID,
+            threadID: threadID,
+            title: title
+        )
+        messaging.setWorkspaceActive(true)
         return true
+    }
+
+    private func openInboundBannerConversation() async {
+        guard let pluginID = messaging.inboundBannerPluginID,
+              let threadID = messaging.inboundBannerThreadID
+        else {
+            return
+        }
+        _ = await routeToThreadTab(pluginID: pluginID, threadID: threadID)
+        messaging.clearInboundBanner()
+    }
+
+    private func syncSelectedChatTabWithMessaging() async {
+        let tab = chatSessions.selectedTab
+        messaging.setWorkspaceActive(tab?.surface == .thread)
+        guard tab?.surface == .thread, let pluginID = tab?.pluginID else { return }
+        if let threadID = tab?.threadID, !threadID.isEmpty {
+            _ = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
+        } else {
+            _ = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
+        }
     }
 
     private func isMessagingConnector(_ pluginID: String) async -> Bool {
