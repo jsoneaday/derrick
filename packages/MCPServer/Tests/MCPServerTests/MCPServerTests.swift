@@ -7,7 +7,7 @@ import Plugin
 import WebCrawler
 @testable import MCPServer
 
-@Suite struct MCPServerTests {
+@Suite(.serialized) struct MCPServerTests {
     private static let dummyGoScript = """
         package main
 
@@ -38,7 +38,47 @@ import WebCrawler
             let digest = DockerWorkerRuntime.pinnedDigest.rawValue + "\n"
             return DockerCLIResult(exitCode: 0, stdout: Data(digest.utf8), stderr: Data())
         }
+        if arguments.contains(where: { $0.contains(DockerWorkerRuntime.binariesLabelKey) }) {
+            let label = DockerWorkerRuntime.binariesLabelValue + "\n"
+            return DockerCLIResult(exitCode: 0, stdout: Data(label.utf8), stderr: Data())
+        }
         return DockerCLIResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data())
+    }
+
+    private actor ImageBuildLatch {
+        private(set) var succeeded = false
+        func markSucceeded() { succeeded = true }
+    }
+
+    private static func missingUntilBuiltExecutor(
+        recorder: DockerCallRecorder,
+        latch: ImageBuildLatch,
+        failFirstBuild: Bool = false,
+        buildDelay: Duration? = nil
+    ) -> DockerCLIExecutor {
+        { args, _, _ in
+            await recorder.append(args)
+            if args.first == "build" {
+                if let buildDelay {
+                    try await Task.sleep(for: buildDelay)
+                }
+                if failFirstBuild {
+                    let builds = await recorder.calls.filter { $0.first == "build" }.count
+                    if builds == 1 {
+                        return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data("boom".utf8))
+                    }
+                }
+                await latch.markSucceeded()
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            if args.first == "image" {
+                if await latch.succeeded, let mocked = mockWorkerImageInspect(args) {
+                    return mocked
+                }
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
     }
 
     private static let dummyCompiledGuest = Data([0x7f, 0x45, 0x4c, 0x46, 0x02])
@@ -299,42 +339,40 @@ import WebCrawler
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in
             await recorder.append(args)
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
-        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
-        #expect(await recorder.calls == [["image", "inspect", DockerProductImagePolicy.webCrawlerImage]])
-    }
-
-    @Test func dockerProductImagePrewarmerBuildsWhenImageMissing() async throws {
-        guard DerrickRepositoryRoot.locate() != nil else { return }
-        let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            if let mocked = Self.mockWorkerImageInspect(args) {
+                return mocked
             }
             return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
         try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
         let calls = await recorder.calls
-        #expect(calls.count == 2)
-        #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.webCrawlerImage])
-        #expect(calls[1].first == "build")
-        #expect(calls[1].contains(DockerProductImagePolicy.webCrawlerImage))
-        #expect(calls[1].last?.hasSuffix("/\(DockerProductImagePolicy.webCrawlerBuildContextRelativePath)") == true)
+        #expect(calls.first == ["image", "inspect", DockerProductImagePolicy.workerImage])
+        #expect(calls.contains { $0.contains("--format") && $0.contains(where: { $0.contains(DockerWorkerRuntime.binariesLabelKey) }) })
+        #expect(calls.contains { $0.contains("{{.Id}}") })
+        #expect(!calls.contains { $0.first == "build" })
+    }
+
+    @Test func dockerProductImagePrewarmerBuildsWhenImageMissing() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(recorder: recorder, latch: latch)
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        let calls = await recorder.calls
+        #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.workerImage])
+        #expect(calls.contains { $0.first == "build" && $0.contains(DockerProductImagePolicy.workerImage) })
+        #expect(calls.contains { $0.contains("{{.Id}}") })
+        #expect(calls.filter { $0.first == "build" }.count == 1)
     }
 
     @Test func crawlerImageBuildFailureMessageOmitsBuildkitDump() {
         let error = DockerProductImagePrewarmerError.buildFailed(
-            DockerProductImagePolicy.webCrawlerImage,
+            DockerProductImagePolicy.workerImage,
             "#0 building with \"default\" instance using docker driver"
         )
         let text = error.localizedDescription
         #expect(!text.contains("#0 building"))
-        #expect(text.lowercased().contains("web crawler"))
+        #expect(text.lowercased().contains("worker image"))
         #expect(text.lowercased().contains("disk"))
         #expect(error.compilerDiagnostic == nil)
     }
@@ -346,7 +384,7 @@ import WebCrawler
         error: Build failed
         """
         let error = DockerProductImagePrewarmerError.buildFailed(
-            DockerProductImagePolicy.webCrawlerImage,
+            DockerProductImagePolicy.workerImage,
             detail
         )
         #expect(error.compilerDiagnostic?.contains("CryptoKit") == true)
@@ -356,17 +394,12 @@ import WebCrawler
     @Test func crawlerImageBuildIsSingleFlight() async throws {
         guard DerrickRepositoryRoot.locate() != nil else { return }
         let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                try await Task.sleep(for: .milliseconds(80))
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(
+            recorder: recorder,
+            latch: latch,
+            buildDelay: .milliseconds(80)
+        )
         let gate = WebCrawlerImageGate()
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await gate.ensureReady(executor: executor) }
@@ -376,26 +409,18 @@ import WebCrawler
         }
         let calls = await recorder.calls
         #expect(calls.filter { $0.first == "build" }.count == 1)
-        #expect(calls.filter { $0.first == "image" }.count == 1)
+        #expect(calls.filter { $0 == ["image", "inspect", DockerProductImagePolicy.workerImage] }.count == 1)
     }
 
     @Test func crawlerImageBuildFailureAllowsRetry() async throws {
         guard DerrickRepositoryRoot.locate() != nil else { return }
         let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                let builds = await recorder.calls.filter { $0.first == "build" }.count
-                if builds == 1 {
-                    return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data("boom".utf8))
-                }
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(
+            recorder: recorder,
+            latch: latch,
+            failFirstBuild: true
+        )
         let gate = WebCrawlerImageGate()
         do {
             try await gate.ensureReady(executor: executor)
@@ -444,6 +469,9 @@ import WebCrawler
         let runner = FileExtractorDockerExecutor(
             executor: { arguments, _, _ in
                 await recorder.append(arguments)
+                if let mocked = Self.mockWorkerImageInspect(arguments) {
+                    return mocked
+                }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             },
             queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
@@ -480,11 +508,17 @@ import WebCrawler
                 timeoutSeconds: 5
             )
             Issue.record("expected missing extractor image")
+        } catch is DockerProductImagePrewarmerError {
+            // Image is missing; prewarmer tries a rebuild and that mock also fails.
+        } catch is DockerImageDigestError {
+            // Pin check after a failed inspect.
         } catch let error as FileExtractorDockerExecutorError {
             #expect(error == .imageUnavailable(FileExtractorDockerExecutor.image))
         }
         let calls = await recorder.calls
-        #expect(calls == [["image", "inspect", FileExtractorDockerExecutor.image]])
+        #expect(calls.contains { $0.first == "image" && $0.contains("inspect") })
+        #expect(!calls.contains { $0.first == "create" })
+        #expect(!calls.contains { $0.first == "start" })
     }
 
     @Test func orphanSweeperRemovesLabeledAndPrefixedContainers() async throws {

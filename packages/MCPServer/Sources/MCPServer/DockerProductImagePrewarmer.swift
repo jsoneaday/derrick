@@ -48,7 +48,7 @@ public enum DockerProductImagePrewarmer: Sendable {
                 )
                 return
             }
-            // Stale worker image (missing news reader, etc.). Rebuild overwrites the tag.
+            // Stale worker image (missing required binaries). Rebuild overwrites the tag.
         }
 
         guard let repoRoot = DerrickRepositoryRoot.locate() else {

@@ -34,7 +34,7 @@ public enum DockerImageInspector: Sendable {
         }
     }
 
-    /// Returns false when the image exists but predates required worker binaries (e.g. news reader).
+    /// Returns false when the image exists but predates required worker binaries.
     public static func workerImageHasCurrentBinaries(
         tag: String = DockerWorkerRuntime.image,
         executor: @escaping DockerCLIExecutor
