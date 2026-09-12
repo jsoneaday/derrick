@@ -1205,7 +1205,6 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.createLabelArguments == ["--label", "app.derrick=runtime"])
         #expect(DerrickDockerRuntimeIdentity.namePrefixes == [
             "derrick-web-crawler",
-            "derrick-news-reader",
             "derrick-guest-runtime",
             "derrick-swift-runtime",
             "derrick-file-extractor",
@@ -1486,8 +1485,6 @@ import Testing
         #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .skill)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .credentials)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .credentials)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "paywall") == .news)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "news") == .news)
         #expect(PluginFactoryCreateInput.failureStep(forStage: "goal") == .goal)
     }
 

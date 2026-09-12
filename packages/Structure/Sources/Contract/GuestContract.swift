@@ -15,7 +15,6 @@ public enum GuestContract: Sendable {
         case workerProduct = "worker-product.schema.json"
         case webCrawlerResult = "web-crawler-result.schema.json"
         case fileExtractorResult = "file-extractor-result.schema.json"
-        case newsReaderResult = "news-reader-result.schema.json"
         case scriptExecContract = "script-exec-contract.schema.json"
     }
 

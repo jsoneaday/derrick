@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://derrick.local/schemas/worker-product.json",
   "title": "Derrick trusted worker product contracts",
-  "description": "Shared stdout JSON contracts for prebuilt Go worker binaries (web crawler, file extractor, and news reader). Swift host and Go workers must match these schemas.",
+  "description": "Shared stdout JSON contracts for prebuilt Go worker binaries (web crawler and file extractor). Swift host and Go workers must match these schemas.",
   "$defs": {
     "string_list": {
       "type": "array",
@@ -89,35 +89,6 @@
         "files": {
           "type": "array",
           "items": { "$ref": "#/$defs/file_extractor_file_result" }
-        },
-        "diagnostics": { "$ref": "#/$defs/string_list" }
-      }
-    },
-    "news_reader_mode": {
-      "type": "string",
-      "enum": ["rss", "list", "summary"]
-    },
-    "news_reader_article": {
-      "type": "object",
-      "required": ["title", "url"],
-      "additionalProperties": false,
-      "properties": {
-        "title": { "type": "string" },
-        "url": { "type": "string" },
-        "detail": { "type": "string" },
-        "published_at": { "type": "string" }
-      }
-    },
-    "news_reader_result": {
-      "type": "object",
-      "required": ["ok", "mode", "articles", "diagnostics"],
-      "additionalProperties": false,
-      "properties": {
-        "ok": { "type": "boolean" },
-        "mode": { "$ref": "#/$defs/news_reader_mode" },
-        "articles": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/news_reader_article" }
         },
         "diagnostics": { "$ref": "#/$defs/string_list" }
       }

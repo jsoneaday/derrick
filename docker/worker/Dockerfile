@@ -9,11 +9,10 @@ COPY workers/go ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/derrick-web-crawler ./cmd/derrick-crawler
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/derrick-file-extractor ./cmd/derrick-file-extractor
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/derrick-news-reader ./cmd/derrick-news-reader
 
 FROM debian:bookworm-slim
 
-LABEL derrick.worker.binaries="crawler,extractor,news-reader"
+LABEL derrick.worker.binaries="crawler,extractor"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends poppler-utils ca-certificates \
@@ -23,7 +22,6 @@ RUN apt-get update \
 COPY --from=build /usr/local/go /usr/local/go
 COPY --from=build /out/derrick-web-crawler /usr/local/bin/derrick-web-crawler
 COPY --from=build /out/derrick-file-extractor /usr/local/bin/derrick-file-extractor
-COPY --from=build /out/derrick-news-reader /usr/local/bin/derrick-news-reader
 RUN mkdir -p /data/in /data/out && chown -R worker:worker /data
 
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

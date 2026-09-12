@@ -19,8 +19,6 @@ import CryptoKit
     func callTool(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
     /// Signed `searchTools` envelope. Reply is `MCPToolSearchResultDTO`.
     func searchTools(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
-    /// Runs the Docker news reader worker (stdin JSON request). Reply is `NewsReaderRunResult`.
-    func runNewsReader(requestJSON: NSData, withReply reply: @escaping @Sendable (NSData) -> Void)
 }
 
 public struct MCPServiceBootstrapResult: Codable, Sendable, Hashable {
@@ -349,13 +347,5 @@ public enum MCPServiceXPCCodec {
 
     public static func decodeString(_ data: Data) -> String {
         String(data: data, encoding: .utf8) ?? ""
-    }
-
-    public static func encodeNewsReaderRunResult(_ result: NewsReaderRunResult) throws -> Data {
-        try JSONEncoder.service.encode(result)
-    }
-
-    public static func decodeNewsReaderRunResult(_ data: Data) throws -> NewsReaderRunResult {
-        try JSONDecoder.service.decode(NewsReaderRunResult.self, from: data)
     }
 }

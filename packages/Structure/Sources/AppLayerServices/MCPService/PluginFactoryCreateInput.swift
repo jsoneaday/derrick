@@ -4,7 +4,6 @@ import Foundation
 public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public enum PluginType: String, Codable, Sendable, CaseIterable {
         case connector
-        case newsReader = "news_reader"
         case custom
     }
 
@@ -148,8 +147,6 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 pluginID: pluginID,
                 skillMarkdown: skillMarkdown
             )
-        case .newsDigest:
-            throw PluginSkillDraftError.newsUsesReaderPath
         }
     }
 
@@ -332,7 +329,6 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         case preview
         case credentials
         case build
-        case news
     }
 
     public static func failureStep(forStage stage: String?) -> FailureStep {
@@ -345,8 +341,6 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             return .preview
         case "auth", "discover", "credentials":
             return .credentials
-        case "news", "paywall":
-            return .news
         case "crawl", "docs", "factory", "build", "review":
             return .build
         default:

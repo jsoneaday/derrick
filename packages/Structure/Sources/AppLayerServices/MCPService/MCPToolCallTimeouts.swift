@@ -12,9 +12,6 @@ public enum MCPToolCallTimeouts {
     /// Must be at least as long as `MCPServiceDockerHelperRunner` call timeout.
     public static let pluginInvokeNanoseconds: UInt64 = 120_000_000_000
 
-    /// News reader Docker worker (RSS fetch + optional summary prep).
-    public static let newsReaderNanoseconds: UInt64 = 200_000_000_000
-
     public static func nanoseconds(forToolName toolName: String) -> UInt64 {
         switch toolName {
         case "web.crawl", "plugin_factory_build", "script_exec":

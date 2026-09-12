@@ -32,7 +32,6 @@ public struct PluginSkillDraft: Sendable, Hashable {
 
     public enum PlannedKind: String, Sendable, Hashable {
         case messagingConnector
-        case newsDigest
         case customCapability
     }
 
@@ -41,25 +40,19 @@ public struct PluginSkillDraft: Sendable, Hashable {
     public var triggers: Set<Trigger>
     public var examples: [Example]
     public var pluginName: String
-    public var newsTopics: [String]
-    public var newsSourceURLs: [String]
 
     public init(
         goal: String = "",
         purpose: String = "",
         triggers: Set<Trigger> = [.chat],
         examples: [Example] = [],
-        pluginName: String = "",
-        newsTopics: [String] = [],
-        newsSourceURLs: [String] = []
+        pluginName: String = ""
     ) {
         self.goal = goal
         self.purpose = purpose
         self.triggers = triggers
         self.examples = examples
         self.pluginName = pluginName
-        self.newsTopics = newsTopics
-        self.newsSourceURLs = newsSourceURLs
     }
 
     public var plannedKind: PlannedKind {
@@ -74,7 +67,7 @@ public struct PluginSkillDraft: Sendable, Hashable {
         switch plannedKind {
         case .messagingConnector:
             return inferredConnectorVendor?.isSelectableInWizard == true
-        case .newsDigest, .customCapability:
+        case .customCapability:
             return true
         }
     }
@@ -104,12 +97,6 @@ public struct PluginSkillDraft: Sendable, Hashable {
 
     public func packageOutline() -> [String] {
         switch plannedKind {
-        case .newsDigest:
-            return [
-                "plugin.json — name, schedule, and reader settings",
-                "skills/\(normalizedPluginFolderName())/SKILL.md — when Derrick uses this list",
-                "News fetcher — loads articles with source links",
-            ]
         case .messagingConnector, .customCapability:
             return [
                 "plugin.json — name, permissions, and secrets",
@@ -143,8 +130,6 @@ public enum PluginSkillDraftPlanner {
         for kind: PluginSkillDraft.PlannedKind
     ) -> Set<PluginSkillDraft.Trigger> {
         switch kind {
-        case .newsDigest:
-            return [.chat, .schedule]
         case .messagingConnector:
             return [.chat, .messaging, .mention]
         case .customCapability:
@@ -160,22 +145,8 @@ public enum PluginSkillDraftPlanner {
         }
     }
 
-    public static func inferNewsMode(from draft: PluginSkillDraft) -> NewsReaderMode {
-        let text = combinedText(draft)
-        if ["summary", "summarize", "summaries", "digest", "brief", "overview"]
-            .contains(where: { text.contains($0) }) {
-            return .summary
-        }
-        if ["crawl", "website", "homepage", "web page", "webpage", "site"]
-            .contains(where: { text.contains($0) }) {
-            return .list
-        }
-        return .rss
-    }
-
     public static func inferKind(from draft: PluginSkillDraft) -> PluginSkillDraft.PlannedKind {
         let text = combinedText(draft)
-        if looksLikeNews(text) { return .newsDigest }
         if looksLikeMessaging(text) { return .messagingConnector }
         return .customCapability
     }
@@ -208,12 +179,6 @@ public enum PluginSkillDraftPlanner {
             draft.triggers = defaultTriggers(for: draft)
         }
         sanitizeTriggers(in: &draft)
-        if inferKind(from: draft) == .newsDigest, draft.newsTopics.isEmpty {
-            draft.newsTopics = defaultNewsTopics(from: trimmed)
-        }
-        if inferKind(from: draft) == .newsDigest, draft.newsSourceURLs.isEmpty {
-            draft.newsSourceURLs = [NewsPresetSource.googleNews.source.url]
-        }
     }
 
     public static func skillMarkdown(for draft: PluginSkillDraft) -> String {
@@ -258,15 +223,6 @@ public enum PluginSkillDraftPlanner {
 
             Confirmed behavior:
             \(examples)
-            """
-        case .newsDigest:
-            return """
-            \(purpose)
-
-            News reader that fetches articles from configured sources and includes source links.
-
-            Topics: \(draft.newsTopics.joined(separator: ", "))
-            Sources: \(draft.newsSourceURLs.joined(separator: ", "))
             """
         case .customCapability:
             return """
@@ -313,8 +269,6 @@ public enum PluginSkillDraftPlanner {
 
             Return go_source, test_input_json, and skill_files. The host writes plugin.json when a host manifest is supplied; otherwise include a valid manifest in your output path via the builder contract.
             """
-        case .newsDigest:
-            throw PluginSkillDraftError.newsUsesReaderPath
         }
     }
 
@@ -322,10 +276,6 @@ public enum PluginSkillDraftPlanner {
         [draft.goal, draft.purpose, draft.pluginName]
             .joined(separator: " ")
             .lowercased()
-    }
-
-    private static func looksLikeNews(_ text: String) -> Bool {
-        ["news", "rss", "headline", "digest", "articles", "reader"].contains { text.contains($0) }
     }
 
     private static func looksLikeMessaging(_ text: String) -> Bool {
@@ -340,12 +290,6 @@ public enum PluginSkillDraftPlanner {
                 return ConnectorPluginNaming.defaultPluginID(vendor: vendor, existingIDs: existingIDs)
             }
             return ConnectorPluginNaming.defaultPluginID(vendor: .slack, existingIDs: existingIDs)
-        case .newsDigest:
-            let base = "news-list"
-            if !existingIDs.contains(base) { return base }
-            var index = 2
-            while existingIDs.contains("\(base)-\(index)") { index += 1 }
-            return "\(base)-\(index)"
         case .customCapability:
             let words = draft.goal
                 .lowercased()
@@ -362,8 +306,6 @@ public enum PluginSkillDraftPlanner {
         switch inferKind(from: draft) {
         case .messagingConnector:
             return [.messaging, .chat]
-        case .newsDigest:
-            return [.schedule, .chat]
         case .customCapability:
             return [.chat]
         }
@@ -383,13 +325,6 @@ public enum PluginSkillDraftPlanner {
                     pluginDoes: "post the message in that channel"
                 ),
             ]
-        case .newsDigest:
-            return [
-                PluginSkillDraft.Example(
-                    userSays: "What's in my news list?",
-                    pluginDoes: "fetch the latest articles with links to the original sources"
-                ),
-            ]
         case .customCapability:
             let snippet = draft.goal.trimmingCharacters(in: .whitespacesAndNewlines)
             return [
@@ -400,46 +335,16 @@ public enum PluginSkillDraftPlanner {
             ]
         }
     }
-
-    private static func defaultNewsTopics(from goal: String) -> [String] {
-        let lower = goal.lowercased()
-        var topics: [String] = []
-        if lower.contains("financ") || lower.contains("market") {
-            topics.append(NewsPresetTopic.financial.displayName)
-        }
-        if lower.contains("tech") {
-            topics.append(NewsPresetTopic.tech.displayName)
-        }
-        if lower.contains("world") || lower.contains("international") {
-            topics.append(NewsPresetTopic.international.displayName)
-        }
-        if lower.contains("politic") {
-            topics.append(NewsPresetTopic.politics.displayName)
-        }
-        if lower.contains("science") {
-            topics.append(NewsPresetTopic.science.displayName)
-        }
-        if lower.contains("sport") {
-            topics.append(NewsPresetTopic.sports.displayName)
-        }
-        if topics.isEmpty {
-            topics.append(NewsPresetTopic.tech.displayName)
-        }
-        return topics
-    }
 }
 
 public enum PluginSkillDraftError: Error, LocalizedError {
     case missingConnectorVendor
-    case newsUsesReaderPath
     case invalidPluginName
 
     public var errorDescription: String? {
         switch self {
         case .missingConnectorVendor:
             return "Could not determine which messaging service this plugin targets."
-        case .newsUsesReaderPath:
-            return "News lists use the reader path, not the plugin factory."
         case .invalidPluginName:
             return "Choose a valid plugin name using letters, numbers, and hyphens."
         }

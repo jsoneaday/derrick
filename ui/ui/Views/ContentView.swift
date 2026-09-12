@@ -234,7 +234,6 @@ struct ContentView: View {
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
     @StateObject private var messaging = MessagingStore()
-    @ObservedObject private var news = NewsReaderStore.shared
     @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
@@ -389,7 +388,6 @@ struct ContentView: View {
                     modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
-                    news: news,
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
@@ -403,14 +401,12 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if workspace == .messaging {
                     MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins && workspace != .news {
+                } else if workspace != .debugLogs && workspace != .plugins {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
                 case .messaging:
                     MessagingConversationView(store: messaging)
-                case .news:
-                    NewsWorkspaceView(store: news)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
                 case .plugins:
@@ -427,13 +423,6 @@ struct ContentView: View {
                                     pluginCreationController.dismissSuccess()
                                 }
                                 Task { await pluginFactoryList.reload() }
-                            }
-                        },
-                        onOpenNewsReader: { readerID in
-                            Task { @MainActor in
-                                workspace = .news
-                                await news.select(id: readerID)
-                                pluginCreationController.dismissSuccess()
                             }
                         }
                     )
@@ -846,10 +835,6 @@ struct ContentView: View {
         await ContainerLifecycleSettingsService.shared.configure(repository: repository)
         await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
         await PluginFactoryListStore.shared.configure(repository: repository)
-        await NewsReaderStore.shared.configure(
-            repository: repository,
-            summarizerSettings: helperModelSettings
-        )
         await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
     }

@@ -38,7 +38,4 @@ public enum InProcessServiceBridges: Sendable {
 
     public typealias RouteMessagingAgent = @Sendable (MessagingAgentRoute) async throws -> Void
     nonisolated(unsafe) public static var messagingAgentRoute: RouteMessagingAgent?
-
-    public typealias RunNewsReader = @Sendable (Data) async throws -> NewsReaderRunResult
-    nonisolated(unsafe) public static var runNewsReader: RunNewsReader?
 }

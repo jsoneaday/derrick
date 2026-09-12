@@ -20,7 +20,6 @@ final class PluginCreationController: ObservableObject {
 
     enum SuccessOutcome: Equatable {
         case plugin
-        case newsList
     }
 
     struct ProgressStepState: Identifiable, Equatable {
@@ -70,18 +69,12 @@ final class PluginCreationController: ObservableObject {
             !$0.userSays.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !$0.pluginDoes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }) else { return false }
-        if skillDraft.plannedKind == .newsDigest {
-            return !skillDraft.newsTopics.isEmpty && !skillDraft.newsSourceURLs.isEmpty
-        }
         return skillDraft.buildBlockedReason == nil
     }
 
     var canConfirmPluginName: Bool {
         let trimmed = skillDraft.pluginName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if skillDraft.plannedKind == .newsDigest {
-            return true
-        }
         return (try? PluginID.normalized(trimmed)) != nil
     }
 
@@ -188,48 +181,6 @@ final class PluginCreationController: ObservableObject {
         }
     }
 
-    func addNewsTopic() {
-        let topic = skillDraft.goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !topic.isEmpty else { return }
-        mutateSkillDraft { draft in
-            if !draft.newsTopics.contains(where: { $0.compare(topic, options: .caseInsensitive) == .orderedSame }) {
-                draft.newsTopics.append(topic)
-            }
-        }
-    }
-
-    func removeNewsTopic(_ topic: String) {
-        mutateSkillDraft { $0.newsTopics.removeAll { $0 == topic } }
-    }
-
-    func addNewsTopicFromPreset(_ topic: String) {
-        let trimmed = topic.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        mutateSkillDraft { draft in
-            if !draft.newsTopics.contains(trimmed) {
-                draft.newsTopics.append(trimmed)
-            }
-        }
-    }
-
-    func addNewsURL(_ raw: String) {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let normalized = NewsSourceURL.canonicalFetchURL(
-            URL(string: trimmed.contains("://") ? trimmed : "https://\(trimmed)")
-                ?? URL(string: "https://news.google.com/rss")!
-        ).absoluteString
-        mutateSkillDraft { draft in
-            if !draft.newsSourceURLs.contains(normalized) {
-                draft.newsSourceURLs.append(normalized)
-            }
-        }
-    }
-
-    func removeNewsURL(_ url: String) {
-        mutateSkillDraft { $0.newsSourceURLs.removeAll { $0 == url } }
-    }
-
     private func mutateSkillDraft(_ transform: (inout PluginSkillDraft) -> Void) {
         var draft = skillDraft
         transform(&draft)
@@ -244,11 +195,6 @@ final class PluginCreationController: ObservableObject {
         creationSessionID = sessionID
         creationAPIKey = helperAPIKey
         creationReviewerModelJSON = helperReviewerModelJSON
-
-        if skillDraft.plannedKind == .newsDigest {
-            startNewsCreation()
-            return
-        }
 
         if skillDraft.plannedKind == .messagingConnector {
             phase = .discoveringAuth
@@ -284,7 +230,7 @@ final class PluginCreationController: ObservableObject {
         case .failed(let step, _, _):
             switch step {
             case .goal: phase = .goal
-            case .skill, .news: phase = .skill
+            case .skill: phase = .skill
             case .preview: phase = .preview
             case .credentials: phase = .preview
             case .build: phase = .preview
@@ -296,66 +242,6 @@ final class PluginCreationController: ObservableObject {
 
     func dismissSuccess() {
         showIntro()
-    }
-
-    private func startNewsCreation() {
-        let sources = skillDraft.newsSourceURLs.map { url in
-            NewsSource(label: URL(string: url)?.host ?? url, url: url)
-        }
-        let spec = NewsReaderSpec(
-            name: skillDraft.pluginName,
-            topics: skillDraft.newsTopics,
-            sources: sources,
-            mode: PluginSkillDraftPlanner.inferNewsMode(from: skillDraft),
-            maxCount: 20,
-            schedule: .off
-        )
-        if let blocked = spec.sources.compactMap({ source -> (NewsSource, String)? in
-            guard let url = URL(string: source.url),
-                  let reason = NewsPaywall.preflightRejection(url: url) else { return nil }
-            return (source, reason)
-        }).first {
-            phase = .failed(
-                step: .news,
-                message: NewsReaderError.paywalled(url: blocked.0.url, detail: blocked.1).errorDescription
-                    ?? "This source is behind a paywall, which is not supported yet."
-            )
-            return
-        }
-        phase = .creating
-        statusMessage = "Starting news reader in Docker…"
-        progressSteps = [
-            ProgressStepState(id: "skill", title: "Write SKILL.md", status: .completed),
-            ProgressStepState(id: "sources", title: "Check sources", status: .active),
-            ProgressStepState(id: "fetch", title: "Run news reader", status: .pending),
-        ]
-        if spec.mode == .summary {
-            progressSteps.append(
-                ProgressStepState(id: "summary", title: "Summarize with AI", status: .pending)
-            )
-        }
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            do {
-                let saved = try await NewsReaderStore.shared.create(spec)
-                setProgressStep("sources", status: .completed)
-                setProgressStep("fetch", status: .completed)
-                if spec.mode == .summary {
-                    setProgressStep("summary", status: .completed)
-                }
-                phase = .succeeded(pluginID: saved.id, outcome: .newsList)
-            } catch let error as NewsReaderError {
-                setProgressStep("sources", status: .failed)
-                phase = .failed(
-                    step: .news,
-                    message: error.localizedDescription,
-                    technicalDetail: String(describing: error)
-                )
-            } catch {
-                setProgressStep("sources", status: .failed)
-                phase = .failed(step: .news, message: error.localizedDescription)
-            }
-        }
     }
 
     private func startFactoryCreation() {

@@ -282,7 +282,7 @@ import WebCrawler
         #expect(allowed?.contains("docs.slack.dev") == true)
     }
 
-    @Test func workerImageLabelDetectsMissingNewsReaderBinary() async {
+    @Test func workerImageLabelDetectsMissingBinaries() async {
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in
             await recorder.append(args)
@@ -293,47 +293,6 @@ import WebCrawler
         }
         let current = await DockerImageInspector.workerImageHasCurrentBinaries(executor: executor)
         #expect(!current)
-    }
-
-    @Test func newsReaderContainerCreateAndExecPassDockerValidator() {
-        let createArgs = NewsReaderDockerExecutor.createArguments(
-            name: "derrick-news-reader-test",
-            proxyHost: "172.17.0.1",
-            proxyPort: 3128,
-            proxyToken: "token"
-        )
-        #expect(
-            DockerRunRequestValidator.validate(
-                DockerHostLaunch.makeRequest(dockerArguments: createArgs, timeoutSeconds: 60)
-            ) == nil
-        )
-        let execArgs = DockerHostLaunch.dockerCLIArguments([
-            "exec", "-i", "derrick-news-reader-test", NewsReaderDockerExecutor.binaryPath,
-        ])
-        #expect(
-            DockerRunRequestValidator.validate(
-                DockerHostLaunch.makeRequest(dockerArguments: execArgs, timeoutSeconds: 60)
-            ) == nil
-        )
-    }
-
-    @Test func newsReaderInputPreparerUsesSourceHostsNotCrawlerStartURL() async throws {
-        let input = try JSONEncoder.service.encode(
-            NewsReaderWorkerRequest(
-                mode: .rss,
-                sources: [
-                    NewsSource(label: "Google News", url: "https://news.google.com/rss?hl=en-US"),
-                ],
-                topics: ["Tech"],
-                maxCount: 20
-            )
-        )
-
-        let prepared = try await NewsReaderDockerInputPreparer.enrich(input)
-        #expect(prepared.leaseHosts.contains("news.google.com"))
-        let decoded = try JSONDecoder.service.decode(NewsReaderWorkerRequest.self, from: prepared.data)
-        #expect(decoded.sources.count == 1)
-        #expect(decoded.sources[0].url.contains("news.google.com"))
     }
 
     @Test func dockerProductImagePrewarmerSkipsBuildWhenImagePresent() async throws {

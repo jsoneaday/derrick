@@ -240,7 +240,6 @@ struct DockerRunnerXPCTests {
             ["rm", "-f", "c"],
             ["inspect", "-f", "{{.State.Running}}", "c"],
             ["exec", "-i", "c", "/usr/local/bin/derrick-file-extractor"],
-            ["exec", "-i", "c", DockerWorkerRuntime.newsReaderBinary],
             [
                 "create",
                 "--label",

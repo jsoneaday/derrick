@@ -108,7 +108,7 @@ final class DBRepositoryTests: XCTestCase {
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
-        XCTAssertTrue(try tableExists(named: "news_readers", at: url))
+        XCTAssertFalse(try tableExists(named: "news_readers", at: url))
         XCTAssertTrue(try tableExists(named: "agent_profiles", at: url))
         XCTAssertTrue(try tableExists(named: "messaging_agent_handled", at: url))
         let loaded = try await repository.pluginFactoryRelease(pluginID: "keep-me", version: "1.0.0")

@@ -3,18 +3,10 @@ import Testing
 @testable import Structure
 
 @Suite struct PluginSkillDraftTests {
-    @Test func infersSummariesModeFromSummaryGoal() {
-        var draft = PluginSkillDraft(goal: "Give me a summary of tech headlines")
-        PluginSkillDraftPlanner.applyGoal(draft.goal, to: &draft, existingPluginIDs: [])
-        #expect(PluginSkillDraftPlanner.inferNewsMode(from: draft) == .summary)
-    }
-
-    @Test func infersNewsFromGoal() {
+    @Test func newsGoalIsCustomCapabilityNotACoreProduct() {
         var draft = PluginSkillDraft(goal: "Fetch tech news headlines daily")
         PluginSkillDraftPlanner.applyGoal(draft.goal, to: &draft, existingPluginIDs: [])
-        #expect(draft.plannedKind == .newsDigest)
-        #expect(!draft.newsTopics.isEmpty)
-        #expect(!draft.newsSourceURLs.isEmpty)
+        #expect(draft.plannedKind == .customCapability)
     }
 
     @Test func infersSlackConnectorFromGoal() {
@@ -78,18 +70,6 @@ import Testing
         #expect(input.pluginID == "summarizer")
     }
 
-    @Test func newsDigestOnlyAllowsChatAndScheduleTriggers() {
-        let allowed = PluginSkillDraftPlanner.availableTriggers(for: .newsDigest)
-        #expect(allowed == Set([.chat, .schedule]))
-        var draft = PluginSkillDraft(
-            goal: "tech news",
-            triggers: [.chat, .schedule, .mention, .messaging],
-            pluginName: "tech-news"
-        )
-        PluginSkillDraftPlanner.sanitizeTriggers(in: &draft)
-        #expect(draft.triggers == Set([.chat, .schedule]))
-    }
-
     @Test func messagingConnectorDisallowsScheduleTrigger() {
         let allowed = PluginSkillDraftPlanner.availableTriggers(for: .messagingConnector)
         #expect(allowed == Set([.chat, .messaging, .mention]))
@@ -100,19 +80,5 @@ import Testing
         )
         PluginSkillDraftPlanner.sanitizeTriggers(in: &draft)
         #expect(draft.triggers == Set([.chat, .messaging]))
-    }
-
-    @Test func newsDraftRejectsFactoryInput() {
-        let draft = PluginSkillDraft(
-            goal: "news digest",
-            purpose: "News",
-            examples: [PluginSkillDraft.Example(userSays: "news", pluginDoes: "fetch")],
-            pluginName: "news-list",
-            newsTopics: ["Tech"],
-            newsSourceURLs: ["https://news.google.com/rss"]
-        )
-        #expect(throws: PluginSkillDraftError.newsUsesReaderPath) {
-            try PluginFactoryCreateInput.makeFromSkillDraft(draft)
-        }
     }
 }

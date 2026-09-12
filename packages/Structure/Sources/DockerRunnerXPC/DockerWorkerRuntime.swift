@@ -8,12 +8,10 @@ public enum DockerWorkerRuntime: Sendable {
 
     public static let crawlerBinary = "/usr/local/bin/derrick-web-crawler"
     public static let extractorBinary = "/usr/local/bin/derrick-file-extractor"
-    public static let newsReaderBinary = "/usr/local/bin/derrick-news-reader"
     /// Binaries that must exist in the unified worker image.
     public static let requiredBinaries: [String] = [
         crawlerBinary,
         extractorBinary,
-        newsReaderBinary,
     ]
 
     public static let guestBinaryPath = "/tmp/guest"
@@ -30,5 +28,5 @@ public enum DockerWorkerRuntime: Sendable {
 
     /// OCI label written by `docker/worker/Dockerfile`; used to detect stale local images.
     public static let binariesLabelKey = "derrick.worker.binaries"
-    public static let binariesLabelValue = "crawler,extractor,news-reader"
+    public static let binariesLabelValue = "crawler,extractor"
 }

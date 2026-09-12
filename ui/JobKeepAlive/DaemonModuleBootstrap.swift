@@ -37,9 +37,6 @@ enum DaemonModuleBootstrap {
                 let tools = try await MCPServiceToolHost.shared.searchTools(query: query, principal: principal)
                 return MCPToolSearchResultDTO(ok: true, tools: tools, message: "ok")
             }
-            InProcessServiceBridges.runNewsReader = { requestJSON in
-                try await MCPServiceToolHost.shared.runNewsReader(requestJSON: requestJSON)
-            }
             InProcessServiceBridges.jobLocalProxy = JobServiceExportedObject()
             InProcessServiceBridges.jobNetworkPreflight = { toolName, argumentsJSON, jobID in
                 let repo = try await JobServiceStore.shared.sharedRepository()
