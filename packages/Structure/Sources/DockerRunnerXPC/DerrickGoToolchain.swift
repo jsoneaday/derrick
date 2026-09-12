@@ -27,7 +27,7 @@ public enum DerrickGoToolchain: Sendable {
         }
     }
 
-    private static func parseVersion(_ text: String) -> String? {
+    static func parseVersion(_ text: String) -> String? {
         // go version go1.27.1 darwin/arm64
         for part in text.split(separator: " ") {
             let token = String(part)
@@ -38,7 +38,7 @@ public enum DerrickGoToolchain: Sendable {
         return nil
     }
 
-    private static func versionSatisfies(_ found: String, minimum: String) -> Bool {
+    static func versionSatisfies(_ found: String, minimum: String) -> Bool {
         compareVersions(found, minimum) != .orderedAscending
     }
 
