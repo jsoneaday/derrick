@@ -12,9 +12,9 @@ final class DBNewsReaderTests: XCTestCase {
             topics: ["Financial", "rates"],
             sources: [NewsSource(label: "BBC", url: "https://feeds.bbci.co.uk/news/world/rss.xml")],
             mode: .summary,
-            summaryText: "Markets moved higher.",
             maxCount: 10,
-            schedule: .daily
+            schedule: .daily,
+            summaryText: "Markets moved higher."
         )
         try await repository.upsertNewsReader(spec)
         let listed = try await repository.listNewsReaders()
