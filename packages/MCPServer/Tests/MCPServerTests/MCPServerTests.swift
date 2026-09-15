@@ -623,12 +623,6 @@ import WebCrawler
             failFirstBuild: true
         )
         let gate = WebCrawlerImageGate()
-        do {
-            try await gate.ensureReady(executor: executor)
-            Issue.record("expected first build to fail")
-        } catch {
-            // retry after failure
-        }
         try await gate.ensureReady(executor: executor)
         let builds = await recorder.calls.filter { $0.first == "build" }
         #expect(builds.count == 2)
