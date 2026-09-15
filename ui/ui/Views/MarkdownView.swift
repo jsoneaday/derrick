@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 enum MarkdownBlock: Identifiable {
+    case heading(level: Int, text: String)
     case paragraph(String)
     case bullet(String)
     case numbered(number: Int, text: String)
@@ -10,6 +11,8 @@ enum MarkdownBlock: Identifiable {
 
     var id: String {
         switch self {
+        case .heading(let level, let text):
+            return "h\(level)-\(text.hashValue)"
         case .paragraph(let text):
             return "p-\(text.hashValue)"
         case .bullet(let text):
@@ -64,6 +67,22 @@ enum MarkdownBlock: Identifiable {
             if trimmed.isEmpty {
                 flushParagraph()
                 continue
+            }
+
+            if trimmed.hasPrefix("#") {
+                var level = 0
+                var index = trimmed.startIndex
+                while index < trimmed.endIndex, trimmed[index] == "#", level < 6 {
+                    level += 1
+                    index = trimmed.index(after: index)
+                }
+                if level > 0, index < trimmed.endIndex, trimmed[index] == " " {
+                    flushParagraph()
+                    let headingText = String(trimmed[trimmed.index(after: index)...])
+                        .trimmingCharacters(in: .whitespaces)
+                    blocks.append(.heading(level: level, text: headingText))
+                    continue
+                }
             }
 
             // Check bullet
@@ -290,6 +309,13 @@ struct MarkdownResponseView: View {
     @ViewBuilder
     private func blockView(for block: MarkdownBlock) -> some View {
         switch block {
+        case .heading(let level, let text):
+            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                .font(headingFont(level: level))
+                .fontWeight(.semibold)
+                .padding(.horizontal, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         case .paragraph(let text):
             Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
                 .lineSpacing(2)
@@ -349,6 +375,16 @@ struct MarkdownResponseView: View {
             }
             .padding(15)
             .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func headingFont(level: Int) -> Font {
+        switch level {
+        case 1: return .title
+        case 2: return .title2
+        case 3: return .title3
+        case 4: return .headline
+        default: return .subheadline
         }
     }
 

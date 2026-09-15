@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:.cursor">
+   </FileRef>
+   <FileRef
       location = "group:ui/ui.xcodeproj">
    </FileRef>
    <FileRef

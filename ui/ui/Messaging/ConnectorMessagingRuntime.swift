@@ -14,15 +14,22 @@ final class ConnectorMessagingRuntime {
     func bootstrap(
         pluginID: String,
         store: MessagingStore,
-        session: MessagingSessionStore
+        session: MessagingSessionStore,
+        generation: Int? = nil
     ) async {
         store.setConnectorSyncing(true)
-        defer { store.setConnectorSyncing(false) }
+        defer {
+            if generation == nil || store.connectorCommandID == generation {
+                store.setConnectorSyncing(false)
+            }
+        }
         do {
             try await client.bootstrap(pluginID: pluginID)
-            let shouldAutoOpen = session.selectedThreadID == nil
+            guard generation == nil || store.connectorCommandID == generation else { return }
+            let shouldAutoOpen = session.selectedThreadID == nil && store.hostUIRoot.opensFirstConversation
             await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: shouldAutoOpen)
-            if session.selectedThreadID == nil, let threadID = session.threads.first?.id {
+            if session.selectedThreadID == nil, store.hostUIRoot.opensFirstConversation,
+               let threadID = session.threads.first?.id {
                 await session.selectThread(id: threadID)
             }
             if let threadID = session.selectedThreadID {
@@ -30,17 +37,21 @@ final class ConnectorMessagingRuntime {
             }
             session.setLastError(nil)
         } catch {
-            let detail = error.localizedDescription
-            session.setLastError(detail)
+            guard generation == nil || store.connectorCommandID == generation else { return }
+            let raw = error.localizedDescription
+            if ConnectorMessagingClientError.isTimeout(error) {
+                return
+            }
+            session.setLastError(raw)
             Task {
                 await ServiceLogRecorder.shared.record(
                     service: "messaging",
                     level: .error,
                     code: "bootstrap_failed",
-                    message: "Messaging bootstrap failed pluginID=\(pluginID): \(detail)",
+                    message: "Messaging bootstrap failed pluginID=\(pluginID): \(raw)",
                     detailJSON: Self.detailJSON(
                         pluginID: pluginID,
-                        error: detail
+                        error: raw
                     )
                 )
             }

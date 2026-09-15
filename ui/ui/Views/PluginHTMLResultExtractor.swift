@@ -57,6 +57,7 @@ enum PluginResultExtractor {
                 let format = envelope.payload["format"]?.stringValue?.lowercased()
                 let candidate = envelope.payload["content"]?.stringValue
                     ?? envelope.payload["summary"]?.stringValue
+                    ?? envelope.payload["markdown"]?.stringValue
                     ?? envelope.payload["text"]?.stringValue
                     ?? ""
                 guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -320,6 +321,7 @@ enum PluginResultExtractor {
 
                 let candidate = item["content"] as? String
                     ?? item["summary"] as? String
+                    ?? item["markdown"] as? String
                     ?? item["text"] as? String
                     ?? ""
                 guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

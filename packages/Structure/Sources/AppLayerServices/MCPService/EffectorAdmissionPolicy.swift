@@ -6,10 +6,14 @@ public enum EffectorAdmissionPolicy: Sendable {
         context: ExecutionContextWire?,
         principal: ServicePrincipal
     ) -> Bool {
-        if case .job = principal { return true }
-        guard let context else { return false }
-        if context.capabilities.contains(.syncWebCrawl) { return true }
-        if context.workflow?.kind == .pluginFactoryCreate { return true }
+        switch principal {
+        case .job, .agent:
+            return true
+        default:
+            break
+        }
+        if let context, context.capabilities.contains(.syncWebCrawl) { return true }
+        if let context, context.workflow?.kind == .pluginFactoryCreate { return true }
         return false
     }
 

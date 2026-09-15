@@ -4,7 +4,6 @@ import Foundation
 public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public enum PluginType: String, Codable, Sendable, CaseIterable {
         case connector
-        case newsReader = "news_reader"
         case custom
     }
 
@@ -62,28 +61,6 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
             pluginID.localizedCaseInsensitiveContains("slack")
         }
-
-        /// Primary vendor API documentation entry point for the mandatory crawl step.
-        public var documentationStartURL: String? {
-            switch self {
-            case .slack: return "https://api.slack.com/docs"
-            case .telegram: return "https://core.telegram.org/bots/api"
-            case .whatsapp: return "https://developers.facebook.com/docs/whatsapp"
-            case .discord: return "https://discord.com/developers/docs/intro"
-            case .custom: return nil
-            }
-        }
-
-        /// Auth/token docs only. Used before Create so the credential form matches the vendor.
-        public var authenticationDocumentationStartURL: String? {
-            switch self {
-            case .slack: return "https://api.slack.com/authentication/tokens"
-            case .telegram: return "https://core.telegram.org/bots/api#authorizing-your-bot"
-            case .whatsapp: return "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"
-            case .discord: return "https://discord.com/developers/docs/topics/oauth2"
-            case .custom: return nil
-            }
-        }
     }
 
     public let pluginType: PluginType
@@ -93,6 +70,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public let description: String
     public let pluginID: String?
     public let auth: ConnectorAuthDiscovery?
+    public let skillMarkdown: String?
 
     public init(
         pluginType: PluginType,
@@ -101,7 +79,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         scope: ConnectorScope = .fullSync,
         description: String,
         pluginID: String? = nil,
-        auth: ConnectorAuthDiscovery? = nil
+        auth: ConnectorAuthDiscovery? = nil,
+        skillMarkdown: String? = nil
     ) {
         self.pluginType = pluginType
         self.vendor = vendor
@@ -109,12 +88,68 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         self.scope = scope
         self.pluginID = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.auth = auth
+        self.skillMarkdown = skillMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.description = Self.resolvedDescription(
             userDescription: description,
             vendor: vendor,
             customVendorName: customVendorName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             scope: scope
         )
+    }
+
+    public static func makeFromSkillDraft(
+        _ draft: PluginSkillDraft,
+        auth: ConnectorAuthDiscovery? = nil,
+        pluginID: String? = nil
+    ) throws -> PluginFactoryCreateInput {
+        let resolvedID: String
+        if let override = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            resolvedID = override
+        } else {
+            resolvedID = try draft.normalizedPluginID()
+        }
+        let description = draft.factoryDescription()
+        let skillMarkdown = draft.skillMarkdown()
+        switch draft.plannedKind {
+        case .messagingConnector:
+            guard let vendor = draft.inferredConnectorVendor else {
+                throw PluginSkillDraftError.missingConnectorVendor
+            }
+            return PluginFactoryCreateInput(
+                pluginType: .connector,
+                vendor: vendor,
+                scope: .fullSync,
+                description: description,
+                pluginID: resolvedID,
+                auth: auth?.preferringCallCredential(),
+                skillMarkdown: skillMarkdown
+            )
+        case .customCapability:
+            return PluginFactoryCreateInput(
+                pluginType: .custom,
+                description: description,
+                pluginID: resolvedID,
+                skillMarkdown: skillMarkdown
+            )
+        }
+    }
+
+    public static func makeFromSpecDraft(
+        _ spec: PluginSpecDraft,
+        auth: ConnectorAuthDiscovery? = nil,
+        existingPluginIDs: [String] = [],
+        pluginID: String? = nil
+    ) throws -> PluginFactoryCreateInput {
+        guard spec.isBuildable else {
+            throw PluginCreatorSpecError.notBuildable
+        }
+        var skill = spec.asSkillDraft()
+        PluginSkillDraftPlanner.applyGoal(
+            skill.goal,
+            to: &skill,
+            existingPluginIDs: existingPluginIDs
+        )
+        return try makeFromSkillDraft(skill, auth: auth, pluginID: pluginID)
     }
 
     /// Builds connector workflow input. The factory goal uses the fixed scope sentence, not free-text extras.
@@ -137,7 +172,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             scope: scope,
             description: userDescription,
             pluginID: resolvedID,
-            auth: auth ?? (try? ConnectorAuthDiscovery.slackBotTokenFallback())
+            auth: auth ?? (try? ConnectorAuthDiscovery.slackBotTokenFallback()),
+            skillMarkdown: nil
         )
     }
 
@@ -182,6 +218,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         case description
         case pluginID
         case auth
+        case skillMarkdown
     }
 
     public init(from decoder: Decoder) throws {
@@ -195,6 +232,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)?
             .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         auth = try container.decodeIfPresent(ConnectorAuthDiscovery.self, forKey: .auth)
+        skillMarkdown = try container.decodeIfPresent(String.self, forKey: .skillMarkdown)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         description = Self.resolvedDescription(
             userDescription: rawDescription,
             vendor: vendor,
@@ -212,6 +251,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         try container.encode(description, forKey: .description)
         try container.encodeIfPresent(pluginID, forKey: .pluginID)
         try container.encodeIfPresent(auth, forKey: .auth)
+        try container.encodeIfPresent(skillMarkdown, forKey: .skillMarkdown)
     }
 
     public func encodedJSON() throws -> String {
@@ -230,7 +270,10 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     }
 
     /// Factory goal passed to `plugin_factory_build` after vendor docs are crawled.
-    public func connectorBuildGoal(crawlSummary: String?) -> String {
+    public func connectorBuildGoal(
+        crawlSummary: String?,
+        inboxAPISummary: String? = nil
+    ) -> String {
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
         let summary = crawlSummary ?? auth?.crawlSummary
         do {
@@ -247,14 +290,18 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                     extra.append("Host permission labels: \(auth.permissions.joined(separator: ", "))")
                 }
             }
+            if let skillMarkdown, !skillMarkdown.isEmpty {
+                extra.append("SKILL.md draft:\n\(skillMarkdown)")
+            }
             extra.append(
-                "The host writes plugin.json. Return python_source and test_input_json only. Do not invent a plugin_id or secrets list."
+                "The host writes plugin.json. Return go_source and test_input_json only. Do not invent a plugin_id or secrets list."
             )
             return try ConnectorContractPrompts.factoryGoal(
                 vendorLabel: vendorLabel,
                 scope: scope,
                 vendor: vendor,
                 crawlSummary: summary,
+                inboxAPISummary: inboxAPISummary,
                 reference: extra.joined(separator: "\n"),
                 includeVendorBindings: true
             )
@@ -267,31 +314,43 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         }
     }
 
-    /// Failure stage hint for returning the wizard to the right step.
+    public func customBuildGoal() -> String {
+        var lines = [
+            "Create an Agent Plugin capability.",
+            description,
+        ]
+        if let skillMarkdown, !skillMarkdown.isEmpty {
+            lines.append("SKILL.md draft:\n\(skillMarkdown)")
+        }
+        lines.append(
+            "Return go_source, test_input_json, and skill_files. Include a valid plugin.json via the builder contract when no host manifest is supplied."
+        )
+        return lines.joined(separator: "\n\n")
+    }
+
+    /// Failure stage hint for returning the plugin studio to the right step.
     public enum FailureStep: String, Sendable {
-        case type
-        case vendor
-        case name
-        case auth
-        case news
-        case description
-        case creating
+        case goal
+        case skill
+        case preview
+        case credentials
+        case build
     }
 
     public static func failureStep(forStage stage: String?) -> FailureStep {
         switch stage?.lowercased() {
-        case "type":
-            return .type
-        case "name":
-            return .name
-        case "auth", "discover":
-            return .auth
-        case "news", "paywall":
-            return .news
-        case "crawl", "docs", "vendor", "factory", "build", "review", "description":
-            return .vendor
+        case "goal":
+            return .goal
+        case "skill", "name", "description", "type", "vendor":
+            return .skill
+        case "preview":
+            return .preview
+        case "auth", "discover", "credentials":
+            return .credentials
+        case "crawl", "docs", "factory", "build", "review":
+            return .build
         default:
-            return .creating
+            return .build
         }
     }
 }

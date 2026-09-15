@@ -2,7 +2,7 @@ import Foundation
 import Plugin
 import Structure
 
-/// Runs an approved factory release through the offline Python guest runtime.
+/// Runs an approved factory release through the offline Go guest runtime.
 public enum GuestPluginRunner: Sendable {
     public static func run(
         release: PluginFactoryRelease,
@@ -15,14 +15,20 @@ public enum GuestPluginRunner: Sendable {
         let invokeID = UUID().uuidString
         let initialEvent = (try? PluginHopEvent.decodeValidated(input))
             ?? PluginHopEvent(kind: .manual)
-        let executor = PythonGuestDockerExecutor(executor: dockerExecutor)
+        let executor = GoGuestDockerExecutor(executor: dockerExecutor)
+        guard !release.compiledArtifact.isEmpty else {
+            throw GoGuestDockerExecutorError.commandFailed(
+                "load plugin artifact",
+                "compiled artifact is empty"
+            )
+        }
         return try await GuestHopLoop.runForPluginInvoke(
             initialEvent: initialEvent,
             invokeID: invokeID,
             timeoutSeconds: timeoutSeconds,
             execute: { hopInput in
-                try await executor.runSource(
-                    source: release.guestSource,
+                try await executor.runArtifact(
+                    artifact: release.compiledArtifact,
                     input: hopInput,
                     timeoutSeconds: timeoutSeconds
                 )

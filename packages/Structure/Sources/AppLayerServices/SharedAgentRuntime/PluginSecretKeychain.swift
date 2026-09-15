@@ -6,9 +6,22 @@ import Security
 /// The sandboxed UI and unsandboxed daemon cannot share a process Keychain.
 /// Values are written to the app-group container (same place as SQLite) so both
 /// processes can read them. Keychain is updated when this process can reach it.
+///
+/// Each secret has one account name, always:
+/// `plugin-secret:<plugin-id>/<field-id>`
+///
+/// - **plugin-id** is unique per installed plugin. Messaging connectors use
+///   `<vendor>-connector-<n>` (`slack-connector-1`, `slack-connector-2`, …).
+///   Custom plugins use the normalized plugin name.
+/// - **field-id** is the secret slot from the plugin (`bot_token`, `api_key`, …).
+///
+/// Keychain **service** is the host bundle id. The app-group file uses the same
+/// account string with `:` and `/` replaced by `_`.
 public enum PluginSecretKeychain: Sendable {
+    public static let accountPrefix = "plugin-secret"
+
     public static func account(pluginID: String, fieldID: String) -> String {
-        "plugin-secret:\(pluginID)/\(fieldID)"
+        "\(accountPrefix):\(pluginID)/\(fieldID)"
     }
 
     public static func load(pluginID: String, fieldID: String) throws -> String? {

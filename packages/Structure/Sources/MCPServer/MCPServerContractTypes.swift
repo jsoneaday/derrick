@@ -2,11 +2,11 @@ import Foundation
 import MCP
 
 public enum GuestScriptLanguage: String, Sendable, Equatable {
-    case python
+    case go
 
-    public var verifierID: String { "python-check-v1" }
+    public var verifierID: String { "go-check-v1" }
 
-    /// `language` is optional and must be Python when set.
+    /// `language` is optional and must be Go when set.
     public static func requestedLanguageIsUnsupported(_ arguments: [String: Value]) -> Bool {
         guard let raw = arguments["language"]?.stringValue?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -15,7 +15,7 @@ public enum GuestScriptLanguage: String, Sendable, Equatable {
         else {
             return false
         }
-        return raw != "python" && raw != "py"
+        return raw != "go" && raw != "golang"
     }
 }
 

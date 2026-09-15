@@ -74,7 +74,10 @@ public final class AgentServiceClient: @unchecked Sendable {
 
     /// Connect (launch-on-demand), bootstrap DB/logs, return health. Retries a few times.
     /// Use at app startup (and when `ensureReadyForTurn` finds the link dead).
-    public func ensureUpAndHealth(retries: Int = 3) async throws -> ServiceHealthReport {
+    public func ensureUpAndHealth(
+        retries: Int = 3,
+        verifyHealth: Bool = true
+    ) async throws -> ServiceHealthReport {
         var lastError: Error?
         for attempt in 0..<max(1, retries) {
             do {
@@ -91,13 +94,26 @@ public final class AgentServiceClient: @unchecked Sendable {
                     throw AgentServiceClientError.bootstrapFailed(boot.message)
                 }
 
-                let report: ServiceHealthReport = try await invoke(timeout: callTimeoutNanoseconds) {
-                    try await self.requestHealth(using: proxy)
-                }
-                await MainActor.run {
-                    debugLog(
-                        "AgentService health: status=\(report.status.rawValue) pid=\(report.pid) detail=\(report.detail ?? "")"
+                let report: ServiceHealthReport
+                if verifyHealth {
+                    report = try await invoke(timeout: callTimeoutNanoseconds) {
+                        try await self.requestHealth(using: proxy)
+                    }
+                    await MainActor.run {
+                        debugLog(
+                            "AgentService health: status=\(report.status.rawValue) pid=\(report.pid) detail=\(report.detail ?? "")"
+                        )
+                    }
+                } else {
+                    report = ServiceHealthReport(
+                        service: .daemon,
+                        status: .ok,
+                        detail: nil,
+                        guestRuntimeImage: DerrickGuestRuntime.guestDockerImage
                     )
+                    await MainActor.run {
+                        debugLog("AgentService ensure-up: bootstrap ok (health check skipped at startup)")
+                    }
                 }
                 markReady()
                 return report

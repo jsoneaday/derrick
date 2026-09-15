@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/connector-contract.json",
+  "title": "Derrick connector protocol document",
+  "description": "Canonical host ops, emit shapes, allowed vendor-call ids, and success rules. Vendor HTTP bindings live in contracts/vendors/*.json.",
+  "type": "object",
+  "required": ["version", "ops", "scopes", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "ops": {
+      "type": "object",
+      "required": ["sync_threads", "poll_inbox", "send_message"],
+      "additionalProperties": { "$ref": "#/$defs/op" }
+    },
+    "scopes": {
+      "type": "object",
+      "required": ["full_sync"],
+      "additionalProperties": { "$ref": "#/$defs/scope" }
+    },
+    "rules": {
+      "type": "object",
+      "required": [
+        "sync_threads_lists_tabs_only",
+        "poll_loads_one_conversation",
+        "paginate_within_op",
+        "live_http_results_accumulate",
+        "direct_test_poll_requires_non_empty_messages",
+        "direct_test_threads_requires_non_empty",
+        "runtime_empty_messages_ok_if_vendor_ok"
+      ],
+      "properties": {
+        "sync_threads_lists_tabs_only": { "type": "boolean" },
+        "poll_loads_one_conversation": { "type": "boolean" },
+        "paginate_within_op": { "type": "boolean" },
+        "live_http_results_accumulate": { "type": "boolean" },
+        "direct_test_poll_requires_non_empty_messages": { "type": "boolean" },
+        "direct_test_threads_requires_non_empty": { "type": "boolean" },
+        "runtime_empty_messages_ok_if_vendor_ok": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "op": {
+      "type": "object",
+      "required": ["kind", "emit"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["manual", "message_in_room"] },
+        "emit": { "type": "string", "enum": ["threads", "messages", "sent_message"] },
+        "params": { "type": "array", "items": { "type": "string" } },
+        "may_call": { "type": "array", "items": { "type": "string" } },
+        "must_not_call": { "type": "array", "items": { "type": "string" } },
+        "when_no_parent": { "$ref": "#/$defs/call_set" },
+        "when_parent": { "$ref": "#/$defs/call_set" },
+        "success": { "$ref": "#/$defs/success" },
+        "failure": { "$ref": "#/$defs/failure" }
+      },
+      "additionalProperties": false
+    },
+    "call_set": {
+      "type": "object",
+      "properties": {
+        "may_call": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "success": {
+      "type": "object",
+      "properties": {
+        "empty_collection_ok": { "type": "boolean" },
+        "empty_array_ok_if_vendor_ok": { "type": "boolean" },
+        "requires_sent_message": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "failure": {
+      "type": "object",
+      "properties": {
+        "vendor_ok_false_empty_is_not_success": { "type": "boolean" },
+        "codes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["ops", "include_reply_poll", "test_pagination"],
+      "properties": {
+        "ops": { "type": "array", "items": { "type": "string" } },
+        "include_reply_poll": { "type": "boolean" },
+        "test_pagination": { "type": "string", "enum": ["single_page", "follow_cursor"] },
+        "poll_must_not_call": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

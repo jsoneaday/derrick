@@ -45,6 +45,17 @@ import Testing
         defer { InProcessServiceBridges.mcpCallTool = previousMCP }
         InProcessServiceBridges.mcpCallTool = { call in
             switch call.toolName {
+            case "web.search":
+                let hits = #"{"ok":true,"query":"Slack API","hits":[{"title":"Auth","url":"https://docs.example.com/auth","snippet":"Create a token."}],"diagnostics":[]}"#
+                let outcome = try ToolExecutionOutcome.completed(
+                    output: ToolExecutionOutcome.Output(format: .json, value: hits)
+                ).encodedJSON()
+                return MCPToolCallResultDTO(
+                    requestID: call.requestID,
+                    ok: true,
+                    isError: false,
+                    text: outcome
+                )
             case "web.crawl":
                 let pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
                 let outcome = try ToolExecutionOutcome.completed(

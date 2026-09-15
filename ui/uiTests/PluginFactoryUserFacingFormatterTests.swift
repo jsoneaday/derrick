@@ -44,7 +44,7 @@ import Testing
         #expect(text.contains("Slack connector ready."))
     }
 
-    @Test func savedConnectorPluginNavigatesToMessaging() {
+    @Test func savedConnectorPluginOpensChatTab() {
         let text = PluginFactoryUserFacingFormatter.savedPluginNextStepText(
             pluginID: "slack-connector",
             isMessagingConnector: true,
@@ -52,30 +52,33 @@ import Testing
             willNavigateToMessaging: true
         )
         #expect(text.contains("**Plugin approved and saved.**"))
-        #expect(text.contains("Messaging → slack-connector"))
+        #expect(text.contains("Chat → /slack-connector"))
         #expect(text.contains("Taking you there now"))
         #expect(!text.contains("Running it now"))
+        #expect(!text.contains("Messaging →"))
     }
 
-    @Test func savedConnectorWithoutCredentialsPointsToMessaging() {
+    @Test func savedConnectorWithoutCredentialsPointsToChat() {
         let text = PluginFactoryUserFacingFormatter.savedPluginNextStepText(
             pluginID: "slack-connector",
             isMessagingConnector: true,
             credentialsReady: false,
             willNavigateToMessaging: false
         )
-        #expect(text.contains("Messaging → slack-connector"))
+        #expect(text.contains("Chat → /slack-connector"))
         #expect(text.contains("add credentials"))
+        #expect(!text.contains("Messaging →"))
     }
 
-    @Test func savedNonConnectorPluginDoesNotMentionMessaging() {
+    @Test func savedNonConnectorPluginRunsFromChat() {
         let text = PluginFactoryUserFacingFormatter.savedPluginNextStepText(
             pluginID: "weather-tool",
             isMessagingConnector: false,
             credentialsReady: true,
             willNavigateToMessaging: false
         )
-        #expect(text.contains("Run **weather-tool** from Plugins"))
+        #expect(text.contains("Run **/weather-tool** in Chat"))
         #expect(!text.contains("Messaging"))
+        #expect(!text.contains("from Plugins"))
     }
 }

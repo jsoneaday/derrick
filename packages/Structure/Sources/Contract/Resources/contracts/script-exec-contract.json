@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "runtime": {
+    "language": "go",
+    "package": "main",
+    "binary": "/tmp/guest",
+    "stdlib_only": true,
+    "forbidden_imports": ["net/http", "net", "os/exec"],
+    "allowed_os_usage": ["os.Stdin", "os.Stdout"],
+    "example_go": "package main\n\nimport (\n\t\"encoding/json\"\n\t\"os\"\n)\n\nfunc main() {\n\tvar event map[string]any\n\tif err := json.NewDecoder(os.Stdin).Decode(&event); err != nil {\n\t\treturn\n\t}\n\temit([]map[string]any{{\"verb\": \"result.emit\", \"title\": \"Result\", \"summary\": \"done\"}})\n}\n\nfunc emit(envelopes []map[string]any) {\n\tenc := json.NewEncoder(os.Stdout)\n\tenc.SetEscapeHTML(false)\n\t_ = enc.Encode(envelopes)\n}"
+  },
+  "io": {
+    "stdin_schema": "hop-event.schema.json",
+    "stdout_schema": "envelope-list.schema.json",
+    "guest_runtime_schema": "guest-runtime.schema.json"
+  },
+  "workflow": {
+    "first_hop_verbs": ["http.request"],
+    "http_results_event_kind": "http_results",
+    "terminal_verbs": ["result.emit", "message.post"],
+    "match_http_by": "request_id",
+    "http_results_accumulate": true,
+    "post_body_field": "json"
+  },
+  "output": {
+    "fields": {
+      "content": {
+        "purpose": "parsed plain-text summaries from fetched HTML, XML, or RSS",
+        "host_strips_incidental_markup": true
+      },
+      "summary": {
+        "purpose": "short plain-text headline or one-line result",
+        "host_strips_incidental_markup": true
+      },
+      "html": {
+        "purpose": "only when the user explicitly requested HTML",
+        "host_allowlist_sanitizes": true
+      },
+      "markdown": {
+        "purpose": "intentional Markdown formatting only",
+        "prefer_content_for_extracted_text": true
+      }
+    },
+    "forbidden_patterns": ["repr(http_results)"],
+    "raw_body_in_content_requires_explicit_user_request": true
+  },
+  "agent": {
+    "prefer_direct_urls_over_serp_html": true,
+    "retry_with_different_urls_on_empty_fetch": true,
+    "max_correction_attempts_after_block": 1
+  },
+  "review": {
+    "fail_fast": true,
+    "response_schema": {
+      "alignedWithRequest": "boolean",
+      "confidence": "number 0.0-1.0",
+      "suggestedAction": "allow|deny",
+      "concerns": "string[]",
+      "summary": "string"
+    },
+    "checks": [
+      {
+        "id": "intent_alignment",
+        "order": 1,
+        "description": "Script, description, reason, and user prompt are consistent.",
+        "notes": [
+          "Derrick has a job scheduler (jobs_create, run_after_seconds, cron). Timing is applied by JobService before this script runs.",
+          "The script must do the work immediately when invoked.",
+          "Words like delayed, scheduled, in 7 seconds, later, or run_after refer to the scheduler, not sleep inside the script.",
+          "Do not deny a script that performs the requested work just because it has no delay."
+        ]
+      },
+      {
+        "id": "no_secret_literals",
+        "order": 2,
+        "description": "No tokens, API keys, passwords, or other secret literals in the source."
+      },
+      {
+        "id": "terminal_result_not_fetch_only",
+        "order": 3,
+        "description": "The script implements the requested terminal result, not just the fetch.",
+        "notes": [
+          "For summarize, list, inspect, or extract requests, the http_results branch must parse the response body and emit the requested data.",
+          "Do not allow repr(http_results), a fetch-only confirmation, or an entire raw body copied to content unless the user explicitly requested the raw source.",
+          "If raw HTML is requested, html is allowed because the host sanitizes it before rendering."
+        ]
+      },
+      {
+        "id": "untrusted_remote_content",
+        "order": 4,
+        "description": "Fetched HTML or XML is untrusted input; output must use envelope-list output fields correctly.",
+        "notes": [
+          "Prefer content or summary for extracted plain-text lists and headlines.",
+          "Use html only when the user explicitly asked for HTML.",
+          "Use markdown only for intentional Markdown formatting.",
+          "Approve scripts that parse RSS, XML, or HTML and emit normalized plain text in content or summary.",
+          "Do not deny solely because the source was XML or HTML or because the guest does not re-validate http or https on plain-text lines."
+        ]
+      }
+    ],
+    "do_not_deny_for": [
+      "go_style",
+      "envelope_construction",
+      "destination_urls",
+      "absence_of_dependencies"
+    ],
+    "enforced_elsewhere": [
+      "static_go_verifier_enforces_forbidden_imports",
+      "guest_has_no_network_host_performs_http",
+      "host_applies_ssrf_on_http"
+    ]
+  },
+  "rules": {
+    "guest_has_no_network": true,
+    "host_performs_http": true,
+    "host_applies_ssrf": true,
+    "static_verifier_enforces_imports": true,
+    "scheduler_timing_not_in_script": true,
+    "deterministic_output_required": true,
+    "stable_sort_and_dedupe_collections": true,
+    "no_time_random_uuid_for_visible_output": true,
+    "match_http_results_by_request_id": true
+  },
+  "plugin_factory": {
+    "manifest": {
+      "host_creates_manifest": true,
+      "do_not_return_manifest_json": true,
+      "agent_plugin_schema": "Agent Plugin 1.0",
+      "entrypoint": "./app.derrick/plugin.go",
+      "plugin_id_allowed_chars": "lowercase letters, numbers, hyphens, dots",
+      "plugin_id_forbidden_chars": ["underscore"],
+      "roles": ["connector", "standard"],
+      "connector_messaging_ops": ["send_message", "poll_inbox", "sync_threads"],
+      "secret_kinds": ["username", "password", "token", "api_key"],
+      "never_embed_credentials_in_go_source": true,
+      "host_lists_connectors_under_messaging": true
+    },
+    "builder": {
+      "response_keys": [
+        "plugin_id",
+        "version",
+        "description",
+        "go_source",
+        "test_input_json",
+        "skill_files",
+        "secrets",
+        "role",
+        "messaging_ops"
+      ],
+      "skill_files_path_pattern": "skills/<name>/SKILL.md",
+      "empty_skill_files_when_unused": true,
+      "test_input_is_serialized_json_object": true,
+      "test_input_must_not_be_empty": true,
+      "test_input_exercises_terminal_result": true,
+      "connector_test_input_uses_hops_array": true,
+      "connector_parse_json_http_results_when_vendor_returns_json": true
+    },
+    "review": {
+      "compilation_success_not_approval": true,
+      "response_schema": {
+        "decision": "approved|rejected",
+        "summary": "string",
+        "findings": "[{severity: info|warning|blocking, category: alignment|safety|correctness|privacy|supplyChain, message: string}]"
+      },
+      "reject_non_go_source": true,
+      "reject_raw_network_outside_http_request_envelopes": true,
+      "reject_missing_stdin_read": true,
+      "source_derived_titles_may_be_fragments": true,
+      "reject_unsupported_direct_test_claims": true,
+      "connector_rules_document": "connector-contract.json"
+    }
+  }
+}

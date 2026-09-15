@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/script-exec-contract.json",
+  "title": "Derrick script_exec protocol document",
+  "description": "Canonical guest runtime, workflow, output, agent, and reviewer rules for script_exec and offline Go guests.",
+  "type": "object",
+  "required": [
+    "version",
+    "runtime",
+    "io",
+    "workflow",
+    "output",
+    "agent",
+    "review",
+    "rules",
+    "plugin_factory"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "io": { "$ref": "#/$defs/io" },
+    "workflow": { "$ref": "#/$defs/workflow" },
+    "output": { "$ref": "#/$defs/output" },
+    "agent": { "$ref": "#/$defs/agent" },
+    "review": { "$ref": "#/$defs/review" },
+    "rules": { "$ref": "#/$defs/rules" },
+    "plugin_factory": { "$ref": "#/$defs/plugin_factory" }
+  },
+  "$defs": {
+    "runtime": {
+      "type": "object",
+      "required": [
+        "language",
+        "package",
+        "binary",
+        "stdlib_only",
+        "forbidden_imports",
+        "allowed_os_usage",
+        "example_go"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "language": { "type": "string", "const": "go" },
+        "package": { "type": "string", "const": "main" },
+        "binary": { "type": "string", "const": "/tmp/guest" },
+        "stdlib_only": { "type": "boolean" },
+        "forbidden_imports": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "allowed_os_usage": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "example_go": { "type": "string", "minLength": 1 }
+      }
+    },
+    "io": {
+      "type": "object",
+      "required": ["stdin_schema", "stdout_schema", "guest_runtime_schema"],
+      "additionalProperties": false,
+      "properties": {
+        "stdin_schema": { "type": "string", "const": "hop-event.schema.json" },
+        "stdout_schema": { "type": "string", "const": "envelope-list.schema.json" },
+        "guest_runtime_schema": { "type": "string", "const": "guest-runtime.schema.json" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "required": [
+        "first_hop_verbs",
+        "http_results_event_kind",
+        "terminal_verbs",
+        "match_http_by",
+        "http_results_accumulate",
+        "post_body_field"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "first_hop_verbs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "http_results_event_kind": { "type": "string" },
+        "terminal_verbs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "match_http_by": { "type": "string", "const": "request_id" },
+        "http_results_accumulate": { "type": "boolean" },
+        "post_body_field": { "type": "string", "const": "json" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["fields", "forbidden_patterns", "raw_body_in_content_requires_explicit_user_request"],
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "type": "object",
+          "required": ["content", "summary", "html", "markdown"],
+          "additionalProperties": false,
+          "properties": {
+            "content": { "$ref": "#/$defs/output_field" },
+            "summary": { "$ref": "#/$defs/output_field" },
+            "html": { "$ref": "#/$defs/output_field" },
+            "markdown": { "$ref": "#/$defs/output_field" }
+          }
+        },
+        "forbidden_patterns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "raw_body_in_content_requires_explicit_user_request": { "type": "boolean" }
+      }
+    },
+    "output_field": {
+      "type": "object",
+      "required": ["purpose"],
+      "additionalProperties": true,
+      "properties": {
+        "purpose": { "type": "string" },
+        "host_strips_incidental_markup": { "type": "boolean" },
+        "host_allowlist_sanitizes": { "type": "boolean" },
+        "prefer_content_for_extracted_text": { "type": "boolean" }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": [
+        "prefer_direct_urls_over_serp_html",
+        "retry_with_different_urls_on_empty_fetch",
+        "max_correction_attempts_after_block"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "prefer_direct_urls_over_serp_html": { "type": "boolean" },
+        "retry_with_different_urls_on_empty_fetch": { "type": "boolean" },
+        "max_correction_attempts_after_block": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "fail_fast",
+        "response_schema",
+        "checks",
+        "do_not_deny_for",
+        "enforced_elsewhere"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fail_fast": { "type": "boolean" },
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "alignedWithRequest",
+            "confidence",
+            "suggestedAction",
+            "concerns",
+            "summary"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "alignedWithRequest": { "type": "string" },
+            "confidence": { "type": "string" },
+            "suggestedAction": { "type": "string" },
+            "concerns": { "type": "string" },
+            "summary": { "type": "string" }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/review_check" }
+        },
+        "do_not_deny_for": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "enforced_elsewhere": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "review_check": {
+      "type": "object",
+      "required": ["id", "order", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "order": { "type": "integer", "minimum": 1 },
+        "description": { "type": "string" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "required": [
+        "guest_has_no_network",
+        "host_performs_http",
+        "host_applies_ssrf",
+        "static_verifier_enforces_imports",
+        "scheduler_timing_not_in_script",
+        "deterministic_output_required",
+        "stable_sort_and_dedupe_collections",
+        "no_time_random_uuid_for_visible_output",
+        "match_http_results_by_request_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "guest_has_no_network": { "type": "boolean" },
+        "host_performs_http": { "type": "boolean" },
+        "host_applies_ssrf": { "type": "boolean" },
+        "static_verifier_enforces_imports": { "type": "boolean" },
+        "scheduler_timing_not_in_script": { "type": "boolean" },
+        "deterministic_output_required": { "type": "boolean" },
+        "stable_sort_and_dedupe_collections": { "type": "boolean" },
+        "no_time_random_uuid_for_visible_output": { "type": "boolean" },
+        "match_http_results_by_request_id": { "type": "boolean" }
+      }
+    },
+    "plugin_factory": {
+      "type": "object",
+      "required": ["manifest", "builder", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "manifest": { "$ref": "#/$defs/plugin_factory_manifest" },
+        "builder": { "$ref": "#/$defs/plugin_factory_builder" },
+        "review": { "$ref": "#/$defs/plugin_factory_review" }
+      }
+    },
+    "plugin_factory_manifest": {
+      "type": "object",
+      "required": [
+        "host_creates_manifest",
+        "do_not_return_manifest_json",
+        "agent_plugin_schema",
+        "entrypoint",
+        "plugin_id_allowed_chars",
+        "plugin_id_forbidden_chars",
+        "roles",
+        "connector_messaging_ops",
+        "secret_kinds",
+        "never_embed_credentials_in_go_source",
+        "host_lists_connectors_under_messaging"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "host_creates_manifest": { "type": "boolean" },
+        "do_not_return_manifest_json": { "type": "boolean" },
+        "agent_plugin_schema": { "type": "string" },
+        "entrypoint": { "type": "string" },
+        "plugin_id_allowed_chars": { "type": "string" },
+        "plugin_id_forbidden_chars": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "connector_messaging_ops": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "secret_kinds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "never_embed_credentials_in_go_source": { "type": "boolean" },
+        "host_lists_connectors_under_messaging": { "type": "boolean" }
+      }
+    },
+    "plugin_factory_builder": {
+      "type": "object",
+      "required": [
+        "response_keys",
+        "skill_files_path_pattern",
+        "empty_skill_files_when_unused",
+        "test_input_is_serialized_json_object",
+        "test_input_must_not_be_empty",
+        "test_input_exercises_terminal_result",
+        "connector_test_input_uses_hops_array",
+        "connector_parse_json_http_results_when_vendor_returns_json"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "response_keys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "skill_files_path_pattern": { "type": "string" },
+        "empty_skill_files_when_unused": { "type": "boolean" },
+        "test_input_is_serialized_json_object": { "type": "boolean" },
+        "test_input_must_not_be_empty": { "type": "boolean" },
+        "test_input_exercises_terminal_result": { "type": "boolean" },
+        "connector_test_input_uses_hops_array": { "type": "boolean" },
+        "connector_parse_json_http_results_when_vendor_returns_json": { "type": "boolean" }
+      }
+    },
+    "plugin_factory_review": {
+      "type": "object",
+      "required": [
+        "compilation_success_not_approval",
+        "response_schema",
+        "reject_non_go_source",
+        "reject_raw_network_outside_http_request_envelopes",
+        "reject_missing_stdin_read",
+        "source_derived_titles_may_be_fragments",
+        "reject_unsupported_direct_test_claims",
+        "connector_rules_document"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "compilation_success_not_approval": { "type": "boolean" },
+        "response_schema": {
+          "type": "object",
+          "required": ["decision", "summary", "findings"],
+          "additionalProperties": false,
+          "properties": {
+            "decision": { "type": "string" },
+            "summary": { "type": "string" },
+            "findings": { "type": "string" }
+          }
+        },
+        "reject_non_go_source": { "type": "boolean" },
+        "reject_raw_network_outside_http_request_envelopes": { "type": "boolean" },
+        "reject_missing_stdin_read": { "type": "boolean" },
+        "source_derived_titles_may_be_fragments": { "type": "boolean" },
+        "reject_unsupported_direct_test_claims": { "type": "boolean" },
+        "connector_rules_document": { "type": "string" }
+      }
+    }
+  }
+}

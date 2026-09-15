@@ -27,12 +27,12 @@ public enum PromptResources {
         try load(named: "web_crawler_skill", from: resourceRoot)
     }
 
-    public static func filesExtractSkill(from resourceRoot: URL? = nil) throws -> String {
-        try load(named: "files_extract_skill", from: resourceRoot)
+    public static func webSearchSkill(from resourceRoot: URL? = nil) throws -> String {
+        try load(named: "web_search_skill", from: resourceRoot)
     }
 
-    public static func scriptReviewerInstructions(from resourceRoot: URL? = nil) throws -> String {
-        try DerrickBundledText.load("script_reviewer_instructions.md", from: resourceRoot)
+    public static func filesExtractSkill(from resourceRoot: URL? = nil) throws -> String {
+        try load(named: "files_extract_skill", from: resourceRoot)
     }
 
     public static func workerOverlay(from resourceRoot: URL? = nil) throws -> String {
@@ -43,22 +43,22 @@ public enum PromptResources {
         try DerrickBundledText.load("user_facing_spawn_overlay.md", from: resourceRoot)
     }
 
-    /// Python guest contract wrapped for a model prompt.
+    /// Go guest contract wrapped for a model prompt.
     public static func guestSDKForModel(
         from resourceRoot: URL? = nil,
         spec: PluginSpec? = nil
     ) throws -> String {
         _ = resourceRoot
         return DerrickBundledText.formatCodeForModel(
-            try DerrickGuestPython.source(for: spec),
-            heading: "standalone Python guest contract",
-            language: "python"
+            try DerrickGuestGo.source(for: spec),
+            heading: "standalone Go guest contract",
+            language: "go"
         )
     }
 
     public static func guestSDKSource(from resourceRoot: URL? = nil) throws -> String {
         _ = resourceRoot
-        return try DerrickGuestPython.source()
+        return try DerrickGuestGo.source()
     }
 
     private static func load(named name: String, from resourceRoot: URL?, prefixTxt: String? = nil) throws -> String {

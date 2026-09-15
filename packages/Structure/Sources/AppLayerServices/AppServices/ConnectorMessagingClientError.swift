@@ -21,4 +21,12 @@ public enum ConnectorMessagingClientError: Error, LocalizedError, Sendable {
             return "Connector messaging timed out."
         }
     }
+
+    public static func isTimeout(_ error: Error) -> Bool {
+        if case .timedOut = error as? ConnectorMessagingClientError {
+            return true
+        }
+        let text = error.localizedDescription
+        return text.localizedCaseInsensitiveContains("Connector messaging timed out")
+    }
 }

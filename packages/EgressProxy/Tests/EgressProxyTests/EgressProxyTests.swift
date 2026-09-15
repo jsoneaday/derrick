@@ -204,6 +204,15 @@ private struct StaticDNSResolver: DNSResolving {
     @Test func permanentSuffixUsesLastTwoLabels() {
         #expect(EgressHostExtractor.permanentSuffix(for: "api.github.com") == "github.com")
         #expect(EgressHostExtractor.permanentSuffix(for: "reactjs.org") == "reactjs.org")
+        #expect(EgressHostExtractor.permanentSuffix(for: "html.duckduckgo.com") == "duckduckgo.com")
+        #expect(EgressHostExtractor.permanentSuffix(for: "lite.duckduckgo.com") == "duckduckgo.com")
+    }
+
+    @Test func duckDuckGoSearchHostsAreCoveredBySuffixLease() {
+        let policy = DefaultDestinationPolicy(allowedDomainSuffixes: ["duckduckgo.com"])
+        #expect(policy.isHostCoveredByAllowlist("html.duckduckgo.com"))
+        #expect(policy.isHostCoveredByAllowlist("lite.duckduckgo.com"))
+        #expect(policy.isHostCoveredByAllowlist("duckduckgo.com"))
     }
 
     @Test func configurationDefaultsToLoopbackListenHost() {

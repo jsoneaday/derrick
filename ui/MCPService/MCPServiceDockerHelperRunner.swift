@@ -63,17 +63,14 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
         await DerrickDockerOrphanSweeper.sweep(executor: makeStdinCLIExecutor())
     }
 
-    /// Prewarm the shared offline guest runtime image.
+    /// Prewarm the shared Go worker image used by script_exec and plugin.invoke.
     func prewarmGuestRuntime() async throws {
-        try await OneshotDockerContainer.ensurePulledImage(
-            DerrickGuestRuntime.pythonGuestDockerImage,
-            executor: makeStdinCLIExecutor()
-        )
+        try await WorkerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())
     }
 
-    /// Build the crawler image in the background. Joins an in-flight build if one exists.
+    /// Legacy alias — same worker image as `prewarmGuestRuntime`.
     func ensureWebCrawlerImage() async throws {
-        try await WebCrawlerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())
+        try await prewarmGuestRuntime()
     }
 
     var hasPeerEndpoint: Bool {

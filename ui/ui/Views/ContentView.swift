@@ -226,6 +226,20 @@ private enum MeshBootstrapError: Error, LocalizedError {
     }
 }
 
+enum ChatSidebarWidth {
+    static let expanded: CGFloat = 296
+    static let compact: CGFloat = 220
+    static let compactAtWindowWidth: CGFloat = 960
+    static let expandedAtWindowWidth: CGFloat = 1280
+
+    static func value(windowWidth: CGFloat) -> CGFloat {
+        let span = expandedAtWindowWidth - compactAtWindowWidth
+        guard span > 0 else { return expanded }
+        let t = min(1, max(0, (windowWidth - compactAtWindowWidth) / span))
+        return (compact + (expanded - compact) * t).rounded()
+    }
+}
+
 struct ContentView: View {
     private let secretResolver = AppSecretResolver()
     private let debugConfiguration = AppDebugConfiguration()
@@ -234,7 +248,6 @@ struct ContentView: View {
     @ObservedObject private var bootstrapStatus = AppBootstrapStatus.shared
     @StateObject private var chatSessions = ChatSessionStore()
     @StateObject private var messaging = MessagingStore()
-    @ObservedObject private var news = NewsReaderStore.shared
     @State private var workspace: AppWorkspace = .chats
 
     private var secretStore: SecretStore {
@@ -275,10 +288,7 @@ struct ContentView: View {
     }
 
     private var currentHelperAPIKey: String? {
-        secretResolver.resolve(
-            account: selectedProvider.secretAccount,
-            environmentKeys: selectedProvider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedProvider, resolver: secretResolver)
     }
 
     private var currentHelperReviewerModelJSON: String? {
@@ -385,38 +395,52 @@ struct ContentView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
             if let helperModelSettings = helperModelSettings {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
                     modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository),
                     chatSessions: chatSessions,
                     messaging: messaging,
-                    news: news,
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
-                    .frame(width: 296)
+                    .frame(width: ChatSidebarWidth.value(windowWidth: geo.size.width))
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
             } else {
                 Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
-                    .frame(width: 296)
+                    .frame(width: ChatSidebarWidth.value(windowWidth: geo.size.width))
             }
 
             VStack(spacing: 0) {
-                if workspace == .messaging {
-                    MessagingTabBarView(store: messaging)
-                } else if workspace != .debugLogs && workspace != .plugins && workspace != .news {
+                if workspace != .debugLogs {
                     ChatTabBarView(store: chatSessions)
                 }
                 switch workspace {
-                case .messaging:
-                    MessagingConversationView(store: messaging)
-                case .news:
-                    NewsWorkspaceView(store: news)
                 case .debugLogs:
                     DebugLogsView(repository: repository)
-                case .plugins:
+                case .chats:
+                    if chatSessions.selectedTab?.surface == .thread {
+                        MessagingConversationView(
+                            store: messaging,
+                            onInboundBannerTap: {
+                                Task { @MainActor in
+                                    await openInboundBannerConversation()
+                                }
+                            },
+                            presentsInbox: chatSessions.selectedTab?.threadID == nil
+                        )
+                    } else if let surface = chatSessions.selectedTab?.surface,
+                              surface == .generatedView || surface == .file || surface == .image {
+                        PluginPresentTabBody(surface: surface)
+                    } else {
+                        mainPanel
+                    }
+                }
+            }
+            .overlay {
+                if pluginCreationController.showsFactoryChrome {
                     PluginsWorkspaceView(
                         controller: pluginCreationController,
                         sessionReady: sessionReady,
@@ -425,34 +449,34 @@ struct ContentView: View {
                         sessionID: pluginWizardSessionID,
                         onOpenMessagingConnector: { pluginID in
                             Task { @MainActor in
-                                let opened = await routeToMessagingConnector(pluginID)
+                                let opened = await routeToPluginTab(
+                                    pluginID,
+                                    present: pluginCreationController.completedSpec?.present
+                                )
                                 if opened {
-                                    pluginCreationController.dismissSuccess()
+                                    pluginCreationController.hide()
                                 }
                                 Task { await pluginFactoryList.reload() }
                             }
-                        },
-                        onOpenNewsReader: { readerID in
-                            Task { @MainActor in
-                                workspace = .news
-                                await news.select(id: readerID)
-                                pluginCreationController.dismissSuccess()
-                            }
                         }
                     )
-                default:
-                    mainPanel
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .onChange(of: workspace) { _, newValue in
-            messaging.setWorkspaceActive(newValue == .messaging)
-            if newValue == .plugins {
-                pluginCreationController.showIntro()
+            messaging.setWorkspaceActive(
+                newValue == .chats && chatSessions.selectedTab?.surface == .thread
+            )
+        }
+        .onChange(of: chatSessions.selectedSessionID) { _, _ in
+            Task { @MainActor in
+                await syncSelectedChatTabWithMessaging()
             }
         }
         .onAppear {
-            messaging.setWorkspaceActive(workspace == .messaging)
+            messaging.setWorkspaceActive(chatSessions.selectedTab?.surface == .thread)
             refreshProviderCredentialUI()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -469,7 +493,7 @@ struct ContentView: View {
                 return
             }
             Task { @MainActor in
-                await routeToMessagingConnector(pluginID)
+                await routeToPluginTab(pluginID)
             }
         }
         .onReceive(NotificationCenter.default.publisher(
@@ -490,11 +514,26 @@ struct ContentView: View {
                 let parentVendorMessageID = notification.userInfo?[
                     DerrickMessagingConversationPresentationWake.parentVendorMessageIDUserInfoKey
                 ] as? String
-                await routeToMessagingConversation(
+                await routeToThreadTab(
                     pluginID: pluginID,
                     threadID: threadID,
                     parentVendorMessageID: parentVendorMessageID
                 )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginCreation)) { _ in
+            workspace = .chats
+            bindPluginCreatorCompletion()
+            chatSessions.openOrFocusPluginCreator()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginInChat)) { notification in
+            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
+                  !pluginID.isEmpty
+            else {
+                return
+            }
+            Task { @MainActor in
+                await routeToPluginTab(pluginID)
             }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
@@ -599,7 +638,7 @@ struct ContentView: View {
             minWidth: 380,
             minHeight: 0,
             maxWidth: 440,
-            maxHeight: bootstrapStatus.phase == .failed ? 420 : 280,
+            maxHeight: bootstrapModalMaxHeight,
             onBackdropDismiss: bootstrapStatus.phase == .failed
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
@@ -608,10 +647,7 @@ struct ContentView: View {
                 : nil,
             header: {
                 HStack(spacing: 10) {
-                    if bootstrapStatus.showsProgressIndicator {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else if bootstrapStatus.phase == .failed {
+                    if bootstrapStatus.phase == .failed {
                         Image(systemName: ModalChrome.bootstrapFailureSymbol)
                             .font(ModalChrome.symbolFont)
                             .symbolRenderingMode(.hierarchical)
@@ -629,23 +665,29 @@ struct ContentView: View {
             },
             body: {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(bootstrapStatus.statusMessage)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if bootstrapStatus.phase == .failed, let detail = bootstrapStatus.failureMessage,
-                       detail != bootstrapStatus.statusMessage {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    if bootstrapStatus.isInitializing {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(bootstrapStatus.activeLoadingTasks) { task in
+                                HStack(alignment: .top, spacing: 10) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(width: 16, height: 16)
+                                        .padding(.top, 2)
+                                    Text(task.message)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.2), value: bootstrapStatus.activeLoadingTasks)
                     }
 
-                    if bootstrapStatus.isInitializing {
-                        Text(bootstrapProgressHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if bootstrapStatus.phase == .failed {
+                        Text(bootstrapStatus.failureMessage ?? bootstrapStatus.statusMessage)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -723,17 +765,12 @@ struct ContentView: View {
         .background(WindowConfigurator())
     }
 
-    private var bootstrapProgressHint: String {
-        switch bootstrapStatus.phase {
-        case .preparingImage, .checkingDocker, .verifyingEnvironment:
-            return "First launch may download a Docker image. Keep Docker Desktop running."
-        case .connectingHelper:
-            return "Starting the background helper…"
-        case .loadingSession:
-            return "Loading your local workspace…"
-        default:
-            return "Starting…"
+    private var bootstrapModalMaxHeight: CGFloat {
+        if bootstrapStatus.phase == .failed {
+            return 420
         }
+        let rowCount = max(bootstrapStatus.activeLoadingTasks.count, 1)
+        return CGFloat(120 + rowCount * 34)
     }
 
     @MainActor
@@ -764,32 +801,40 @@ struct ContentView: View {
 
             do {
                 bootstrapStatus.update(phase: .loadingSession, message: "Starting Derrick…")
+                bootstrapStatus.beginTask(.daemon)
+                bootstrapStatus.beginTask(.database)
+                bootstrapStatus.beginTask(.docker)
 
-                // Prewarm Docker in parallel, but connect daemon + DB first so the modal
-                // does not sit on "Guest runtime ready" while XPC bootstrap is still retrying.
-                async let dockerPeer = prewarmLaunchDockerPeer()
+                // Docker reachability, daemon, and DB are independent — run in parallel.
+                let dockerPeerTask = Task { try await prewarmLaunchDockerPeer() }
+                async let health = connectLaunchDaemon()
+                async let repo = loadLaunchRepository()
 
-                let health = try await connectLaunchDaemon()
+                let healthResult = try await health
+                bootstrapStatus.completeTask(.daemon)
                 debugLog(
-                    "Daemon ensure-up ok status=\(health.status.rawValue) pid=\(health.pid) runtime=\(health.guestRuntimeImage ?? "?") detail=\(health.detail ?? "")"
+                    "Daemon ensure-up ok status=\(healthResult.status.rawValue) pid=\(healthResult.pid) runtime=\(healthResult.guestRuntimeImage ?? "?") detail=\(healthResult.detail ?? "")"
                 )
 
-                let repo = try await loadLaunchRepository()
-
-                if let peer = try await dockerPeer {
-                    do {
-                        try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
-                        debugLog("Docker helper peer endpoint handed to daemon MCP")
-                    } catch {
-                        debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
-                    }
-                }
+                let repoResult = try await repo
+                bootstrapStatus.completeTask(.database)
 
                 sessionReady = true
                 bootstrapStatus.markReady()
-                await chatSessions.configure(repository: repo)
-                await messaging.configure(repository: repo)
-                await DerrickNotificationService.shared.activateSession(repository: repo)
+                await chatSessions.configure(repository: repoResult)
+                await messaging.configure(repository: repoResult)
+                await DerrickNotificationService.shared.activateSession(repository: repoResult)
+
+                Task {
+                    if let peer = try? await dockerPeerTask.value {
+                        do {
+                            try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
+                            debugLog("Docker helper peer endpoint handed to daemon MCP")
+                        } catch {
+                            debugLog("Docker helper peer handoff skipped: \(error.localizedDescription)")
+                        }
+                    }
+                }
                 if isDebugEnabled {
                     debugLogStore.log("UI client ready (Docker + derrickd Agent/Job/MCP)")
                 }
@@ -824,7 +869,7 @@ struct ContentView: View {
         bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
         try? await JobServiceLoginAgent.ensureRegistered()
         JobServiceLoginAgent.ensureHelperProcessRunning()
-        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 8)
+        return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 4, verifyHealth: false)
     }
 
     @MainActor
@@ -838,23 +883,23 @@ struct ContentView: View {
     @MainActor
     private func configureClientRepositoryServices(repository: DBRepository) async {
         await ServiceLogRecorder.shared.configure(repository: repository)
-        await EgressAllowlistService.shared.configure(repository: repository)
         await ContentSensitivityGrantService.shared.configure(repository: repository)
         await UsageLimitsService.shared.configure(repository: repository)
         await ContainerLifecycleSettingsService.shared.configure(repository: repository)
         await OrchestrationLimitsSettingsService.shared.configure(repository: repository)
         await PluginFactoryListStore.shared.configure(repository: repository)
-        await NewsReaderStore.shared.configure(repository: repository)
         await AgentProfileStore.shared.configure(repository: repository)
         pluginCreationController.configure(repository: repository)
+        bindPluginCreatorCompletion()
     }
 
     /// Prewarm Docker in parallel with daemon + DB. Only peer handoff needs both daemon XPC and Docker.
     @MainActor
     private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
-        bootstrapStatus.update(phase: .checkingDocker, message: "Starting Docker runtime…")
+        bootstrapStatus.updateTask(.docker, message: "Starting Docker runtime…")
         _ = XPCDockerRunner.shared
-        try await XPCDockerRunner.shared.waitUntilPrewarmed()
+        try await XPCDockerRunner.shared.waitUntilDockerReachable()
+        bootstrapStatus.completeTask(.docker)
         do {
             return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
         } catch {
@@ -926,9 +971,10 @@ struct ContentView: View {
     func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
         let turns = chatSessions.selectedTab?.turns ?? []
         let isStreaming = chatSessions.isSelectedTabStreaming
+        let isPluginCreator = chatSessions.selectedTab?.isPluginCreator == true
 
         return VStack(spacing: 0) {
-            if turns.isEmpty {
+            if turns.isEmpty && !isPluginCreator {
                 Spacer()
 
                 emptyState
@@ -952,13 +998,16 @@ struct ContentView: View {
                             }
                             
                             LazyVStack(alignment: .leading, spacing: 16) {
+                                if isPluginCreator {
+                                    PluginCreatorIntroHeader()
+                                }
                                 ForEach(turns) { turn in
                                     PromptCompletionCard(
                                         turn: turn,
                                         isStreaming: isStreaming,
                                         isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
                                         completionStatus: completionStatus(for: turn),
-                                        statusMessage: turn.status?.rawValue,
+                                        statusMessage: streamingStatusMessage(for: turn),
                                         toolName: turn.toolName
                                     ) {
                                         copyTurn(turn)
@@ -1368,6 +1417,15 @@ struct ContentView: View {
         .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private func streamingStatusMessage(for turn: ChatTurn) -> String? {
+        if turn.status != .complete,
+           turn.response == PluginAccessAskPolicy.reviewingQuestion {
+            return PluginAccessAskPolicy.reviewingStatusLabel
+        }
+        guard let status = turn.status else { return nil }
+        return agentResponseStatusLabel(status: status.rawValue)
+    }
+
     private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
         switch turn.status {
         case .complete:
@@ -1385,44 +1443,111 @@ struct ContentView: View {
         promptFocusToken += 1
 
         Task { @MainActor in
-            if let pluginID = Self.slashPluginID(from: currentPrompt),
-               await isMessagingConnector(pluginID) {
-                await routeToMessagingConnector(pluginID)
-                return
+            if let pluginID = Self.slashPluginID(from: currentPrompt) {
+                await routeToPluginTab(pluginID)
+                if await isMessagingConnector(pluginID) {
+                    return
+                }
             }
 
             chatSessions.sendPrompt(
                 currentPrompt,
                 apiKey: resolveAPIKey() ?? "",
-                profileHandle: selectedProfileHandle
+                profileHandle: selectedProfileHandle,
+                reviewerModelJSON: currentHelperReviewerModelJSON
             ) { message in
                 errorMessage = message
             }
         }
     }
 
-    @discardableResult
-    private func routeToMessagingConnector(_ pluginID: String) async -> Bool {
-        let opened = await messaging.openConnector(pluginID: pluginID)
-        guard opened else { return false }
-        workspace = .messaging
-        return true
+    private func bindPluginCreatorCompletion() {
+        chatSessions.onPluginSpecComplete = { session in
+            pluginCreationController.beginFromCompletedSpec(
+                session.draft,
+                auth: session.accessDiscovery,
+                pluginID: session.reservedPluginID,
+                sessionID: pluginWizardSessionID,
+                helperAPIKey: currentHelperAPIKey,
+                helperReviewerModelJSON: currentHelperReviewerModelJSON
+            )
+        }
     }
 
     @discardableResult
-    private func routeToMessagingConversation(
+    private func routeToPluginTab(_ pluginID: String, present: PluginPresent? = nil) async -> Bool {
+        workspace = .chats
+        let connector = await isMessagingConnector(pluginID)
+        let binding: ChatTabSurfacePolicy.Binding
+        if let present {
+            binding = ChatTabSurfacePolicy.bind(present: present)
+        } else {
+            binding = ChatTabSurfacePolicy.bind(isMessagingConnector: connector)
+        }
+        switch binding {
+        case .decided(let surface):
+            chatSessions.openOrFocusPlugin(
+                pluginID: pluginID,
+                surface: surface,
+                title: "/\(pluginID)"
+            )
+            guard surface == .thread else { return true }
+            let opened = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
+            messaging.setWorkspaceActive(true)
+            return opened
+        case .needsHumanChoice:
+            // The human is asked only when the host cannot decide. Slice 1 never asks.
+            chatSessions.openOrFocusPlugin(
+                pluginID: pluginID,
+                surface: .conversation,
+                title: "/\(pluginID)"
+            )
+            return true
+        }
+    }
+
+    @discardableResult
+    private func routeToThreadTab(
         pluginID: String,
         threadID: String,
         parentVendorMessageID: String? = nil
     ) async -> Bool {
+        workspace = .chats
         let opened = await messaging.openConversation(
             pluginID: pluginID,
             threadID: threadID,
             parentVendorMessageID: parentVendorMessageID
         )
         guard opened else { return false }
-        workspace = .messaging
+        let title = messaging.selectedThread?.title ?? "/\(pluginID)"
+        chatSessions.openOrFocusThread(
+            pluginID: pluginID,
+            threadID: threadID,
+            title: title
+        )
+        messaging.setWorkspaceActive(true)
         return true
+    }
+
+    private func openInboundBannerConversation() async {
+        guard let pluginID = messaging.inboundBannerPluginID,
+              let threadID = messaging.inboundBannerThreadID
+        else {
+            return
+        }
+        _ = await routeToThreadTab(pluginID: pluginID, threadID: threadID)
+        messaging.clearInboundBanner()
+    }
+
+    private func syncSelectedChatTabWithMessaging() async {
+        let tab = chatSessions.selectedTab
+        messaging.setWorkspaceActive(tab?.surface == .thread)
+        guard tab?.surface == .thread, let pluginID = tab?.pluginID else { return }
+        if let threadID = tab?.threadID, !threadID.isEmpty {
+            _ = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
+        } else {
+            _ = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
+        }
     }
 
     private func isMessagingConnector(_ pluginID: String) async -> Bool {
@@ -1489,10 +1614,7 @@ struct ContentView: View {
     }
 
     private func resolveAPIKey() -> String? {
-        secretResolver.resolve(
-            account: selectedModel.provider.secretAccount,
-            environmentKeys: selectedModel.provider.apiKeyEnvironmentKeys
-        )
+        LLMProviderCredentialGate.resolveAPIKey(for: selectedModel.provider, resolver: secretResolver)
     }
 
     @ViewBuilder

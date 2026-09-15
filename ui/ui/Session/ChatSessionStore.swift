@@ -4,25 +4,183 @@ import Foundation
 import LLMAgentClient
 import Structure
 
+enum ChatTabSurface: String, Hashable, Sendable {
+    case conversation
+    case thread
+    case generatedView
+    case file
+    case image
+
+    init(_ present: PluginPresent) {
+        switch present {
+        case .conversation: self = .conversation
+        case .thread: self = .thread
+        case .generatedView: self = .generatedView
+        case .file: self = .file
+        case .image: self = .image
+        }
+    }
+}
+
 struct ChatTab: Identifiable, Hashable {
     let id: String
     var title: String
     var turns: [ChatTurn]
     var pendingAttachments: [ChatFileAttachment]
     var isStreaming: Bool
+    var surface: ChatTabSurface
+    var pluginID: String?
+    var threadID: String?
+    var isPluginCreator: Bool
+    var specSession: PluginSpecSession?
 
     init(
         id: String,
         title: String,
         turns: [ChatTurn] = [],
         pendingAttachments: [ChatFileAttachment] = [],
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        surface: ChatTabSurface = .conversation,
+        pluginID: String? = nil,
+        threadID: String? = nil,
+        isPluginCreator: Bool = false,
+        specSession: PluginSpecSession? = nil
     ) {
         self.id = id
         self.title = title
         self.turns = turns
         self.pendingAttachments = pendingAttachments
         self.isStreaming = isStreaming
+        self.surface = surface
+        self.pluginID = pluginID
+        self.threadID = threadID
+        self.isPluginCreator = isPluginCreator
+        self.specSession = specSession
+    }
+
+    static func pluginRootID(_ pluginID: String) -> String {
+        "plugin:\(pluginID)"
+    }
+
+    static func pluginThreadID(pluginID: String, threadID: String) -> String {
+        "plugin:\(pluginID):thread:\(threadID)"
+    }
+
+    static func pluginTabIdentity(_ id: String) -> (pluginID: String, threadID: String?)? {
+        let prefix = "plugin:"
+        guard id.hasPrefix(prefix) else { return nil }
+        let rest = String(id.dropFirst(prefix.count))
+        guard !rest.isEmpty else { return nil }
+        let marker = ":thread:"
+        if let range = rest.range(of: marker) {
+            let pluginID = String(rest[..<range.lowerBound])
+            let threadID = String(rest[range.upperBound...])
+            guard !pluginID.isEmpty, !threadID.isEmpty else { return nil }
+            return (pluginID, threadID)
+        }
+        return (rest, nil)
+    }
+
+    /// Recents can restore this tab with no turns; New plugin must still show the creator.
+    static func pluginCreator(existing: ChatTab? = nil) -> ChatTab {
+        var tab = existing ?? ChatTab(
+            id: PluginSpecProcession.newCreatorTabID(),
+            title: PluginSpecProcession.creatorTabTitlePrefix,
+            isPluginCreator: true,
+            specSession: PluginSpecSession()
+        )
+        if tab.title.isEmpty {
+            tab.title = PluginSpecProcession.creatorTabTitlePrefix
+        }
+        tab.isPluginCreator = true
+        if tab.specSession == nil {
+            tab.specSession = PluginSpecSession()
+        }
+        if tab.turns.isEmpty {
+            tab.turns = [
+                ChatTurn(
+                    prompt: "Create plugin",
+                    response: PluginSpecProcession.openingQuestion,
+                    status: .complete
+                ),
+            ]
+        }
+        return tab
+    }
+
+    mutating func applyCreatorUtterance(_ utterance: String) -> PluginSpecTurn {
+        var session = specSession ?? PluginSpecSession()
+        let turn = PluginSpecProcession.advance(session: &session, utterance: utterance)
+        specSession = session
+        let isDocsReview = turn.reply == PluginAccessAskPolicy.reviewingQuestion
+        turns.append(
+            ChatTurn(
+                prompt: utterance,
+                response: turn.reply,
+                status: isDocsReview ? .thinking : .complete,
+                toolName: isDocsReview ? AllowedMCPTool.webSearch.rawValue : nil
+            )
+        )
+        if let outcome = session.draft.claimedOutcome,
+           !outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            title = PluginSpecProcession.creatorTabTitle(from: outcome)
+        }
+        return turn
+    }
+
+    mutating func applyAccessDiscovery(
+        _ auth: ConnectorAuthDiscovery,
+        documentationURL: String? = nil
+    ) {
+        guard var session = specSession, session.ask == .slot(.access) else { return }
+        session.accessDiscovery = auth.preferringCallCredential()
+        session.draft.needsHumanDocsURL = false
+        if let documentationURL, !documentationURL.isEmpty {
+            session.draft.documentationURL = documentationURL
+        }
+        specSession = session
+        let reply = PluginSpecProcession.question(for: .slot(.access), session: session)
+        guard let last = turns.indices.last else { return }
+        turns[last].response = reply
+        turns[last].status = .complete
+        turns[last].toolName = nil
+        isStreaming = false
+    }
+
+    mutating func beginAccessDocsReview() {
+        isStreaming = true
+        guard let last = turns.indices.last else { return }
+        turns[last].status = .thinking
+        turns[last].toolName = AllowedMCPTool.webSearch.rawValue
+    }
+
+    mutating func applyDocsReviewFailed(
+        triedURL: String? = nil,
+        fromHuman: Bool = false,
+        failure: PluginDocsLookupFailure? = nil
+    ) {
+        guard var session = specSession else { return }
+        session.accessDiscovery = nil
+        session.draft.needsHumanDocsURL = true
+        session.draft.documentationURLFromHuman = fromHuman
+        session.draft.docsLookupFailure = failure
+        let trimmed = triedURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        session.draft.documentationURL = trimmed.isEmpty ? nil : trimmed
+        session.ask = .docsURL
+        specSession = session
+        let reply = PluginSpecProcession.question(for: .docsURL, session: session)
+        guard let last = turns.indices.last else { return }
+        turns[last].response = reply
+        turns[last].status = .complete
+        turns[last].toolName = nil
+        isStreaming = false
+    }
+
+    mutating func applyDocsReviewProgress(_ message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let last = turns.indices.last else { return }
+        turns[last].thought = trimmed
+        turns[last].status = .thinking
     }
 }
 
@@ -32,9 +190,12 @@ final class ChatSessionStore: ObservableObject {
     @Published var selectedSessionID: String?
     @Published private(set) var recentSessions: [ChatSessionDTO] = []
     @Published var scrollToBottomToken = 0
+        var onPluginSpecComplete: ((PluginSpecSession) -> Void)?
 
     private var repository: DBRepository?
     private var activeTasks: [String: Task<Void, Never>] = [:]
+    private var accessDocsTasks: [String: Task<Void, Never>] = [:]
+    private var accessDocsGeneration: [String: Int] = [:]
     private let applicationName = "ui"
 
     var selectedTab: ChatTab? {
@@ -83,7 +244,221 @@ final class ChatSessionStore: ObservableObject {
         let tab = ChatTab(id: id, title: "New chat")
         tabs.append(tab)
         selectedSessionID = id
-        persistSessionShell(sessionID: id, title: tab.title)
+        persistSessionShell(sessionID: id, title: tab.title, tab: tab)
+    }
+
+    @discardableResult
+    func openOrFocusPluginCreator() -> String {
+        let tab = ChatTab.pluginCreator()
+        tabs.append(tab)
+        selectedSessionID = tab.id
+        persistSessionShell(sessionID: tab.id, title: tab.title, tab: tab)
+        return tab.id
+    }
+
+    private func sendCreatorUtterance(
+        _ utterance: String,
+        sessionID: String,
+        apiKey: String,
+        reviewerModelJSON: String?
+    ) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }) else { return }
+        var tab = tabs[tabIndex]
+        let turn = tab.applyCreatorUtterance(utterance)
+        var nextTabs = tabs
+        nextTabs[tabIndex] = tab
+        tabs = nextTabs
+        scrollToBottomToken += 1
+        persistSessionShell(sessionID: sessionID, title: tab.title, tab: tab)
+        persistCreatorTabTitle(sessionID: sessionID, title: tab.title)
+        if case .accessSecret = tab.specSession?.ask {
+            presentCreatorCredentialForm(sessionID: sessionID)
+        }
+        if case .slot(.access) = tab.specSession?.ask,
+           tab.specSession?.accessDiscovery == nil,
+           tab.specSession?.draft.connect?.klass != .localFiles {
+            let vendor = PluginAccessAskPolicy.vendor(from: tab.specSession?.draft.connect) ?? .custom
+            let sourceName = VendorDocsLocator.searchSourceName(
+                from: tab.specSession?.draft.connect?.detail ?? vendor.displayName
+            )
+            startAccessDocsReview(
+                sessionID: sessionID,
+                vendor: vendor,
+                sourceName: sourceName,
+                documentationURL: tab.specSession?.draft.documentationURL,
+                apiKey: apiKey,
+                reviewerModelJSON: reviewerModelJSON
+            )
+        }
+        if turn.isComplete, let session = tab.specSession {
+            onPluginSpecComplete?(session)
+        }
+    }
+
+    private func startAccessDocsReview(
+        sessionID: String,
+        vendor: PluginFactoryCreateInput.ConnectorVendor,
+        sourceName: String,
+        documentationURL: String?,
+        apiKey: String,
+        reviewerModelJSON: String?
+    ) {
+        accessDocsTasks[sessionID]?.cancel()
+        let generation = (accessDocsGeneration[sessionID] ?? 0) + 1
+        accessDocsGeneration[sessionID] = generation
+        if let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }) {
+            var tab = tabs[tabIndex]
+            tab.beginAccessDocsReview()
+            var nextTabs = tabs
+            nextTabs[tabIndex] = tab
+            tabs = nextTabs
+        }
+        let providedByHuman = documentationURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        accessDocsTasks[sessionID] = Task { @MainActor in
+            let review = await PluginCreatorAccessDocsReview.discover(
+                vendor: vendor,
+                sourceName: sourceName,
+                documentationURL: documentationURL,
+                sessionID: sessionID,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                reviewerModelJSON: reviewerModelJSON,
+                onProgress: { message in
+                    Task { @MainActor in
+                        self.applyCreatorDocsReviewProgress(
+                            sessionID: sessionID,
+                            message: message
+                        )
+                    }
+                }
+            )
+            guard !Task.isCancelled, accessDocsGeneration[sessionID] == generation else { return }
+            accessDocsTasks[sessionID] = nil
+            if PluginAccessAskPolicy.docsReviewSucceeded(
+                failure: review.failure,
+                auth: review.auth
+            ) {
+                applyCreatorAccessDiscovery(
+                    sessionID: sessionID,
+                    auth: review.auth,
+                    documentationURL: review.documentationURL
+                )
+            } else {
+                applyCreatorDocsReviewFailed(
+                    sessionID: sessionID,
+                    triedURL: review.documentationURL ?? documentationURL,
+                    fromHuman: providedByHuman,
+                    failure: review.failure
+                )
+            }
+        }
+    }
+
+    func applyCreatorDocsReviewProgress(sessionID: String, message: String) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }) else { return }
+        var tab = tabs[tabIndex]
+        tab.applyDocsReviewProgress(message)
+        var nextTabs = tabs
+        nextTabs[tabIndex] = tab
+        tabs = nextTabs
+    }
+
+    func applyCreatorAccessDiscovery(
+        sessionID: String,
+        auth: ConnectorAuthDiscovery,
+        documentationURL: String? = nil
+    ) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }) else { return }
+        var tab = tabs[tabIndex]
+        tab.applyAccessDiscovery(auth, documentationURL: documentationURL)
+        var nextTabs = tabs
+        nextTabs[tabIndex] = tab
+        tabs = nextTabs
+        scrollToBottomToken += 1
+    }
+
+    func applyCreatorDocsReviewFailed(
+        sessionID: String,
+        triedURL: String? = nil,
+        fromHuman: Bool = false,
+        failure: PluginDocsLookupFailure? = nil
+    ) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }) else { return }
+        var tab = tabs[tabIndex]
+        tab.applyDocsReviewFailed(triedURL: triedURL, fromHuman: fromHuman, failure: failure)
+        var nextTabs = tabs
+        nextTabs[tabIndex] = tab
+        tabs = nextTabs
+        scrollToBottomToken += 1
+    }
+
+    private func presentCreatorCredentialForm(sessionID: String) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }),
+              var session = tabs[tabIndex].specSession,
+              session.ask == .accessSecret
+        else { return }
+        let secrets = PluginAccessAskPolicy.collectableSecrets(session.accessDiscovery).map(\.descriptor)
+        guard !secrets.isEmpty else { return }
+        if session.reservedPluginID == nil {
+            var skill = session.draft.asSkillDraft()
+            PluginSkillDraftPlanner.applyGoal(
+                skill.goal,
+                to: &skill,
+                existingPluginIDs: PluginFactoryListStore.shared.pluginIDs
+            )
+            session.reservedPluginID = try? skill.normalizedPluginID()
+            var tab = tabs[tabIndex]
+            tab.specSession = session
+            var next = tabs
+            next[tabIndex] = tab
+            tabs = next
+        }
+        guard let pluginID = session.reservedPluginID, !pluginID.isEmpty else { return }
+        let prompt = PluginAccessAskPolicy.credentialFormPrompt(discovery: session.accessDiscovery)
+        Task { @MainActor in
+            let result = await ConnectorCredentialService.present(
+                pluginID: pluginID,
+                secrets: secrets,
+                mode: .requireMissing,
+                prompt: prompt
+            )
+            self.finishCreatorCredentialForm(sessionID: sessionID, result: result)
+        }
+    }
+
+    private func finishCreatorCredentialForm(sessionID: String, result: ConnectorCredentialService.Result) {
+        guard result == .ok,
+              let tabIndex = tabs.firstIndex(where: { $0.id == sessionID }),
+              var session = tabs[tabIndex].specSession
+        else { return }
+        let turn = PluginSpecProcession.completeAccessCollection(session: &session)
+        var tab = tabs[tabIndex]
+        tab.specSession = session
+        if let last = tab.turns.indices.last {
+            tab.turns[last].response = turn.reply
+            tab.turns[last].status = .complete
+            tab.turns[last].toolName = nil
+        }
+        var next = tabs
+        next[tabIndex] = tab
+        tabs = next
+        scrollToBottomToken += 1
+        persistSessionShell(sessionID: sessionID, title: tab.title, tab: tab)
+        persistCreatorTabTitle(sessionID: sessionID, title: tab.title)
+        if turn.isComplete {
+            onPluginSpecComplete?(session)
+        }
+    }
+
+    private func persistCreatorTabTitle(sessionID: String, title: String) {
+        guard let repository else { return }
+        Task {
+            try? await repository.updateChatSessionTitle(
+                applicationName: applicationName,
+                sessionID: sessionID,
+                title: title
+            )
+            await refreshRecents()
+        }
     }
 
     func selectSession(id: String) {
@@ -92,16 +467,115 @@ final class ChatSessionStore: ObservableObject {
             return
         }
         if !tabs.contains(where: { $0.id == id }) {
-            let title = recentSessions.first(where: { $0.sessionID == id }).map(displayTitle(for:))
-                ?? "Chat"
-            tabs.append(ChatTab(id: id, title: title))
+            let session = recentSessions.first(where: { $0.sessionID == id })
+            let title = session.map(displayTitle(for:)) ?? "Chat"
+            var tab = tab(from: session, id: id, title: title)
+            if let identity = ChatTab.pluginTabIdentity(id), identity.threadID != nil {
+                _ = openOrFocusPlugin(
+                    pluginID: identity.pluginID,
+                    surface: .thread,
+                    title: "/\(identity.pluginID)"
+                )
+                return
+            }
+            if let pluginID = tab.pluginID,
+               tab.threadID != nil,
+               tab.surface == .thread {
+                _ = openOrFocusPlugin(
+                    pluginID: pluginID,
+                    surface: .thread,
+                    title: "/\(pluginID)"
+                )
+                return
+            }
+            if PluginSpecProcession.isCreatorTabID(id) || tab.isPluginCreator {
+                tab = ChatTab.pluginCreator(existing: tab)
+            }
+            tabs.append(tab)
+        } else if let index = tabs.firstIndex(where: { $0.id == id }) {
+            if let identity = ChatTab.pluginTabIdentity(id), identity.threadID != nil {
+                _ = openOrFocusPlugin(
+                    pluginID: identity.pluginID,
+                    surface: .thread,
+                    title: "/\(identity.pluginID)"
+                )
+                return
+            }
+            if let pluginID = tabs[index].pluginID,
+               tabs[index].threadID != nil,
+               tabs[index].surface == .thread {
+                _ = openOrFocusPlugin(
+                    pluginID: pluginID,
+                    surface: .thread,
+                    title: "/\(pluginID)"
+                )
+                return
+            }
+            if PluginSpecProcession.isCreatorTabID(id) || tabs[index].isPluginCreator {
+                tabs[index] = ChatTab.pluginCreator(existing: tabs[index])
+            }
         }
         selectedSessionID = id
+    }
+
+    /// Opens or focuses a Chat tab for `/plugin-id` (connector or standard).
+    @discardableResult
+    func openOrFocusPlugin(pluginID: String, surface: ChatTabSurface, title: String? = nil) -> String {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = ChatTab.pluginRootID(trimmed)
+        if let existing = tabs.first(where: { $0.id == id })
+            ?? tabs.first(where: { $0.pluginID == trimmed && $0.threadID == nil }) {
+            selectedSessionID = existing.id
+            return existing.id
+        }
+        let tabTitle = title ?? "/\(trimmed)"
+        let tab = ChatTab(
+            id: id,
+            title: tabTitle,
+            surface: surface,
+            pluginID: trimmed
+        )
+        tabs.append(tab)
+        selectedSessionID = id
+        persistSessionShell(sessionID: id, title: tabTitle, tab: tab)
+        return id
+    }
+
+    /// Opens or focuses a Chat tab for a connector thread (notifications, picker).
+    @discardableResult
+    func openOrFocusThread(
+        pluginID: String,
+        threadID: String,
+        title: String? = nil
+    ) -> String {
+        let plugin = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let thread = threadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = ChatTab.pluginThreadID(pluginID: plugin, threadID: thread)
+        if let existing = tabs.first(where: { $0.id == id })
+            ?? tabs.first(where: { $0.pluginID == plugin && $0.threadID == thread }) {
+            selectedSessionID = existing.id
+            return existing.id
+        }
+        let tabTitle = title ?? "/\(plugin)"
+        let tab = ChatTab(
+            id: id,
+            title: tabTitle,
+            surface: .thread,
+            pluginID: plugin,
+            threadID: thread
+        )
+        tabs.append(tab)
+        selectedSessionID = id
+        persistSessionShell(sessionID: id, title: tabTitle, tab: tab)
+        return id
     }
 
     func closeTab(id: String) {
         activeTasks[id]?.cancel()
         activeTasks[id] = nil
+        accessDocsTasks[id]?.cancel()
+        accessDocsTasks[id] = nil
+        accessDocsGeneration[id] = nil
         tabs.removeAll { $0.id == id }
         if selectedSessionID == id {
             selectedSessionID = tabs.last?.id
@@ -115,6 +589,7 @@ final class ChatSessionStore: ObservableObject {
         _ prompt: String,
         apiKey: String,
         profileHandle: String,
+        reviewerModelJSON: String? = nil,
         onError: @escaping (String) -> Void
     ) {
         if let selected = selectedSessionID, JobSessionID.isJobSession(selected) {
@@ -131,6 +606,16 @@ final class ChatSessionStore: ObservableObject {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = tabs[tabIndex].pendingAttachments
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+
+        if tabs[tabIndex].isPluginCreator {
+            sendCreatorUtterance(
+                trimmed,
+                sessionID: sessionID,
+                apiKey: apiKey,
+                reviewerModelJSON: reviewerModelJSON
+            )
+            return
+        }
 
         guard let resolved = AgentProfileStore.shared.resolveProfile(
             explicitHandle: profileHandle,
@@ -265,7 +750,7 @@ final class ChatSessionStore: ObservableObject {
         guard tabs[tabIndex].title == "New chat" || tabs[tabIndex].title.isEmpty else { return }
         let title = Self.title(from: prompt, attachments: attachments)
         tabs[tabIndex].title = title
-        persistSessionShell(sessionID: sessionID, title: title)
+        persistSessionShell(sessionID: sessionID, title: title, tab: tabs[tabIndex])
         Task {
             try? await repository?.updateChatSessionTitle(
                 applicationName: applicationName,
@@ -275,20 +760,49 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
-    private func persistSessionShell(sessionID: String, title: String) {
+    private func persistSessionShell(sessionID: String, title: String, tab: ChatTab) {
         guard let repository else { return }
         let now = Date.now
+        var metadata: [String: String] = ["surface": tab.surface.rawValue]
+        if tab.isPluginCreator {
+            metadata["pluginCreator"] = "true"
+        }
+        if let pluginID = tab.pluginID {
+            metadata["pluginID"] = pluginID
+        }
+        if let threadID = tab.threadID {
+            metadata["threadID"] = threadID
+        }
         let dto = ChatSessionDTO(
             applicationName: applicationName,
             sessionID: sessionID,
             title: title,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            metadata: metadata
         )
         Task {
             try? await repository.upsertChatSession(dto)
             await refreshRecents()
         }
+    }
+
+    private func tab(from session: ChatSessionDTO?, id: String, title: String) -> ChatTab {
+        let metadata = session?.metadata ?? [:]
+        let surface = ChatTabSurface(rawValue: metadata["surface"] ?? "") ?? .conversation
+        let pluginID = metadata["pluginID"].flatMap { $0.isEmpty ? nil : $0 }
+        let threadID = metadata["threadID"].flatMap { $0.isEmpty ? nil : $0 }
+        let isPluginCreator = metadata["pluginCreator"] == "true"
+            || PluginSpecProcession.isCreatorTabID(id)
+        return ChatTab(
+            id: id,
+            title: title,
+            surface: surface,
+            pluginID: pluginID,
+            threadID: threadID,
+            isPluginCreator: isPluginCreator,
+            specSession: isPluginCreator ? PluginSpecSession() : nil
+        )
     }
 
     private func displayTitle(for session: ChatSessionDTO) -> String {

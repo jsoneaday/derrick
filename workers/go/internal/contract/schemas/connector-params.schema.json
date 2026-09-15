@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/connector-params.json",
+  "title": "Connector hop params",
+  "description": "params object on a connector plugin.invoke hop event.",
+  "type": "object",
+  "properties": {
+    "messaging_op": {
+      "type": "string",
+      "enum": ["sync_threads", "poll_inbox", "send_message"]
+    },
+    "vendor_thread_id": { "type": "string" },
+    "text": { "type": "string" },
+    "since": { "type": "string" },
+    "oldest": { "type": "string" },
+    "parent_vendor_message_id": { "type": "string" },
+    "thread_ts": { "type": "string" }
+  },
+  "additionalProperties": false
+}

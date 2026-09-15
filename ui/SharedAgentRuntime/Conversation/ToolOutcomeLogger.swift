@@ -9,6 +9,8 @@ enum ToolOutcomeLogger {
             logPluginFactory(rawText)
         case AllowedMCPTool.webCrawl.rawValue:
             logWebCrawl(rawText)
+        case AllowedMCPTool.webSearch.rawValue:
+            logWebSearch(rawText)
         default:
             break
         }
@@ -59,6 +61,9 @@ enum ToolOutcomeLogger {
             } else {
                 debugLog("[web.crawl] ok")
             }
+            for line in crawlPageLines(from: outcome).prefix(6) {
+                debugLog("[web.crawl] \(line)")
+            }
             return
         }
 
@@ -70,6 +75,36 @@ enum ToolOutcomeLogger {
             let message = diagnostic.message.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !message.isEmpty else { continue }
             debugLog("[web.crawl] \(message)")
+        }
+    }
+
+    private static func logWebSearch(_ rawText: String) {
+        guard let outcome = ToolExecutionOutcome.decode(from: rawText) else {
+            debugLog("[web.search] finished with non-JSON outcome")
+            return
+        }
+
+        if outcome.status == .completed {
+            let hits = hitCount(from: outcome)
+            if let hits {
+                debugLog("[web.search] ok hits=\(hits)")
+            } else {
+                debugLog("[web.search] ok")
+            }
+            for url in hitURLs(from: outcome).prefix(5) {
+                debugLog("[web.search] hit \(url)")
+            }
+            return
+        }
+
+        debugLog(
+            "[web.search] failed status=\(outcome.status.rawValue) "
+                + "stage=\(outcome.stage.rawValue)"
+        )
+        for diagnostic in outcome.diagnostics.prefix(4) {
+            let message = diagnostic.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { continue }
+            debugLog("[web.search] \(message)")
         }
     }
 
@@ -92,5 +127,46 @@ enum ToolOutcomeLogger {
             return nil
         }
         return pages.count
+    }
+
+    private static func crawlPageLines(from outcome: ToolExecutionOutcome) -> [String] {
+        guard let value = outcome.output?.value,
+              let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pages = object["pages"] as? [[String: Any]] else {
+            return []
+        }
+        return pages.compactMap { page in
+            let url = (page["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !url.isEmpty else { return nil }
+            let status = page["status_code"] as? Int ?? page["statusCode"] as? Int
+            if let status {
+                return "page \(url) status=\(status)"
+            }
+            return "page \(url)"
+        }
+    }
+
+    private static func hitCount(from outcome: ToolExecutionOutcome) -> Int? {
+        guard let value = outcome.output?.value,
+              let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hits = object["hits"] as? [Any] else {
+            return nil
+        }
+        return hits.count
+    }
+
+    private static func hitURLs(from outcome: ToolExecutionOutcome) -> [String] {
+        guard let value = outcome.output?.value,
+              let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hits = object["hits"] as? [[String: Any]] else {
+            return []
+        }
+        return hits.compactMap { hit in
+            let url = (hit["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return url.isEmpty ? nil : url
+        }
     }
 }

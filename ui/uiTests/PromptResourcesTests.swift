@@ -58,6 +58,20 @@ import Testing
         #expect(try PromptResources.webCrawlerSkill(from: root) == "Web crawler skill from file")
     }
 
+    @Test func loadsWebSearchSkillFromResourcesDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+
+        try "Web search skill from file\n".write(
+            to: resources.appendingPathComponent("web_search_skill.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        #expect(try PromptResources.webSearchSkill(from: root) == "Web search skill from file")
+    }
+
     @Test func loadsFilesExtractSkillFromResourcesDirectory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let resources = root.appendingPathComponent("Resources", isDirectory: true)
@@ -74,10 +88,10 @@ import Testing
 
     @Test func loadsGuestSDKFromResourcesDirectory() throws {
         let source = try PromptResources.guestSDKSource()
-        #expect(source.contains("standalone Python script"))
+        #expect(source.contains("package main"))
         let wrapped = try PromptResources.guestSDKForModel()
-        #expect(wrapped.contains("```python"))
-        #expect(wrapped.contains("Python guest contract"))
+        #expect(wrapped.contains("```go"))
+        #expect(wrapped.contains("script-exec-contract.json"))
     }
 
     @Test func throwsWhenConversationRAGInstructionsAreMissing() throws {

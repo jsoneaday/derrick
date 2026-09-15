@@ -63,6 +63,11 @@ import Testing
         #expect(goal.contains("--- connector-contract.json ---"))
         #expect(goal.contains("They cannot add ops"))
         #expect(goal.contains("Slack Web API notes"))
+        #expect(goal.contains("ui.present"))
+        #expect(goal.contains("same envelope list as result.emit"))
+        #expect(goal.contains("host-ui-library.json"))
+        #expect(goal.contains("tab_strip"))
+        #expect(goal.contains("selection=conversations"))
         #expect(ConnectorContractPrompts.reviewerGuide().contains("If a rule is not in the JSON"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- connector-contract.json ---"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- vendor slack ---"))
@@ -204,7 +209,7 @@ private func slackFullSyncGoal() -> String {
 private func slackFullSyncManifestJSON() -> String {
     """
     {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+    "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
     """
 }
 

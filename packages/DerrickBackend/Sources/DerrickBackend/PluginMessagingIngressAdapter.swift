@@ -37,15 +37,40 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         )
     }
 
-    public func pollInbox(repository: DBRepository) async throws -> [MessagingPersistResult] {
+    public func pollInbox(
+        repository: DBRepository,
+        preferredVendorThreadID: String? = nil,
+        preferredParentVendorMessageID: String? = nil,
+        maxChannelPolls: Int? = nil,
+        channelOffset: Int = 0
+    ) async throws -> [MessagingPersistResult] {
         let threads = try await repository.listMessagingThreads(pluginID: pluginID)
         guard !threads.isEmpty else { return [] }
         let connector = try await repository.listMessagingConnectors()
             .first(where: { $0.pluginID == pluginID })
+        let ordered = Self.orderedThreads(
+            threads,
+            preferredVendorThreadID: preferredVendorThreadID,
+            channelOffset: channelOffset
+        )
+        let channelLimit = max(1, maxChannelPolls ?? ordered.count)
+        let channels = Array(ordered.prefix(channelLimit))
+        let preferredParent = preferredParentVendorMessageID?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         var inserted: [MessagingPersistResult] = []
-        var replyPollsRemaining = 8
-        for thread in threads {
+        // Docker guest is one slot. Extra reply-thread invokes are what made inbound
+        // feel 30s–1min. Poll replies only when the UI has that thread open, or one
+        // catch-up invoke when Derrick is not looking at a specific conversation.
+        let watchingConversation = !(preferredVendorThreadID?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
+        var replyPollsRemaining = 0
+        if !preferredParent.isEmpty {
+            replyPollsRemaining = 1
+        } else if !watchingConversation {
+            replyPollsRemaining = 1
+        }
+        for thread in channels {
             inserted.append(
                 contentsOf: try await pollConversation(
                     thread: thread,
@@ -54,6 +79,18 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
                     connector: connector
                 )
             )
+            if !preferredParent.isEmpty, thread.vendorThreadID == preferredVendorThreadID {
+                inserted.append(
+                    contentsOf: try await pollConversation(
+                        thread: thread,
+                        parentVendorMessageID: preferredParent,
+                        repository: repository,
+                        connector: connector
+                    )
+                )
+                replyPollsRemaining = 0
+                continue
+            }
             guard replyPollsRemaining > 0 else { continue }
             let parents = try await replyParentsNeedingSync(
                 thread: thread,
@@ -73,6 +110,24 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
             }
         }
         return inserted
+    }
+
+    static func orderedThreads(
+        _ threads: [MessagingThreadDTO],
+        preferredVendorThreadID: String?,
+        channelOffset: Int = 0
+    ) -> [MessagingThreadDTO] {
+        let preferred = preferredVendorThreadID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !preferred.isEmpty,
+           let index = threads.firstIndex(where: { $0.vendorThreadID == preferred }) {
+            var ordered = threads
+            let focused = ordered.remove(at: index)
+            ordered.insert(focused, at: 0)
+            return ordered
+        }
+        guard threads.count > 1 else { return threads }
+        let start = ((channelOffset % threads.count) + threads.count) % threads.count
+        return Array(threads[start...]) + Array(threads[..<start])
     }
 
     public func pollConversation(
@@ -260,6 +315,10 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
     }
 
     public func bootstrap(repository: DBRepository) async throws {
+        let existing = try await repository.listMessagingThreads(pluginID: pluginID)
+        if !existing.isEmpty {
+            return
+        }
         let manifestJSON = try await repository.listLatestPluginFactoryManifests()
             .first(where: { $0.pluginID == pluginID })?
             .manifestJSON ?? ""

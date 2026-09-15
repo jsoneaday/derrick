@@ -2,9 +2,9 @@ import Foundation
 
 public typealias PluginFactoryLogger = @Sendable (String) async -> Void
 
-/// The factory creates Agent Plugin packages whose Derrick entrypoint is Python.
-/// A draft is a standalone file: the container runs it with `python3 /tmp/guest.py`.
-/// A released version stores UTF-8 source as the packaged artifact.
+/// The factory creates Agent Plugin packages whose Derrick entrypoint is Go.
+/// A draft is compiled to a Linux binary and run as `/tmp/guest` in the worker image.
+/// A released version stores the compiled binary as the packaged artifact.
 public struct PluginFactoryDraft: Sendable, Hashable {
     public let manifestJSON: String
     public let guestSource: String
@@ -146,7 +146,7 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
             throw PluginFactoryError.invalidManifest("Version is required.")
         }
         var derrick: [String: Any] = [
-            "entrypoint": "./app.derrick/plugin.py",
+            "entrypoint": "./app.derrick/plugin.go",
         ]
         if !secrets.isEmpty {
             derrick["secrets"] = secrets.map(\.jsonObject)
@@ -204,7 +204,7 @@ public struct PluginFactoryBuilderRequest: Sendable, Hashable {
     public let userGoal: String
     public let previousDraft: PluginFactoryDraft?
     public let feedback: String?
-    /// When set, the host writes `plugin.json`. The builder only supplies Python and tests.
+    /// When set, the host writes `plugin.json`. The builder only supplies Go source and tests.
     public let hostManifest: PluginFactoryManifestInput?
 
     public init(
@@ -288,7 +288,7 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case pluginID = "plugin_id"
         case version, description
-        case guestSource = "python_source"
+        case guestSource = "go_source"
         case legacySwiftSource = "swift_source"
         case testInputJSON = "test_input_json"
         case skillFiles = "skill_files"
@@ -299,16 +299,134 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        pluginID = try container.decode(String.self, forKey: .pluginID)
-        version = try container.decode(String.self, forKey: .version)
-        description = try container.decode(String.self, forKey: .description)
-        guestSource = try container.decodeIfPresent(String.self, forKey: .guestSource)
-            ?? container.decode(String.self, forKey: .legacySwiftSource)
+        pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)
+            ?? "plugin"
+        version = try container.decodeIfPresent(String.self, forKey: .version) ?? "1.0.0"
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        guestSource = try {
+            if let go = try container.decodeIfPresent(String.self, forKey: .guestSource), !go.isEmpty {
+                return go
+            }
+            if let legacy = try container.decodeIfPresent(String.self, forKey: .legacySwiftSource), !legacy.isEmpty {
+                return legacy
+            }
+            throw DecodingError.keyNotFound(
+                CodingKeys.guestSource,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "go_source is required."
+                )
+            )
+        }()
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
         secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
         role = try container.decodeIfPresent(PluginRole.self, forKey: .role) ?? .standard
         messagingOps = try container.decodeIfPresent([String].self, forKey: .messagingOps) ?? []
+    }
+
+    /// Extracts one draft JSON object from a model reply (markdown fences allowed).
+    public static func draft(fromModelText text: String) throws -> PluginFactoryDraft {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let jsonText: String
+        if normalized.first == "{", normalized.last == "}" {
+            jsonText = normalized
+        } else if let start = normalized.firstIndex(of: "{"),
+                  let end = normalized.lastIndex(of: "}") {
+            jsonText = String(normalized[start...end])
+        } else {
+            throw PluginFactoryError.invalidSource(
+                "The plugin builder returned invalid draft JSON (no JSON object)."
+            )
+        }
+        guard let data = jsonText.data(using: .utf8) else {
+            throw PluginFactoryError.invalidSource(
+                "The plugin builder returned invalid draft JSON."
+            )
+        }
+        do {
+            guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw PluginFactoryError.invalidSource(
+                    "The plugin builder returned invalid draft JSON (expected an object)."
+                )
+            }
+            if object["plugin_id"] == nil { object["plugin_id"] = "plugin" }
+            if object["version"] == nil { object["version"] = "1.0.0" }
+            if object["description"] == nil { object["description"] = "" }
+            if object["skill_files"] == nil { object["skill_files"] = [] }
+            if let nested = object["test_input_json"], !(nested is String) {
+                let nestedData = try JSONSerialization.data(withJSONObject: nested)
+                object["test_input_json"] = String(decoding: nestedData, as: UTF8.self)
+            }
+            let coerced = try JSONSerialization.data(withJSONObject: object)
+            return try JSONDecoder().decode(Self.self, from: coerced).draft()
+        } catch let error as PluginFactoryError {
+            throw error
+        } catch {
+            throw PluginFactoryError.invalidSource(
+                Self.draftJSONFailureMessage(text: jsonText, error: error)
+            )
+        }
+    }
+
+    public static func draftJSONFailureMessage(text: String, error: Error) -> String {
+        let reason = describeJSONError(error)
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = String(collapsed.prefix(180))
+        let suffix: String
+        if collapsed.count > 260 {
+            suffix = String(collapsed.suffix(80))
+        } else {
+            suffix = ""
+        }
+        var lines = [
+            "The plugin builder returned invalid draft JSON.",
+            "Reason: \(reason)",
+            "Reply length: \(text.count) characters. Ends with closing brace: \(text.trimmingCharacters(in: .whitespacesAndNewlines).last == "}" ? "yes" : "no").",
+            "Reply starts with: \(prefix)",
+        ]
+        if !suffix.isEmpty {
+            lines.append("Reply ends with: \(suffix)")
+        }
+        return lines.joined(separator: " ")
+    }
+
+    private static func describeJSONError(_ error: Error) -> String {
+        if let decoding = error as? DecodingError {
+            switch decoding {
+            case .keyNotFound(let key, let context):
+                let path = (context.codingPath.map(\.stringValue) + [key.stringValue])
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ".")
+                return "missing field \(path)"
+            case .typeMismatch(let type, let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                return "field \(path.isEmpty ? "(root)" : path) had the wrong type (expected \(type))"
+            case .valueNotFound(let type, let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                return "field \(path.isEmpty ? "(root)" : path) was null (expected \(type))"
+            case .dataCorrupted(let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                if path.isEmpty {
+                    return context.debugDescription
+                }
+                return "\(path): \(context.debugDescription)"
+            @unknown default:
+                break
+            }
+        }
+        let text = error.localizedDescription
+        if text.lowercased().contains("end of") || text.lowercased().contains("unterminated") {
+            return "JSON was truncated or incomplete"
+        }
+        return text
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -380,12 +498,17 @@ public struct PluginFactoryExecutionResult: Sendable, Hashable {
     }
 }
 
-/// The host supplies this adapter. Its production implementation runs these
-/// commands inside the restricted Linux Swift Docker container.
+/// The host supplies this adapter. Its production implementation compiles and
+/// runs guests inside the pinned Go worker Docker container.
 public protocol PluginFactoryExecutor: Sendable {
     func runGuestSource(source: String, input: Data) async throws -> PluginFactoryExecutionResult
     func packageGuestSource(source: String) async throws -> Data
     func runPackagedArtifact(_ artifact: Data, input: Data) async throws -> PluginFactoryExecutionResult
+}
+
+/// Optional compile-once hop replay for factory direct tests.
+public protocol PluginFactoryCompiledGuestExecutor: PluginFactoryExecutor {
+    func runGuestSourceHops(source: String, testInput: Data) async throws -> PluginFactoryHopTestRun
 }
 
 public enum PluginReviewDecision: String, Sendable, Hashable {
@@ -526,10 +649,14 @@ public struct PluginFactoryRelease: Sendable, Hashable {
     }
 
     public func packageFiles() -> [String: Data] {
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: manifestJSON
+        )
         var files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
             "app.derrick/runtime.json": Data(runtimeJSON.utf8),
-            "app.derrick/plugin.py": Data(guestSource.utf8),
+            guestPath: Data(guestSource.utf8),
             "app.derrick/plugin": compiledArtifact,
         ]
         for (path, body) in skillFiles {
@@ -571,15 +698,15 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         case .invalidSkillPath(let path):
             return "Invalid skill path '\(path)'. Skill path must be skills/<name>/SKILL.md."
         case .reservedPluginID(let id): return "The plugin id '\(id)' is reserved by Derrick."
-        case .invalidSource(let message): return "Invalid Python guest source: \(message)"
-        case .directRunFailed(let message): return "Python draft test failed: \(message)"
-        case .invalidDirectOutput(let message): return "Python draft returned invalid plugin output: \(message)"
+        case .invalidSource(let message): return "Invalid Go guest source: \(message)"
+        case .directRunFailed(let message): return "Go draft test failed: \(message)"
+        case .invalidDirectOutput(let message): return "Go draft returned invalid plugin output: \(message)"
         case .reviewRejected(let summary, let findings):
             let detail = findings.isEmpty
                 ? summary
                 : "\(summary) \(findings.joined(separator: " "))"
             return "Plugin review rejected the draft: \(detail)"
-        case .packageFailed(let message): return "Python plugin packaging failed: \(message)"
+        case .packageFailed(let message): return "Go plugin packaging failed: \(message)"
         case .packagedRunFailed(let message): return "Packaged plugin test failed: \(message)"
         case .invalidPackagedOutput(let message): return "Packaged plugin returned invalid output: \(message)"
         case .draftValidationFailed(let findings):

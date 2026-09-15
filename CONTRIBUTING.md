@@ -5,7 +5,8 @@ Thank you for your interest in contributing. Please read the [Code of Conduct](C
 ## Requirements
 
 - **macOS** with **Xcode 27** (Swift 6.4+)
-- **Docker Desktop** (Python guest runtime, web crawler, and file extractor images)
+- **Docker Desktop** (Go worker image for guests, web crawler, and file extractor)
+- **Go 1.27.1+** (`brew install go`) for local diagnostics; guest compile runs in Docker
 - Apple Developer account for code signing
 
 ## Getting started

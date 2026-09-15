@@ -62,7 +62,7 @@ public actor HostHTTPClient {
         guard !trimmed.isEmpty, let url = URL(string: wireURL), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")
         }
-        var currentURL = url
+        var currentURL = NewsSourceURL.canonicalFetchURL(url)
         var currentMethod = request.method
         var currentBody = wire.body
         let envelopeHeaders = wire.headers

@@ -343,9 +343,9 @@ import Testing
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "ui", password: "ui")
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-bot","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
         """
-        let runtimeJSON = #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#
+        let runtimeJSON = #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#
         let guestSource = "print([])"
         var release = PluginFactoryRelease(
             pluginID: "slack-bot",

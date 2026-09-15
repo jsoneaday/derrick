@@ -15,51 +15,15 @@ jobs:
       - name: Verify no secrets in git history
         run: chmod +x scripts/verify-no-secrets.sh && ./scripts/verify-no-secrets.sh --history
 
-  build-and-test:
+  unit-tests:
     runs-on: xcode-27
     needs: secrets
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Xcode toolchain
         run: |
           xcodebuild -version
           swift --version
-      - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -workspace derrick.xcworkspace -scheme ui
-      - name: Build ui scheme
-        run: |
-          xcodebuild build \
-            -workspace derrick.xcworkspace \
-            -scheme ui \
-            -destination 'platform=macOS' \
-            -configuration Debug \
-            -xcconfig Config/CI.xcconfig \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM=
-      - name: Test Swift packages
-        run: |
-          for pkg in packages/*/Package.swift; do
-            dir="$(dirname "$pkg")"
-            if ! grep -q 'testTarget' "$pkg"; then
-              echo "Skipping $dir (no test target)"
-              continue
-            fi
-            echo "== Testing $dir =="
-            (cd "$dir" && swift test)
-          done
-      - name: Test ui scheme
-        run: |
-          xcodebuild test \
-            -workspace derrick.xcworkspace \
-            -scheme ui \
-            -destination 'platform=macOS' \
-            -configuration Debug \
-            -xcconfig Config/CI.xcconfig \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM= \
-            -only-testing:uiTests
+      - name: Unit test Swift packages
+        run: chmod +x scripts/ci-unit-tests.sh && ./scripts/ci-unit-tests.sh

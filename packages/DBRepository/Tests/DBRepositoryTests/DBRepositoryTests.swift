@@ -81,23 +81,9 @@ final class DBRepositoryTests: XCTestCase {
     func testSchemaUpgradeDoesNotWipeExistingRows() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
-        let artifact = Data("compiled".utf8)
-        let files: [String: Data] = [
-            "plugin.json": Data(#"{"name":"keep-me"}"#.utf8),
-            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
-            "app.derrick/plugin": artifact,
-        ]
-        let release = PluginFactoryRelease(
+        let release = makeGoFactoryRelease(
             pluginID: "keep-me",
-            version: "1.0.0",
-            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
-            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
-            guestSource: "print(\"[]\")",
-            compiledArtifact: artifact,
-            skillFiles: [:],
-            contentHash: PluginContentHash.hash(files: files),
-            reviewSummary: "approved"
+            manifestName: "keep-me"
         )
         try await repository.savePluginFactoryRelease(release)
         let url = await repository.databaseURL
@@ -108,7 +94,7 @@ final class DBRepositoryTests: XCTestCase {
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
         XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
-        XCTAssertTrue(try tableExists(named: "news_readers", at: url))
+        XCTAssertFalse(try tableExists(named: "news_readers", at: url))
         XCTAssertTrue(try tableExists(named: "agent_profiles", at: url))
         XCTAssertTrue(try tableExists(named: "messaging_agent_handled", at: url))
         let loaded = try await repository.pluginFactoryRelease(pluginID: "keep-me", version: "1.0.0")
@@ -119,25 +105,11 @@ final class DBRepositoryTests: XCTestCase {
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
-        let artifact = Data("compiled".utf8)
         let skillFiles = ["skills/weather/SKILL.md": "# Weather"]
-        let files: [String: Data] = [
-            "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
-            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
-            "app.derrick/plugin": artifact,
-            "skills/weather/SKILL.md": Data("# Weather".utf8),
-        ]
-        let release = PluginFactoryRelease(
+        let release = makeGoFactoryRelease(
             pluginID: "weather-tool",
-            version: "1.0.0",
-            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
-            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
-            guestSource: "print(\"[]\")",
-            compiledArtifact: artifact,
-            skillFiles: skillFiles,
-            contentHash: PluginContentHash.hash(files: files),
-            reviewSummary: "approved"
+            manifestName: "weather-tool",
+            skillFiles: skillFiles
         )
 
         try await repository.savePluginFactoryRelease(release)
@@ -164,25 +136,11 @@ final class DBRepositoryTests: XCTestCase {
             )
         )
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
-        let artifact = Data("compiled".utf8)
         let skillFiles = ["skills/weather/SKILL.md": "# Weather"]
-        let files: [String: Data] = [
-            "plugin.json": Data(#"{"name":"weather-tool"}"#.utf8),
-            "app.derrick/runtime.json": Data(#"{"language":"swift"}"#.utf8),
-            "app.derrick/plugin.py": Data("print(\"[]\")".utf8),
-            "app.derrick/plugin": artifact,
-            "skills/weather/SKILL.md": Data("# Weather".utf8),
-        ]
-        let release = PluginFactoryRelease(
+        let release = makeGoFactoryRelease(
             pluginID: "weather-tool",
-            version: "1.0.0",
-            manifestJSON: String(decoding: files["plugin.json"] ?? Data(), as: UTF8.self),
-            runtimeJSON: String(decoding: files["app.derrick/runtime.json"] ?? Data(), as: UTF8.self),
-            guestSource: "print(\"[]\")",
-            compiledArtifact: artifact,
-            skillFiles: skillFiles,
-            contentHash: PluginContentHash.hash(files: files),
-            reviewSummary: "approved"
+            manifestName: "weather-tool",
+            skillFiles: skillFiles
         )
         try await repository.savePluginFactoryRelease(release)
 
@@ -632,5 +590,39 @@ final class DBRepositoryTests: XCTestCase {
             throw NSError(domain: "DBRepositoryTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Unable to read journal_mode"])
         }
         return String(cString: c)
+    }
+
+    /// Hash must match `packageFiles()`, which uses `guestSource` at the Go guest path.
+    private func makeGoFactoryRelease(
+        pluginID: String,
+        manifestName: String,
+        skillFiles: [String: String] = [:]
+    ) -> PluginFactoryRelease {
+        let artifact = Data("compiled".utf8)
+        let guestSource = "package main"
+        let manifestJSON = "{\"name\":\"\(manifestName)\"}"
+        let runtimeJSON = #"{"language":"go"}"#
+        var files: [String: Data] = [
+            "plugin.json": Data(manifestJSON.utf8),
+            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
+            "app.derrick/plugin.go": Data(guestSource.utf8),
+            "app.derrick/plugin": artifact,
+        ]
+        for (path, body) in skillFiles {
+            files[path] = Data(body.utf8)
+        }
+        let release = PluginFactoryRelease(
+            pluginID: pluginID,
+            version: "1.0.0",
+            manifestJSON: manifestJSON,
+            runtimeJSON: runtimeJSON,
+            guestSource: guestSource,
+            compiledArtifact: artifact,
+            skillFiles: skillFiles,
+            contentHash: PluginContentHash.hash(files: files),
+            reviewSummary: "approved"
+        )
+        XCTAssertTrue(release.verifyIntegrity(), "test fixture hash must match packageFiles()")
+        return release
     }
 }

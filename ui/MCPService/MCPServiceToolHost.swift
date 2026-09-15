@@ -7,7 +7,7 @@ import MemorySystem
 import Plugin
 import Structure
 
-/// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, factory
+/// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, `web.search`, factory
 /// plugin tools, and session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
@@ -42,10 +42,13 @@ actor MCPServiceToolHost {
             LLMModelThinkingSettings(repository: repo)
         }
         await factoryThinkingSettings.loadSettings()
-        let factoryExecutor = PythonPluginFactoryDockerExecutor(
+        let factoryExecutor = GoPluginFactoryDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let webCrawlerExecutor = WebCrawlerDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
+        let webSearchExecutor = WebSearchDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let fileExtractorExecutor = FileExtractorDockerExecutor(
@@ -67,10 +70,6 @@ actor MCPServiceToolHost {
                     await WorkflowProgressPublisher.publish(stage: "factory", message: progress)
                 }
             },
-            apiKeyProvider: {
-                MCPServiceCallContext.shared.helperAPIKey
-                    ?? TurnProcessContext.effectiveAPIKey
-            }
         )
         let made = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
@@ -111,6 +110,14 @@ actor MCPServiceToolHost {
             await server.register(
                 WebCrawlerToolModule.makeRegistration { input, timeoutSeconds in
                     try await webCrawlerExecutor.run(
+                        input: input,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                }
+            )
+            await server.register(
+                WebSearchToolModule.makeRegistration { input, timeoutSeconds in
+                    try await webSearchExecutor.run(
                         input: input,
                         timeoutSeconds: timeoutSeconds
                     )
@@ -170,7 +177,8 @@ actor MCPServiceToolHost {
                         try await GuestPluginRunner.run(
                             release: release,
                             input: input,
-                            dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+                            dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
+                            hopHandler: HostUIPresentHopHandler(pluginID: pluginID)
                         )
                     }
                 }
@@ -193,7 +201,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec, web.crawl, files.extract)",
+            message: "MCP tool host ready (script_exec, web.crawl, web.search, files.extract)",
             code: "tool_host_ready"
         )
         return made
@@ -233,32 +241,6 @@ actor MCPServiceToolHost {
                 message: "Tool \(toolName) is owned by AgentService, not MCPService."
             )
         }
-        if toolName == AllowedMCPTool.webCrawl.rawValue,
-           !EffectorAdmissionPolicy.allowsSyncWebCrawl(
-               context: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)
-                   ?? legacyExecutionContext(from: request),
-               principal: request.principal
-           ) {
-            let outcome = ToolExecutionOutcome.failure(
-                status: .blocked,
-                stage: .validation,
-                diagnostics: [
-                    ToolExecutionOutcome.Diagnostic(
-                        code: "web_crawl_requires_notification",
-                        message: "web.crawl must be submitted through jobs_create so the result can arrive in a notification banner."
-                    )
-                ],
-                retry: ToolExecutionOutcome.Retry(allowed: false)
-            )
-            return MCPToolCallResultDTO(
-                requestID: request.requestID,
-                ok: true,
-                isError: true,
-                text: (try? outcome.encodedJSON()) ?? "",
-                message: "Submit web.crawl through jobs_create for notification delivery."
-            )
-        }
-
         let sessionKey: MemorySessionKey
         switch request.principal {
         case .agent(let sessionID, let agentID):

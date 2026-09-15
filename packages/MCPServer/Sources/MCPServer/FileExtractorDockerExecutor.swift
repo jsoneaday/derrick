@@ -5,8 +5,9 @@ import Structure
 /// Own queue (max 1). Job folders are bind-mounted; the image must already
 /// exist (`docker image inspect` happens outside the permit).
 public struct FileExtractorDockerExecutor: Sendable {
-    public static let image = "derrick-file-extractor:swift-6.4-v1"
+    public static let image = DockerWorkerRuntime.image
     public static let containerPrefix = "derrick-file-extractor"
+    public static let binaryPath = DockerWorkerRuntime.extractorBinary
     public static let maximumTimeoutSeconds = 180
 
     private let executor: DockerCLIExecutor
@@ -27,10 +28,7 @@ public struct FileExtractorDockerExecutor: Sendable {
         timeoutSeconds: Int
     ) async throws -> DockerCLIResult {
         let timeout = min(max(timeoutSeconds, 1), Self.maximumTimeoutSeconds)
-        let imageCheck = try await executor(["image", "inspect", Self.image], Data(), 30)
-        guard imageCheck.exitCode == 0 else {
-            throw FileExtractorDockerExecutorError.imageUnavailable(Self.image)
-        }
+        try await WorkerImageGate.shared.ensureReady(executor: executor)
         let executor = self.executor
         do {
             return try await queue.withPermit {
@@ -48,7 +46,7 @@ public struct FileExtractorDockerExecutor: Sendable {
                     startStep: "start file extractor container",
                     body: { name in
                         try await executor(
-                            ["exec", "-i", name, "/usr/local/bin/derrick-file-extractor"],
+                            ["exec", "-i", name, Self.binaryPath],
                             input,
                             timeout
                         )

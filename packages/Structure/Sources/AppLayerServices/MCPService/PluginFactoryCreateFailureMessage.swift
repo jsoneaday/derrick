@@ -28,6 +28,16 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             )
         }
 
+        if WorkerImageFailureDisplay.isWorkerImageIssue(trimmed) {
+            return PluginFactoryCreateFailurePresentation(
+                summary: """
+                The connector was not saved. Derrick’s web tools were not ready. \
+                Keep Docker Desktop open and try again.
+                """,
+                technicalDetail: trimmed
+            )
+        }
+
         if isModelTimeout(trimmed) {
             let reviewer = trimmed.lowercased().contains("safety reviewer")
             return PluginFactoryCreateFailurePresentation(
@@ -92,8 +102,8 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         if message.count > 160 { return true }
         let prefixes = [
             "Invalid Agent Plugin manifest",
-            "Invalid Python guest source",
-            "Python draft test failed",
+            "Invalid Go guest source",
+            "Go draft test failed",
             "Plugin review rejected",
             "Draft validation failed:",
         ]

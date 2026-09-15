@@ -31,7 +31,7 @@ public enum TurnProcessContext {
     /// Active agent profile handle for the current user-facing turn (orchestrator-only tools).
     @TaskLocal public static var activeProfileHandle: String?
 
-    /// Active `/create-plugin` or `/edit-plugin` factory turn (enables sync `web.crawl`).
+    /// Active `/create-plugin` or `/edit-plugin` factory turn.
     @TaskLocal public static var pluginFactoryCreationActive: Bool = false
 
     public static func install(

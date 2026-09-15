@@ -30,6 +30,34 @@ import Testing
         #expect(threads.first?.vendorThreadID == "C123")
     }
 
+    @Test func bootstrapSkipsVendorSyncWhenConversationsAlreadyExist() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+
+        final class InvokeCounter: @unchecked Sendable {
+            var count = 0
+        }
+        let counter = InvokeCounter()
+        let invoker = ConnectorPluginInvoker { _, _ in
+            counter.count += 1
+            Issue.record("bootstrap must not invoke the plugin when conversations already exist")
+            return ""
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        try await adapter.bootstrap(repository: repository)
+        #expect(counter.count == 0)
+    }
+
     @Test func syncThreadsDropsConversationsThePluginNoLongerReturns() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
@@ -420,7 +448,7 @@ import Testing
         }
         let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
         _ = try await adapter.pollInbox(repository: repository)
-        #expect(capture.parents == ["", "171.3", "171.1"])
+        #expect(capture.parents == ["", "171.3"])
     }
 
     @Test func pollInboxRefetchesReplyThreadWhenStoredCountMatches() async throws {
@@ -542,10 +570,10 @@ import Testing
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
         let manifestJSON = """
         {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["send_message"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["send_message"]}}}
         """
         let guestSource = "import json, sys\njson.dump([], sys.stdout)"
-        let runtimeJSON = #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#
+        let runtimeJSON = #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#
         let draft = PluginFactoryRelease(
             pluginID: "slack-connection",
             version: "1.0.0",
@@ -658,6 +686,113 @@ import Testing
         let inserted = try await adapter.pollInbox(repository: repository)
         #expect(Set(capture.vendorThreadIDs) == ["C111", "C222"])
         #expect(inserted.count == 2)
+    }
+
+    @Test func pollInboxPrefersTheOpenConversationWhenCapped() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C111",
+                title: "#one"
+            )
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C222",
+                title: "#two"
+            )
+        )
+
+        final class PollCapture: @unchecked Sendable {
+            var vendorThreadIDs: [String] = []
+        }
+        let capture = PollCapture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.vendorThreadIDs.append(event.params?["vendor_thread_id"]?.stringValue ?? "")
+            let envelopes = #"[{"verb":"result.emit","messages":[]}]"#
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        _ = try await adapter.pollInbox(
+            repository: repository,
+            preferredVendorThreadID: "C222",
+            preferredParentVendorMessageID: nil,
+            maxChannelPolls: 1,
+            channelOffset: 0
+        )
+        #expect(capture.vendorThreadIDs == ["C222"])
+    }
+
+    @Test func pollInboxSkipsOpportunisticRepliesWhenWatchingAChannel() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                title: "#general"
+            )
+        )
+        _ = try await repository.persistMessagingInbound(
+            MessagingInboundRecord(
+                pluginID: "slack-connection",
+                vendorThreadID: "C123",
+                threadTitle: "#general",
+                vendorMessageID: "171.1",
+                sender: "alice",
+                body: "root",
+                createdAt: Date(timeIntervalSince1970: 1_710_000_000),
+                replyCount: 1
+            )
+        )
+
+        final class Capture: @unchecked Sendable {
+            var parents: [String] = []
+        }
+        let capture = Capture()
+        let invoker = ConnectorPluginInvoker { _, input in
+            let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
+            capture.parents.append(event.params?["parent_vendor_message_id"]?.stringValue ?? "")
+            let envelopes = #"[{"verb":"result.emit","messages":[]}]"#
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
+        }
+        let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
+        _ = try await adapter.pollInbox(
+            repository: repository,
+            preferredVendorThreadID: "C123",
+            preferredParentVendorMessageID: nil,
+            maxChannelPolls: 1,
+            channelOffset: 0
+        )
+        #expect(capture.parents == [""])
+    }
+
+    @Test func orderedThreadsRotatesFromOffsetWhenNothingIsFocused() {
+        let rotated = PluginMessagingIngressAdapter.orderedThreads(
+            [
+                MessagingThreadDTO(pluginID: "p", vendorThreadID: "C111", title: "#one"),
+                MessagingThreadDTO(pluginID: "p", vendorThreadID: "C222", title: "#two"),
+            ],
+            preferredVendorThreadID: nil,
+            channelOffset: 1
+        )
+        #expect(rotated.map(\.vendorThreadID) == ["C222", "C111"])
     }
 
     @Test func pollInboxMapsMisassignedVendorThreadIDToPolledThread() async throws {

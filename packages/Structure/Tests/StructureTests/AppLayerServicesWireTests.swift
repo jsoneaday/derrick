@@ -84,11 +84,11 @@ import Testing
         #expect(decoded.executableFingerprint == nil)
     }
 
-    @Test func bundledScriptReviewerInstructionsLoadFromSourceTree() throws {
-        let scriptReviewer = try DerrickBundledText.load("script_reviewer_instructions.md")
-        #expect(scriptReviewer.contains("intent alignment"))
-        #expect(scriptReviewer.contains("secret literals"))
-        #expect(scriptReviewer.contains("Python verifier"))
+    @Test func scriptExecReviewerPromptLoadsFromBundledContract() {
+        let scriptReviewer = ScriptExecContractPrompts.reviewerGuide()
+        #expect(scriptReviewer.contains("script-exec-contract.json"))
+        #expect(scriptReviewer.contains("intent_alignment"))
+        #expect(scriptReviewer.contains("If a rule is not in the JSON"))
     }
 
     @Test func healthDecodesLegacyPayloadWithoutGuestRuntime() throws {
@@ -224,12 +224,23 @@ import Testing
     @Test func mcpToolCallTimeouts() {
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "web.crawl")
             == MCPToolCallTimeouts.longRunningNanoseconds)
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "web.search")
+            == MCPToolCallTimeouts.webSearchNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin_factory_build")
             == MCPToolCallTimeouts.longRunningNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin.invoke")
             == MCPToolCallTimeouts.pluginInvokeNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "memory_search")
             == MCPToolCallTimeouts.standardNanoseconds)
+    }
+
+    @Test func connectorMessagingTimeoutIsDetectableWithoutShowingAsAHardFailure() {
+        #expect(ConnectorMessagingClientError.isTimeout(ConnectorMessagingClientError.timedOut))
+        #expect(!ConnectorMessagingClientError.isTimeout(ConnectorMessagingClientError.unavailable))
+        #expect(
+            ConnectorMessagingClientError.timedOut.errorDescription
+                == "Connector messaging timed out."
+        )
     }
 
     @Test func connectorMessagingXPCCodecRoundTrip() throws {
@@ -369,7 +380,7 @@ import Testing
     @Test func slackConnectorFallsBackToBotTokenWhenManifestOmitsSecrets() {
         let json = """
         {"$schema":"https://example.invalid/agent-plugin.json","name":"slack-connector","version":"1.0.0",\
-        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.py","role":"connector","messaging_ops":["sync_threads"]}}}
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads"]}}}
         """
         let descriptors = PluginSecretField.resolvedDescriptors(
             pluginID: "slack-connector",
@@ -453,6 +464,18 @@ import Testing
         #expect(
             PluginSecretKeychain.account(pluginID: "slack-connection", fieldID: "password")
                 == "plugin-secret:slack-connection/password"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-1", fieldID: "bot_token")
+                == "plugin-secret:slack-connector-1/bot_token"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-2", fieldID: "bot_token")
+                == "plugin-secret:slack-connector-2/bot_token"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-1", fieldID: "bot_token")
+                != PluginSecretKeychain.account(pluginID: "slack-connector-2", fieldID: "bot_token")
         )
         #expect(PluginCredentialPrompt.toolName == "plugin.credentials")
     }
@@ -834,6 +857,23 @@ import Testing
         )
     }
 
+    @Test func derrickMessagingForegroundPresenceReportsOpenConversation() {
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
+        DerrickMessagingForegroundPresence.clear()
+        defer { DerrickMessagingForegroundPresence.clear() }
+        DerrickMessagingForegroundPresence.sync(
+            isMessagingWorkspace: true,
+            pluginID: "slack-connector-1",
+            vendorThreadID: "C123",
+            parentVendorMessageID: "171.1",
+            isFrontmost: true
+        )
+        let focus = DerrickMessagingForegroundPresence.preferredInboxFocus(excludingPID: -1)
+        #expect(focus?.pluginID == "slack-connector-1")
+        #expect(focus?.vendorThreadID == "C123")
+        #expect(focus?.parentVendorMessageID == "171.1")
+    }
+
     @Test func derrickDaemonHygieneRestartAfterOrphanEviction() {
         #expect(
             DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
@@ -1022,15 +1062,15 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
             !DerrickDaemonHygiene.shouldRetireConnectedDaemon(
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
-                reportedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                reportedGuestRuntime: DerrickGuestRuntime.guestDockerImage,
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1038,7 +1078,7 @@ import Testing
                 reportedFingerprint: "old",
                 expectedFingerprint: "new",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1046,7 +1086,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: "a",
                 reportedGuestRuntime: "stale-guest:old",
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1054,7 +1094,7 @@ import Testing
                 reportedFingerprint: nil,
                 expectedFingerprint: "a",
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
         #expect(
@@ -1062,7 +1102,7 @@ import Testing
                 reportedFingerprint: "a",
                 expectedFingerprint: nil,
                 reportedGuestRuntime: DerrickGuestRuntime.swiftPluginDockerImage,
-                expectedGuestRuntime: DerrickGuestRuntime.pythonGuestDockerImage
+                expectedGuestRuntime: DerrickGuestRuntime.guestDockerImage
             )
         )
     }
@@ -1205,6 +1245,7 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.createLabelArguments == ["--label", "app.derrick=runtime"])
         #expect(DerrickDockerRuntimeIdentity.namePrefixes == [
             "derrick-web-crawler",
+            "derrick-web-search",
             "derrick-guest-runtime",
             "derrick-swift-runtime",
             "derrick-file-extractor",
@@ -1214,10 +1255,10 @@ import Testing
         #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
         #expect(
             DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
-                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + ["python:3.14.7"]
+                ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + [DockerWorkerRuntime.image]
             )
         )
-        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", "python:3.14.7"]))
+        #expect(!DerrickDockerRuntimeIdentity.createHasRuntimeLabel(["create", "--name", "x", DockerWorkerRuntime.image]))
     }
 
     @Test func webCrawlerProductImageBuildUsesPackagesContext() {
@@ -1317,12 +1358,12 @@ import Testing
         )
     }
 
-    @Test func effectorAdmissionDeniesLiveChatWithoutContext() {
+    @Test func effectorAdmissionAllowsLiveChatWithoutContext() {
         #expect(
             EffectorAdmissionPolicy.allowsSyncWebCrawl(
                 context: nil,
                 principal: .agent(sessionID: "s1", agentID: "a1")
-            ) == false
+            )
         )
     }
 
@@ -1416,6 +1457,13 @@ import Testing
         )
     }
 
+    @Test func pluginFactoryCreateFailureMessageExplainsWebTools() {
+        let raw = "The worker image derrick-worker:go-v1 does not match the version shipped with Derrick. Rebuild or reinstall product images."
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("web tools were not ready"))
+        #expect(presentation.technicalDetail == raw)
+    }
+
     @Test func pluginFactoryCreateFailureMessageExplainsBuilderTimeout() {
         let presentation = PluginFactoryCreateFailureMessage.presentation("The request timed out.")
         #expect(presentation.summary.contains("plugin builder did not finish in time"))
@@ -1476,17 +1524,16 @@ import Testing
         #expect(!PluginFactoryValidationExpectations.isSendOnlyConnector(manifestJSON: sendAndReceive))
     }
 
-    @Test func connectorFactoryFailureReturnsToVendorStep() {
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .vendor)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .type)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .name)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .auth)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .auth)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "paywall") == .news)
-        #expect(PluginFactoryCreateInput.failureStep(forStage: "news") == .news)
+    @Test func pluginStudioFailureMapsToSkillFirstSteps() {
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "docs") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "factory") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "review") == .build)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "description") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "type") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "name") == .skill)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "auth") == .credentials)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "discover") == .credentials)
+        #expect(PluginFactoryCreateInput.failureStep(forStage: "goal") == .goal)
     }
 
     @Test func connectorWizardOffersFullSyncOnly() {
@@ -1516,6 +1563,8 @@ import Testing
         #expect(goal.contains("send_message"))
         #expect(goal.contains("sync_threads"))
         #expect(goal.contains("poll_inbox"))
+        #expect(goal.contains("ui.present"))
+        #expect(goal.contains("host-ui-library.json"))
         #expect(goal.contains("Host plugin id"))
         #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
         #expect(!goal.contains("must sync and send messages"))

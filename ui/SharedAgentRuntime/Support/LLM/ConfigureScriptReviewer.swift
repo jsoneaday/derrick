@@ -21,7 +21,7 @@ actor ConfiguredScriptReviewer: ScriptReviewer {
 
     func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
         let selectedModel = await MainActor.run { settings.scriptReviewerModel }
-        guard let apiKey = await resolveAPIKey(for: selectedModel) else {
+        guard let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: selectedModel) else {
             await MainActor.run {
                 debugLog(
                     "Helper reviewer model \(selectedModel.helperDisplayName) unavailable; trying default helper reviewer."
@@ -83,7 +83,7 @@ actor ConfiguredScriptReviewer: ScriptReviewer {
         if selectedModel == defaultModel {
             return nil
         }
-        guard let apiKey = await resolveAPIKey(for: defaultModel) else {
+        guard let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: defaultModel) else {
             return nil
         }
 
@@ -110,18 +110,5 @@ actor ConfiguredScriptReviewer: ScriptReviewer {
             let reviewer = OpenAIScriptReviewer(apiKey: apiKey, model: openAIModel)
             return try await reviewer.review(args)
         }
-    }
-
-    private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
-        if let key = await MainActor.run(body: {
-            AppSecretResolver().resolve(
-                account: model.provider.secretAccount,
-                environmentKeys: model.provider.apiKeyEnvironmentKeys
-            )
-        }), !key.isEmpty {
-            return key
-        }
-        // AgentService XPC process cannot read the UI keychain; use the turn-supplied key.
-        return TurnProcessContext.effectiveAPIKey
     }
 }

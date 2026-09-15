@@ -170,15 +170,6 @@ final class DerrickNotificationService {
             fputs("[HumanDecision] resolve skip id=\(approvalID)\n", stderr)
             return
         }
-        if approved, HITLOfflineNetworkService.isNetworkToolName(row.toolName),
-           let host = HITLOfflineNetworkService.host(fromNetworkToolName: row.toolName) {
-            await EgressAllowlistService.shared.applyUserNetworkDecision(
-                host: host,
-                decision: always
-                    ? .approvedPermanently(actor: actor)
-                    : .approvedOnce(actor: actor)
-            )
-        }
         let status: PendingHITLApprovalStatus = approved ? .approved : .cancelled
         let edited = approved ? row.argumentsJSON : nil
         try? await repository.resolveHITLApproval(
@@ -264,9 +255,6 @@ final class DerrickNotificationService {
                 databaseDirectoryURL: directory
             )
             repository = repo
-            if !JobResultPanelSession.isPanelOnlyLaunch {
-                await EgressAllowlistService.shared.configure(repository: repo)
-            }
             return repo
         } catch {
             fputs("[HumanDecision] ensureRepository failed: \(error.localizedDescription)\n", stderr)

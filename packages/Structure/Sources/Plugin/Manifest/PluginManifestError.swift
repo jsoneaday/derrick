@@ -47,7 +47,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .invalidFieldType(let f):
             return "plugin.json field has the wrong type: \(f)"
         case .invalidEntrypoint(let p):
-            return "Entrypoint must be a plugin-relative .py path: \(p)"
+            return "Entrypoint must be a plugin-relative .go path: \(p)"
         case .pathNotRelative(let p):
             return "Path must be plugin-relative and start with ./: \(p)"
         case .pathEscapesRoot(let p):

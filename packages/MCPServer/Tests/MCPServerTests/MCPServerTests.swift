@@ -7,20 +7,108 @@ import Plugin
 import WebCrawler
 @testable import MCPServer
 
-@Suite struct MCPServerTests {
-    private static let dummyPythonScript = """
-        import json, sys
-        _ = sys.stdin.read()
-        json.dump([{"verb":"result.emit","summary":"ok"}], sys.stdout)
+@Suite(.serialized) struct MCPServerTests {
+    private static let dummyGoScript = """
+        package main
+
+        import (
+            "encoding/json"
+            "os"
+        )
+
+        func main() {
+            var event map[string]any
+            _ = json.NewDecoder(os.Stdin).Decode(&event)
+            enc := json.NewEncoder(os.Stdout)
+            enc.SetEscapeHTML(false)
+            _ = enc.Encode([]map[string]any{{"verb": "result.emit", "summary": "ok"}})
+        }
         """
 
-    private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { arguments, _, _ in
-        if arguments.contains("python3"), arguments.contains("/tmp/guest.py") {
+    private static func isGuestBinaryExec(_ arguments: [String]) -> Bool {
+        arguments.contains(DockerWorkerRuntime.guestBinaryPath)
+            && !arguments.contains("cat >")
+    }
+
+    private static func mockWorkerImageInspect(_ arguments: [String]) -> DockerCLIResult? {
+        guard arguments.first == "image", arguments.contains("inspect") else {
+            return nil
+        }
+        if arguments.contains("{{.Id}}") {
+            let digest = DockerWorkerRuntime.pinnedDigest.rawValue + "\n"
+            return DockerCLIResult(exitCode: 0, stdout: Data(digest.utf8), stderr: Data())
+        }
+        if arguments.contains(where: { $0.contains(DockerWorkerRuntime.binariesLabelKey) }) {
+            let label = DockerWorkerRuntime.binariesLabelValue + "\n"
+            return DockerCLIResult(exitCode: 0, stdout: Data(label.utf8), stderr: Data())
+        }
+        return DockerCLIResult(exitCode: 0, stdout: Data("[]".utf8), stderr: Data())
+    }
+
+    private actor ImageBuildLatch {
+        private(set) var succeeded = false
+        func markSucceeded() { succeeded = true }
+    }
+
+    private static func missingUntilBuiltExecutor(
+        recorder: DockerCallRecorder,
+        latch: ImageBuildLatch,
+        failFirstBuild: Bool = false,
+        buildDelay: Duration? = nil
+    ) -> DockerCLIExecutor {
+        { args, _, _ in
+            await recorder.append(args)
+            if args.first == "build" {
+                if let buildDelay {
+                    try await Task.sleep(for: buildDelay)
+                }
+                if failFirstBuild {
+                    let builds = await recorder.calls.filter { $0.first == "build" }.count
+                    if builds == 1 {
+                        return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data("boom".utf8))
+                    }
+                }
+                await latch.markSucceeded()
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            if args.first == "image" {
+                if await latch.succeeded, let mocked = mockWorkerImageInspect(args) {
+                    return mocked
+                }
+                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+    }
+
+    private static let dummyCompiledGuest = Data([0x7f, 0x45, 0x4c, 0x46, 0x02])
+
+    private static func mockGuestDocker(_ arguments: [String]) -> DockerCLIResult? {
+        if arguments.contains("cat > /tmp/guest") {
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        if arguments.contains(DockerWorkerRuntime.guestWriteSourceShell) {
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        if arguments.contains(DockerWorkerRuntime.guestCompileShell) {
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        if arguments.contains(DockerWorkerRuntime.guestReadBinaryShell) {
+            return DockerCLIResult(exitCode: 0, stdout: dummyCompiledGuest, stderr: Data())
+        }
+        if isGuestBinaryExec(arguments) {
             return DockerCLIResult(
                 exitCode: 0,
                 stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
                 stderr: Data()
             )
+        }
+        return mockWorkerImageInspect(arguments)
+    }
+
+    private static let dummyStdin: @Sendable ([String], Data, Int) async throws -> DockerCLIResult = { arguments, _, _ in
+        if let mocked = mockGuestDocker(arguments) {
+            return mocked
         }
         return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
     }
@@ -161,6 +249,185 @@ import WebCrawler
         #expect((await recorder.calls).count == 1)
     }
 
+    @Test func webSearchToolValidatesAndReturnsStructuredOutcome() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebSearchToolModule.makeRegistration { input, timeoutSeconds in
+                    await recorder.append(["run", "\(input.count)", "\(timeoutSeconds)"])
+                    return DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"{"ok":true,"query":"slack api tokens","hits":[{"title":"Tokens","url":"https://docs.slack.dev/authentication/tokens","snippet":"Create a token."}],"diagnostics":[]}"#.utf8
+                        ),
+                        stderr: Data()
+                    )
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.search",
+            arguments: [
+                "query": .string("slack api tokens"),
+                "timeout_seconds": .int(30)
+            ]
+        )
+
+        #expect(!result.isError)
+        #expect(result.text.contains("\"status\":\"completed\""))
+        #expect(result.text.contains("docs.slack.dev"))
+        #expect((await recorder.calls).count == 1)
+    }
+
+    @Test func webSearchEmptyHitsAreCompletedNotAToolCrash() async throws {
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebSearchToolModule.makeRegistration { _, _ in
+                    DockerCLIResult(
+                        exitCode: 0,
+                        stdout: Data(
+                            #"{"ok":false,"query":"nope","hits":[],"diagnostics":["DuckDuckGo returned no usable search results."]}"#.utf8
+                        ),
+                        stderr: Data()
+                    )
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.search",
+            arguments: [
+                "query": .string("slack api tokens")
+            ]
+        )
+
+        #expect(!result.isError)
+        #expect(result.text.contains("\"status\":\"completed\""))
+        #expect(result.text.contains("DuckDuckGo returned no usable search results"))
+        let hits = VendorDocsLocator.hits(fromSearchToolText: result.text)
+        #expect(hits.isEmpty)
+    }
+
+    @Test func webSearchToolBlocksFloodQueries() async throws {
+        let recorder = DockerCallRecorder()
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                WebSearchToolModule.makeRegistration { _, _ in
+                    await recorder.append(["unexpected"])
+                    return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            )
+        }
+
+        let result = try await bridge.client.callTool(
+            named: "web.search",
+            arguments: [
+                "query": .string("flood slack with requests")
+            ]
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("\"status\":\"blocked\""))
+        #expect(result.text.contains("flooding"))
+        #expect((await recorder.calls).isEmpty)
+    }
+
+    @Test func webSearchContainerCreateOverridesImageEntrypoint() {
+        let args = WebSearchDockerExecutor.createArguments(
+            name: "derrick-web-search-test",
+            proxyHost: "172.17.0.1",
+            proxyPort: 3128,
+            proxyToken: "token"
+        )
+        let imageIndex = args.firstIndex(of: WebSearchDockerExecutor.image)
+        let entrypointIndex = args.firstIndex(of: "--entrypoint")
+        let sleepIndex = args.firstIndex(of: "/bin/sleep")
+        #expect(entrypointIndex != nil)
+        #expect(sleepIndex != nil)
+        #expect(imageIndex != nil)
+        #expect(args.contains("infinity"))
+        #expect(args.contains("DERRICK_EGRESS_PROXY_HOST=172.17.0.1"))
+        #expect(args.contains("--name"))
+        #expect(args.contains("derrick-web-search-test"))
+        #expect(entrypointIndex! < imageIndex!)
+        #expect(sleepIndex! < imageIndex!)
+        #expect(args.contains(DerrickDockerRuntimeIdentity.labelAssignment))
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: args, timeoutSeconds: 60)
+            ) == nil
+        )
+    }
+
+    @Test func accessDocsDockerArgvIsAllowedByHelper() {
+        let name = "derrick-web-search-e2e"
+        let commands: [[String]] = [
+            ["image", "inspect", DockerWorkerRuntime.image],
+            [
+                "image", "inspect", "--format", DockerWorkerRuntime.binariesInspectFormat,
+                DockerWorkerRuntime.image,
+            ],
+            [
+                "image", "inspect", "--format", "{{.Id}}",
+                DockerWorkerRuntime.image,
+            ],
+            WebSearchDockerExecutor.createArguments(
+                name: name,
+                proxyHost: WebCrawlerEgressProxy.containerProxyHost,
+                proxyPort: WebCrawlerEgressProxy.containerProxyPort,
+                proxyToken: "token"
+            ),
+            ["start", name],
+            ["exec", "-i", name, DockerWorkerRuntime.searchBinary],
+            ["rm", "-f", name],
+            WebCrawlerDockerExecutor.createArguments(
+                name: "derrick-web-crawler-e2e",
+                proxyHost: WebCrawlerEgressProxy.containerProxyHost,
+                proxyPort: WebCrawlerEgressProxy.containerProxyPort,
+                proxyToken: "token"
+            ),
+            ["exec", "-i", "derrick-web-crawler-e2e", DockerWorkerRuntime.crawlerBinary],
+        ] + DerrickDockerRuntimeIdentity.psListArguments
+        for args in commands {
+            #expect(
+                DockerRunRequestValidator.validate(
+                    DockerHostLaunch.makeRequest(dockerArguments: args, timeoutSeconds: 60)
+                ) == nil,
+                "expected allow for \(args)"
+            )
+        }
+    }
+
+    @Test func hostDockerWorkerImageHasSearchBinariesWhenPresent() throws {
+        let dockerArgs = [
+            "image", "inspect", "--format", DockerWorkerRuntime.binariesInspectFormat,
+            DockerWorkerRuntime.image,
+        ]
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(dockerArguments: dockerArgs, timeoutSeconds: 30)
+            ) == nil
+        )
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: DockerHostLaunch.envExecutablePath)
+        process.arguments = DockerHostLaunch.dockerCLIArguments(dockerArgs)
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            return
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return }
+        let label = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(label == DockerWorkerRuntime.binariesLabelValue)
+    }
+
     @Test func webCrawlerToolBlocksDDoSLikeRequests() async throws {
         let recorder = DockerCallRecorder()
         let bridge = try await MCPLocalBridge.make { server in
@@ -234,46 +501,79 @@ import WebCrawler
         #expect(allowed?.contains("docs.slack.dev") == true)
     }
 
+    @Test func workerImageLabelDetectsMissingBinaries() async {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "image", args.contains("inspect"), args.contains("--format") {
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let current = await DockerImageInspector.workerImageHasCurrentBinaries(executor: executor)
+        #expect(!current)
+    }
+
     @Test func dockerProductImagePrewarmerSkipsBuildWhenImagePresent() async throws {
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in
             await recorder.append(args)
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
-        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
-        #expect(await recorder.calls == [["image", "inspect", DockerProductImagePolicy.webCrawlerImage]])
-    }
-
-    @Test func dockerProductImagePrewarmerBuildsWhenImageMissing() async throws {
-        guard DerrickRepositoryRoot.locate() != nil else { return }
-        let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            if let mocked = Self.mockWorkerImageInspect(args) {
+                return mocked
             }
             return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
         try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
         let calls = await recorder.calls
-        #expect(calls.count == 2)
-        #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.webCrawlerImage])
-        #expect(calls[1].first == "build")
-        #expect(calls[1].contains(DockerProductImagePolicy.webCrawlerImage))
-        #expect(calls[1].last?.hasSuffix("/\(DockerProductImagePolicy.webCrawlerBuildContextRelativePath)") == true)
+        #expect(calls.first == ["image", "inspect", DockerProductImagePolicy.workerImage])
+        #expect(calls.contains { $0.contains("--format") && $0.contains(where: { $0.contains(DockerWorkerRuntime.binariesLabelKey) }) })
+        #expect(calls.contains { $0.contains("{{.Id}}") })
+        #expect(!calls.contains { $0.first == "build" })
+    }
+
+    @Test func dockerProductImagePrewarmerUsesLocalImageWhenPinIsStale() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.contains("{{.Id}}") {
+                return DockerCLIResult(
+                    exitCode: 0,
+                    stdout: Data("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n".utf8),
+                    stderr: Data()
+                )
+            }
+            if let mocked = Self.mockWorkerImageInspect(args) {
+                return mocked
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        try await DockerProductImagePrewarmer.ensureWorkerImage(executor: executor)
+        let calls = await recorder.calls
+        #expect(!calls.contains { $0.first == "build" })
+    }
+
+    @Test func dockerProductImagePrewarmerBuildsWhenImageMissing() async throws {
+        guard DerrickRepositoryRoot.locate() != nil else { return }
+        let recorder = DockerCallRecorder()
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(recorder: recorder, latch: latch)
+        try await DockerProductImagePrewarmer.ensureWebCrawlerImage(executor: executor)
+        let calls = await recorder.calls
+        #expect(calls[0] == ["image", "inspect", DockerProductImagePolicy.workerImage])
+        #expect(calls.contains { $0.first == "build" && $0.contains(DockerProductImagePolicy.workerImage) })
+        #expect(calls.contains { $0.contains("{{.Id}}") })
+        #expect(calls.filter { $0.first == "build" }.count == 1)
     }
 
     @Test func crawlerImageBuildFailureMessageOmitsBuildkitDump() {
         let error = DockerProductImagePrewarmerError.buildFailed(
-            DockerProductImagePolicy.webCrawlerImage,
+            DockerProductImagePolicy.workerImage,
             "#0 building with \"default\" instance using docker driver"
         )
         let text = error.localizedDescription
         #expect(!text.contains("#0 building"))
-        #expect(text.lowercased().contains("web crawler"))
+        #expect(text.lowercased().contains("web tools"))
         #expect(text.lowercased().contains("disk"))
         #expect(error.compilerDiagnostic == nil)
     }
@@ -285,7 +585,7 @@ import WebCrawler
         error: Build failed
         """
         let error = DockerProductImagePrewarmerError.buildFailed(
-            DockerProductImagePolicy.webCrawlerImage,
+            DockerProductImagePolicy.workerImage,
             detail
         )
         #expect(error.compilerDiagnostic?.contains("CryptoKit") == true)
@@ -295,17 +595,12 @@ import WebCrawler
     @Test func crawlerImageBuildIsSingleFlight() async throws {
         guard DerrickRepositoryRoot.locate() != nil else { return }
         let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                try await Task.sleep(for: .milliseconds(80))
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(
+            recorder: recorder,
+            latch: latch,
+            buildDelay: .milliseconds(80)
+        )
         let gate = WebCrawlerImageGate()
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await gate.ensureReady(executor: executor) }
@@ -315,33 +610,19 @@ import WebCrawler
         }
         let calls = await recorder.calls
         #expect(calls.filter { $0.first == "build" }.count == 1)
-        #expect(calls.filter { $0.first == "image" }.count == 1)
+        #expect(calls.filter { $0 == ["image", "inspect", DockerProductImagePolicy.workerImage] }.count == 1)
     }
 
     @Test func crawlerImageBuildFailureAllowsRetry() async throws {
         guard DerrickRepositoryRoot.locate() != nil else { return }
         let recorder = DockerCallRecorder()
-        let executor: DockerCLIExecutor = { args, _, _ in
-            await recorder.append(args)
-            if args.first == "image" {
-                return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
-            }
-            if args.first == "build" {
-                let builds = await recorder.calls.filter { $0.first == "build" }.count
-                if builds == 1 {
-                    return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data("boom".utf8))
-                }
-                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
-            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
-        }
+        let latch = ImageBuildLatch()
+        let executor = Self.missingUntilBuiltExecutor(
+            recorder: recorder,
+            latch: latch,
+            failFirstBuild: true
+        )
         let gate = WebCrawlerImageGate()
-        do {
-            try await gate.ensureReady(executor: executor)
-            Issue.record("expected first build to fail")
-        } catch {
-            // retry after failure
-        }
         try await gate.ensureReady(executor: executor)
         let builds = await recorder.calls.filter { $0.first == "build" }
         #expect(builds.count == 2)
@@ -383,6 +664,9 @@ import WebCrawler
         let runner = FileExtractorDockerExecutor(
             executor: { arguments, _, _ in
                 await recorder.append(arguments)
+                if let mocked = Self.mockWorkerImageInspect(arguments) {
+                    return mocked
+                }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             },
             queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
@@ -419,11 +703,17 @@ import WebCrawler
                 timeoutSeconds: 5
             )
             Issue.record("expected missing extractor image")
+        } catch is DockerProductImagePrewarmerError {
+            // Image is missing; prewarmer tries a rebuild and that mock also fails.
+        } catch is DockerImageDigestError {
+            // Pin check after a failed inspect.
         } catch let error as FileExtractorDockerExecutorError {
             #expect(error == .imageUnavailable(FileExtractorDockerExecutor.image))
         }
         let calls = await recorder.calls
-        #expect(calls == [["image", "inspect", FileExtractorDockerExecutor.image]])
+        #expect(calls.contains { $0.first == "image" && $0.contains("inspect") })
+        #expect(!calls.contains { $0.first == "create" })
+        #expect(!calls.contains { $0.first == "start" })
     }
 
     @Test func orphanSweeperRemovesLabeledAndPrefixedContainers() async throws {
@@ -825,9 +1115,9 @@ import WebCrawler
         #expect(results?.first?["json"] == nil)
     }
 
-    @Test func pythonGuestRuntimeUsesPinnedImage() {
-        #expect(DerrickGuestRuntime.pythonGuestDockerImage == "python:3.14.7")
-        #expect(PythonGuestDockerExecutor.containerPrefix == "derrick-guest-runtime")
+    @Test func goGuestRuntimeUsesWorkerImage() {
+        #expect(DerrickGuestRuntime.guestDockerImage == DockerWorkerRuntime.image)
+        #expect(GoGuestDockerExecutor.containerPrefix == "derrick-guest-runtime")
         #expect(DerrickDockerRunQueue.guest.maxConcurrentContainers == 1)
         #expect(DerrickDockerRunQueue.crawler.maxConcurrentContainers == 2)
         #expect(DerrickDockerRunQueue.extractor.maxConcurrentContainers == 1)
@@ -847,7 +1137,7 @@ import WebCrawler
 
     @Test func oneshotEnsurePulledImageSkipsPullWhenImageExists() async throws {
         let recorder = DockerCallRecorder()
-        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+        try await OneshotDockerContainer.ensurePulledImage(DockerWorkerRuntime.image) { arguments, _, _ in
             await recorder.append(arguments)
             return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
         }
@@ -858,7 +1148,7 @@ import WebCrawler
 
     @Test func oneshotEnsurePulledImagePullsWhenMissing() async throws {
         let recorder = DockerCallRecorder()
-        try await OneshotDockerContainer.ensurePulledImage("python:3.14.7") { arguments, _, _ in
+        try await OneshotDockerContainer.ensurePulledImage(DockerWorkerRuntime.image) { arguments, _, _ in
             await recorder.append(arguments)
             if arguments.first == "image" {
                 return DockerCLIResult(exitCode: 1, stdout: Data(), stderr: Data())
@@ -867,7 +1157,7 @@ import WebCrawler
         }
         let calls = await recorder.calls
         #expect(calls.contains { $0.starts(with: ["image", "inspect"]) })
-        #expect(calls.contains { $0.first == "pull" && $0.contains("python:3.14.7") })
+        #expect(calls.contains { $0.first == "pull" && $0.contains(DockerWorkerRuntime.image) })
     }
 
     @Test func dockerRunQueueSerializesWhenMaxIsOne() async throws {
@@ -915,7 +1205,7 @@ import WebCrawler
                     return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
                 },
                 prefix: "derrick-guest-runtime",
-                createArguments: { name in ["create", "--name", name, "python:3.14.7"] },
+                createArguments: { name in ["create", "--name", name, DockerWorkerRuntime.image] },
                 createStep: "create guest runtime container",
                 startStep: "start guest runtime container",
                 body: { _ in
@@ -931,40 +1221,35 @@ import WebCrawler
         }
     }
 
-    @Test func pythonSourceVerifierRejectsNetworkAndDependencies() {
-        let findings = PythonScriptVerifier.validate(
-            source: "import sys\nimport requests",
+    @Test func goSourceVerifierRejectsNetworkAndDependencies() {
+        let findings = GoScriptVerifier.validate(
+            source: "package main\nimport \"net/http\"",
             dependencies: ["example": "1.0.0"]
         )
-        #expect(findings.contains("Direct network access is not allowed; emit http.request envelopes."))
-        #expect(findings.contains("Guest plugin dependencies are not supported; use the standard library."))
+        #expect(findings.contains("Go guest must not import \"net/http\"."))
+        #expect(findings.contains("Guest script dependencies are not supported."))
     }
 
-    @Test func pythonSourceVerifierRequiresStdin() {
-        let findings = PythonScriptVerifier.validate(source: "print('[]')")
-        #expect(findings.contains("Python source must read its JSON event from standard input."))
+    @Test func goSourceVerifierRequiresPackageMain() {
+        let findings = GoScriptVerifier.validate(source: "package plugin")
+        #expect(findings.contains("Go guest source must declare package main."))
     }
 
-    @Test func pythonExecutorUsesReadOnlyOfflineContainer() async throws {
+    @Test func goExecutorUsesReadOnlyOfflineContainer() async throws {
         let recorder = DockerCallRecorder()
-        let runner = PythonGuestDockerExecutor(
-            image: "python:3.14.7",
+        let runner = GoGuestDockerExecutor(
+            image: DockerWorkerRuntime.image,
             executor: { arguments, _, _ in
                 await recorder.append(arguments)
-                if arguments.contains("/tmp/guest.py"),
-                   !arguments.contains("cat") {
-                    return DockerCLIResult(
-                        exitCode: 0,
-                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
-                        stderr: Data()
-                    )
+                if let mocked = Self.mockGuestDocker(arguments) {
+                    return mocked
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             },
             queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
         )
         _ = try await runner.runSource(
-            source: "import json, sys\njson.dump([], sys.stdout)",
+            source: Self.dummyGoScript,
             input: Data(#"{"kind":"script"}"#.utf8)
         )
 
@@ -975,15 +1260,17 @@ import WebCrawler
         #expect(create.contains("--read-only"))
         #expect(create.contains("--label"))
         #expect(create.contains(DerrickDockerRuntimeIdentity.labelAssignment))
-        let exec = calls.first(where: { $0.contains("python3") }) ?? []
-        #expect(exec.contains("/tmp/guest.py"))
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestWriteSourceShell) })
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestCompileShell) })
+        let exec = calls.first(where: { $0.contains(DockerWorkerRuntime.guestBinaryPath) }) ?? []
+        #expect(exec.contains(DockerWorkerRuntime.guestBinaryPath))
         #expect(calls.contains { $0.first == "rm" && $0.contains("-f") })
     }
 
-    @Test func pythonGuestDockerCommandsPassXPCValidation() async throws {
+    @Test func goGuestDockerCommandsPassXPCValidation() async throws {
         let recorder = DockerCallRecorder()
-        let runner = PythonGuestDockerExecutor(
-            image: "python:3.14.7",
+        let runner = GoGuestDockerExecutor(
+            image: DockerWorkerRuntime.image,
             executor: { arguments, _, _ in
                 await recorder.append(arguments)
                 if let error = DockerRunRequestValidator.validate(
@@ -995,26 +1282,22 @@ import WebCrawler
                         stderr: Data(error.launchErrorMessage.utf8)
                     )
                 }
-                if arguments.contains("/tmp/guest.py"),
-                   !arguments.contains("cat") {
-                    return DockerCLIResult(
-                        exitCode: 0,
-                        stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
-                        stderr: Data()
-                    )
+                if let mocked = Self.mockGuestDocker(arguments) {
+                    return mocked
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             },
             queue: DerrickDockerRunQueue(maxConcurrentContainers: 1)
         )
         let result = try await runner.runSource(
-            source: "import json, sys\njson.dump([], sys.stdout)",
+            source: Self.dummyGoScript,
             input: Data(#"{"kind":"script"}"#.utf8)
         )
         #expect(result.exitCode == 0)
         let calls = await recorder.calls
-        #expect(calls.contains { $0.contains("sh") && $0.contains("cat > /tmp/guest.py") })
-        #expect(calls.contains { $0.contains("python3") && $0.contains("/tmp/guest.py") })
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestWriteSourceShell) })
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestCompileShell) })
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestBinaryPath) })
     }
 
     @Test func leftoverSwiftRuntimePrefixIsStillSwept() {
@@ -1022,15 +1305,15 @@ import WebCrawler
         #expect(GuestRuntimeLimits.maxTimeoutSeconds == 300)
     }
 
-    @Test func pythonScriptCanReturnHTMLResult() async throws {
+    @Test func goScriptCanReturnHTMLResult() async throws {
         let resultText = try await ScriptExecutionRuntime.run(
             arguments: [
                 "description": .string("render a safe card"),
                 "reason": .string("manual HTML output check"),
-                "script": .string(Self.dummyPythonScript)
+                "script": .string(Self.dummyGoScript)
             ],
             stdinExecutor: { arguments, _, _ in
-                if arguments.contains("python3"), arguments.contains("/tmp/guest.py") {
+                if Self.isGuestBinaryExec(arguments) {
                     return DockerCLIResult(
                         exitCode: 0,
                         stdout: Data(
@@ -1038,6 +1321,9 @@ import WebCrawler
                         ),
                         stderr: Data()
                     )
+                }
+                if let mocked = Self.mockGuestDocker(arguments) {
+                    return mocked
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             },
@@ -1058,13 +1344,13 @@ import WebCrawler
         #expect(result.output?.value == "<p><strong>Safe</strong></p>")
     }
 
-    @Test func scriptExecRejectsSwiftLanguage() async throws {
+    @Test func scriptExecRejectsUnsupportedLanguage() async throws {
         let resultText = try await ScriptExecutionRuntime.run(
             arguments: [
-                "description": .string("legacy swift"),
+                "description": .string("legacy python"),
                 "reason": .string("should be blocked"),
-                "script": .string(Self.dummyPythonScript),
-                "language": .string("swift")
+                "script": .string(Self.dummyGoScript),
+                "language": .string("python")
             ],
             stdinExecutor: Self.dummyStdin,
             reviewer: nil,
@@ -1074,10 +1360,10 @@ import WebCrawler
         let result = try #require(ToolExecutionOutcome.decode(from: resultText))
         #expect(result.status == .blocked)
         #expect(result.stage == .validation)
-        #expect(resultText.contains("only runs Python"))
+        #expect(resultText.contains("only runs Go"))
     }
 
-    @Test func pythonScriptToolBlocksFilesystemAccess() async throws {
+    @Test func goScriptToolBlocksFilesystemAccess() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.registerScriptExecutionTool(
                 stdinExecutor: Self.dummyStdin,
@@ -1098,7 +1384,7 @@ import WebCrawler
             arguments: [
                 "description": .string("attempt write"),
                 "reason": .string("test"),
-                "script": .string("import sys\n_ = sys.stdin.read()\nopen('/tmp/a','w')")
+                "script": .string("package main\nimport \"os\"\nfunc main() { _, _ = os.Open(\"/tmp/a\") }")
             ]
         )
 
@@ -1108,18 +1394,18 @@ import WebCrawler
 
     @Test func leftoverSwiftGuestImageIsTreatedAsStaleHygieneTag() {
         #expect(DerrickGuestRuntime.swiftPluginDockerImage.contains("swift"))
-        #expect(DerrickGuestRuntime.pythonGuestDockerImage == "python:3.14.7")
+        #expect(DerrickGuestRuntime.guestDockerImage == DockerWorkerRuntime.image)
     }
 
-    @Test func guestPluginRunnerRunsPythonRelease() async throws {
+    @Test func guestPluginRunnerRunsGoRelease() async throws {
         let recorder = DockerCallRecorder()
         let release = PluginFactoryRelease(
             pluginID: "slack-connection",
             version: "1.0.0",
             manifestJSON: "{}",
-            runtimeJSON: #"{"language":"python","entrypoint":"./app.derrick/plugin.py"}"#,
-            guestSource: "import json, sys\njson.dump([{\"verb\":\"result.emit\",\"summary\":\"ok\"}], sys.stdout)",
-            compiledArtifact: Data(),
+            runtimeJSON: #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#,
+            guestSource: Self.dummyGoScript,
+            compiledArtifact: Self.dummyCompiledGuest,
             skillFiles: [:],
             contentHash: try PluginContentHash(hex: String(repeating: "c", count: 64)),
             reviewSummary: "ok"
@@ -1129,13 +1415,15 @@ import WebCrawler
             input: Data(#"{"kind":"manual"}"#.utf8),
             dockerExecutor: { arguments, _, _ in
                 await recorder.append(arguments)
-                if arguments.contains("/tmp/guest.py"),
-                   !arguments.contains("cat") {
+                if Self.isGuestBinaryExec(arguments) {
                     return DockerCLIResult(
                         exitCode: 0,
                         stdout: Data(#"[{"verb":"result.emit","summary":"ok"}]"#.utf8),
                         stderr: Data()
                     )
+                }
+                if let mocked = Self.mockGuestDocker(arguments) {
+                    return mocked
                 }
                 return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
             }
@@ -1143,7 +1431,7 @@ import WebCrawler
         #expect(result.exitCode == 0)
         #expect(String(decoding: result.stdout, as: UTF8.self).contains("result.emit"))
         let calls = await recorder.calls
-        #expect(calls.contains { $0.contains("python3") })
+        #expect(calls.contains { $0.contains(DockerWorkerRuntime.guestBinaryPath) })
         #expect(!calls.contains { $0.contains("swift") })
     }
 
@@ -1274,12 +1562,85 @@ import WebCrawler
         #expect(hops == PluginContract.maxPluginInvokeHops)
     }
 
-    @Test func pythonGuestContainerArgumentsStayNetworkIsolated() {
+    @Test func pluginInvokeFinishesOnUIPresentWithoutAnotherDockerHop() async throws {
+        actor Counter {
+            var hops = 0
+            func bump() { hops += 1 }
+        }
+        let counter = Counter()
+        struct PresentHandler: PluginHopHandler {
+            func handleUIPresent(payload: [String: PluginJSON]) async -> PluginHopEvent? {
+                _ = payload
+                return PluginHopEvent(kind: .uiAction)
+            }
+
+            func handleSecretRequest(payload: [String: PluginJSON]) async -> PluginHopEvent? {
+                _ = payload
+                return nil
+            }
+        }
+        let result = try await GuestHopLoop.runForPluginInvoke(
+            initialEvent: PluginHopEvent(kind: .manual),
+            invokeID: "test-invoke",
+            timeoutSeconds: 30,
+            execute: { _ in
+                await counter.bump()
+                return PluginFactoryExecutionResult(
+                    exitCode: 0,
+                    stdout: Data(
+                        ##"[{"verb":"ui.present","root":{"element":"screen"}},{"verb":"result.emit","summary":"ok","threads":[{"vendor_thread_id":"C1","title":"#general"}]}]"##.utf8
+                    )
+                )
+            },
+            logger: { _ in },
+            hopHandler: PresentHandler()
+        )
+        #expect(result.exitCode == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self).contains("result.emit"))
+        #expect(await counter.hops == 1)
+    }
+
+    @Test func pluginInvokeDoesNotSpinWhenGuestOnlyPresentsUI() async throws {
+        actor Counter {
+            var hops = 0
+            func bump() { hops += 1 }
+        }
+        let counter = Counter()
+        struct PresentHandler: PluginHopHandler {
+            func handleUIPresent(payload: [String: PluginJSON]) async -> PluginHopEvent? {
+                _ = payload
+                return PluginHopEvent(kind: .uiAction)
+            }
+
+            func handleSecretRequest(payload: [String: PluginJSON]) async -> PluginHopEvent? {
+                _ = payload
+                return nil
+            }
+        }
+        let result = try await GuestHopLoop.runForPluginInvoke(
+            initialEvent: PluginHopEvent(kind: .manual),
+            invokeID: "test-invoke",
+            timeoutSeconds: 30,
+            execute: { _ in
+                await counter.bump()
+                return PluginFactoryExecutionResult(
+                    exitCode: 0,
+                    stdout: Data(#"[{"verb":"ui.present","root":{"element":"screen"}}]"#.utf8)
+                )
+            },
+            logger: { _ in },
+            hopHandler: PresentHandler()
+        )
+        #expect(result.exitCode == 0)
+        #expect(await counter.hops == 1)
+    }
+
+    @Test func goGuestContainerArgumentsStayNetworkIsolated() {
         let name = "derrick-guest-runtime-test"
         let args = [
             "create", "--network", "none", "--name", name, "--read-only",
             "--tmpfs", "/tmp:rw,exec,nosuid,size=128m",
-            DerrickGuestRuntime.pythonGuestDockerImage, "/bin/sleep", "infinity",
+            DerrickGuestRuntime.guestDockerImage, "/bin/sleep", "infinity",
         ]
         #expect(args.contains("--name"))
         #expect(args.contains(name))
@@ -1301,7 +1662,7 @@ import WebCrawler
                 "mode": .string("write"),
                 "description": .string("create report file"),
                 "reason": .string("user asked for file output"),
-                "script": .string(Self.dummyPythonScript),
+                "script": .string(Self.dummyGoScript),
                 "expected_effects": .array([.string("write /tmp/report.txt")]),
                 "allow_network": .bool(true)
             ]
@@ -1332,7 +1693,7 @@ import WebCrawler
                 "mode": .string("readonly"),
                 "description": .string("inspect csv"),
                 "reason": .string("analyze user-provided data"),
-                "script": .string(Self.dummyPythonScript),
+                "script": .string(Self.dummyGoScript),
                 "user_prompt": .string("summarize this csv"),
                 "allow_network": .bool(true)
             ]
@@ -1448,7 +1809,7 @@ import WebCrawler
                 "mode": .string("readonly"),
                 "description": .string("fetch page"),
                 "reason": .string("test"),
-                "script": .string(Self.dummyPythonScript),
+                "script": .string(Self.dummyGoScript),
                 "allow_network": .bool(true)
             ]
         )

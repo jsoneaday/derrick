@@ -26,7 +26,7 @@ enum FactoryHarnessMain {
         let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
         fputs("FactoryHarness: building slack full-sync connector…\n", stderr)
-        let executor = PythonPluginFactoryDockerExecutor(executor: DirectShellDocker.executor())
+        let executor = GoPluginFactoryDockerExecutor(executor: DirectShellDocker.executor())
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)
         ).build(

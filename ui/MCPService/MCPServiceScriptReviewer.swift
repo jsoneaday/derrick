@@ -20,9 +20,8 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
     }
 
     func review(_ args: ScriptExecutionArguments) async throws -> ScriptReviewOutcome {
-        guard let apiKey = MCPServiceCallContext.shared.helperAPIKey,
-              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else {
+        let selected = resolveSelectedModel()
+        guard let apiKey = await resolveAPIKey(for: selected) else {
             throw NSError(
                 domain: "MCPService",
                 code: 404,
@@ -30,7 +29,6 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
             )
         }
 
-        let selected = resolveSelectedModel()
         do {
             return try await review(args, model: selected, apiKey: apiKey)
         } catch {
@@ -38,7 +36,7 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
                 "[MCPService] reviewer model \(selected.label) failed: \(error.localizedDescription); trying defaults\n",
                 stderr
             )
-            if let fallback = await fallbackReview(args: args, apiKey: apiKey, excluding: selected) {
+            if let fallback = await fallbackReview(args: args, excluding: selected) {
                 return fallback
             }
             throw error
@@ -108,12 +106,12 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
 
     private func fallbackReview(
         args: ScriptExecutionArguments,
-        apiKey: String,
         excluding: ReviewerModel
     ) async -> ScriptReviewOutcome? {
         var candidates: [ReviewerModel] = [Self.defaultModel, Self.secondaryDefault]
         candidates.removeAll { $0 == excluding }
         for candidate in candidates {
+            guard let apiKey = await resolveAPIKey(for: candidate) else { continue }
             do {
                 let outcome = try await review(args, model: candidate, apiKey: apiKey)
                 fputs("[MCPService] fallback reviewer succeeded model=\(candidate.label)\n", stderr)
@@ -126,6 +124,19 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
             }
         }
         return nil
+    }
+
+    private func resolveAPIKey(for model: ReviewerModel) async -> String? {
+        await LLMProviderCredentialGate.resolveAPIKey(for: llmModelChoice(from: model))
+    }
+
+    private func llmModelChoice(from model: ReviewerModel) -> LLMModelChoice {
+        switch model {
+        case .openai(let openAIModel):
+            return .openai(openAIModel)
+        case .gemini(let geminiModel):
+            return .gemini(geminiModel)
+        }
     }
 }
 

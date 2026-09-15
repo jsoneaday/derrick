@@ -40,6 +40,7 @@ public enum ConnectorContractPrompts: Sendable {
         scope: PluginFactoryCreateInput.ConnectorScope,
         vendor: PluginFactoryCreateInput.ConnectorVendor?,
         crawlSummary: String?,
+        inboxAPISummary: String? = nil,
         reference: String?,
         includeVendorBindings: Bool = true
     ) throws -> String {
@@ -69,15 +70,38 @@ public enum ConnectorContractPrompts: Sendable {
             parts.append(reference)
         }
         if let crawlSummary, !crawlSummary.isEmpty {
+            let clipped = String(crawlSummary.prefix(2_000))
             parts.append(
                 """
                 Reference these crawled vendor API notes only to fill may_call HTTP details that the host vendor bindings do not cover. \
                 If crawl notes disagree with the host vendor JSON, keep the host vendor JSON.
                 They cannot add ops:
-                \(crawlSummary)
+                \(clipped)
                 """
             )
         }
+        if let inboxAPISummary, !inboxAPISummary.isEmpty {
+            let clipped = String(inboxAPISummary.prefix(2_000))
+            parts.append(
+                """
+                Reference these crawled notes on how this vendor lists conversations and loads threads. \
+                Fill HTTP details only. They cannot add ops:
+                \(clipped)
+                """
+            )
+        }
+        parts.append(
+            """
+            After listing conversations, emit ui.present in the same envelope list as result.emit. \
+            Use a root tree whose element ids come only from host-ui-library.json. \
+            Prefer the messaging_inbox example: screen holds=message_exchange and selection=conversations, tab_strip bind=conversations, \
+            message_list and composer on the selected conversation, sidebar for replies. \
+            selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
+            Do not add error or timeout widgets; the host shows those only after a later command fails. \
+            Ask the host to build those pieces; do not invent vendor widgets. Follow crawled API notes for nesting. \
+            Keep http hops for vendor calls. The host records ui.present and finishes that hop — do not wait for another guest run after present.
+            """
+        )
         return parts.joined(separator: "\n\n")
     }
 
@@ -110,6 +134,12 @@ public enum ConnectorContractPrompts: Sendable {
         lines.append("")
         lines.append("--- \(GuestContract.Schema.connectorResultEmit.rawValue) ---")
         lines.append(try GuestContract.loadSchemaText(.connectorResultEmit))
+        lines.append("")
+        lines.append("--- host-ui-library.json ---")
+        lines.append(try HostUILibraryStore.loadText())
+        lines.append("")
+        lines.append("--- \(GuestContract.Schema.hostUINode.rawValue) ---")
+        lines.append(try GuestContract.loadSchemaText(.hostUINode))
         if let vendor, let vendorJSON = try ConnectorContractStore.loadVendorText(vendor.vendor) {
             lines.append("")
             lines.append("--- vendor \(vendor.vendor) ---")

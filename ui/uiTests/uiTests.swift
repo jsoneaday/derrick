@@ -48,6 +48,30 @@ import DBRepository
         )
     }
 
+    @Test func pluginCredentialFieldDoesNotPrefillWhenKeychainAlreadyHasValue() {
+        #expect(
+            PluginCredentialFieldCopy.draftValue(
+                hasStoredValue: true,
+                developmentValue: "xoxb-from-env"
+            ) == ""
+        )
+        #expect(
+            PluginCredentialFieldCopy.draftValue(
+                hasStoredValue: false,
+                developmentValue: "xoxb-from-env"
+            ) == "xoxb-from-env"
+        )
+        #expect(PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: false) == nil)
+        #expect(
+            PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: true)?
+                .contains("already saved") == true
+        )
+        #expect(
+            PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: true)?
+                .contains("•") == false
+        )
+    }
+
     @Test func connectorCredentialSaverAllowsPartialUpdateWhenStored() {
         let fields = [
             PluginCredentialFieldPresentation(
@@ -205,6 +229,8 @@ import DBRepository
         #expect(LLMProviderCredentialGate.hasAPIKey(for: .openai, resolver: resolver))
         #expect(!LLMProviderCredentialGate.hasAPIKey(for: .google, resolver: resolver))
         #expect(LLMProviderCredentialGate.configuredProviders(resolver: resolver) == [.openai])
+        #expect(LLMProviderCredentialGate.resolveAPIKey(for: .openai, resolver: resolver) == "test")
+        #expect(LLMProviderCredentialGate.resolveAPIKey(for: .google, resolver: resolver) == nil)
     }
 
     @Test func llmFailureClassifierDetectsCreditErrors() {

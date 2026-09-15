@@ -77,7 +77,7 @@ Open: binary convert (xlsx) has no “here is your file” UI yet. Do not delete
 Each `script_exec` / `plugin.invoke`:
 
 1. Wait for the offline queue (max 1).
-2. `docker create` a unique `derrick-guest-runtime-<uuid>` from `python:3.14.7`.
+2. `docker create` a unique `derrick-guest-runtime-<uuid>` from `derrick-worker:go-v1`.
 3. Run until the host hop loop is done (terminal envelope, error, or in-use lease TTL).
 4. `docker rm -f` immediately — that is “I’m done.”
 5. Release the queue slot so the next script can create at once.

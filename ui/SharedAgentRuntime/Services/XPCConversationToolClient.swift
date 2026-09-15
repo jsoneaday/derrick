@@ -9,19 +9,16 @@ import Structure
 public struct XPCConversationToolClient: ConversationToolClient, Sendable {
     private let principal: ServicePrincipal
     private let agentsClient: MCPClient?
-    private let helperAPIKeyProvider: @Sendable () -> String?
     /// JSON `HelperModelWire` for MCP script security reviewer (from `LLMModelSettings`).
     private let helperReviewerModelJSONProvider: @Sendable () async -> String?
 
     public init(
         principal: ServicePrincipal,
         agentsClient: MCPClient? = nil,
-        helperAPIKeyProvider: @escaping @Sendable () -> String? = { TurnProcessContext.effectiveAPIKey },
         helperReviewerModelJSONProvider: @escaping @Sendable () async -> String? = { nil }
     ) {
         self.principal = principal
         self.agentsClient = agentsClient
-        self.helperAPIKeyProvider = helperAPIKeyProvider
         self.helperReviewerModelJSONProvider = helperReviewerModelJSONProvider
     }
 
@@ -85,7 +82,7 @@ public struct XPCConversationToolClient: ConversationToolClient, Sendable {
             principal: activePrincipal,
             toolName: name,
             argumentsJSON: argumentsJSON,
-            helperAPIKey: helperAPIKeyProvider(),
+            helperAPIKey: nil,
             helperReviewerModelJSON: reviewerModelJSON,
             pluginFactoryCreationActive: executionContextJSON != nil
                 && TurnProcessContext.effectivePluginFactoryCreationActive,
