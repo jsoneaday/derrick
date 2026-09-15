@@ -39,10 +39,10 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
 
     public func pollInbox(
         repository: DBRepository,
-        preferredVendorThreadID: String?,
-        preferredParentVendorMessageID: String?,
-        maxChannelPolls: Int?,
-        channelOffset: Int
+        preferredVendorThreadID: String? = nil,
+        preferredParentVendorMessageID: String? = nil,
+        maxChannelPolls: Int? = nil,
+        channelOffset: Int = 0
     ) async throws -> [MessagingPersistResult] {
         let threads = try await repository.listMessagingThreads(pluginID: pluginID)
         guard !threads.isEmpty else { return [] }
