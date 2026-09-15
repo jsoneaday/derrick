@@ -94,7 +94,18 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             model: model,
             apiKey: apiKey
         )
-        return try Self.decodeDraft(response)
+        do {
+            return try PluginFactoryBuilderResponse.draft(fromModelText: response)
+        } catch {
+            let prefix = response
+                .replacingOccurrences(of: "\n", with: " ")
+                .prefix(240)
+            await logger(
+                "[plugin_factory] draft_json_invalid chars=\(response.count) " +
+                "detail=\(error.localizedDescription) prefix=\(prefix)"
+            )
+            throw error
+        }
     }
 
     private func resolveAPIKey(for model: LLMModelChoice) async -> String? {
@@ -175,8 +186,8 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             ),
         ],
         required: [
-            "plugin_id", "version", "description", "go_source",
-            "test_input_json", "skill_files",
+            "go_source",
+            "test_input_json",
         ]
     )
 
@@ -219,37 +230,6 @@ actor ConfiguredPluginFactoryBuilder: PluginFactoryBuilder {
             sections.append("Factory feedback to correct before the next attempt:\n\(feedback)")
         }
         return sections.joined(separator: "\n\n")
-    }
-
-    private static func decodeDraft(_ text: String) throws -> PluginFactoryDraft {
-        let normalized = text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "```json", with: "")
-            .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let jsonText: String
-        if normalized.first == "{", normalized.last == "}" {
-            jsonText = normalized
-        } else if let start = normalized.firstIndex(of: "{"),
-                  let end = normalized.lastIndex(of: "}") {
-            jsonText = String(normalized[start...end])
-        } else {
-            throw PluginFactoryModelError.invalidBuilderResponse
-        }
-        guard let data = jsonText.data(using: .utf8) else {
-            throw PluginFactoryModelError.invalidBuilderResponse
-        }
-        do {
-            return try JSONDecoder()
-                .decode(PluginFactoryBuilderResponse.self, from: data)
-                .draft()
-        } catch let error as PluginFactoryError {
-            throw error
-        } catch let error as PluginFactoryModelError {
-            throw error
-        } catch {
-            throw PluginFactoryModelError.invalidBuilderResponse
-        }
     }
 }
 

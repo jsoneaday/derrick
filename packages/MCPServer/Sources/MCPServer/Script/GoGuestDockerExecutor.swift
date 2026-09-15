@@ -104,46 +104,60 @@ public struct GoGuestDockerExecutor: Sendable {
     private func withGuestContainer<T: Sendable>(
         _ body: @escaping @Sendable (String) async throws -> T
     ) async throws -> T {
-        try await DockerImageInspector.verifyPinned(
-            tag: image,
-            expected: DockerWorkerRuntime.pinnedDigest,
-            executor: executor
-        )
+        try await WorkerImageGate.shared.ensureReady(executor: executor)
         let image = self.image
         let executor = self.executor
         do {
-            return try await queue.withPermit {
-                try await OneshotDockerContainer.run(
-                    executor: executor,
-                    prefix: Self.containerPrefix,
-                    createArguments: { name in
-                        [
-                            "create",
-                        ] + DerrickDockerRuntimeIdentity.createLabelArguments + [
-                            "--network", "none",
-                            "--name", name,
-                            "--env", "HOME=/tmp",
-                            "--env", "GOCACHE=/tmp/gocache",
-                            "--env", "GOTMPDIR=/tmp",
-                            "--read-only",
-                            "--tmpfs", "/tmp:rw,exec,nosuid,size=256m",
-                            "--pids-limit", "128",
-                            "--cpus", "2.0",
-                            "--memory", "1g",
-                            "--security-opt", "no-new-privileges",
-                            "--cap-drop", "ALL",
-                            image,
-                            "/bin/sleep",
-                            "infinity",
-                        ]
-                    },
-                    createStep: "create go guest runtime container",
-                    startStep: "start go guest runtime container",
-                    body: body
-                )
-            }
+            return try await runGuestContainer(image: image, executor: executor, body: body)
         } catch let error as OneshotDockerContainerError {
+            if WorkerImageFailureDisplay.isWorkerImageIssue(error.localizedDescription)
+                || error.localizedDescription.lowercased().contains("no such image")
+                || error.localizedDescription.lowercased().contains("unable to find image") {
+                try await WorkerImageGate.shared.ensureReady(executor: executor, forceRebuild: true)
+                do {
+                    return try await runGuestContainer(image: image, executor: executor, body: body)
+                } catch let retry as OneshotDockerContainerError {
+                    throw mappedGuestError(retry)
+                }
+            }
             throw mappedGuestError(error)
+        }
+    }
+
+    private func runGuestContainer<T: Sendable>(
+        image: String,
+        executor: @escaping DockerCLIExecutor,
+        body: @escaping @Sendable (String) async throws -> T
+    ) async throws -> T {
+        try await queue.withPermit {
+            try await OneshotDockerContainer.run(
+                executor: executor,
+                prefix: Self.containerPrefix,
+                createArguments: { name in
+                    [
+                        "create",
+                    ] + DerrickDockerRuntimeIdentity.createLabelArguments + [
+                        "--network", "none",
+                        "--name", name,
+                        "--env", "HOME=/tmp",
+                        "--env", "GOCACHE=/tmp/gocache",
+                        "--env", "GOTMPDIR=/tmp",
+                        "--read-only",
+                        "--tmpfs", "/tmp:rw,exec,nosuid,size=256m",
+                        "--pids-limit", "128",
+                        "--cpus", "2.0",
+                        "--memory", "1g",
+                        "--security-opt", "no-new-privileges",
+                        "--cap-drop", "ALL",
+                        image,
+                        "/bin/sleep",
+                        "infinity",
+                    ]
+                },
+                createStep: "create go guest runtime container",
+                startStep: "start go guest runtime container",
+                body: body
+            )
         }
     }
 
@@ -246,13 +260,29 @@ public actor WorkerImageGate {
 
     private var inFlight: Task<Void, Error>?
 
-    public func ensureReady(executor: @escaping DockerCLIExecutor) async throws {
-        if let inFlight {
+    public func ensureReady(
+        executor: @escaping DockerCLIExecutor,
+        forceRebuild: Bool = false
+    ) async throws {
+        if !forceRebuild, let inFlight {
             try await inFlight.value
             return
         }
         let task = Task {
-            try await DockerProductImagePrewarmer.ensureWorkerImage(executor: executor)
+            do {
+                try await DockerProductImagePrewarmer.ensureWorkerImage(
+                    executor: executor,
+                    forceRebuild: forceRebuild
+                )
+            } catch {
+                if forceRebuild { throw error }
+                let detail = error.localizedDescription
+                guard WorkerImageFailureDisplay.isWorkerImageIssue(detail) else { throw error }
+                try await DockerProductImagePrewarmer.ensureWorkerImage(
+                    executor: executor,
+                    forceRebuild: true
+                )
+            }
         }
         inFlight = task
         do {

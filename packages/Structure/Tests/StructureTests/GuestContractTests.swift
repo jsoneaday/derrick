@@ -127,6 +127,22 @@ import Testing
         }
     }
 
+    @Test func webSearchResultValidationAcceptsMinimalSuccess() throws {
+        let json = """
+        {"ok":true,"query":"slack api tokens","hits":[],"diagnostics":[]}
+        """
+        try GuestContractValidation.validateWebSearchResultJSON(Data(json.utf8))
+    }
+
+    @Test func webSearchResultValidationRejectsNullHits() {
+        let json = """
+        {"ok":false,"query":"slack api tokens","hits":null,"diagnostics":[]}
+        """
+        #expect(throws: GuestContractError.self) {
+            try GuestContractValidation.validateWebSearchResultJSON(Data(json.utf8))
+        }
+    }
+
     @Test func fileExtractorResultValidationAcceptsMinimalSuccess() throws {
         let json = """
         {"ok":true,"operation":"extract","files":[],"diagnostics":[]}

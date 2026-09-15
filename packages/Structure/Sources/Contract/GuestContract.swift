@@ -6,6 +6,8 @@ public enum GuestContract: Sendable {
     public enum Schema: String, Sendable, CaseIterable {
         case hopEvent = "hop-event.schema.json"
         case envelopeList = "envelope-list.schema.json"
+        case hostUILibrary = "host-ui-library.schema.json"
+        case hostUINode = "host-ui-node.schema.json"
         case executionContextWire = "execution-context-wire.schema.json"
         case connectorContract = "connector-contract.schema.json"
         case connectorParams = "connector-params.schema.json"
@@ -14,6 +16,7 @@ public enum GuestContract: Sendable {
         case guestRuntime = "guest-runtime.schema.json"
         case workerProduct = "worker-product.schema.json"
         case webCrawlerResult = "web-crawler-result.schema.json"
+        case webSearchResult = "web-search-result.schema.json"
         case fileExtractorResult = "file-extractor-result.schema.json"
         case scriptExecContract = "script-exec-contract.schema.json"
     }

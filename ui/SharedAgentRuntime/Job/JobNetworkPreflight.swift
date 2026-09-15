@@ -24,6 +24,8 @@ public enum JobNetworkPreflight {
                 return
             }
             hosts = [host]
+        } else if toolName == AllowedMCPTool.webSearch.rawValue {
+            hosts = DockerWorkerRuntime.searchHosts
         } else {
             return
         }

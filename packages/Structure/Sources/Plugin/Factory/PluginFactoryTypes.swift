@@ -299,16 +299,134 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        pluginID = try container.decode(String.self, forKey: .pluginID)
-        version = try container.decode(String.self, forKey: .version)
-        description = try container.decode(String.self, forKey: .description)
-        guestSource = try container.decodeIfPresent(String.self, forKey: .guestSource)
-            ?? container.decode(String.self, forKey: .legacySwiftSource)
+        pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)
+            ?? "plugin"
+        version = try container.decodeIfPresent(String.self, forKey: .version) ?? "1.0.0"
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        guestSource = try {
+            if let go = try container.decodeIfPresent(String.self, forKey: .guestSource), !go.isEmpty {
+                return go
+            }
+            if let legacy = try container.decodeIfPresent(String.self, forKey: .legacySwiftSource), !legacy.isEmpty {
+                return legacy
+            }
+            throw DecodingError.keyNotFound(
+                CodingKeys.guestSource,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "go_source is required."
+                )
+            )
+        }()
         testInputJSON = try container.decode(String.self, forKey: .testInputJSON)
         skillFiles = try container.decodeIfPresent([PluginFactorySkillFile].self, forKey: .skillFiles) ?? []
         secrets = try container.decodeIfPresent([PluginSecretField].self, forKey: .secrets) ?? []
         role = try container.decodeIfPresent(PluginRole.self, forKey: .role) ?? .standard
         messagingOps = try container.decodeIfPresent([String].self, forKey: .messagingOps) ?? []
+    }
+
+    /// Extracts one draft JSON object from a model reply (markdown fences allowed).
+    public static func draft(fromModelText text: String) throws -> PluginFactoryDraft {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let jsonText: String
+        if normalized.first == "{", normalized.last == "}" {
+            jsonText = normalized
+        } else if let start = normalized.firstIndex(of: "{"),
+                  let end = normalized.lastIndex(of: "}") {
+            jsonText = String(normalized[start...end])
+        } else {
+            throw PluginFactoryError.invalidSource(
+                "The plugin builder returned invalid draft JSON (no JSON object)."
+            )
+        }
+        guard let data = jsonText.data(using: .utf8) else {
+            throw PluginFactoryError.invalidSource(
+                "The plugin builder returned invalid draft JSON."
+            )
+        }
+        do {
+            guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw PluginFactoryError.invalidSource(
+                    "The plugin builder returned invalid draft JSON (expected an object)."
+                )
+            }
+            if object["plugin_id"] == nil { object["plugin_id"] = "plugin" }
+            if object["version"] == nil { object["version"] = "1.0.0" }
+            if object["description"] == nil { object["description"] = "" }
+            if object["skill_files"] == nil { object["skill_files"] = [] }
+            if let nested = object["test_input_json"], !(nested is String) {
+                let nestedData = try JSONSerialization.data(withJSONObject: nested)
+                object["test_input_json"] = String(decoding: nestedData, as: UTF8.self)
+            }
+            let coerced = try JSONSerialization.data(withJSONObject: object)
+            return try JSONDecoder().decode(Self.self, from: coerced).draft()
+        } catch let error as PluginFactoryError {
+            throw error
+        } catch {
+            throw PluginFactoryError.invalidSource(
+                Self.draftJSONFailureMessage(text: jsonText, error: error)
+            )
+        }
+    }
+
+    public static func draftJSONFailureMessage(text: String, error: Error) -> String {
+        let reason = describeJSONError(error)
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = String(collapsed.prefix(180))
+        let suffix: String
+        if collapsed.count > 260 {
+            suffix = String(collapsed.suffix(80))
+        } else {
+            suffix = ""
+        }
+        var lines = [
+            "The plugin builder returned invalid draft JSON.",
+            "Reason: \(reason)",
+            "Reply length: \(text.count) characters. Ends with closing brace: \(text.trimmingCharacters(in: .whitespacesAndNewlines).last == "}" ? "yes" : "no").",
+            "Reply starts with: \(prefix)",
+        ]
+        if !suffix.isEmpty {
+            lines.append("Reply ends with: \(suffix)")
+        }
+        return lines.joined(separator: " ")
+    }
+
+    private static func describeJSONError(_ error: Error) -> String {
+        if let decoding = error as? DecodingError {
+            switch decoding {
+            case .keyNotFound(let key, let context):
+                let path = (context.codingPath.map(\.stringValue) + [key.stringValue])
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ".")
+                return "missing field \(path)"
+            case .typeMismatch(let type, let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                return "field \(path.isEmpty ? "(root)" : path) had the wrong type (expected \(type))"
+            case .valueNotFound(let type, let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                return "field \(path.isEmpty ? "(root)" : path) was null (expected \(type))"
+            case .dataCorrupted(let context):
+                let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+                if path.isEmpty {
+                    return context.debugDescription
+                }
+                return "\(path): \(context.debugDescription)"
+            @unknown default:
+                break
+            }
+        }
+        let text = error.localizedDescription
+        if text.lowercased().contains("end of") || text.lowercased().contains("unterminated") {
+            return "JSON was truncated or incomplete"
+        }
+        return text
     }
 
     public func encode(to encoder: Encoder) throws {

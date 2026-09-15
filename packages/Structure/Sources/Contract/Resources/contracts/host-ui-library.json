@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "elements": {
+    "screen": {
+      "description": "A full pane that can hold other elements. Config holds chooses what the pane is for (message_exchange for send and receive, arbitrary for anything else). Config selection=conversations shows a chooser among listed conversations.",
+      "config": {
+        "holds": ["message_exchange", "arbitrary"],
+        "selection": ["conversations", "none"]
+      }
+    },
+    "sidebar": {
+      "description": "A side pane next to a screen. Config holds=messages shows a reply or detail thread. Config visible_when=reply_thread hides it until a parent message is opened.",
+      "config": {
+        "holds": ["messages", "arbitrary"],
+        "visible_when": ["reply_thread", "always"]
+      }
+    },
+    "tab_strip": {
+      "description": "A row of tabs. Bind conversations to list rooms, channels, or DMs from result.emit threads.",
+      "binds": ["conversations"]
+    },
+    "message_list": {
+      "description": "A scrolling list of message elements. Bind selected_conversation for the open room, or selected_thread for replies to a parent message.",
+      "binds": ["selected_conversation", "selected_thread"]
+    },
+    "message": {
+      "description": "One message bubble: sender and body. Used inside message_list. Do not invent vendor-specific bubbles."
+    },
+    "composer": {
+      "description": "Text input plus send. Bind selected_conversation to post in the open room, or selected_thread to reply to a parent message.",
+      "binds": ["selected_conversation", "selected_thread"]
+    },
+    "text_field": {
+      "description": "A single-line or multi-line input box. Config placeholder is the empty hint."
+    },
+    "select": {
+      "description": "A drop-down. Bind conversations to pick a room, or pass options in config."
+    },
+    "button": {
+      "description": "A pressable control. Config label is the visible name."
+    },
+    "text": {
+      "description": "Plain or markdown text."
+    },
+    "table": {
+      "description": "Rows and columns for a scanable list."
+    }
+  },
+  "examples": {
+    "messaging_inbox": {
+      "element": "screen",
+      "id": "inbox",
+      "config": {
+        "holds": "message_exchange",
+        "selection": "conversations"
+      },
+      "children": [
+        {
+          "element": "tab_strip",
+          "id": "conversations",
+          "bind": "conversations"
+        },
+        {
+          "element": "message_list",
+          "id": "channel",
+          "bind": "selected_conversation"
+        },
+        {
+          "element": "composer",
+          "id": "compose",
+          "bind": "selected_conversation"
+        },
+        {
+          "element": "sidebar",
+          "id": "thread",
+          "config": {
+            "holds": "messages",
+            "visible_when": "reply_thread"
+          },
+          "children": [
+            {
+              "element": "message_list",
+              "id": "replies",
+              "bind": "selected_thread"
+            },
+            {
+              "element": "composer",
+              "id": "reply",
+              "bind": "selected_thread"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

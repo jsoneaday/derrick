@@ -58,11 +58,25 @@ public struct PluginFactorySession: Sendable {
                     hostManifest: hostManifest
                 )
             } catch {
+                let wrapped = PluginFactoryError.invalidSource(error.localizedDescription)
+                lastError = wrapped
                 await logger(
                     "[plugin_factory] attempt=\(attempt + 1)/\(configuration.maxBuilderAttempts) " +
-                    "failed=\(pluginFactoryLogValue(error.localizedDescription))"
+                    "failed=\(pluginFactoryLogValue(wrapped.localizedDescription))"
                 )
-                throw error
+                let lower = error.localizedDescription.lowercased()
+                if lower.contains("no api key"), lower.contains("available") {
+                    throw error
+                }
+                guard attempt + 1 < configuration.maxBuilderAttempts else {
+                    throw wrapped
+                }
+                request = PluginFactoryBuilderRequest(
+                    userGoal: userGoal,
+                    previousDraft: currentDraft,
+                    feedback: Self.builderFeedback(from: wrapped, userGoal: userGoal),
+                    hostManifest: hostManifest
+                )
             }
         }
         throw lastError ?? PluginFactoryError.invalidSource("Factory stopped without a result.")
@@ -91,6 +105,14 @@ public struct PluginFactorySession: Sendable {
             parts.append(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
             parts.append(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
             return parts.joined(separator: "\n")
+        case .invalidSource(let message) where message.lowercased().contains("invalid draft json"):
+            return """
+            The host could not parse your last draft.
+            \(message)
+            Return exactly one JSON object. go_source and test_input_json are required.
+            test_input_json must be a JSON string, not a nested object.
+            Do not wrap the object in markdown.
+            """
         default:
             return error.localizedDescription
         }

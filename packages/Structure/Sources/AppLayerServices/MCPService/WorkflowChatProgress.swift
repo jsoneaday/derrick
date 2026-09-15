@@ -61,7 +61,9 @@ public enum WorkflowChatProgress: Sendable {
     public static func shouldSurfaceWorkflowMessage(_ message: String) -> Bool {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if trimmed.hasPrefix("plugin_factory_build ") || trimmed.hasPrefix("web.crawl ") {
+        if trimmed.hasPrefix("plugin_factory_build ")
+            || trimmed.hasPrefix("web.crawl ")
+            || trimmed.hasPrefix("web.search ") {
             return false
         }
         if trimmed.hasPrefix("[plugin_factory]") {

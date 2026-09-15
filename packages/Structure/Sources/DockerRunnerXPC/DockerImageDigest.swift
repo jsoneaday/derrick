@@ -38,10 +38,10 @@ public enum DockerImageDigestError: Error, LocalizedError, Sendable, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .imageMissing(let tag):
-            return "The worker image \(tag) is not installed."
-        case .digestMismatch(let tag, _, _):
-            return "The worker image \(tag) does not match the version shipped with Derrick. Rebuild or reinstall product images."
+        case .imageMissing:
+            return WorkerImageFailureDisplay.toolsNotReady
+        case .digestMismatch:
+            return WorkerImageFailureDisplay.toolsNotReady
         }
     }
 }

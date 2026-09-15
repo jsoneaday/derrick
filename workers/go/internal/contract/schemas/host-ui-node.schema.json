@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://derrick.local/schemas/host-ui-node.schema.json",
+  "title": "Host UI tree node",
+  "description": "One host library element in a ui.present request. element must be a host-ui-library.json id.",
+  "type": "object",
+  "required": ["element"],
+  "additionalProperties": false,
+  "properties": {
+    "element": { "type": "string", "minLength": 1 },
+    "id": { "type": "string" },
+    "bind": { "type": "string" },
+    "config": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "children": {
+      "type": "array",
+      "items": { "$ref": "#" }
+    }
+  }
+}

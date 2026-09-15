@@ -81,6 +81,7 @@ final class MessagingSessionStore: ObservableObject {
             visibleMessages = []
             visibleReplyMessages = []
             replyThreadWarning = nil
+            lastError = nil
         }
         selectedPluginID = pluginID
     }
@@ -136,7 +137,7 @@ final class MessagingSessionStore: ObservableObject {
             await reloadThreads(autoOpenMostRecent: false)
             refreshSelectedTab()
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -150,7 +151,7 @@ final class MessagingSessionStore: ObservableObject {
             await reloadThreads(autoOpenMostRecent: false)
             refreshSelectedTab()
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -183,7 +184,7 @@ final class MessagingSessionStore: ObservableObject {
             scrollAnchorID = oldest.id
             showJumpToLatest = true
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -249,7 +250,11 @@ final class MessagingSessionStore: ObservableObject {
     }
 
     func setLastError(_ message: String?) {
-        lastError = message
+        guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastError = nil
+            return
+        }
+        lastError = WorkerImageFailureDisplay.userFacing(from: message)
     }
 
     func reloadThreadsForSelectedConnector(autoOpenMostRecent: Bool) async {
@@ -300,7 +305,7 @@ final class MessagingSessionStore: ObservableObject {
                 parentVendorMessageIDs: parentIDs
             )
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -325,7 +330,7 @@ final class MessagingSessionStore: ObservableObject {
             showNewMessagesPill = false
             scrollToBottomToken += 1
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -373,7 +378,7 @@ final class MessagingSessionStore: ObservableObject {
                 }
             }
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -408,7 +413,7 @@ final class MessagingSessionStore: ObservableObject {
             refreshSelectedTab()
             await catalog?.refreshBadges()
         } catch {
-            lastError = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
     }
 

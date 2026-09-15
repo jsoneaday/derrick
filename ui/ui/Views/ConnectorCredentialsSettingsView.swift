@@ -159,21 +159,27 @@ struct CredentialsSettingsView: View {
             Text(field.label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if field.hasStoredValue {
-                Text(String(repeating: "•", count: 12))
-                    .font(.body.monospaced())
+            if let caption = PluginCredentialFieldCopy.storedValueCaption(
+                hasStoredValue: field.hasStoredValue
+            ) {
+                Text(caption)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Saved value hidden")
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if field.usesSecureField {
                 SecureField(
-                    field.hasStoredValue ? "Leave blank to keep saved value" : field.label,
+                    field.hasStoredValue
+                        ? PluginCredentialFieldCopy.keepSavedValuePlaceholder
+                        : field.label,
                     text: pluginDraftBinding(pluginID: group.pluginID, fieldID: field.id)
                 )
                 .textFieldStyle(.roundedBorder)
             } else {
                 TextField(
-                    field.hasStoredValue ? "Leave blank to keep saved value" : field.label,
+                    field.hasStoredValue
+                        ? PluginCredentialFieldCopy.keepSavedValuePlaceholder
+                        : field.label,
                     text: pluginDraftBinding(pluginID: group.pluginID, fieldID: field.id)
                 )
                 .textFieldStyle(.roundedBorder)

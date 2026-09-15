@@ -38,10 +38,19 @@ struct SidebarView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 SidebarActionRow(
-                    row: SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
+                    row: SidebarPrimaryActions.newChat
                 ) {
                     workspace = .chats
                     chatSessions.openNewChat()
+                }
+                SidebarActionRow(
+                    row: SidebarPrimaryActions.newPlugin
+                ) {
+                    workspace = .chats
+                    NotificationCenter.default.post(
+                        name: ChatShellNotification.startPluginCreation,
+                        object: nil
+                    )
                 }
                 SidebarActionRow(
                     row: SidebarRow(
@@ -219,6 +228,11 @@ struct SidebarRow: Identifiable, Hashable, Sendable {
         self.isProminent = isProminent
         self.isDisabled = isDisabled
     }
+}
+
+enum SidebarPrimaryActions {
+    static let newChat = SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
+    static let newPlugin = SidebarRow(id: "new-plugin", icon: "plus.square.fill", title: "New plugin")
 }
 
 struct SidebarActionRow: View {

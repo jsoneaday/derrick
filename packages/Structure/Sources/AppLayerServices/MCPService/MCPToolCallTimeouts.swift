@@ -12,10 +12,15 @@ public enum MCPToolCallTimeouts {
     /// Must be at least as long as `MCPServiceDockerHelperRunner` call timeout.
     public static let pluginInvokeNanoseconds: UInt64 = 120_000_000_000
 
+    /// `web.search` needs Docker create plus one DuckDuckGo round trip.
+    public static let webSearchNanoseconds: UInt64 = 60_000_000_000
+
     public static func nanoseconds(forToolName toolName: String) -> UInt64 {
         switch toolName {
         case "web.crawl", "plugin_factory_build", "script_exec":
             return longRunningNanoseconds
+        case "web.search":
+            return webSearchNanoseconds
         case "plugin.invoke":
             return pluginInvokeNanoseconds
         default:

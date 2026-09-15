@@ -12,6 +12,7 @@ struct ChatTabBarView: View {
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(store.tabs) { tab in
                     browserTab(tab)
+                        .id("\(tab.id)-\(tab.title)")
                 }
             }
             .padding(.horizontal, 12)

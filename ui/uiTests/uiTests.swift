@@ -48,6 +48,30 @@ import DBRepository
         )
     }
 
+    @Test func pluginCredentialFieldDoesNotPrefillWhenKeychainAlreadyHasValue() {
+        #expect(
+            PluginCredentialFieldCopy.draftValue(
+                hasStoredValue: true,
+                developmentValue: "xoxb-from-env"
+            ) == ""
+        )
+        #expect(
+            PluginCredentialFieldCopy.draftValue(
+                hasStoredValue: false,
+                developmentValue: "xoxb-from-env"
+            ) == "xoxb-from-env"
+        )
+        #expect(PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: false) == nil)
+        #expect(
+            PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: true)?
+                .contains("already saved") == true
+        )
+        #expect(
+            PluginCredentialFieldCopy.storedValueCaption(hasStoredValue: true)?
+                .contains("•") == false
+        )
+    }
+
     @Test func connectorCredentialSaverAllowsPartialUpdateWhenStored() {
         let fields = [
             PluginCredentialFieldPresentation(

@@ -18,10 +18,32 @@ struct AgentProfileHighlightedText: View {
     }
 
     private var highlighted: AttributedString {
-        var attributed = AttributedString(text)
-        for nsRange in AgentProfileTokenHighlight.nsRanges(in: text) {
-            guard let range = Range(nsRange, in: attributed) else { continue }
-            attributed[range].foregroundColor = AgentProfileTokenColor.darkGreen
+        MessagingMarkdownText.attributed(text)
+    }
+}
+
+struct MessagingMarkdownText: View {
+    let text: String
+    var font: Font = .body
+    var baseColor: Color = .primary
+
+    var body: some View {
+        Text(Self.attributed(text))
+            .font(font)
+            .foregroundStyle(baseColor)
+            .textSelection(.enabled)
+    }
+
+    static func attributed(_ text: String) -> AttributedString {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        var attributed = (try? AttributedString(markdown: text, options: options))
+            ?? AttributedString(text)
+        for range in AgentProfileTokenHighlight.ranges(in: text) {
+            let snippet = String(text[range])
+            if let match = attributed.range(of: snippet) {
+                attributed[match].foregroundColor = AgentProfileTokenColor.darkGreen
+            }
         }
         return attributed
     }

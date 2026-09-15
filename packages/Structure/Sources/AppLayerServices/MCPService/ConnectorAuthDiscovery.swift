@@ -76,6 +76,12 @@ public struct ConnectorAuthDiscovery: Codable, Sendable, Hashable {
         )
     }
 
+    /// Prefer a token or API key the running app sends on HTTP calls over OAuth
+    /// client id/secret used only to install the app, when docs name both.
+    public func preferringCallCredential() -> ConnectorAuthDiscovery {
+        ConnectorAuthPreference.preferringCallCredential(self)
+    }
+
     /// Slack bot token when the classifier or crawl is unavailable.
     public static func slackBotTokenFallback(crawlSummary: String? = nil) throws -> ConnectorAuthDiscovery {
         ConnectorAuthDiscovery(
@@ -103,14 +109,18 @@ public struct ConnectorAuthDiscovery: Codable, Sendable, Hashable {
 public struct ConnectorAuthDiscoverInput: Codable, Sendable, Hashable {
     public let vendor: PluginFactoryCreateInput.ConnectorVendor
     public let customVendorName: String?
+    public let documentationURL: String?
 
     public init(
         vendor: PluginFactoryCreateInput.ConnectorVendor,
-        customVendorName: String? = nil
+        customVendorName: String? = nil,
+        documentationURL: String? = nil
     ) {
         self.vendor = vendor
         let trimmed = customVendorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.customVendorName = trimmed.isEmpty ? nil : trimmed
+        let url = documentationURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.documentationURL = url.isEmpty ? nil : url
     }
 
     public func encodedJSON() throws -> String {
@@ -129,13 +139,24 @@ public struct ConnectorAuthDiscoverInput: Codable, Sendable, Hashable {
 /// Crawl-only result. The UI reviewer model classifies auth from `crawlSummary`.
 public struct ConnectorAuthDiscoverResult: Codable, Sendable, Hashable {
     public let crawlSummary: String
+    public let documentationURL: String?
+    public let failureCode: PluginDocsLookupFailure?
 
-    public init(crawlSummary: String) {
+    public init(
+        crawlSummary: String,
+        documentationURL: String? = nil,
+        failureCode: PluginDocsLookupFailure? = nil
+    ) {
         self.crawlSummary = crawlSummary
+        let trimmed = documentationURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.documentationURL = trimmed.isEmpty ? nil : trimmed
+        self.failureCode = failureCode
     }
 
     enum CodingKeys: String, CodingKey {
         case crawlSummary = "crawl_summary"
+        case documentationURL = "documentation_url"
+        case failureCode = "failure_code"
     }
 }
 

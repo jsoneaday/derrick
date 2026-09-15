@@ -118,9 +118,10 @@ public func agentResponseStatusLabel(status: String) -> String {
         return "Tool Call"
     } else if status == "tool_batch" {
         return "Tool Batch"
-    } else {
+    } else if status == "thinking" {
         return "Thinking"
     }
+    return status
 }
 
 /// During streaming provides the next status (e.g. thinking, tool_call, etc) and the next chunk of text from llm

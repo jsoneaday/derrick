@@ -52,7 +52,7 @@ Derrick treats model output and guest code as untrusted.
 
 ### Docker sandbox (Go worker runtime)
 
-- **`script_exec`, plugins, web crawl, and file extract** share one Go worker image `derrick-worker:go-v1` (digest-pinned, `--network none` for guests).
+- **`script_exec`, plugins, web crawl, web search, and file extract** share one Go worker image `derrick-worker:go-v1` (digest-pinned, `--network none` for guests).
 - Plugin and script sources are compiled **inside the worker container** (Go 1.27.1 in the image). Users only need Docker Desktop.
 - Canonical I/O types live in `packages/Structure/Sources/Contract/Resources/schemas/` and are mirrored to `workers/go/internal/contract/schemas/`.
 - No net/http, subprocess, filesystem access, or credentials inside the guest.

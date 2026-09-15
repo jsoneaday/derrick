@@ -212,6 +212,7 @@ public enum DockerRunRequestValidator: Sendable {
                 return .disallowedDockerFlag("exec \(command)")
             }
         case DockerWorkerRuntime.crawlerBinary,
+             DockerWorkerRuntime.searchBinary,
              DockerWorkerRuntime.extractorBinary,
              DockerWorkerRuntime.guestBinaryPath:
             guard args == [command] else {
@@ -268,10 +269,13 @@ public enum DockerRunRequestValidator: Sendable {
         if args.count == 2 {
             return nil
         }
-        guard args.count == 4,
-              args[1] == "--format",
-              args[2] == "{{.Id}}" else {
+        guard args.count == 4, args[1] == "--format" else {
             return .disallowedDockerFlag("image inspect")
+        }
+        let format = args[2]
+        guard format == "{{.Id}}"
+            || format == DockerWorkerRuntime.binariesInspectFormat else {
+            return .disallowedDockerFlag("image inspect format")
         }
         let tag = args[3]
         guard tag == DockerWorkerRuntime.image

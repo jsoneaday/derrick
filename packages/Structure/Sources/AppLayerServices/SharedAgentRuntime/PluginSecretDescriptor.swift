@@ -78,25 +78,32 @@ public struct PluginCredentialPromptPayload: Codable, Sendable, Hashable {
     public let pluginID: String
     public let fields: [PluginCredentialFieldPresentation]
     public let mode: PluginCredentialCollectionMode
+    public let prompt: String?
 
     public init(
         pluginID: String,
         secrets: [PluginSecretDescriptor],
-        mode: PluginCredentialCollectionMode
+        mode: PluginCredentialCollectionMode,
+        prompt: String? = nil
     ) {
         self.pluginID = pluginID
         self.fields = PluginCredentialFieldPresentation.presentations(for: secrets, pluginID: pluginID)
         self.mode = mode
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.prompt = trimmed.isEmpty ? nil : trimmed
     }
 
     public init(
         pluginID: String,
         fields: [PluginCredentialFieldPresentation],
-        mode: PluginCredentialCollectionMode
+        mode: PluginCredentialCollectionMode,
+        prompt: String? = nil
     ) {
         self.pluginID = pluginID
         self.fields = fields
         self.mode = mode
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.prompt = trimmed.isEmpty ? nil : trimmed
     }
 
     public var secrets: [PluginSecretDescriptor] {
@@ -108,6 +115,7 @@ public struct PluginCredentialPromptPayload: Codable, Sendable, Hashable {
         case fields
         case secrets
         case mode
+        case prompt
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,6 +123,9 @@ public struct PluginCredentialPromptPayload: Codable, Sendable, Hashable {
         pluginID = try container.decode(String.self, forKey: .pluginID)
         mode = try container.decodeIfPresent(PluginCredentialCollectionMode.self, forKey: .mode)
             ?? .requireMissing
+        let prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.prompt = trimmed.isEmpty ? nil : trimmed
         if let fields = try container.decodeIfPresent(
             [PluginCredentialFieldPresentation].self,
             forKey: .fields
@@ -138,5 +149,6 @@ public struct PluginCredentialPromptPayload: Codable, Sendable, Hashable {
         try container.encode(pluginID, forKey: .pluginID)
         try container.encode(fields, forKey: .fields)
         try container.encode(mode, forKey: .mode)
+        try container.encodeIfPresent(prompt, forKey: .prompt)
     }
 }

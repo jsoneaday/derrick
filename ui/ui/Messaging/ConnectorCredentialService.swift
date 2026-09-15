@@ -9,6 +9,7 @@ struct ConnectorCredentialForm: View {
     let pluginID: String
     let fields: [PluginCredentialFieldPresentation]
     let mode: PluginCredentialCollectionMode
+    var prompt: String? = nil
     let onSave: ([String: String]) -> Void
     let onCancel: () -> Void
 
@@ -31,11 +32,11 @@ struct ConnectorCredentialForm: View {
             .padding(.bottom, 8)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Stored in Keychain for \(pluginID). Values never enter the plugin sandbox.")
+                Text(prompt ?? "Stored in Keychain for \(pluginID). Values never enter the plugin sandbox.")
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if pluginID.localizedCaseInsensitiveContains("slack") {
+                if prompt == nil, pluginID.localizedCaseInsensitiveContains("slack") {
                     Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -93,21 +94,27 @@ struct ConnectorCredentialForm: View {
             Text(field.label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if field.hasStoredValue {
-                Text(String(repeating: "•", count: 12))
-                    .font(.body.monospaced())
+            if let caption = PluginCredentialFieldCopy.storedValueCaption(
+                hasStoredValue: field.hasStoredValue
+            ) {
+                Text(caption)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Saved value hidden")
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if field.usesSecureField {
                 SecureField(
-                    field.hasStoredValue ? "Leave blank to keep saved value" : field.label,
+                    field.hasStoredValue
+                        ? PluginCredentialFieldCopy.keepSavedValuePlaceholder
+                        : field.label,
                     text: binding(for: field.id)
                 )
                 .textFieldStyle(.roundedBorder)
             } else {
                 TextField(
-                    field.hasStoredValue ? "Leave blank to keep saved value" : field.label,
+                    field.hasStoredValue
+                        ? PluginCredentialFieldCopy.keepSavedValuePlaceholder
+                        : field.label,
                     text: binding(for: field.id)
                 )
                 .textFieldStyle(.roundedBorder)
@@ -138,10 +145,16 @@ enum ConnectorCredentialService {
     static func present(
         pluginID: String,
         secrets: [PluginSecretDescriptor],
-        mode: PluginCredentialCollectionMode
+        mode: PluginCredentialCollectionMode,
+        prompt: String? = nil
     ) async -> Result {
         guard !secrets.isEmpty else { return .ok }
-        let payload = PluginCredentialPromptPayload(pluginID: pluginID, secrets: secrets, mode: mode)
+        let payload = PluginCredentialPromptPayload(
+            pluginID: pluginID,
+            secrets: secrets,
+            mode: mode,
+            prompt: prompt
+        )
         guard let data = try? JSONEncoder().encode(payload),
               let json = String(data: data, encoding: .utf8)
         else {

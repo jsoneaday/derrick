@@ -59,18 +59,11 @@ enum ConnectorAuthClassifier {
                 return classified
             }
         }
-        if vendor == .slack {
-            return (try? ConnectorAuthDiscovery.slackBotTokenFallback(crawlSummary: crawlSummary))
-                ?? ConnectorAuthDiscovery(
-                    authScheme: .botToken,
-                    secrets: [PluginSecretField.slackBotToken],
-                    crawlSummary: crawlSummary
-                )
-        }
         return ConnectorAuthDiscovery(
             authScheme: .apiKey,
-            secrets: [PluginSecretField.slackBotToken],
-            crawlSummary: crawlSummary
+            secrets: [],
+            setupHint: nil,
+            crawlSummary: crawlSummary.isEmpty ? nil : crawlSummary
         )
     }
 
@@ -96,15 +89,18 @@ enum ConnectorAuthClassifier {
     }
 
     private static let systemPrompt = """
-    You classify how a messaging vendor authenticates HTTP API calls for a bot or app.
+    You classify how a third-party HTTP API authenticates a running bot or app.
     Return exactly one JSON object with keys:
     auth_scheme, secrets, permissions, setup_hint.
     auth_scheme must be one of: bot_token, api_key, basic, oauth.
+    Prefer bot_token or api_key when the notes describe a token or key the running \
+    app sends on each API call (Authorization header, bot token, API key, bearer token).
+    Use oauth only when that is the only documented way to call the API. Do not choose \
+    client id and client secret when a bot token, API key, or bearer token is also named.
     secrets is an array of {id, label, kind}. kind is username, password, token, or api_key.
     permissions is an array of short vendor permission or scope labels only (no sentences).
-    setup_hint is one short paragraph for the user, or empty.
+    setup_hint is one short paragraph for the user taken from the documentation notes, or empty.
     Do not invent implementation details or HTTP URLs.
-    If the vendor is Slack, prefer auth_scheme bot_token and secret id bot_token.
     """
 
     private static func userPrompt(
@@ -150,6 +146,6 @@ enum ConnectorAuthClassifier {
             throw PluginFactoryModelError.invalidBuilderResponse
         }
         let decoded = try JSONDecoder().decode(ConnectorAuthDiscovery.self, from: data)
-        return decoded.withCrawlSummary(crawlSummary)
+        return decoded.withCrawlSummary(crawlSummary).preferringCallCredential()
     }
 }

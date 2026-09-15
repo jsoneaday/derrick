@@ -27,6 +27,10 @@ public enum PromptResources {
         try load(named: "web_crawler_skill", from: resourceRoot)
     }
 
+    public static func webSearchSkill(from resourceRoot: URL? = nil) throws -> String {
+        try load(named: "web_search_skill", from: resourceRoot)
+    }
+
     public static func filesExtractSkill(from resourceRoot: URL? = nil) throws -> String {
         try load(named: "files_extract_skill", from: resourceRoot)
     }

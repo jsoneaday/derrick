@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://derrick.local/schemas/worker-product.json",
   "title": "Derrick trusted worker product contracts",
-  "description": "Shared stdout JSON contracts for prebuilt Go worker binaries (web crawler and file extractor). Swift host and Go workers must match these schemas.",
+  "description": "Shared stdout JSON contracts for prebuilt Go worker binaries (web crawler, web search, and file extractor). Swift host and Go workers must match these schemas.",
   "$defs": {
     "string_list": {
       "type": "array",
@@ -59,6 +59,30 @@
         "requests_made": { "type": "integer" },
         "bytes_read": { "type": "integer" },
         "truncated": { "type": "boolean" },
+        "diagnostics": { "$ref": "#/$defs/string_list" }
+      }
+    },
+    "web_search_hit": {
+      "type": "object",
+      "required": ["title", "url", "snippet"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "snippet": { "type": "string" }
+      }
+    },
+    "web_search_result": {
+      "type": "object",
+      "required": ["ok", "query", "hits", "diagnostics"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "query": { "type": "string" },
+        "hits": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/web_search_hit" }
+        },
         "diagnostics": { "$ref": "#/$defs/string_list" }
       }
     },

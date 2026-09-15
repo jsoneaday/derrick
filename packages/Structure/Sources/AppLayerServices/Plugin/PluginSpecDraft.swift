@@ -50,7 +50,7 @@ public enum PluginReturnClass: String, Sendable, Hashable, Codable {
     case threadItems
 }
 
-public enum PluginTriggerClass: String, Sendable, Hashable, Codable {
+public enum PluginTriggerClass: String, Sendable, Hashable, Codable, CaseIterable {
     case chat
     case messaging
     case schedule
@@ -74,11 +74,19 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
     public var access: PluginAccessState?
     public var work: PluginWorkVerb?
     public var returnClass: PluginReturnClass?
-    public var trigger: PluginTriggerClass?
+    public var triggers: Set<PluginTriggerClass>
     public var present: PluginPresent?
     public var presentSource: PluginPresentSource?
     public var wrongness: String?
     public var parked: [String: String]
+    /// API setup docs to crawl before Access. Empty means Derrick must ask for a URL.
+    public var documentationURL: String?
+    /// True when a crawl ran and did not yield usable setup notes.
+    public var needsHumanDocsURL: Bool
+    /// True when `documentationURL` came from a paste, not from Derrick's search.
+    public var documentationURLFromHuman: Bool
+    /// Why the last docs lookup failed. Used for honest Access copy.
+    public var docsLookupFailure: PluginDocsLookupFailure?
 
     public init(
         claimedOutcome: String? = nil,
@@ -86,22 +94,30 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
         access: PluginAccessState? = nil,
         work: PluginWorkVerb? = nil,
         returnClass: PluginReturnClass? = nil,
-        trigger: PluginTriggerClass? = nil,
+        triggers: Set<PluginTriggerClass> = [],
         present: PluginPresent? = nil,
         presentSource: PluginPresentSource? = nil,
         wrongness: String? = nil,
-        parked: [String: String] = [:]
+        parked: [String: String] = [:],
+        documentationURL: String? = nil,
+        needsHumanDocsURL: Bool = false,
+        documentationURLFromHuman: Bool = false,
+        docsLookupFailure: PluginDocsLookupFailure? = nil
     ) {
         self.claimedOutcome = claimedOutcome
         self.connect = connect
         self.access = access
         self.work = work
         self.returnClass = returnClass
-        self.trigger = trigger
+        self.triggers = triggers
         self.present = present
         self.presentSource = presentSource
         self.wrongness = wrongness
         self.parked = parked
+        self.documentationURL = documentationURL
+        self.needsHumanDocsURL = needsHumanDocsURL
+        self.documentationURLFromHuman = documentationURLFromHuman
+        self.docsLookupFailure = docsLookupFailure
     }
 
     public var isMessagingConnect: Bool {
@@ -112,7 +128,7 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
         guard let claimedOutcome, !claimedOutcome.isEmpty else { return false }
         guard connect != nil else { return false }
         guard access == .reachable else { return false }
-        guard work != nil, returnClass != nil, trigger != nil else { return false }
+        guard work != nil, returnClass != nil, !triggers.isEmpty else { return false }
         guard present != nil else { return false }
         guard let wrongness, !wrongness.isEmpty else { return false }
         return true
@@ -120,9 +136,11 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
 
     public func asSkillDraft(pluginName: String = "") -> PluginSkillDraft {
         let outcome = claimedOutcome ?? ""
-        var triggers: Set<PluginSkillDraft.Trigger> = [.chat]
-        if let trigger {
-            triggers = [Self.skillTrigger(trigger)]
+        var skillTriggers: Set<PluginSkillDraft.Trigger> = []
+        if triggers.isEmpty {
+            skillTriggers = [.chat]
+        } else {
+            skillTriggers = Set(triggers.map(Self.skillTrigger))
         }
         let purposeParts = [
             outcome,
@@ -134,7 +152,7 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
         return PluginSkillDraft(
             goal: outcome,
             purpose: purposeParts.joined(separator: ". "),
-            triggers: triggers,
+            triggers: skillTriggers,
             examples: [
                 PluginSkillDraft.Example(
                     userSays: outcome.isEmpty ? "Run this plugin" : outcome,

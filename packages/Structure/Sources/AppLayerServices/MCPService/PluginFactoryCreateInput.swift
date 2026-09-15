@@ -61,28 +61,6 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
             pluginID.localizedCaseInsensitiveContains("slack")
         }
-
-        /// Primary vendor API documentation entry point for the mandatory crawl step.
-        public var documentationStartURL: String? {
-            switch self {
-            case .slack: return "https://api.slack.com/docs"
-            case .telegram: return "https://core.telegram.org/bots/api"
-            case .whatsapp: return "https://developers.facebook.com/docs/whatsapp"
-            case .discord: return "https://discord.com/developers/docs/intro"
-            case .custom: return nil
-            }
-        }
-
-        /// Auth/token docs only. Used before Create so the credential form matches the vendor.
-        public var authenticationDocumentationStartURL: String? {
-            switch self {
-            case .slack: return "https://api.slack.com/authentication/tokens"
-            case .telegram: return "https://core.telegram.org/bots/api#authorizing-your-bot"
-            case .whatsapp: return "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"
-            case .discord: return "https://discord.com/developers/docs/topics/oauth2"
-            case .custom: return nil
-            }
-        }
     }
 
     public let pluginType: PluginType
@@ -121,9 +99,15 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
 
     public static func makeFromSkillDraft(
         _ draft: PluginSkillDraft,
-        auth: ConnectorAuthDiscovery? = nil
+        auth: ConnectorAuthDiscovery? = nil,
+        pluginID: String? = nil
     ) throws -> PluginFactoryCreateInput {
-        let pluginID = try draft.normalizedPluginID()
+        let resolvedID: String
+        if let override = pluginID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            resolvedID = override
+        } else {
+            resolvedID = try draft.normalizedPluginID()
+        }
         let description = draft.factoryDescription()
         let skillMarkdown = draft.skillMarkdown()
         switch draft.plannedKind {
@@ -136,15 +120,15 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 vendor: vendor,
                 scope: .fullSync,
                 description: description,
-                pluginID: pluginID,
-                auth: auth,
+                pluginID: resolvedID,
+                auth: auth?.preferringCallCredential(),
                 skillMarkdown: skillMarkdown
             )
         case .customCapability:
             return PluginFactoryCreateInput(
                 pluginType: .custom,
                 description: description,
-                pluginID: pluginID,
+                pluginID: resolvedID,
                 skillMarkdown: skillMarkdown
             )
         }
@@ -153,7 +137,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     public static func makeFromSpecDraft(
         _ spec: PluginSpecDraft,
         auth: ConnectorAuthDiscovery? = nil,
-        existingPluginIDs: [String] = []
+        existingPluginIDs: [String] = [],
+        pluginID: String? = nil
     ) throws -> PluginFactoryCreateInput {
         guard spec.isBuildable else {
             throw PluginCreatorSpecError.notBuildable
@@ -164,7 +149,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             to: &skill,
             existingPluginIDs: existingPluginIDs
         )
-        return try makeFromSkillDraft(skill, auth: auth)
+        return try makeFromSkillDraft(skill, auth: auth, pluginID: pluginID)
     }
 
     /// Builds connector workflow input. The factory goal uses the fixed scope sentence, not free-text extras.
@@ -285,7 +270,10 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
     }
 
     /// Factory goal passed to `plugin_factory_build` after vendor docs are crawled.
-    public func connectorBuildGoal(crawlSummary: String?) -> String {
+    public func connectorBuildGoal(
+        crawlSummary: String?,
+        inboxAPISummary: String? = nil
+    ) -> String {
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
         let summary = crawlSummary ?? auth?.crawlSummary
         do {
@@ -313,6 +301,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 scope: scope,
                 vendor: vendor,
                 crawlSummary: summary,
+                inboxAPISummary: inboxAPISummary,
                 reference: extra.joined(separator: "\n"),
                 includeVendorBindings: true
             )

@@ -2,7 +2,7 @@
 
 /// SHA-256 of script_exec protocol JSON and schemas. `swift test` fails when this is stale.
 public enum ScriptExecContractFingerprint: Sendable {
-    public static let sha256 = "3a543a59f64b9c72a1fe94b8845af719740c17dfbc5ea81f5849c9554dcc8c89"
+    public static let sha256 = "2984a39bfbb89d8c66607807a3eb49b6adf06e26d41820d2d125179ae558c919"
     public static let sourceFiles: [String] = [
         "schemas/script-exec-contract.schema.json",
         "schemas/guest-runtime.schema.json",

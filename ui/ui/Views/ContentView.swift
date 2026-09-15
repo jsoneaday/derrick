@@ -226,6 +226,20 @@ private enum MeshBootstrapError: Error, LocalizedError {
     }
 }
 
+enum ChatSidebarWidth {
+    static let expanded: CGFloat = 296
+    static let compact: CGFloat = 220
+    static let compactAtWindowWidth: CGFloat = 960
+    static let expandedAtWindowWidth: CGFloat = 1280
+
+    static func value(windowWidth: CGFloat) -> CGFloat {
+        let span = expandedAtWindowWidth - compactAtWindowWidth
+        guard span > 0 else { return expanded }
+        let t = min(1, max(0, (windowWidth - compactAtWindowWidth) / span))
+        return (compact + (expanded - compact) * t).rounded()
+    }
+}
+
 struct ContentView: View {
     private let secretResolver = AppSecretResolver()
     private let debugConfiguration = AppDebugConfiguration()
@@ -381,7 +395,8 @@ struct ContentView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
             if let helperModelSettings = helperModelSettings {
                 SidebarView(
                     helperModelSettings: helperModelSettings,
@@ -391,11 +406,11 @@ struct ContentView: View {
                     workspace: $workspace,
                     isDebugEnabled: isDebugEnabled
                 )
-                    .frame(width: 296)
+                    .frame(width: ChatSidebarWidth.value(windowWidth: geo.size.width))
                     .background(Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0))
             } else {
                 Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
-                    .frame(width: 296)
+                    .frame(width: ChatSidebarWidth.value(windowWidth: geo.size.width))
             }
 
             VStack(spacing: 0) {
@@ -413,7 +428,8 @@ struct ContentView: View {
                                 Task { @MainActor in
                                     await openInboundBannerConversation()
                                 }
-                            }
+                            },
+                            presentsInbox: chatSessions.selectedTab?.threadID == nil
                         )
                     } else if let surface = chatSessions.selectedTab?.surface,
                               surface == .generatedView || surface == .file || surface == .image {
@@ -447,24 +463,11 @@ struct ContentView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .onChange(of: workspace) { _, newValue in
             messaging.setWorkspaceActive(
                 newValue == .chats && chatSessions.selectedTab?.surface == .thread
-            )
-        }
-        .onChange(of: messaging.selectedThreadID) { _, threadID in
-            guard workspace == .chats,
-                  let threadID,
-                  let pluginID = messaging.selectedPluginID,
-                  chatSessions.selectedTab?.surface == .thread
-            else {
-                return
-            }
-            let title = messaging.selectedThread?.title ?? "/\(pluginID)"
-            chatSessions.openOrFocusThread(
-                pluginID: pluginID,
-                threadID: threadID,
-                title: title
             )
         }
         .onChange(of: chatSessions.selectedSessionID) { _, _ in
@@ -968,9 +971,10 @@ struct ContentView: View {
     func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
         let turns = chatSessions.selectedTab?.turns ?? []
         let isStreaming = chatSessions.isSelectedTabStreaming
+        let isPluginCreator = chatSessions.selectedTab?.isPluginCreator == true
 
         return VStack(spacing: 0) {
-            if turns.isEmpty {
+            if turns.isEmpty && !isPluginCreator {
                 Spacer()
 
                 emptyState
@@ -994,13 +998,16 @@ struct ContentView: View {
                             }
                             
                             LazyVStack(alignment: .leading, spacing: 16) {
+                                if isPluginCreator {
+                                    PluginCreatorIntroHeader()
+                                }
                                 ForEach(turns) { turn in
                                     PromptCompletionCard(
                                         turn: turn,
                                         isStreaming: isStreaming,
                                         isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
                                         completionStatus: completionStatus(for: turn),
-                                        statusMessage: turn.status?.rawValue,
+                                        statusMessage: streamingStatusMessage(for: turn),
                                         toolName: turn.toolName
                                     ) {
                                         copyTurn(turn)
@@ -1410,6 +1417,15 @@ struct ContentView: View {
         .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private func streamingStatusMessage(for turn: ChatTurn) -> String? {
+        if turn.status != .complete,
+           turn.response == PluginAccessAskPolicy.reviewingQuestion {
+            return PluginAccessAskPolicy.reviewingStatusLabel
+        }
+        guard let status = turn.status else { return nil }
+        return agentResponseStatusLabel(status: status.rawValue)
+    }
+
     private func completionStatus(for turn: ChatTurn) -> PromptCompletionCard.CompletionStatus {
         switch turn.status {
         case .complete:
@@ -1437,7 +1453,8 @@ struct ContentView: View {
             chatSessions.sendPrompt(
                 currentPrompt,
                 apiKey: resolveAPIKey() ?? "",
-                profileHandle: selectedProfileHandle
+                profileHandle: selectedProfileHandle,
+                reviewerModelJSON: currentHelperReviewerModelJSON
             ) { message in
                 errorMessage = message
             }
@@ -1445,9 +1462,11 @@ struct ContentView: View {
     }
 
     private func bindPluginCreatorCompletion() {
-        chatSessions.onPluginSpecComplete = { spec in
+        chatSessions.onPluginSpecComplete = { session in
             pluginCreationController.beginFromCompletedSpec(
-                spec,
+                session.draft,
+                auth: session.accessDiscovery,
+                pluginID: session.reservedPluginID,
                 sessionID: pluginWizardSessionID,
                 helperAPIKey: currentHelperAPIKey,
                 helperReviewerModelJSON: currentHelperReviewerModelJSON
@@ -1473,7 +1492,7 @@ struct ContentView: View {
                 title: "/\(pluginID)"
             )
             guard surface == .thread else { return true }
-            let opened = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
+            let opened = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
             messaging.setWorkspaceActive(true)
             return opened
         case .needsHumanChoice:
@@ -1527,7 +1546,7 @@ struct ContentView: View {
         if let threadID = tab?.threadID, !threadID.isEmpty {
             _ = await messaging.openConversation(pluginID: pluginID, threadID: threadID)
         } else {
-            _ = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: false)
+            _ = await messaging.openConnector(pluginID: pluginID, autoOpenMostRecent: true)
         }
     }
 

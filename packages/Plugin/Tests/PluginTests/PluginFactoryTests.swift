@@ -611,6 +611,48 @@ import Testing
         }
     }
 
+    @Test func builderDraftFromModelTextAcceptsNestedTestInputJSON() throws {
+        let goJSON = String(data: try JSONEncoder().encode(guestGoSource()), encoding: .utf8)!
+        let text = """
+        {"description":"Weather","go_source":\(goJSON),"test_input_json":{"kind":"manual"}}
+        """
+        let draft = try PluginFactoryBuilderResponse.draft(fromModelText: text)
+        #expect(String(decoding: draft.testInput, as: UTF8.self).contains("manual"))
+        #expect(draft.guestSource.contains("package main"))
+    }
+
+    @Test func builderDraftFromModelTextNamesMissingGoSource() {
+        do {
+            _ = try PluginFactoryBuilderResponse.draft(fromModelText: #"{"description":"x","test_input_json":"{\"kind\":\"manual\"}"}"#)
+            Issue.record("Expected missing go_source to fail")
+        } catch let error as PluginFactoryError {
+            #expect(error.localizedDescription.contains("missing field go_source"))
+            #expect(error.localizedDescription.contains("invalid draft JSON"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test func sessionRetriesInvalidDraftJSONFromBuilder() async throws {
+        let executor = RecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
+        let builder = FailThenSucceedFactoryBuilder(draft: draft())
+        let release = try await PluginFactorySession(
+            configuration: PluginFactoryConfiguration(maxBuilderAttempts: 2)
+        ).build(
+            userGoal: "make a weather plugin",
+            builder: builder,
+            executor: executor,
+            reviewer: reviewer
+        )
+        #expect(release.pluginID == "weather-tool")
+        #expect(await builder.callCount == 2)
+        let requests = await builder.requests
+        #expect(requests[1].feedback?.contains("invalid draft JSON") == true)
+        #expect(requests[1].feedback?.contains("The host could not parse your last draft.") == true)
+        #expect(requests[1].userGoal == "make a weather plugin")
+    }
+
     private func draft() -> PluginFactoryDraft {
         PluginFactoryDraft(
             manifestJSON: manifestJSON(),
@@ -820,6 +862,31 @@ private actor RecordingFactoryBuilder: PluginFactoryBuilder {
 
     func makeDraft(_ request: PluginFactoryBuilderRequest) async throws -> PluginFactoryDraft {
         requests.append(request)
+        return draft
+    }
+}
+
+private struct BuilderJSONError: Error, LocalizedError {
+    var errorDescription: String? {
+        "The plugin builder returned invalid draft JSON."
+    }
+}
+
+private actor FailThenSucceedFactoryBuilder: PluginFactoryBuilder {
+    let draft: PluginFactoryDraft
+    private(set) var requests: [PluginFactoryBuilderRequest] = []
+    private(set) var callCount = 0
+
+    init(draft: PluginFactoryDraft) {
+        self.draft = draft
+    }
+
+    func makeDraft(_ request: PluginFactoryBuilderRequest) async throws -> PluginFactoryDraft {
+        requests.append(request)
+        callCount += 1
+        if callCount == 1 {
+            throw BuilderJSONError()
+        }
         return draft
     }
 }

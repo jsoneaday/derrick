@@ -39,6 +39,7 @@ final class PluginCredentialPanelPresenter {
             pluginID: pluginID,
             fields: fields,
             mode: mode,
+            prompt: payload?.prompt,
             onSave: { [weak self] values in
                 self?.saveAndFinish(
                     request: request,

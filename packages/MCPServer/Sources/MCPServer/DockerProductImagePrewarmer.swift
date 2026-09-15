@@ -2,19 +2,21 @@ import Foundation
 import DockerRunnerXPC
 import Structure
 
-/// Ensures trusted product Docker images exist (local build) and match pinned digests.
+/// Ensures the unified worker image exists and has the current binaries.
+/// Image ids change on every local `docker build`, so they are logged, not gated.
 public enum DockerProductImagePrewarmer: Sendable {
     public static func ensureWorkerImage(
-        executor: @escaping DockerCLIExecutor
+        executor: @escaping DockerCLIExecutor,
+        forceRebuild: Bool = false
     ) async throws {
         try await ensureImage(
             tag: DockerProductImagePolicy.workerImage,
             dockerfileRelativePath: DockerProductImagePolicy.workerDockerfileRelativePath,
             contextRelativePath: DockerProductImagePolicy.workerBuildContextRelativePath,
-            pinnedDigest: DockerWorkerRuntime.pinnedDigest,
             buildValidator: DockerProductImagePolicy.isAllowedWorkerBuild,
             executor: executor,
-            buildTimeoutSeconds: 1_200
+            buildTimeoutSeconds: 1_200,
+            forceRebuild: forceRebuild
         )
     }
 
@@ -29,26 +31,24 @@ public enum DockerProductImagePrewarmer: Sendable {
         tag: String,
         dockerfileRelativePath: String,
         contextRelativePath: String,
-        pinnedDigest: DockerImageDigest,
         buildValidator: @escaping (String, String, String) -> Bool,
         executor: @escaping DockerCLIExecutor,
-        buildTimeoutSeconds: Int = 1_200
+        buildTimeoutSeconds: Int = 1_200,
+        forceRebuild: Bool = false
     ) async throws {
-        let inspect = try await executor(["image", "inspect", tag], Data(), 30)
-        if inspect.exitCode == 0 {
-            let binariesCurrent = await DockerImageInspector.workerImageHasCurrentBinaries(
-                tag: tag,
-                executor: executor
-            )
-            if binariesCurrent {
-                try await DockerImageInspector.verifyPinned(
+        if !forceRebuild {
+            let inspect = try await executor(["image", "inspect", tag], Data(), 30)
+            if inspect.exitCode == 0 {
+                let binariesCurrent = await DockerImageInspector.workerImageHasCurrentBinaries(
                     tag: tag,
-                    expected: pinnedDigest,
                     executor: executor
                 )
-                return
+                if binariesCurrent {
+                    await logImageIdentity(tag: tag, executor: executor, rebuilt: false)
+                    return
+                }
+                // Stale worker image (missing required binaries). Rebuild overwrites the tag.
             }
-            // Stale worker image (missing required binaries). Rebuild overwrites the tag.
         }
 
         guard let repoRoot = DerrickRepositoryRoot.locate() else {
@@ -85,10 +85,31 @@ public enum DockerProductImagePrewarmer: Sendable {
             )
         }
 
-        try await DockerImageInspector.verifyPinned(
+        let binariesCurrent = await DockerImageInspector.workerImageHasCurrentBinaries(
             tag: tag,
-            expected: pinnedDigest,
             executor: executor
+        )
+        guard binariesCurrent else {
+            throw DockerProductImagePrewarmerError.buildFailed(
+                tag,
+                "built image is missing required binaries \(DockerWorkerRuntime.binariesLabelValue)"
+            )
+        }
+        await logImageIdentity(tag: tag, executor: executor, rebuilt: true)
+    }
+
+    private static func logImageIdentity(
+        tag: String,
+        executor: @escaping DockerCLIExecutor,
+        rebuilt: Bool
+    ) async {
+        let actual = (try? await DockerImageInspector.localImageID(tag: tag, executor: executor))?.rawValue
+            ?? "unknown"
+        let recorded = DockerWorkerRuntime.recordedDigest.rawValue
+        let match = actual == recorded ? "yes" : "no"
+        fputs(
+            "[worker-image] ready tag=\(tag) rebuilt=\(rebuilt) binaries=\(DockerWorkerRuntime.binariesLabelValue) id=\(actual) recorded=\(recorded) id_matches_record=\(match)\n",
+            stderr
         )
     }
 }
@@ -121,11 +142,11 @@ public enum DockerProductImagePrewarmerError: Error, LocalizedError, Equatable, 
     public var errorDescription: String? {
         switch self {
         case .repositoryRootNotFound:
-            return "The worker image is not installed and Derrick could not find its source to build it."
+            return WorkerImageFailureDisplay.toolsNotReady
         case .dockerfileMissing:
-            return "The worker image is not installed and Derrick could not find its build files."
+            return WorkerImageFailureDisplay.toolsNotReady
         case .buildFailed:
-            return "Derrick could not build the worker image. Make sure Docker Desktop is running, has enough disk space, and can reach the network."
+            return "Derrick could not prepare its web tools. Make sure Docker Desktop is running, has enough disk space, and can reach the network."
         }
     }
 

@@ -68,8 +68,8 @@ public struct WebCrawlerDockerExecutor: Sendable {
         }
     }
 
-    /// Idle-container create argv. The image ENTRYPOINT is the crawler binary,
-    /// so PID 1 must override it with sleep or the container exits before exec.
+    /// Idle-container create argv. The worker image has no ENTRYPOINT/CMD, so
+    /// PID 1 is `/bin/sleep` until `docker exec` runs the crawler binary.
     static func createArguments(
         name: String,
         proxyHost: String,

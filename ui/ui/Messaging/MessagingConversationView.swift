@@ -4,6 +4,8 @@ import SwiftUI
 struct MessagingConversationView: View {
     @ObservedObject var store: MessagingStore
     var onInboundBannerTap: (() -> Void)? = nil
+    /// Plugin Chat tab for the connector itself: conversations as inner tabs, replies as a side pane.
+    var presentsInbox: Bool = false
     @ObservedObject private var agentProfiles = AgentProfileStore.shared
     @State private var draft = ""
     @State private var threadDraft = ""
@@ -21,7 +23,13 @@ struct MessagingConversationView: View {
                 case .catalogRoot:
                     emptyConnectors
                 case .vendorConnector:
-                    if store.selectedThread == nil, store.isConnectorSyncing {
+                    if presentsInbox {
+                        if store.isConnectorSyncing, store.tabs.isEmpty {
+                            discoveringThreads
+                        } else {
+                            conversation
+                        }
+                    } else if store.selectedThread == nil, store.isConnectorSyncing {
                         discoveringThreads
                     } else if store.selectedThread == nil, store.canPickThread {
                         threadPicker
@@ -271,12 +279,17 @@ struct MessagingConversationView: View {
 
     private var conversation: some View {
         ZStack(alignment: .top) {
-            HStack(spacing: 0) {
-                channelPane
-                if store.isViewingReplyThread {
-                    Divider()
-                    threadPane
-                        .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
+            VStack(spacing: 0) {
+                if store.showsHostConversationTabs, !store.tabs.isEmpty {
+                    MessagingTabBarView(store: store)
+                }
+                HStack(spacing: 0) {
+                    channelPane
+                    if store.showsHostMessageSidebar {
+                        Divider()
+                        threadPane
+                            .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
+                    }
                 }
             }
             if let banner = store.inboundBanner, !banner.isEmpty {
@@ -378,13 +391,8 @@ struct MessagingConversationView: View {
 
     private var channelHeader: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(store.selectedThread?.title ?? "Conversation")
-                    .font(.headline)
-                Text(store.selectedConnectorDisplayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(store.selectedConnectorDisplayName)
+                .font(.headline)
             Spacer()
             Menu {
                 Picker("Default profile", selection: channelDefaultProfileBinding) {
@@ -685,7 +693,7 @@ private struct MessagingBubble: View {
     }
 
     private var bubbleLabel: some View {
-        AgentProfileHighlightedText(
+        MessagingMarkdownText(
             text: message.body,
             font: .system(size: 13)
         )

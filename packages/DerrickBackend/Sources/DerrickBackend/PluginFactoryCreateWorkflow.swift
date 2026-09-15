@@ -86,7 +86,7 @@ enum PluginFactoryCreateWorkflow {
             )
             return
         }
-        guard let auth = input.auth else {
+        guard let rawAuth = input.auth else {
             try await fail(
                 workflowID: workflowID,
                 stage: "auth",
@@ -95,6 +95,7 @@ enum PluginFactoryCreateWorkflow {
             )
             return
         }
+        let auth = rawAuth.preferringCallCredential()
         guard auth.authScheme.isSupportedInWizard else {
             try await fail(
                 workflowID: workflowID,
@@ -106,41 +107,73 @@ enum PluginFactoryCreateWorkflow {
         }
 
         var crawlSummary: String? = auth.crawlSummary
-        if crawlSummary == nil, let docURL = vendor.documentationStartURL {
-            try await log(
+        if crawlSummary == nil {
+            let sourceName = input.customVendorName ?? vendor.displayName
+            let page = try await VendorDocsFetch.resolve(
+                sourceName: sourceName,
+                documentationURL: nil,
                 workflowID: workflowID,
-                stage: "docs",
-                message: "Reading \(vendor.displayName) API docs. This can take a minute…",
-                repositoryProvider: repositoryProvider
+                request: request,
+                baseContext: baseContext,
+                executeTool: executeTool,
+                log: { message in
+                    try await log(
+                        workflowID: workflowID,
+                        stage: "docs",
+                        message: message,
+                        repositoryProvider: repositoryProvider
+                    )
+                }
             )
-            let crawlArgs = try crawlArguments(startURL: docURL, vendor: vendor, scope: input.scope)
-            let crawlResult = try await executeTool(
-                AllowedMCPTool.webCrawl.rawValue,
-                crawlArgs,
-                baseContext,
-                request.principal,
-                request.helperAPIKey,
-                request.helperReviewerModelJSON,
-                workflowID,
-                "docs"
-            )
-            if crawlResult.isError {
-                try await fail(
+            switch page {
+            case .page(let fetched):
+                crawlSummary = fetched.summary
+            case .failed:
+                crawlSummary = nil
+                try await log(
                     workflowID: workflowID,
                     stage: "docs",
-                    message: userFacingToolError(crawlResult, fallback: "Could not read vendor API documentation."),
+                    message: "Continuing without vendor setup docs.",
                     repositoryProvider: repositoryProvider
                 )
-                return
             }
-            crawlSummary = extractCrawlSummary(from: crawlResult.text)
         } else {
             try await log(
                 workflowID: workflowID,
                 stage: "docs",
-                message: crawlSummary == nil
-                    ? "Skipping vendor doc crawl for a custom connector."
-                    : "Using the auth docs already read for this connector.",
+                message: "Using the auth docs already read for this connector.",
+                repositoryProvider: repositoryProvider
+            )
+        }
+
+        var inboxAPISummary: String?
+        let sourceName = input.customVendorName ?? vendor.displayName
+        let inboxPage = try await VendorDocsFetch.resolve(
+            sourceName: sourceName,
+            documentationURL: nil,
+            workflowID: workflowID,
+            request: request,
+            baseContext: baseContext,
+            executeTool: executeTool,
+            log: { message in
+                try await log(
+                    workflowID: workflowID,
+                    stage: "docs",
+                    message: message,
+                    repositoryProvider: repositoryProvider
+                )
+            },
+            purpose: .inboxAPI
+        )
+        switch inboxPage {
+        case .page(let fetched):
+            inboxAPISummary = fetched.summary
+        case .failed:
+            inboxAPISummary = nil
+            try await log(
+                workflowID: workflowID,
+                stage: "docs",
+                message: "Continuing without conversation API docs.",
                 repositoryProvider: repositoryProvider
             )
         }
@@ -151,7 +184,10 @@ enum PluginFactoryCreateWorkflow {
             message: "Building \(vendor.displayName) connector — waiting on the plugin builder, then tests and safety review…",
             repositoryProvider: repositoryProvider
         )
-        let goal = input.connectorBuildGoal(crawlSummary: crawlSummary)
+        let goal = input.connectorBuildGoal(
+            crawlSummary: crawlSummary,
+            inboxAPISummary: inboxAPISummary
+        )
         let buildArgs = try buildArguments(goal: goal, hostManifest: input.hostManifest)
         let buildResult = try await executeTool(
             AllowedMCPTool.pluginFactoryBuild.rawValue,
@@ -289,27 +325,6 @@ enum PluginFactoryCreateWorkflow {
         )
     }
 
-    private static func crawlArguments(
-        startURL: String,
-        vendor: PluginFactoryCreateInput.ConnectorVendor,
-        scope: PluginFactoryCreateInput.ConnectorScope
-    ) throws -> String {
-        let product = PluginFactoryCreateInput.defaultDescription(
-            vendor: vendor,
-            customVendorName: nil,
-            scope: scope
-        )
-        let payload: [String: Any] = [
-            "start_url": startURL,
-            "goal": "Summarize \(vendor.displayName) bot/API authentication and message send/receive endpoints for: \(product)",
-            "max_pages": 12,
-            "max_depth": 2,
-            "timeout_seconds": 420,
-        ]
-        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        return String(decoding: data, as: UTF8.self)
-    }
-
     private static func buildArguments(goal: String, hostManifest: PluginFactoryManifestInput?) throws -> String {
         var payload: [String: Any] = ["goal": goal]
         if let hostManifest {
@@ -317,17 +332,6 @@ enum PluginFactoryCreateWorkflow {
         }
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
-    }
-
-    private static func extractCrawlSummary(from text: String) -> String? {
-        guard let outcome = ToolExecutionOutcome.decode(from: text),
-              let value = outcome.output?.value.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty
-        else {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : String(trimmed.prefix(12_000))
-        }
-        return String(value.prefix(12_000))
     }
 
     private static func decodeBuildResult(_ text: String) -> FactoryBuildResult? {

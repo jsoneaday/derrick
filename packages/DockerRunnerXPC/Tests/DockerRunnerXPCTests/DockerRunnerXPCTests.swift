@@ -210,6 +210,14 @@ struct DockerRunnerXPCTests {
         for args in [
             ["version"],
             ["image", "inspect", "img"],
+            [
+                "image", "inspect", "--format", "{{.Id}}",
+                DockerWorkerRuntime.image,
+            ],
+            [
+                "image", "inspect", "--format", DockerWorkerRuntime.binariesInspectFormat,
+                DockerWorkerRuntime.image,
+            ],
             ["pull", "img"],
             ["exec", "-i", "c", DockerWorkerRuntime.guestBinaryPath],
             ["exec", "-i", "c", "sh", "-c", "cat > /tmp/guest && chmod +x /tmp/guest"],
@@ -217,6 +225,7 @@ struct DockerRunnerXPCTests {
             ["exec", "c", "sh", "-c", DockerWorkerRuntime.guestCompileShell],
             ["exec", "c", "sh", "-c", DockerWorkerRuntime.guestReadBinaryShell],
             ["exec", "-i", "c", "/usr/local/bin/derrick-web-crawler"],
+            ["exec", "-i", "c", "/usr/local/bin/derrick-web-search"],
             ["create", "--label", "app.derrick=runtime", "--entrypoint", "/bin/sleep", "--name", "c", "derrick-web-crawler:swift-6.4-v1", "infinity"],
             [
                 "create",
@@ -367,6 +376,13 @@ struct DockerRunnerXPCTests {
             let r = request(arguments: DockerHostLaunch.dockerCLIArguments(args))
             #expect(DockerRunRequestValidator.validate(r) == nil, "expected allow for \(args)")
         }
+    }
+
+    @Test func rejectsUnknownImageInspectFormat() {
+        let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
+            "image", "inspect", "--format", "{{.Config.Env}}", DockerWorkerRuntime.image,
+        ]))
+        #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerFlag("image inspect format"))
     }
 
     @Test func rejectsUnscopedDockerPs() {

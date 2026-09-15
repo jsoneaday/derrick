@@ -95,7 +95,9 @@ public final class ConnectorMessagingClient: @unchecked Sendable {
         let deadline = DispatchTime.now().uptimeNanoseconds + operationTimeoutNanoseconds
         var pollCount = 0
         while DispatchTime.now().uptimeNanoseconds < deadline {
-            let poll = try await poll(ConnectorOperationPollRequest(operationID: request.operationID))
+            let poll = try await poll(
+                ConnectorOperationPollRequest(operationID: request.operationID)
+            )
             pollCount += 1
             switch poll.status {
             case .running:

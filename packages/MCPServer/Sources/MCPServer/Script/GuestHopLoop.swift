@@ -97,7 +97,7 @@ public enum GuestHopLoop: Sendable {
 
             if !uiPresents.isEmpty {
                 if let next = await hopHandler?.handleUIPresent(payload: uiPresents[0].payload) {
-                    event = next
+                    event = eventByMergingUIAck(current: event, next: next)
                     continue
                 }
                 let cardText = uiPresentText(uiPresents[0].payload)
@@ -234,11 +234,11 @@ public enum GuestHopLoop: Sendable {
                 continue
             }
 
+            // ui.present is a side channel. Record it and finish this invoke.
+            // Continuing here re-runs Docker up to maxPluginInvokeHops and blocks
+            // the single guest slot so inbox polling cannot fetch new messages.
             if !uiPresents.isEmpty {
-                if let next = await hopHandler?.handleUIPresent(payload: uiPresents[0].payload) {
-                    event = next
-                    continue
-                }
+                _ = await hopHandler?.handleUIPresent(payload: uiPresents[0].payload)
                 return hopResult
             }
 
@@ -296,6 +296,17 @@ public enum GuestHopLoop: Sendable {
     ) throws -> PluginHopEvent {
         let latest = try PluginHopEvent.decodeValidated(nextData)
         return current.mergingLatestHTTPResults(latest)
+    }
+
+    private static func eventByMergingUIAck(
+        current: PluginHopEvent,
+        next: PluginHopEvent
+    ) -> PluginHopEvent {
+        PluginHopEvent(
+            kind: next.kind,
+            httpResults: next.httpResults ?? current.httpResults,
+            params: next.params ?? current.params
+        )
     }
 
     private static func terminalStdout(

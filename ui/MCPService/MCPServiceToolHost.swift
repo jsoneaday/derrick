@@ -7,7 +7,7 @@ import MemorySystem
 import Plugin
 import Structure
 
-/// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, factory
+/// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, `web.search`, factory
 /// plugin tools, and session memory). No agents_* tools.
 actor MCPServiceToolHost {
     static let shared = MCPServiceToolHost()
@@ -46,6 +46,9 @@ actor MCPServiceToolHost {
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let webCrawlerExecutor = WebCrawlerDockerExecutor(
+            executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+        )
+        let webSearchExecutor = WebSearchDockerExecutor(
             executor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
         )
         let fileExtractorExecutor = FileExtractorDockerExecutor(
@@ -113,6 +116,14 @@ actor MCPServiceToolHost {
                 }
             )
             await server.register(
+                WebSearchToolModule.makeRegistration { input, timeoutSeconds in
+                    try await webSearchExecutor.run(
+                        input: input,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                }
+            )
+            await server.register(
                 FileExtractorToolModule.makeRegistration(
                     sessionID: { MCPServiceCallContext.shared.memorySessionKey?.sessionID },
                     run: { input, workspace, timeoutSeconds in
@@ -166,7 +177,8 @@ actor MCPServiceToolHost {
                         try await GuestPluginRunner.run(
                             release: release,
                             input: input,
-                            dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor()
+                            dockerExecutor: MCPServiceDockerHelperRunner.shared.makeStdinCLIExecutor(),
+                            hopHandler: HostUIPresentHopHandler(pluginID: pluginID)
                         )
                     }
                 }
@@ -189,7 +201,7 @@ actor MCPServiceToolHost {
         host = made
         await MCPServiceStore.shared.log(
             level: .info,
-            message: "MCP tool host ready (script_exec, web.crawl, files.extract)",
+            message: "MCP tool host ready (script_exec, web.crawl, web.search, files.extract)",
             code: "tool_host_ready"
         )
         return made

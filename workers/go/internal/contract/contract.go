@@ -29,6 +29,11 @@ func ValidateWebCrawlerResultJSON(data []byte) error {
 	return validate("web-crawler-result.schema.json", data)
 }
 
+// ValidateWebSearchResultJSON checks search stdout against web-search-result.schema.json.
+func ValidateWebSearchResultJSON(data []byte) error {
+	return validate("web-search-result.schema.json", data)
+}
+
 // ValidateFileExtractorResultJSON checks extractor stdout against file-extractor-result.schema.json.
 func ValidateFileExtractorResultJSON(data []byte) error {
 	return validate("file-extractor-result.schema.json", data)

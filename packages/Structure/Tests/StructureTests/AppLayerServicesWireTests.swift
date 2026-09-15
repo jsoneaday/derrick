@@ -224,12 +224,23 @@ import Testing
     @Test func mcpToolCallTimeouts() {
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "web.crawl")
             == MCPToolCallTimeouts.longRunningNanoseconds)
+        #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "web.search")
+            == MCPToolCallTimeouts.webSearchNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin_factory_build")
             == MCPToolCallTimeouts.longRunningNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "plugin.invoke")
             == MCPToolCallTimeouts.pluginInvokeNanoseconds)
         #expect(MCPToolCallTimeouts.nanoseconds(forToolName: "memory_search")
             == MCPToolCallTimeouts.standardNanoseconds)
+    }
+
+    @Test func connectorMessagingTimeoutIsDetectableWithoutShowingAsAHardFailure() {
+        #expect(ConnectorMessagingClientError.isTimeout(ConnectorMessagingClientError.timedOut))
+        #expect(!ConnectorMessagingClientError.isTimeout(ConnectorMessagingClientError.unavailable))
+        #expect(
+            ConnectorMessagingClientError.timedOut.errorDescription
+                == "Connector messaging timed out."
+        )
     }
 
     @Test func connectorMessagingXPCCodecRoundTrip() throws {
@@ -453,6 +464,18 @@ import Testing
         #expect(
             PluginSecretKeychain.account(pluginID: "slack-connection", fieldID: "password")
                 == "plugin-secret:slack-connection/password"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-1", fieldID: "bot_token")
+                == "plugin-secret:slack-connector-1/bot_token"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-2", fieldID: "bot_token")
+                == "plugin-secret:slack-connector-2/bot_token"
+        )
+        #expect(
+            PluginSecretKeychain.account(pluginID: "slack-connector-1", fieldID: "bot_token")
+                != PluginSecretKeychain.account(pluginID: "slack-connector-2", fieldID: "bot_token")
         )
         #expect(PluginCredentialPrompt.toolName == "plugin.credentials")
     }
@@ -834,6 +857,23 @@ import Testing
         )
     }
 
+    @Test func derrickMessagingForegroundPresenceReportsOpenConversation() {
+        guard appGroupCrossProcessStorageIsAvailable() else { return }
+        DerrickMessagingForegroundPresence.clear()
+        defer { DerrickMessagingForegroundPresence.clear() }
+        DerrickMessagingForegroundPresence.sync(
+            isMessagingWorkspace: true,
+            pluginID: "slack-connector-1",
+            vendorThreadID: "C123",
+            parentVendorMessageID: "171.1",
+            isFrontmost: true
+        )
+        let focus = DerrickMessagingForegroundPresence.preferredInboxFocus(excludingPID: -1)
+        #expect(focus?.pluginID == "slack-connector-1")
+        #expect(focus?.vendorThreadID == "C123")
+        #expect(focus?.parentVendorMessageID == "171.1")
+    }
+
     @Test func derrickDaemonHygieneRestartAfterOrphanEviction() {
         #expect(
             DerrickDaemonHygiene.shouldRestartDaemonAfterReconcile(
@@ -1205,6 +1245,7 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.createLabelArguments == ["--label", "app.derrick=runtime"])
         #expect(DerrickDockerRuntimeIdentity.namePrefixes == [
             "derrick-web-crawler",
+            "derrick-web-search",
             "derrick-guest-runtime",
             "derrick-swift-runtime",
             "derrick-file-extractor",
@@ -1416,6 +1457,13 @@ import Testing
         )
     }
 
+    @Test func pluginFactoryCreateFailureMessageExplainsWebTools() {
+        let raw = "The worker image derrick-worker:go-v1 does not match the version shipped with Derrick. Rebuild or reinstall product images."
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("web tools were not ready"))
+        #expect(presentation.technicalDetail == raw)
+    }
+
     @Test func pluginFactoryCreateFailureMessageExplainsBuilderTimeout() {
         let presentation = PluginFactoryCreateFailureMessage.presentation("The request timed out.")
         #expect(presentation.summary.contains("plugin builder did not finish in time"))
@@ -1515,6 +1563,8 @@ import Testing
         #expect(goal.contains("send_message"))
         #expect(goal.contains("sync_threads"))
         #expect(goal.contains("poll_inbox"))
+        #expect(goal.contains("ui.present"))
+        #expect(goal.contains("host-ui-library.json"))
         #expect(goal.contains("Host plugin id"))
         #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
         #expect(!goal.contains("must sync and send messages"))

@@ -14,6 +14,10 @@ public enum GuestContractValidation: Sendable {
         try GuestContract.validate(json: data, against: .webCrawlerResult)
     }
 
+    public static func validateWebSearchResultJSON(_ data: Data) throws {
+        try GuestContract.validate(json: data, against: .webSearchResult)
+    }
+
     public static func validateFileExtractorResultJSON(_ data: Data) throws {
         try GuestContract.validate(json: data, against: .fileExtractorResult)
     }

@@ -878,6 +878,8 @@ extension ConversationPipeline {
         switch toolName {
         case AllowedMCPTool.webCrawl.rawValue:
             return "Fetching web content. This may take a few minutes…"
+        case AllowedMCPTool.webSearch.rawValue:
+            return "Searching the web…"
         case AllowedMCPTool.pluginFactoryBuild.rawValue:
             return "Building the plugin (code generation, Docker tests, and safety review). This may take several minutes…"
         default:

@@ -39,7 +39,7 @@ public enum DockerImageInspector: Sendable {
         tag: String = DockerWorkerRuntime.image,
         executor: @escaping DockerCLIExecutor
     ) async -> Bool {
-        let format = "{{index .Config.Labels \"\(DockerWorkerRuntime.binariesLabelKey)\"}}"
+        let format = DockerWorkerRuntime.binariesInspectFormat
         do {
             let response = try await executor(
                 ["image", "inspect", "--format", format, tag],

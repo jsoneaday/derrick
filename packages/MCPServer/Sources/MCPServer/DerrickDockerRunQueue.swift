@@ -13,6 +13,9 @@ public actor DerrickDockerRunQueue {
     public static let crawler = DerrickDockerRunQueue(
         maxConcurrentContainers: ContainerLifecyclePolicy.derrickDefault.maxNetworkContainers
     )
+    public static let search = DerrickDockerRunQueue(
+        maxConcurrentContainers: ContainerLifecyclePolicy.derrickDefault.maxNetworkContainers
+    )
     public static let extractor = DerrickDockerRunQueue(
         maxConcurrentContainers: ContainerLifecyclePolicy.derrickDefault.maxFileExtractContainers
     )

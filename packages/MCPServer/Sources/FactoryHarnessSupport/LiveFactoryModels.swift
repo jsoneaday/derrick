@@ -24,7 +24,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
             model: model
         )
         let (text, _) = try await collectAgentStream(stream)
-        return try Self.decodeDraft(text)
+        return try PluginFactoryBuilderResponse.draft(fromModelText: text)
     }
 
     private static func userPrompt(for request: PluginFactoryBuilderRequest) -> String {
@@ -49,27 +49,6 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
             sections.append("Factory feedback to correct before the next attempt:\n\(feedback)")
         }
         return sections.joined(separator: "\n\n")
-    }
-
-    private static func decodeDraft(_ text: String) throws -> PluginFactoryDraft {
-        let normalized = text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "```json", with: "")
-            .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let jsonText: String
-        if normalized.first == "{", normalized.last == "}" {
-            jsonText = normalized
-        } else if let start = normalized.firstIndex(of: "{"),
-                  let end = normalized.lastIndex(of: "}") {
-            jsonText = String(normalized[start...end])
-        } else {
-            throw HarnessError.invalidModelJSON("builder")
-        }
-        guard let data = jsonText.data(using: .utf8) else {
-            throw HarnessError.invalidModelJSON("builder")
-        }
-        return try JSONDecoder().decode(PluginFactoryBuilderResponse.self, from: data).draft()
     }
 
     private static func builderSystemPrompt(for userGoal: String) -> String {
@@ -116,8 +95,8 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
             "messaging_ops": AgentSchema(type: .array, items: AgentSchema(type: .string)),
         ],
         required: [
-            "plugin_id", "version", "description", "go_source",
-            "test_input_json", "skill_files",
+            "go_source",
+            "test_input_json",
         ]
     )
 }

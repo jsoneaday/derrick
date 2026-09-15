@@ -12,7 +12,13 @@ protocol MessagingIngressAdapter: Sendable {
     func syncThreads(repository: DBRepository) async throws
 
     /// Fetches new vendor messages and persists them. Returns rows inserted this poll.
-    func pollInbox(repository: DBRepository) async throws -> [MessagingPersistResult]
+    func pollInbox(
+        repository: DBRepository,
+        preferredVendorThreadID: String?,
+        preferredParentVendorMessageID: String?,
+        maxChannelPolls: Int?,
+        channelOffset: Int
+    ) async throws -> [MessagingPersistResult]
 
     /// Polls one conversation, optionally a nested reply thread (`parentVendorMessageID`).
     func pollConversation(
@@ -32,7 +38,21 @@ protocol MessagingIngressAdapter: Sendable {
 }
 
 extension MessagingIngressAdapter {
+    func pollInbox(repository: DBRepository) async throws -> [MessagingPersistResult] {
+        try await pollInbox(
+            repository: repository,
+            preferredVendorThreadID: nil,
+            preferredParentVendorMessageID: nil,
+            maxChannelPolls: nil,
+            channelOffset: 0
+        )
+    }
+
     public func bootstrap(repository: DBRepository) async throws {
+        let existing = try await repository.listMessagingThreads(pluginID: pluginID)
+        if !existing.isEmpty {
+            return
+        }
         let manifestJSON = try await repository.listLatestPluginFactoryManifests()
             .first(where: { $0.pluginID == pluginID })?
             .manifestJSON ?? ""

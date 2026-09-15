@@ -34,6 +34,20 @@ func TestValidateWebCrawlerResultRejectsNullDiagnostics(t *testing.T) {
 	}
 }
 
+func TestValidateWebSearchResultAcceptsEmptyHitsArray(t *testing.T) {
+	payload := []byte(`{"ok":true,"query":"slack api tokens","hits":[],"diagnostics":[]}`)
+	if err := ValidateWebSearchResultJSON(payload); err != nil {
+		t.Fatalf("web search result: %v", err)
+	}
+}
+
+func TestValidateWebSearchResultRejectsNullHits(t *testing.T) {
+	payload := []byte(`{"ok":false,"query":"slack api tokens","hits":null,"diagnostics":[]}`)
+	if err := ValidateWebSearchResultJSON(payload); err == nil {
+		t.Fatal("expected rejection for null hits")
+	}
+}
+
 func TestValidateFileExtractorResultAcceptsEmptyFilesArray(t *testing.T) {
 	payload := []byte(`{"ok":true,"operation":"extract","files":[],"diagnostics":[]}`)
 	if err := ValidateFileExtractorResultJSON(payload); err != nil {

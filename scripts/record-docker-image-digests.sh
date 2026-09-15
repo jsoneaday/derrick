@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Builds the unified Go worker image and updates the pinned digest in Structure.
+# Builds the unified Go worker image and records its image id for logs/audit.
+# Runtime readiness is the OCI binaries label (crawler,extractor,search), not this id.
+# Docker assigns a new image id on every local build, so this file is not a gate.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

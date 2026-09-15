@@ -41,6 +41,15 @@
       },
       "headers": { "type": "object", "additionalProperties": { "type": "string" } },
       "widgets": { "type": "array", "items": { "type": "object" } },
+      "root": { "$ref": "host-ui-node.schema.json" },
+      "element": { "type": "string" },
+      "id": { "type": "string" },
+      "bind": { "type": "string" },
+      "config": { "type": "object" },
+      "children": {
+        "type": "array",
+        "items": { "$ref": "host-ui-node.schema.json" }
+      },
       "secret_ref": { "type": "string" },
       "reason": { "type": "string" },
       "key": { "type": "string" },

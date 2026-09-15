@@ -50,6 +50,7 @@ final class PluginCreationController: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var discoverTask: Task<Void, Never>?
     private var pendingAuth: ConnectorAuthDiscovery?
+    private var reservedPluginID: String?
     private var creationAPIKey: String?
     private var creationReviewerModelJSON: String?
     private var creationSessionID = ""
@@ -116,6 +117,7 @@ final class PluginCreationController: ObservableObject {
         cancelPolling()
         discoverTask?.cancel()
         pendingAuth = nil
+        reservedPluginID = nil
         phase = .idle
         statusMessage = ""
         progressSteps = []
@@ -129,6 +131,7 @@ final class PluginCreationController: ObservableObject {
         cancelPolling()
         discoverTask?.cancel()
         pendingAuth = nil
+        reservedPluginID = nil
         phase = .intro
         statusMessage = ""
         progressSteps = []
@@ -140,11 +143,15 @@ final class PluginCreationController: ObservableObject {
 
     func beginFromCompletedSpec(
         _ spec: PluginSpecDraft,
+        auth: ConnectorAuthDiscovery? = nil,
+        pluginID: String? = nil,
         sessionID: String,
         helperAPIKey: String?,
         helperReviewerModelJSON: String?
     ) {
         completedSpec = spec
+        pendingAuth = auth?.preferringCallCredential()
+        reservedPluginID = pluginID
         var skill = spec.asSkillDraft()
         PluginSkillDraftPlanner.applyGoal(
             skill.goal,
@@ -189,12 +196,14 @@ final class PluginCreationController: ObservableObject {
     func goBackToGoal() {
         discoverTask?.cancel()
         pendingAuth = nil
+        reservedPluginID = nil
         phase = .goal
     }
 
     func goBackToSkill() {
         discoverTask?.cancel()
         pendingAuth = nil
+        reservedPluginID = nil
         phase = .skill
     }
 
@@ -243,6 +252,10 @@ final class PluginCreationController: ObservableObject {
         creationReviewerModelJSON = helperReviewerModelJSON
 
         if skillDraft.plannedKind == .messagingConnector {
+            if let pendingAuth, pendingAuth.authScheme.isSupportedInWizard {
+                startFactoryCreation()
+                return
+            }
             phase = .discoveringAuth
             statusMessage = "Reading how this service authenticates…"
             resetProgressSteps()
@@ -303,8 +316,9 @@ final class PluginCreationController: ObservableObject {
             if let completedSpec {
                 input = try PluginFactoryCreateInput.makeFromSpecDraft(
                     completedSpec,
-                    auth: pendingAuth,
-                    existingPluginIDs: PluginFactoryListStore.shared.pluginIDs
+                    auth: pendingAuth?.preferringCallCredential(),
+                    existingPluginIDs: PluginFactoryListStore.shared.pluginIDs,
+                    pluginID: reservedPluginID
                 )
             } else {
                 throw PluginCreatorSpecError.notBuildable
@@ -313,6 +327,9 @@ final class PluginCreationController: ObservableObject {
             phase = .creating
             statusMessage = "Building your plugin…"
             resetProgressSteps()
+            if reservedPluginID != nil {
+                markProgressCompleted("credentials")
+            }
             pollAfterSeq = 0
 
             pollTask = Task { @MainActor in
@@ -344,13 +361,14 @@ final class PluginCreationController: ObservableObject {
         progressSteps = [
             ProgressStepState(id: "skill", title: "Write SKILL.md", status: .completed),
             ProgressStepState(id: "docs", title: "Read API docs", status: .pending),
+            ProgressStepState(id: "credentials", title: "Save credentials", status: .pending),
             ProgressStepState(id: "factory", title: "Build guest program", status: .pending),
             ProgressStepState(id: "review", title: "Safety review", status: .pending),
             ProgressStepState(id: "trial", title: "Trial run", status: .pending),
-            ProgressStepState(id: "credentials", title: "Save credentials", status: .pending),
         ]
         if skillDraft.plannedKind == .customCapability {
             setProgressStep("docs", status: .completed)
+            setProgressStep("credentials", status: .completed)
         }
     }
 
@@ -371,11 +389,16 @@ final class PluginCreationController: ObservableObject {
         switch stage?.lowercased() {
         case "crawl", "docs":
             setProgressStep("docs", status: .failed)
+        case "credentials", "auth":
+            markProgressCompleted("docs")
+            setProgressStep("credentials", status: .failed)
         case "factory", "build":
             markProgressCompleted("docs")
+            markProgressCompleted("credentials")
             setProgressStep("factory", status: .failed)
         case "review":
             markProgressCompleted("docs")
+            markProgressCompleted("credentials")
             markProgressCompleted("factory")
             setProgressStep("review", status: .failed)
         default:
@@ -391,9 +414,11 @@ final class PluginCreationController: ObservableObject {
                 markProgressActive("docs")
             case "factory":
                 markProgressCompleted("docs")
+                markProgressCompleted("credentials")
                 markProgressActive("factory")
             case "complete":
                 markProgressCompleted("docs")
+                markProgressCompleted("credentials")
                 markProgressCompleted("factory")
                 markProgressCompleted("review")
                 markProgressCompleted("trial")
@@ -404,6 +429,7 @@ final class PluginCreationController: ObservableObject {
             let message = event.message
             if message.contains("draft_started") || message.contains("direct_test") {
                 markProgressCompleted("docs")
+                markProgressCompleted("credentials")
                 markProgressActive("factory")
             }
             if message.contains("review decision=approved") {
@@ -503,6 +529,7 @@ final class PluginCreationController: ObservableObject {
     private func startAuthDiscovery() {
         discoverTask?.cancel()
         pendingAuth = nil
+        reservedPluginID = nil
         guard let vendor = skillDraft.inferredConnectorVendor else {
             phase = .failed(step: .skill, message: "Could not determine which messaging service this plugin targets.")
             return
@@ -511,70 +538,39 @@ final class PluginCreationController: ObservableObject {
         let apiKey = creationAPIKey
         let reviewerJSON = creationReviewerModelJSON
         discoverTask = Task { @MainActor in
-            var summary = ""
-            if vendor.authenticationDocumentationStartURL != nil {
-                do {
-                    let inputJSON = try ConnectorAuthDiscoverInput(vendor: vendor).encodedJSON()
-                    let handle = try await WorkflowRuntimeClient.shared.startWorkflow(
-                        WorkflowStartRequest(
-                            kind: .connectorAuthDiscover,
-                            sessionID: sessionID.isEmpty ? "plugin-wizard" : sessionID,
-                            agentID: "ui",
-                            inputJSON: inputJSON,
-                            principal: .agent(
-                                sessionID: sessionID.isEmpty ? "plugin-wizard" : sessionID,
-                                agentID: "ui"
-                            ),
-                            helperAPIKey: apiKey,
-                            helperReviewerModelJSON: reviewerJSON
-                        )
-                    )
-                    var after = 0
-                    while !Task.isCancelled {
-                        let poll = try await WorkflowRuntimeClient.shared.pollWorkflowUpdate(
-                            WorkflowPollRequest(workflowID: handle.workflowID, afterSeq: after)
-                        )
-                        for event in poll.events {
-                            after = max(after, event.seq)
-                            if event.kind == "progress" {
-                                statusMessage = event.message
-                            }
-                        }
-                        if poll.status == .completed {
-                            if let json = poll.resultJSON,
-                               let data = json.data(using: .utf8),
-                               let result = try? JSONDecoder.service.decode(
-                                ConnectorAuthDiscoverResult.self,
-                                from: data
-                               ) {
-                                summary = result.crawlSummary
-                            }
-                            break
-                        }
-                        if poll.status == .failed || poll.status == .cancelled {
-                            break
-                        }
-                        try? await Task.sleep(nanoseconds: 800_000_000)
-                    }
-                } catch {
-                    summary = ""
-                }
-            }
-            guard !Task.isCancelled else { return }
-            let auth = await ConnectorAuthClassifier.classifyOrFallback(
+            let review = await PluginCreatorAccessDocsReview.discover(
                 vendor: vendor,
-                crawlSummary: summary,
+                sourceName: vendor.displayName,
+                documentationURL: nil,
+                sessionID: sessionID,
                 apiKey: apiKey,
-                reviewerModelJSON: reviewerJSON
+                reviewerModelJSON: reviewerJSON,
+                onProgress: { [weak self] message in
+                    Task { @MainActor in
+                        self?.statusMessage = message
+                    }
+                }
             )
-            pendingAuth = auth
+            guard !Task.isCancelled else { return }
+            if let failure = review.failure {
+                phase = .failed(
+                    step: .credentials,
+                    message: PluginAccessAskPolicy.docsURLQuestion(
+                        triedURL: review.documentationURL,
+                        failure: failure
+                    )
+                )
+                return
+            }
+            pendingAuth = review.auth.preferringCallCredential()
             if phase == .discoveringAuth {
-                presentCredentialsOrFail(auth: auth)
+                presentCredentialsOrFail(auth: pendingAuth ?? review.auth)
             }
         }
     }
 
     private func presentCredentialsOrFail(auth: ConnectorAuthDiscovery) {
+        let auth = auth.preferringCallCredential()
         guard auth.authScheme.isSupportedInWizard else {
             phase = .failed(
                 step: .credentials,
@@ -582,7 +578,7 @@ final class PluginCreationController: ObservableObject {
             )
             return
         }
-        guard let pluginID = try? skillDraft.normalizedPluginID() else {
+        guard let pluginID = reservedPluginID ?? (try? skillDraft.normalizedPluginID()) else {
             phase = .skill
             return
         }
@@ -604,8 +600,16 @@ final class PluginCreationController: ObservableObject {
         )
         credentialFields = fields
         credentialDrafts = Dictionary(uniqueKeysWithValues: fields.map { field in
-            let env = PluginSecretDevelopmentSource.resolve(pluginID: pluginID, fieldID: field.id) ?? ""
-            return (field.id, env)
+            (
+                field.id,
+                PluginCredentialFieldCopy.draftValue(
+                    hasStoredValue: field.hasStoredValue,
+                    developmentValue: PluginSecretDevelopmentSource.resolve(
+                        pluginID: pluginID,
+                        fieldID: field.id
+                    )
+                )
+            )
         })
         statusMessage = auth.setupHint ?? "Enter the credentials this plugin needs. They are stored in Keychain on your Mac."
         phase = .collectCredentials(pluginID: pluginID)
