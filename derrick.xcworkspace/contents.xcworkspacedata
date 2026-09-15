@@ -64,4 +64,7 @@
    <FileRef
       location = "group:docs">
    </FileRef>
+   <FileRef
+      location = "group:.cursor/skills">
+   </FileRef>
 </Workspace>
