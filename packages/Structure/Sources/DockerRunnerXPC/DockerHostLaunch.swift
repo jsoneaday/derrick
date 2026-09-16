@@ -37,7 +37,8 @@ public enum DockerHostLaunch: Sendable {
 
     /// Second-level tokens for `docker image …`.
     public static let allowedImageSubcommands: Set<String> = [
-        "inspect"
+        "inspect",
+        "prune",
     ]
 
     /// Exact flags that must never appear on the docker CLI.

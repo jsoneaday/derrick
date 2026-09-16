@@ -1253,6 +1253,25 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("label=app.derrick=runtime"))
         #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=derrick-guest-runtime"))
         #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("exited"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("dead"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("created"))
+        #expect(!DerrickDockerRuntimeIdentity.isAllowedPsStatus("running"))
+        #expect(DerrickDockerRuntimeIdentity.psStoppedListArguments.count == 18)
+        #expect(
+            DerrickDockerRuntimeIdentity.psStoppedListArguments.contains {
+                $0 == [
+                    "ps", "-aq",
+                    "--filter", "name=derrick-guest-runtime",
+                    "--filter", "status=exited",
+                ]
+            }
+        )
+        #expect(
+            DockerWorkerRuntime.danglingImagePruneArguments == [
+                "image", "prune", "-f", "--filter", "label=derrick.worker.binaries",
+            ]
+        )
         #expect(
             DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
                 ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + [DockerWorkerRuntime.image]

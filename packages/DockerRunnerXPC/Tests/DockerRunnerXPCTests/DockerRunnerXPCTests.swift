@@ -157,6 +157,25 @@ struct DockerRunnerXPCTests {
         #expect(DockerRunRequestValidator.validate(r) == .disallowedDockerSubcommand("system"))
     }
 
+    @Test func rejectsBroadImagePruneAndRunningContainerPs() {
+        #expect(
+            DockerRunRequestValidator.validate(
+                request(arguments: DockerHostLaunch.dockerCLIArguments([
+                    "image", "prune", "-af",
+                ]))
+            ) != nil
+        )
+        #expect(
+            DockerRunRequestValidator.validate(
+                request(arguments: DockerHostLaunch.dockerCLIArguments([
+                    "ps", "-aq",
+                    "--filter", "name=derrick-guest-runtime",
+                    "--filter", "status=running",
+                ]))
+            ) == .disallowedDockerFlag("ps")
+        )
+    }
+
     @Test func rejectsPrivilegedFlag() {
         let r = request(arguments: DockerHostLaunch.dockerCLIArguments([
             "create", "--privileged", "--name", "x", "image"
@@ -247,6 +266,12 @@ struct DockerRunnerXPCTests {
             ],
             ["start", "c"],
             ["rm", "-f", "c"],
+            DockerWorkerRuntime.danglingImagePruneArguments,
+            [
+                "ps", "-aq",
+                "--filter", "name=derrick-guest-runtime",
+                "--filter", "status=exited",
+            ],
             ["inspect", "-f", "{{.State.Running}}", "c"],
             ["exec", "-i", "c", "/usr/local/bin/derrick-file-extractor"],
             [

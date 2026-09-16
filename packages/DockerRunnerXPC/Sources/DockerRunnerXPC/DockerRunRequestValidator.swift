@@ -159,14 +159,27 @@ public enum DockerRunRequestValidator: Sendable {
         return nil
     }
 
-    /// `docker ps -aq --filter label=app.derrick=runtime` (or an allowed name prefix).
+    /// `docker ps -aq --filter <identity>` or the same plus `--filter status=<stopped>`.
     private static func validatePsArguments(
         _ dockerArgs: [String]
     ) -> DockerRunRequestValidationError? {
-        guard dockerArgs.count == 4,
+        guard dockerArgs.first == "ps",
+              dockerArgs.count >= 4,
               dockerArgs[1] == "-aq",
               dockerArgs[2] == "--filter",
               DerrickDockerRuntimeIdentity.isAllowedPsFilter(dockerArgs[3])
+        else {
+            return .disallowedDockerFlag("ps")
+        }
+        if dockerArgs.count == 4 {
+            return nil
+        }
+        guard dockerArgs.count == 6,
+              dockerArgs[4] == "--filter",
+              dockerArgs[5].hasPrefix("status="),
+              DerrickDockerRuntimeIdentity.isAllowedPsStatus(
+                String(dockerArgs[5].dropFirst("status=".count))
+              )
         else {
             return .disallowedDockerFlag("ps")
         }
@@ -264,6 +277,12 @@ public enum DockerRunRequestValidator: Sendable {
         guard let second = args.first,
               DockerHostLaunch.allowedImageSubcommands.contains(second) else {
             return .disallowedDockerSubcommand("image \(args.first ?? "<missing>")")
+        }
+        if second == "prune" {
+            guard dockerArgs == DockerWorkerRuntime.danglingImagePruneArguments else {
+                return .disallowedDockerFlag("image prune")
+            }
+            return nil
         }
         guard second == "inspect" else { return nil }
         if args.count == 2 {

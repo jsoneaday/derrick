@@ -443,7 +443,7 @@
 				DEAA100A2FFF00000042F228 /* Embed XPC Services */,
 				DEKA10122A00000000KA001 /* Embed JobKeepAlive */,
 				DEKA10132A00000000KA001 /* Embed LaunchAgents */,
-				DEPRUNE12A00000000UI001 /* Prune dangling Derrick worker images */,
+				DEPRUNE12A00000000UI001 /* Prune leftover Derrick Docker images and containers */,
 			);
 			buildRules = (
 			);
@@ -780,10 +780,10 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		DEPRUNE12A00000000UI001 /* Prune dangling Derrick worker images */ = {
+		DEPRUNE12A00000000UI001 /* Prune leftover Derrick Docker images and containers */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
-			name = "Prune dangling Derrick worker images";
+			name = "Prune leftover Derrick Docker images and containers";
 			shellPath = /bin/sh;
 			shellScript = (
 				"\"${SRCROOT}/../scripts/prune-dangling-worker-images.sh\"",

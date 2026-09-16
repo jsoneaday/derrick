@@ -2,16 +2,29 @@ import Foundation
 import Structure
 
 /// Removes leftover Derrick Docker containers from a previous crash or kill.
-///
-/// Call from daemon Docker sync — not a one-off on the developer machine, not on
-/// UI launch (the daemon may still be running jobs), and not on UI quit.
 public enum DerrickDockerOrphanSweeper: Sendable {
+    public enum Scope: Sendable {
+        /// Every matching container, including running ones. Daemon crash recovery only.
+        case allMatching
+        /// Exited, dead, or created only. Safe at UI launch while jobs may still be running.
+        case stoppedOnly
+    }
+
     /// Best-effort: list by label and name prefix, then `docker rm -f`.
     /// Returns how many container IDs were passed to remove (0 if none or list failed).
     @discardableResult
-    public static func sweep(executor: DockerCLIExecutor) async -> Int {
+    public static func sweep(
+        executor: DockerCLIExecutor,
+        scope: Scope = .allMatching
+    ) async -> Int {
         var ids = Set<String>()
-        for arguments in DerrickDockerRuntimeIdentity.psListArguments {
+        let lists = switch scope {
+        case .allMatching:
+            DerrickDockerRuntimeIdentity.psListArguments
+        case .stoppedOnly:
+            DerrickDockerRuntimeIdentity.psStoppedListArguments
+        }
+        for arguments in lists {
             guard let result = try? await executor(arguments, Data(), 30),
                   result.exitCode == 0
             else {

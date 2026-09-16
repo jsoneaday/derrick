@@ -41,6 +41,10 @@ public enum DockerWorkerRuntime: Sendable {
     /// OCI label written by `docker/worker/Dockerfile`; used to detect stale local images.
     public static let binariesLabelKey = "derrick.worker.binaries"
     public static let binariesLabelValue = "crawler,extractor,search"
+    /// Untagged leftover worker images only. Does not remove `derrick-worker:go-v1`.
+    public static let danglingImagePruneArguments = [
+        "image", "prune", "-f", "--filter", "label=\(binariesLabelKey)",
+    ]
     /// `docker image inspect --format` template for `binariesLabelKey`.
     public static let binariesInspectFormat =
         "{{index .Config.Labels \"\(binariesLabelKey)\"}}"

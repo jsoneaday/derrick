@@ -748,6 +748,58 @@ import WebCrawler
         }
     }
 
+    @Test func orphanSweeperStoppedOnlyListsExitedDeadAndCreated() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "ps",
+               args.contains("name=derrick-guest-runtime"),
+               args.contains("status=exited") {
+                return DockerCLIResult(exitCode: 0, stdout: Data("cccccccccccc\n".utf8), stderr: Data())
+            }
+            if args.first == "ps" {
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let removed = await DerrickDockerOrphanSweeper.sweep(executor: executor, scope: .stoppedOnly)
+        #expect(removed == 1)
+        let calls = await recorder.calls
+        #expect(calls.filter { $0.first == "ps" }.count == DerrickDockerRuntimeIdentity.psStoppedListArguments.count)
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=exited") })
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=dead") })
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=created") })
+        #expect(!calls.contains { $0.contains("status=running") })
+        let rm = try #require(calls.first { $0.first == "rm" })
+        #expect(rm.contains("cccccccccccc"))
+        for call in calls where call.first == "ps" || call.first == "rm" {
+            #expect(
+                DockerRunRequestValidator.validate(
+                    DockerHostLaunch.makeRequest(dockerArguments: call, timeoutSeconds: 60)
+                ) == nil
+            )
+        }
+    }
+
+    @Test func danglingImagePrunerUsesLabeledPruneOnly() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        #expect(await DerrickDockerDanglingImagePruner.prune(executor: executor))
+        let calls = await recorder.calls
+        #expect(calls == [DockerWorkerRuntime.danglingImagePruneArguments])
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(
+                    dockerArguments: DockerWorkerRuntime.danglingImagePruneArguments,
+                    timeoutSeconds: 60
+                )
+            ) == nil
+        )
+    }
+
     @Test func orphanSweeperSkipsRemoveWhenNothingMatches() async throws {
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in

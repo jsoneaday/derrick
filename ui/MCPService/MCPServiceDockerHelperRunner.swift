@@ -63,6 +63,15 @@ final class MCPServiceDockerHelperRunner: @unchecked Sendable {
         await DerrickDockerOrphanSweeper.sweep(executor: makeStdinCLIExecutor())
     }
 
+    /// Remove stopped Derrick containers only (UI-safe; leaves running jobs).
+    @discardableResult
+    func sweepStoppedRuntimeContainers() async -> Int {
+        await DerrickDockerOrphanSweeper.sweep(
+            executor: makeStdinCLIExecutor(),
+            scope: .stoppedOnly
+        )
+    }
+
     /// Prewarm the shared Go worker image used by script_exec and plugin.invoke.
     func prewarmGuestRuntime() async throws {
         try await WorkerImageGate.shared.ensureReady(executor: makeStdinCLIExecutor())

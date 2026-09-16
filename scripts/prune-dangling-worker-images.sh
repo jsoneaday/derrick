@@ -1,6 +1,7 @@
 #!/bin/sh
-# Drop leftover derrick-worker rebuilds after Xcode builds a new tag.
-# Keep the live derrick-worker tag and the Dockerfile's golang base.
+# After Xcode builds: drop leftover derrick-worker images and stopped oneshot
+# containers (guest, search, crawl, extract). Keep the live derrick-worker tag,
+# the Dockerfile's golang base, and any still-running containers.
 # Older local builds have no OCI labels, so label-only prune misses them.
 PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${PATH}"
 if ! command -v docker >/dev/null 2>&1; then
@@ -20,6 +21,30 @@ GOLANG_KEEP=$(awk '
     exit
   }
 ' "$DOCKERFILE")
+
+remove_stopped_runtime_containers() {
+  ids=$(docker ps -aq --filter "$1" --filter "status=$2" 2>/dev/null) || ids=""
+  for id in $ids; do
+    [ -n "$id" ] || continue
+    docker rm -f "$id" >/dev/null 2>&1 || true
+  done
+}
+
+for prefix in \
+  derrick-guest-runtime \
+  derrick-web-crawler \
+  derrick-web-search \
+  derrick-file-extractor \
+  derrick-swift-runtime
+do
+  for status in exited dead created; do
+    remove_stopped_runtime_containers "name=${prefix}" "$status"
+  done
+done
+
+for status in exited dead created; do
+  remove_stopped_runtime_containers "label=app.derrick=runtime" "$status"
+done
 
 docker image prune -f --filter "label=derrick.worker.binaries" >/dev/null 2>&1 || true
 
