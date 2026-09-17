@@ -415,12 +415,15 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 if workspace != .debugLogs {
-                    ChatTabBarView(store: chatSessions)
+                    ChatTabBarView(
+                        store: chatSessions,
+                        filter: workspace == .plugins ? .plugins : .chats
+                    )
                 }
                 switch workspace {
                 case .debugLogs:
                     DebugLogsView(repository: repository)
-                case .chats:
+                case .chats, .plugins:
                     if chatSessions.selectedTab?.surface == .thread {
                         MessagingConversationView(
                             store: messaging,
@@ -469,6 +472,14 @@ struct ContentView: View {
             messaging.setWorkspaceActive(
                 newValue == .chats && chatSessions.selectedTab?.surface == .thread
             )
+            switch newValue {
+            case .chats:
+                ensureChatMenuSelection()
+            case .plugins:
+                ensurePluginsMenuSelection()
+            case .debugLogs:
+                break
+            }
         }
         .onChange(of: chatSessions.selectedSessionID) { _, _ in
             Task { @MainActor in
@@ -522,9 +533,29 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginCreation)) { _ in
-            workspace = .chats
             bindPluginCreatorCompletion()
             chatSessions.openOrFocusPluginCreator()
+            workspace = .plugins
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginEdit)) { notification in
+            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
+                  let version = notification.userInfo?[ChatShellNotification.pluginVersionUserInfoKey] as? String,
+                  let prompt = notification.userInfo?[ChatShellNotification.editPromptUserInfoKey] as? String,
+                  !pluginID.isEmpty,
+                  !version.isEmpty,
+                  !prompt.isEmpty
+            else {
+                return
+            }
+            workspace = .plugins
+            pluginCreationController.beginEdit(
+                pluginID: pluginID,
+                version: version,
+                prompt: prompt,
+                sessionID: pluginWizardSessionID,
+                helperAPIKey: currentHelperAPIKey,
+                helperReviewerModelJSON: currentHelperReviewerModelJSON
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginInChat)) { notification in
             guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
@@ -955,8 +986,9 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     var mainPanel: some View {
-        Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
+        let panel = Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
             .ignoresSafeArea()
             .overlay {
                 GeometryReader { proxy in
@@ -966,6 +998,14 @@ struct ContentView: View {
                     panelContent(inputHeight: inputHeight, panelWidth: panelWidth)
                 }
             }
+        // Plugin tab + pill sub-tabs only while the Plugins menu is active.
+        if workspace == .plugins, chatSessions.selectedTab?.isPluginCreator == true {
+            PluginsWorkspaceShellView {
+                panel
+            }
+        } else {
+            panel
+        }
     }
 
     func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
@@ -1459,6 +1499,27 @@ struct ContentView: View {
                 errorMessage = message
             }
         }
+    }
+
+    /// Chat menu: hide Plugin tab by leaving any creator selection.
+    private func ensureChatMenuSelection() {
+        guard chatSessions.selectedTab?.isPluginCreator == true else { return }
+        if let chat = chatSessions.tabs.last(where: { !$0.isPluginCreator }) {
+            chatSessions.selectSession(id: chat.id)
+        } else {
+            chatSessions.openNewChat()
+        }
+    }
+
+    /// Plugins menu: show/focus a Plugin tab (creator).
+    private func ensurePluginsMenuSelection() {
+        if chatSessions.selectedTab?.isPluginCreator == true { return }
+        if let creator = chatSessions.tabs.last(where: \.isPluginCreator) {
+            chatSessions.selectSession(id: creator.id)
+            return
+        }
+        bindPluginCreatorCompletion()
+        chatSessions.openOrFocusPluginCreator()
     }
 
     private func bindPluginCreatorCompletion() {

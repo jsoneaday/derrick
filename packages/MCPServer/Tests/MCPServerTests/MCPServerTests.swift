@@ -1074,6 +1074,54 @@ import WebCrawler
         #expect(result.text.contains("guest runtime failed"))
     }
 
+    @Test func pluginSkillActivatesOnDemand() async throws {
+        let release = PluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            manifestJSON: #"{"name":"weather-tool"}"#,
+            runtimeJSON: "",
+            guestSource: "package main",
+            compiledArtifact: Data(),
+            skillFiles: [
+                "skills/weather/SKILL.md": "---\nname: weather\ndescription: Forecasts\n---\n# Full skill\n",
+                "skills/weather/references/api.md": "# API",
+            ],
+            contentHash: try PluginContentHash(hex: String(repeating: "c", count: 64)),
+            reviewSummary: "ok"
+        )
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                PluginRuntimeToolModule.makeSkillRegistration { pluginID in
+                    pluginID == release.pluginID ? release : nil
+                }
+            )
+        }
+
+        let activated = try await bridge.client.callTool(
+            named: "plugin.skill",
+            arguments: [
+                "plugin_id": .string("weather-tool"),
+                "action": .string("activate"),
+                "skill": .string("weather"),
+            ]
+        )
+        #expect(!activated.isError)
+        #expect(activated.text.contains("# Full skill"))
+
+        let referenced = try await bridge.client.callTool(
+            named: "plugin.skill",
+            arguments: [
+                "plugin_id": .string("weather-tool"),
+                "action": .string("reference"),
+                "path": .string("api.md"),
+            ]
+        )
+        #expect(!referenced.isError)
+        #expect(referenced.text.contains("weather"))
+        #expect(referenced.text.contains("api.md"))
+        #expect(referenced.text.contains("# API"))
+    }
+
     @Test func pluginFactorySurfacesReviewFailureOutcome() async throws {
         let bridge = try await MCPLocalBridge.make { server in
             await server.register(

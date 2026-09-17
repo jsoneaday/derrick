@@ -1583,7 +1583,7 @@ import Testing
         #expect(goal.contains("sync_threads"))
         #expect(goal.contains("poll_inbox"))
         #expect(goal.contains("ui.present"))
-        #expect(goal.contains("host-ui-library.json"))
+        #expect(goal.contains("host UI catalog (summary)"))
         #expect(goal.contains("Host plugin id"))
         #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
         #expect(!goal.contains("must sync and send messages"))

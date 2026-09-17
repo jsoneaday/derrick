@@ -7,7 +7,8 @@ import Structure
 /// plugin-specific dispatch here: every release receives JSON on stdin.
 public enum PluginRuntimeToolModule {
     public static func makeListRegistration(
-        list: @escaping @Sendable () async throws -> [PluginFactoryReleaseSummary]
+        list: @escaping @Sendable () async throws -> [PluginFactoryReleaseSummary],
+        skillIndex: @escaping @Sendable () async throws -> [PluginSkillDisclosure.IndexEntry] = { [] }
     ) -> MCPToolRegistration {
         MCPToolRegistration(
             tool: .pluginList,
@@ -18,14 +19,139 @@ public enum PluginRuntimeToolModule {
             ])
         ) { _ in
             let releases = try await list()
-            let data = try JSONEncoder().encode(releases.map { release in
-                [
-                    "plugin_id": release.pluginID,
-                    "version": release.version,
-                    "content_hash": release.contentHash,
-                ]
-            })
+            let skills = try await skillIndex()
+            let payload: [String: Any] = [
+                "releases": releases.map { release in
+                    [
+                        "plugin_id": release.pluginID,
+                        "version": release.version,
+                        "content_hash": release.contentHash,
+                    ] as [String: String]
+                },
+                "skills": skills.map { entry in
+                    [
+                        "plugin_id": entry.pluginID,
+                        "skill_name": entry.skillName,
+                        "description": entry.description,
+                    ] as [String: String]
+                },
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    public static func makeSkillRegistration(
+        loadRelease: @escaping @Sendable (String) async throws -> PluginFactoryRelease?
+    ) -> MCPToolRegistration {
+        MCPToolRegistration(
+            tool: .pluginSkill,
+            description: AllowedMCPTool.pluginSkill.defaultDescription,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "plugin_id": .object([
+                        "type": .string("string"),
+                        "description": .string("Approved plugin id that owns the skill."),
+                    ]),
+                    "action": .object([
+                        "type": .string("string"),
+                        "description": .string("activate (full SKILL.md) or reference (one references/* file)."),
+                    ]),
+                    "skill": .object([
+                        "type": .string("string"),
+                        "description": .string("Skill name or skills/<name>/SKILL.md path (required for activate)."),
+                    ]),
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Reference path or filename (required for reference)."),
+                    ]),
+                ]),
+                "required": .array([.string("plugin_id"), .string("action")]),
+            ])
+        ) { arguments in
+            let pluginID = arguments["plugin_id"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let action = arguments["action"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() ?? ""
+            guard !pluginID.isEmpty else {
+                return try failure(
+                    stage: .validation,
+                    code: "plugin_id_required",
+                    message: "plugin_id is required."
+                ).encodedJSON()
+            }
+            guard let release = try await loadRelease(pluginID) else {
+                return try failure(
+                    stage: .validation,
+                    code: "plugin_not_found",
+                    message: "No approved plugin named \(pluginID)."
+                ).encodedJSON()
+            }
+            switch action {
+            case "activate":
+                let skill = arguments["skill"]?.stringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !skill.isEmpty else {
+                    return try failure(
+                        stage: .validation,
+                        code: "skill_required",
+                        message: "skill is required for action=activate."
+                    ).encodedJSON()
+                }
+                guard let body = PluginSkillDisclosure.activate(
+                    skillFiles: release.skillFiles,
+                    skillNameOrPath: skill
+                ) else {
+                    return try failure(
+                        stage: .validation,
+                        code: "skill_not_found",
+                        message: "No skill matching \(skill) on /\(pluginID)."
+                    ).encodedJSON()
+                }
+                return try ToolExecutionOutcome.completed(
+                    output: ToolExecutionOutcome.Output(format: .text, value: body)
+                ).encodedJSON()
+            case "reference":
+                let path = arguments["path"]?.stringValue?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !path.isEmpty else {
+                    return try failure(
+                        stage: .validation,
+                        code: "path_required",
+                        message: "path is required for action=reference."
+                    ).encodedJSON()
+                }
+                guard let hit = PluginSkillDisclosure.reference(
+                    skillFiles: release.skillFiles,
+                    requested: path
+                ) else {
+                    let available = PluginSkillDisclosure.referencePaths(skillFiles: release.skillFiles)
+                    let hint = available.isEmpty
+                        ? "No references shipped for /\(pluginID)."
+                        : "Available: \(available.joined(separator: ", "))"
+                    return try failure(
+                        stage: .validation,
+                        code: "reference_not_found",
+                        message: "No reference matching \(path). \(hint)"
+                    ).encodedJSON()
+                }
+                let payload: [String: String] = ["path": hit.path, "body": hit.body]
+                let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                return try ToolExecutionOutcome.completed(
+                    output: ToolExecutionOutcome.Output(
+                        format: .json,
+                        value: String(decoding: data, as: UTF8.self)
+                    )
+                ).encodedJSON()
+            default:
+                return try failure(
+                    stage: .validation,
+                    code: "invalid_action",
+                    message: "action must be activate or reference."
+                ).encodedJSON()
+            }
         }
     }
 

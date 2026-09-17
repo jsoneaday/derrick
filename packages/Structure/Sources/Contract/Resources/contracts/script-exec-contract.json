@@ -148,7 +148,7 @@
         "messaging_ops"
       ],
       "skill_files_path_pattern": "skills/<name>/SKILL.md",
-      "empty_skill_files_when_unused": true,
+      "empty_skill_files_when_unused": false,
       "test_input_is_serialized_json_object": true,
       "test_input_must_not_be_empty": true,
       "test_input_exercises_terminal_result": true,

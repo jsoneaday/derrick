@@ -128,30 +128,20 @@ struct DebugLogsView: View {
     private var serviceFilter: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                filterChip(title: "All", service: nil)
+                PillFilterChip(title: "All", isSelected: viewModel.selectedService == nil) {
+                    viewModel.selectService(nil)
+                }
                 ForEach(viewModel.knownServices, id: \.self) { service in
-                    filterChip(title: service, service: service)
+                    PillFilterChip(
+                        title: service,
+                        isSelected: viewModel.selectedService == service
+                    ) {
+                        viewModel.selectService(service)
+                    }
                 }
             }
         }
-    }
-
-    private func filterChip(title: String, service: String?) -> some View {
-        let selected = viewModel.selectedService == service
-        return Button(title) {
-            viewModel.selectService(service)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            selected ? Color.accentColor.opacity(0.18) : Color.black.opacity(0.05),
-            in: Capsule()
-        )
-        .overlay(
-            Capsule()
-                .stroke(selected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
-        )
+        .accessibilityIdentifier("debug-logs-service-pills")
     }
 
     private func copyToPasteboard(_ text: String) {

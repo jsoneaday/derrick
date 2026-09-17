@@ -204,6 +204,7 @@ import Testing
             PluginSpecProcession.creatorTabTitle(from: "connect to slack")
                 == "Create plugin - connect to slack"
         )
+        #expect(PluginSpecProcession.pluginsTabTitle == "Plugins")
         let long = "connect to slack and send and receive messages extra words"
         let title = PluginSpecProcession.creatorTabTitle(from: long)
         #expect(title.hasPrefix("Create plugin - "))

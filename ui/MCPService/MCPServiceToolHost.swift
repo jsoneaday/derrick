@@ -137,8 +137,25 @@ actor MCPServiceToolHost {
                 )
             )
             await server.register(
-                PluginRuntimeToolModule.makeListRegistration {
-                    try await repo.listPluginFactoryReleaseSummaries()
+                PluginRuntimeToolModule.makeListRegistration(
+                    list: {
+                        try await repo.listPluginFactoryReleaseSummaries()
+                    },
+                    skillIndex: {
+                        try await Self.skillIndex(from: repo)
+                    }
+                )
+            )
+            await server.register(
+                PluginRuntimeToolModule.makeSkillRegistration { pluginID in
+                    guard let summary = try await repo.listPluginFactoryReleaseSummaries()
+                        .first(where: { $0.pluginID == pluginID }) else {
+                        return nil
+                    }
+                    return try await repo.pluginFactoryRelease(
+                        pluginID: summary.pluginID,
+                        version: summary.version
+                    )
                 }
             )
             await server.register(
@@ -361,6 +378,23 @@ actor MCPServiceToolHost {
                 capabilities: [.syncWebCrawl, .hostReviewRetry]
             )
         }
+    }
+
+    private static func skillIndex(from repo: DBRepository) async throws -> [PluginSkillDisclosure.IndexEntry] {
+        let summaries = try await repo.listPluginFactoryReleaseSummaries()
+        var latestByPlugin: [String: PluginFactoryReleaseSummary] = [:]
+        for summary in summaries where latestByPlugin[summary.pluginID] == nil {
+            latestByPlugin[summary.pluginID] = summary
+        }
+        var entries: [PluginSkillDisclosure.IndexEntry] = []
+        for summary in latestByPlugin.values.sorted(by: { $0.pluginID < $1.pluginID }) {
+            guard let release = try await repo.pluginFactoryRelease(
+                pluginID: summary.pluginID,
+                version: summary.version
+            ) else { continue }
+            entries.append(contentsOf: PluginSkillDisclosure.index(from: release))
+        }
+        return entries
     }
 }
 

@@ -26,6 +26,9 @@ public struct PluginPackage: Sendable, Hashable {
         }
 
         let (skills, skipped) = discoverSkills(root: root)
+        guard skills.contains(where: { $0.relativePath.hasSuffix("/SKILL.md") }) else {
+            throw PluginManifestError.missingSkillFiles
+        }
         let contentHash = try PluginContentHash.hash(root: root)
         return PluginPackage(
             manifest: manifest,
@@ -37,22 +40,29 @@ public struct PluginPackage: Sendable, Hashable {
     }
 
     private static func loadRuntime(root: URL, pointers: DerrickExtensionPointers) throws -> DerrickRuntime {
-        let runtimeRel = pointers.runtime ?? "./\(PluginContract.derrickExtensionNamespace)/runtime.json"
-        let runtimeURL = try PluginPath.resolve(root: root, relative: runtimeRel)
-        guard FileManager.default.fileExists(atPath: runtimeURL.path) else {
+        if let runtimeRel = pointers.runtime {
+            let runtimeURL = try PluginPath.resolve(root: root, relative: runtimeRel)
+            if FileManager.default.fileExists(atPath: runtimeURL.path) {
+                let data = try Data(contentsOf: runtimeURL)
+                var runtime = try PluginDecoding.decode(DerrickRuntime.self, from: data)
+                if let entry = pointers.entrypoint {
+                    runtime.entrypoint = try PluginPath.validateRuntimeEntrypoint(entry)
+                }
+                let entryURL = try PluginPath.resolve(root: root, relative: runtime.entrypoint)
+                guard FileManager.default.fileExists(atPath: entryURL.path) else {
+                    throw PluginManifestError.missingFile(runtime.entrypoint)
+                }
+                return runtime
+            }
+        }
+        guard let entry = pointers.entrypoint else {
             throw PluginManifestError.missingRuntime
         }
-        let data = try Data(contentsOf: runtimeURL)
-        var runtime = try PluginDecoding.decode(DerrickRuntime.self, from: data)
-        if let entry = pointers.entrypoint {
-            runtime.entrypoint = try PluginPath.validateRuntimeEntrypoint(entry)
-        }
-
+        let runtime = try DerrickRuntime(entrypoint: entry)
         let entryURL = try PluginPath.resolve(root: root, relative: runtime.entrypoint)
         guard FileManager.default.fileExists(atPath: entryURL.path) else {
             throw PluginManifestError.missingFile(runtime.entrypoint)
         }
-
         return runtime
     }
 

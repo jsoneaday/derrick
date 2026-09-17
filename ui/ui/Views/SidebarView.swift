@@ -44,9 +44,13 @@ struct SidebarView: View {
                     chatSessions.openNewChat()
                 }
                 SidebarActionRow(
-                    row: SidebarPrimaryActions.newPlugin
+                    row: SidebarRow(
+                        id: SidebarPrimaryActions.newPlugin.id,
+                        icon: SidebarPrimaryActions.newPlugin.icon,
+                        title: SidebarPrimaryActions.newPlugin.title,
+                        isProminent: workspace == .plugins
+                    )
                 ) {
-                    workspace = .chats
                     NotificationCenter.default.post(
                         name: ChatShellNotification.startPluginCreation,
                         object: nil
@@ -170,7 +174,9 @@ struct SidebarView: View {
                     } else {
                         ForEach(chatSessions.recentSessions) { session in
                             Button {
-                                workspace = .chats
+                                let isCreator = session.metadata["pluginCreator"] == "true"
+                                    || PluginSpecProcession.isCreatorTabID(session.sessionID)
+                                workspace = isCreator ? .plugins : .chats
                                 chatSessions.selectSession(id: session.sessionID)
                             } label: {
                                 Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -232,7 +238,7 @@ struct SidebarRow: Identifiable, Hashable, Sendable {
 
 enum SidebarPrimaryActions {
     static let newChat = SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
-    static let newPlugin = SidebarRow(id: "new-plugin", icon: "plus.square.fill", title: "New plugin")
+    static let newPlugin = SidebarRow(id: "new-plugin", icon: "puzzlepiece.extension.fill", title: "Plugins")
 }
 
 struct SidebarActionRow: View {

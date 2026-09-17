@@ -69,12 +69,25 @@ let package = Package(
         ),
         .target(
             name: "FactoryHarnessSupport",
-            dependencies: ["MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            dependencies: [
+                "MCPServer",
+                "Plugin",
+                "LLMAgentClient",
+                "Structure",
+                "DBRepository",
+            ],
             path: "Sources/FactoryHarnessSupport"
         ),
         .executableTarget(
             name: "FactoryHarness",
-            dependencies: ["FactoryHarnessSupport", "MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "Plugin",
+                "LLMAgentClient",
+                "Structure",
+                "DBRepository",
+            ],
             path: "Sources/FactoryHarness"
         ),
         .executableTarget(

@@ -38,7 +38,6 @@ import Testing
         #expect(guestPath == "app.derrick/plugin.go")
         let files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
-            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
             guestPath: Data(guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
@@ -46,11 +45,15 @@ import Testing
             pluginID: "slack-connector-1",
             version: "1.0.0",
             manifestJSON: manifestJSON,
-            runtimeJSON: runtimeJSON,
+            runtimeJSON: "",
             guestSource: guestSource,
             compiledArtifact: artifact,
-            skillFiles: [:],
-            contentHash: PluginContentHash.hash(files: files),
+            skillFiles: ["skills/slack-connector-1/SKILL.md": "---\nname: slack\ndescription: Slack\n---\n"],
+            contentHash: PluginContentHash.hash(files: {
+                var all = files
+                all["skills/slack-connector-1/SKILL.md"] = Data("---\nname: slack\ndescription: Slack\n---\n".utf8)
+                return all
+            }()),
             reviewSummary: "ok"
         )
         #expect(release.verifyIntegrity())

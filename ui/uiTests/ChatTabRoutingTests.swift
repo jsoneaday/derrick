@@ -89,8 +89,21 @@ import CoreGraphics
 
     @Test func newPluginSitsBelowNewChatInTheSidebar() {
         #expect(SidebarPrimaryActions.newChat.title == "New chat")
-        #expect(SidebarPrimaryActions.newPlugin.title == "New plugin")
+        #expect(SidebarPrimaryActions.newPlugin.title == "Plugins")
         #expect(SidebarPrimaryActions.newPlugin.id == "new-plugin")
+    }
+
+    @Test func pluginsWorkspaceSubtabsAreCreateAndPlugins() {
+        #expect(PluginsWorkspaceSubtab.allCases.map(\.rawValue) == ["Create plugin", "Plugins"])
+    }
+
+    @Test func chatTabBarHidesPluginTabsInChatFilter() {
+        #expect(ChatTabBarView.TabFilter.chats != .plugins)
+    }
+
+    @Test func pluginsMenuIsSeparateFromChatMenu() {
+        #expect(AppWorkspace.plugins != .chats)
+        #expect(SidebarPrimaryActions.newPlugin.title == "Plugins")
     }
 
     @Test func pluginCreatorIntroExplainsWhatAPluginIs() {
@@ -114,7 +127,8 @@ import CoreGraphics
         #expect(PluginSpecProcession.isCreatorTabID(fresh.id))
         #expect(fresh.turns.isEmpty == false)
         #expect(fresh.isPluginCreator)
-        #expect(fresh.title == PluginSpecProcession.creatorTabTitlePrefix)
+        #expect(fresh.title == PluginSpecProcession.pluginsTabTitle)
+        #expect(seeded.title == PluginSpecProcession.pluginsTabTitle)
     }
 
     @MainActor
@@ -127,7 +141,7 @@ import CoreGraphics
         #expect(PluginSpecProcession.isCreatorTabID(second))
         #expect(store.tabs.filter(\.isPluginCreator).count == 2)
         #expect(store.selectedSessionID == second)
-        #expect(store.selectedTab?.title == PluginSpecProcession.creatorTabTitlePrefix)
+        #expect(store.selectedTab?.title == PluginSpecProcession.pluginsTabTitle)
     }
 
     @MainActor
@@ -141,23 +155,18 @@ import CoreGraphics
         #expect(store.selectedTab?.pluginID == "slack-connector-1")
     }
 
-    @Test func pluginCreatorKeepsDescriptionTitleWhenReseeded() {
+    @Test func pluginCreatorKeepsPluginsTabTitleWhenReseeded() {
         var tab = ChatTab.pluginCreator()
         tab.title = PluginSpecProcession.creatorTabTitle(from: "connect to slack and send receive messages")
         let reseeded = ChatTab.pluginCreator(existing: tab)
-        #expect(reseeded.title == tab.title)
-        #expect(reseeded.title.hasPrefix("Create plugin - "))
+        #expect(reseeded.title == PluginSpecProcession.pluginsTabTitle)
     }
 
-    @Test func pluginCreatorTabTitleUpdatesAfterClaimedOutcome() {
+    @Test func pluginCreatorTabTitleStaysPluginsAfterClaimedOutcome() {
         var tab = ChatTab.pluginCreator()
-        #expect(tab.title == PluginSpecProcession.creatorTabTitlePrefix)
+        #expect(tab.title == PluginSpecProcession.pluginsTabTitle)
         _ = tab.applyCreatorUtterance("connect to slack and send receive messages")
-        #expect(tab.title == PluginSpecProcession.creatorTabTitle(
-            from: "connect to slack and send receive messages"
-        ))
-        #expect(tab.title.hasPrefix("Create plugin - "))
-        #expect(tab.title.contains("slack"))
+        #expect(tab.title == PluginSpecProcession.pluginsTabTitle)
     }
 
     @Test func pluginCreatorAccessWaitsForDocsThenAsksFromTheSummary() {

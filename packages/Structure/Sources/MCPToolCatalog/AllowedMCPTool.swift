@@ -22,6 +22,8 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
     case pluginFactoryBuild = "plugin_factory_build"
     /// Lists approved compiled plugin releases.
     case pluginList = "plugin.list"
+    /// Progressive disclosure: activate a skill (full SKILL.md) or fetch a references/* file.
+    case pluginSkill = "plugin.skill"
     /// Runs one approved compiled plugin release.
     case pluginInvoke = "plugin.invoke"
     /// Crawls a bounded same-origin website in an isolated container.
@@ -67,7 +69,9 @@ public enum AllowedMCPTool: String, CaseIterable, Sendable, Codable, Hashable {
         case .pluginFactoryBuild:
             return "Translate a user goal into an Agent Plugin draft, test it, independently review it, compile it with Swift, and verify its release hash."
         case .pluginList:
-            return "List approved compiled Agent Plugin releases."
+            return "List approved Agent Plugin releases with a cheap skill index (name + description only)."
+        case .pluginSkill:
+            return "Progressive disclosure for Agent Plugins: action=activate returns full SKILL.md; action=reference returns one references/* file. Do not dump the whole package."
         case .pluginInvoke:
             return "Run one approved compiled Agent Plugin by id with a JSON input object."
         case .webCrawl:

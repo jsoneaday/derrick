@@ -303,6 +303,131 @@ final class PluginCreationController: ObservableObject {
         hide()
     }
 
+    /// LLM edit from the Plugins browser. Rebuilds via factory and promotes a new version.
+    func beginEdit(
+        pluginID: String,
+        version: String,
+        prompt: String,
+        sessionID: String,
+        helperAPIKey: String?,
+        helperReviewerModelJSON: String?
+    ) {
+        creationSessionID = sessionID
+        creationAPIKey = helperAPIKey
+        creationReviewerModelJSON = helperReviewerModelJSON
+        reservedPluginID = pluginID
+        completedSpec = nil
+        pendingAuth = nil
+        guard let creationAPIKey, !creationAPIKey.isEmpty else {
+            phase = .failed(
+                step: .build,
+                message: "Add an API key in Settings before updating a plugin."
+            )
+            return
+        }
+        cancelPolling()
+        phase = .creating
+        statusMessage = "Updating /\(pluginID)…"
+        resetProgressSteps()
+        markProgressCompleted("credentials")
+        pollAfterSeq = 0
+
+        pollTask = Task { @MainActor in
+            do {
+                guard let release = try await PluginFactoryListStore.shared.release(
+                    pluginID: pluginID,
+                    version: version
+                ) else {
+                    phase = .failed(
+                        step: .build,
+                        message: "Could not load /\(pluginID) v\(version) to edit."
+                    )
+                    return
+                }
+                let input = try Self.editInput(
+                    release: release,
+                    prompt: prompt
+                )
+                let inputJSON = try input.encodedJSON()
+                let handle = try await WorkflowRuntimeClient.shared.startWorkflow(
+                    WorkflowStartRequest(
+                        kind: .pluginFactoryCreate,
+                        sessionID: creationSessionID,
+                        agentID: "ui",
+                        inputJSON: inputJSON,
+                        principal: .agent(sessionID: creationSessionID, agentID: "ui"),
+                        helperAPIKey: creationAPIKey,
+                        helperReviewerModelJSON: creationReviewerModelJSON
+                    )
+                )
+                workflowID = handle.workflowID
+                await pollUntilTerminal()
+                await PluginFactoryListStore.shared.reload()
+            } catch {
+                phase = .failed(step: .build, message: error.localizedDescription)
+            }
+        }
+    }
+
+    private static func editInput(
+        release: PluginFactoryRelease,
+        prompt: String
+    ) throws -> PluginFactoryCreateInput {
+        let nextVersion = nextVersion(after: release.version)
+        let skillPath = release.skillFiles.keys
+            .first { PluginFactorySkillFile.isSkillMarkdownPath($0) }
+        let skillBody = skillPath.flatMap { release.skillFiles[$0] }
+            ?? PluginFactoryRelease.defaultSkillMarkdown(pluginID: release.pluginID)
+        let description = """
+        EDIT existing Agent Plugin \(release.pluginID) at version \(release.version). \
+        Ship version \(nextVersion) (do not reuse \(release.version)).
+        User change request:
+        \(prompt.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        Keep a complete Agent Plugin package: plugin.json + skills/<name>/SKILL.md (+ references if needed) + Go guest. \
+        Do not invent app.derrick/runtime.json.
+
+        Current SKILL.md:
+        \(skillBody)
+
+        Current guest source (adapt as needed):
+        \(String(release.guestSource.prefix(12_000)))
+        """
+        let isConnector = release.manifestJSON.contains("\"role\":\"connector\"")
+            || release.manifestJSON.contains("\"role\": \"connector\"")
+        if isConnector {
+            let vendor: PluginFactoryCreateInput.ConnectorVendor =
+                release.pluginID.localizedCaseInsensitiveContains("slack") ? .slack : .custom
+            return PluginFactoryCreateInput.makeConnector(
+                vendor: vendor,
+                pluginID: release.pluginID,
+                customVendorName: vendor == .custom ? release.pluginID : nil,
+                scope: .fullSync,
+                userDescription: description
+            )
+        }
+        return PluginFactoryCreateInput(
+            pluginType: .custom,
+            description: description,
+            pluginID: release.pluginID,
+            skillMarkdown: skillBody
+        )
+    }
+
+    private static func nextVersion(after version: String) -> String {
+        let parts = version.split(separator: ".").compactMap { Int($0) }
+        if parts.count >= 3 {
+            return "\(parts[0]).\(parts[1]).\(parts[2] + 1)"
+        }
+        if parts.count == 2 {
+            return "\(parts[0]).\(parts[1]).1"
+        }
+        if parts.count == 1 {
+            return "\(parts[0]).0.1"
+        }
+        return "0.1.1"
+    }
+
     private func startFactoryCreation() {
         guard let creationAPIKey, !creationAPIKey.isEmpty else {
             phase = .failed(
@@ -470,12 +595,28 @@ final class PluginCreationController: ObservableObject {
                     markProgressCompleted("review")
                     markProgressCompleted("trial")
                     await PluginFactoryListStore.shared.reload()
-                    if let pluginID = parseSuccessPluginID(result.resultJSON) {
+                    if let saved = parseSuccessResult(result.resultJSON) {
                         markProgressCompleted("credentials")
-                        phase = .succeeded(pluginID: pluginID, outcome: .plugin)
+                        phase = .succeeded(pluginID: saved.pluginID, outcome: .plugin)
+                        NotificationCenter.default.post(
+                            name: ChatShellNotification.pluginFactorySucceeded,
+                            object: nil,
+                            userInfo: [
+                                ChatShellNotification.pluginIDUserInfoKey: saved.pluginID,
+                                ChatShellNotification.pluginVersionUserInfoKey: saved.version,
+                            ]
+                        )
                     } else if let saved = PluginFactoryListStore.shared.releases.first {
                         markProgressCompleted("credentials")
                         phase = .succeeded(pluginID: saved.pluginID, outcome: .plugin)
+                        NotificationCenter.default.post(
+                            name: ChatShellNotification.pluginFactorySucceeded,
+                            object: nil,
+                            userInfo: [
+                                ChatShellNotification.pluginIDUserInfoKey: saved.pluginID,
+                                ChatShellNotification.pluginVersionUserInfoKey: saved.version,
+                            ]
+                        )
                     } else {
                         phase = .failed(
                             step: .build,
@@ -517,13 +658,13 @@ final class PluginCreationController: ObservableObject {
         }
     }
 
-    private func parseSuccessPluginID(_ json: String?) -> String? {
+    private func parseSuccessResult(_ json: String?) -> PluginFactoryCreateResult? {
         guard let json, let data = json.data(using: .utf8),
               let result = try? JSONDecoder.service.decode(PluginFactoryCreateResult.self, from: data)
         else {
             return nil
         }
-        return result.pluginID
+        return result
     }
 
     private func startAuthDiscovery() {

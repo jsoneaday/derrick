@@ -185,4 +185,14 @@ public extension DBRepository {
             )
         }
     }
+
+    /// Replaces an existing version in place after a manual package edit.
+    /// The content hash must match the edited package files.
+    func replacePluginFactoryRelease(_ release: PluginFactoryRelease) throws {
+        guard release.verifyIntegrity() else {
+            throw DBRepositoryError.sqliteOperationFailed("Refusing to store a release with an invalid content hash.")
+        }
+        try deletePluginFactoryRelease(pluginID: release.pluginID, version: release.version)
+        try savePluginFactoryRelease(release)
+    }
 }

@@ -236,6 +236,11 @@ public struct PluginFactorySkillFile: Codable, Sendable, Hashable {
     }
 
     public static func isValidPath(_ path: String) -> Bool {
+        isSkillMarkdownPath(path) || isSkillReferencePath(path)
+    }
+
+    /// Agent Skills required file: `skills/<name>/SKILL.md`.
+    public static func isSkillMarkdownPath(_ path: String) -> Bool {
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
         guard components.count == 3,
               components[0] == "skills",
@@ -243,7 +248,25 @@ public struct PluginFactorySkillFile: Codable, Sendable, Hashable {
         else {
             return false
         }
-        return components[1].range(
+        return isValidSkillDirectoryName(String(components[1]))
+    }
+
+    /// Optional progressive-disclosure assets under a skill.
+    public static func isSkillReferencePath(_ path: String) -> Bool {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.count == 4,
+              components[0] == "skills",
+              components[2] == "references",
+              !components[3].isEmpty,
+              !components[3].contains("..")
+        else {
+            return false
+        }
+        return isValidSkillDirectoryName(String(components[1]))
+    }
+
+    private static func isValidSkillDirectoryName(_ name: String) -> Bool {
+        name.range(
             of: #"^[A-Za-z0-9][A-Za-z0-9_-]*$"#,
             options: .regularExpression
         ) != nil
@@ -470,6 +493,9 @@ public struct PluginFactoryBuilderResponse: Codable, Sendable, Hashable {
             }
             files[skill.path] = skill.body
         }
+        guard files.keys.contains(where: { PluginFactorySkillFile.isSkillMarkdownPath($0) }) else {
+            throw PluginFactoryError.missingSkillFiles
+        }
         return try PluginFactoryDraft(
             manifest: PluginFactoryManifestInput(
                 pluginID: pluginID,
@@ -601,6 +627,10 @@ public struct PluginFactoryReleaseSummary: Identifiable, Sendable, Hashable {
 }
 
 public struct PluginFactoryRelease: Sendable, Hashable {
+    public static let compiledArtifactPackagePath = "app.derrick/plugin"
+    public static let manifestPackagePath = "plugin.json"
+    public static let runtimePackagePath = "app.derrick/runtime.json"
+
     public let pluginID: String
     public let version: String
     public let manifestJSON: String
@@ -634,10 +664,11 @@ public struct PluginFactoryRelease: Sendable, Hashable {
     }
 
     /// Recompute the digest immediately before execution. A release is usable
-    /// only when its manifest, source, skills, runtime metadata, and binary
-    /// still match the digest captured at promotion.
+    /// only when its manifest, source, skills, and binary still match the digest
+    /// captured at promotion. Legacy releases that hashed `runtime.json` still verify.
     public func verifyIntegrity() -> Bool {
         Self.verifyIntegrity(files: packageFiles(), expected: contentHash)
+            || Self.verifyIntegrity(files: legacyPackageFilesIncludingRuntime(), expected: contentHash)
     }
 
     /// Verifies files read back from storage before a release is executed.
@@ -648,27 +679,155 @@ public struct PluginFactoryRelease: Sendable, Hashable {
         PluginContentHash.hash(files: files) == expected
     }
 
+    /// Agent Plugin package members used for hashing. No proprietary `runtime.json`.
     public func packageFiles() -> [String: Data] {
         let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
-            runtimeJSON: runtimeJSON,
+            runtimeJSON: "",
             manifestJSON: manifestJSON
         )
         var files: [String: Data] = [
-            "plugin.json": Data(manifestJSON.utf8),
-            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
+            Self.manifestPackagePath: Data(manifestJSON.utf8),
             guestPath: Data(guestSource.utf8),
-            "app.derrick/plugin": compiledArtifact,
+            Self.compiledArtifactPackagePath: compiledArtifact,
         ]
         for (path, body) in skillFiles {
             files[path] = Data(body.utf8)
         }
         return files
     }
+
+    /// Pre-revamp packages included `app.derrick/runtime.json` in the digest.
+    public func legacyPackageFilesIncludingRuntime() -> [String: Data] {
+        var files = packageFiles()
+        let trimmed = runtimeJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return files }
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: runtimeJSON,
+            manifestJSON: manifestJSON
+        )
+        files[guestPath] = Data(guestSource.utf8)
+        files[Self.runtimePackagePath] = Data(runtimeJSON.utf8)
+        return files
+    }
+
+    /// Text package members (includes legacy runtime when present). Prefer `browserPackageFiles`.
+    public func editableTextPackageFiles() -> [(path: String, body: String)] {
+        browserPackageFiles()
+    }
+
+    /// Readonly Plugins browser: pretty `plugin.json`, Go source, skills/references.
+    /// Omits compiled binary and proprietary `runtime.json`.
+    public func browserPackageFiles() -> [(path: String, body: String)] {
+        let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: "",
+            manifestJSON: manifestJSON
+        )
+        var items: [(path: String, body: String)] = [
+            (Self.manifestPackagePath, Self.prettyPrintedJSON(manifestJSON)),
+            (guestPath, guestSource),
+        ]
+        for path in skillFiles.keys.sorted() {
+            let body = skillFiles[path] ?? ""
+            items.append((path, path.hasSuffix(".json") ? Self.prettyPrintedJSON(body) : body))
+        }
+        return items
+    }
+
+    /// - Warning: Deprecated name; use `browserPackageFiles()`.
+    public func browserEditableTextPackageFiles() -> [(path: String, body: String)] {
+        browserPackageFiles()
+    }
+
+    public static func prettyPrintedJSON(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.prettyPrinted, .sortedKeys]
+              ),
+              let text = String(data: pretty, encoding: .utf8)
+        else {
+            return raw
+        }
+        return text
+    }
+
+    public static func defaultSkillPackagePath(pluginID: String) -> String {
+        "skills/\(pluginID)/SKILL.md"
+    }
+
+    public static func defaultSkillMarkdown(pluginID: String) -> String {
+        """
+        ---
+        name: \(pluginID)
+        description: Describe when Derrick should use /\(pluginID).
+        ---
+
+        # /\(pluginID)
+
+        Explain what this plugin does and when to call it.
+        """
+    }
+
+    /// Rebuilds this release from edited text files, keeping the compiled artifact.
+    /// Paths that are not package text members are ignored. Does not write `runtime.json`.
+    public func replacingEditableTextPackageFiles(
+        _ files: [String: String]
+    ) -> PluginFactoryRelease {
+        let newManifest = files[Self.manifestPackagePath] ?? manifestJSON
+        let oldGuestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: "",
+            manifestJSON: manifestJSON
+        )
+        let newGuestPath = PluginFactoryRuntime.guestSourcePackagePath(
+            runtimeJSON: "",
+            manifestJSON: newManifest
+        )
+        let newGuest = files[newGuestPath] ?? files[oldGuestPath] ?? guestSource
+
+        let reserved: Set<String> = [
+            Self.manifestPackagePath,
+            Self.runtimePackagePath,
+            Self.compiledArtifactPackagePath,
+            oldGuestPath,
+            newGuestPath,
+        ]
+        var newSkills: [String: String] = [:]
+        for (path, body) in files where !reserved.contains(path) {
+            newSkills[path] = body
+        }
+        for (path, body) in skillFiles where newSkills[path] == nil && files[path] == nil {
+            newSkills[path] = body
+        }
+
+        var package: [String: Data] = [
+            Self.manifestPackagePath: Data(newManifest.utf8),
+            newGuestPath: Data(newGuest.utf8),
+            Self.compiledArtifactPackagePath: compiledArtifact,
+        ]
+        for (path, body) in newSkills {
+            package[path] = Data(body.utf8)
+        }
+
+        return PluginFactoryRelease(
+            pluginID: pluginID,
+            version: version,
+            manifestJSON: newManifest,
+            runtimeJSON: "",
+            guestSource: newGuest,
+            compiledArtifact: compiledArtifact,
+            skillFiles: newSkills,
+            contentHash: PluginContentHash.hash(files: package),
+            reviewSummary: reviewSummary
+        )
+    }
 }
 
 public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
     case invalidManifest(String)
     case invalidSkillPath(String)
+    case missingSkillFiles
     case reservedPluginID(String)
     case invalidSource(String)
     case directRunFailed(String)
@@ -683,7 +842,7 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         switch self {
         case .directRunFailed, .invalidDirectOutput:
             return true
-        case .invalidSkillPath, .invalidManifest, .invalidSource:
+        case .invalidSkillPath, .missingSkillFiles, .invalidManifest, .invalidSource:
             return true
         case .reviewRejected, .draftValidationFailed:
             return true
@@ -696,7 +855,9 @@ public enum PluginFactoryError: Error, LocalizedError, Equatable, Sendable {
         switch self {
         case .invalidManifest(let message): return "Invalid Agent Plugin manifest: \(message)"
         case .invalidSkillPath(let path):
-            return "Invalid skill path '\(path)'. Skill path must be skills/<name>/SKILL.md."
+            return "Invalid skill path '\(path)'. Use skills/<name>/SKILL.md or skills/<name>/references/<file>."
+        case .missingSkillFiles:
+            return "Agent Plugin packages require at least one skills/<name>/SKILL.md file."
         case .reservedPluginID(let id): return "The plugin id '\(id)' is reserved by Derrick."
         case .invalidSource(let message): return "Invalid Go guest source: \(message)"
         case .directRunFailed(let message): return "Go draft test failed: \(message)"

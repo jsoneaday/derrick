@@ -81,16 +81,17 @@ struct ChatTab: Identifiable, Hashable {
         return (rest, nil)
     }
 
-    /// Recents can restore this tab with no turns; New plugin must still show the creator.
+    /// Recents can restore this tab with no turns; Plugins must still show the creator.
     static func pluginCreator(existing: ChatTab? = nil) -> ChatTab {
         var tab = existing ?? ChatTab(
             id: PluginSpecProcession.newCreatorTabID(),
-            title: PluginSpecProcession.creatorTabTitlePrefix,
+            title: PluginSpecProcession.pluginsTabTitle,
             isPluginCreator: true,
             specSession: PluginSpecSession()
         )
-        if tab.title.isEmpty {
-            tab.title = PluginSpecProcession.creatorTabTitlePrefix
+        if tab.title.isEmpty || tab.title == PluginSpecProcession.creatorTabTitlePrefix
+            || tab.title.hasPrefix(PluginSpecProcession.creatorTabTitlePrefix + " - ") {
+            tab.title = PluginSpecProcession.pluginsTabTitle
         }
         tab.isPluginCreator = true
         if tab.specSession == nil {
@@ -99,7 +100,7 @@ struct ChatTab: Identifiable, Hashable {
         if tab.turns.isEmpty {
             tab.turns = [
                 ChatTurn(
-                    prompt: "Create plugin",
+                    prompt: PluginSpecProcession.creatorTabTitlePrefix,
                     response: PluginSpecProcession.openingQuestion,
                     status: .complete
                 ),
@@ -121,10 +122,7 @@ struct ChatTab: Identifiable, Hashable {
                 toolName: isDocsReview ? AllowedMCPTool.webSearch.rawValue : nil
             )
         )
-        if let outcome = session.draft.claimedOutcome,
-           !outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            title = PluginSpecProcession.creatorTabTitle(from: outcome)
-        }
+        title = PluginSpecProcession.pluginsTabTitle
         return turn
     }
 

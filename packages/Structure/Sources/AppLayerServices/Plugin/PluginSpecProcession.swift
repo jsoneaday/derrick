@@ -53,6 +53,9 @@ public struct PluginSpecTurn: Equatable, Sendable {
 public enum PluginSpecProcession: Sendable {
     public static let creatorTabID = "plugin-creator"
     public static let creatorTabIDPrefix = "plugin-creator"
+    /// Chat tab title for the Plugins workspace (Create plugin + Plugins browser).
+    public static let pluginsTabTitle = "Plugins"
+    /// Label for the Create plugin subtab and seeded creator turn prompt.
     public static let creatorTabTitlePrefix = "Create plugin"
     public static let creatorTabTitleSnippetLimit = 42
 
