@@ -36,6 +36,17 @@ final class PluginCreationController: ObservableObject {
         var status: Status
     }
 
+    /// Host create order: credentials → Agent Plugin spec → docs → SKILL.md → build.
+    static let factoryProgressStepOrder: [(id: String, title: String)] = [
+        ("credentials", "Save credentials"),
+        ("spec", "Read Agent Plugin spec"),
+        ("docs", "Read API docs"),
+        ("skill", "Write SKILL.md"),
+        ("factory", "Build guest program"),
+        ("review", "Safety review"),
+        ("trial", "Trial run"),
+    ]
+
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var statusMessage = ""
     @Published private(set) var progressSteps: [ProgressStepState] = []
@@ -483,14 +494,10 @@ final class PluginCreationController: ObservableObject {
     }
 
     private func resetProgressSteps() {
-        progressSteps = [
-            ProgressStepState(id: "skill", title: "Write SKILL.md", status: .completed),
-            ProgressStepState(id: "docs", title: "Read API docs", status: .pending),
-            ProgressStepState(id: "credentials", title: "Save credentials", status: .pending),
-            ProgressStepState(id: "factory", title: "Build guest program", status: .pending),
-            ProgressStepState(id: "review", title: "Safety review", status: .pending),
-            ProgressStepState(id: "trial", title: "Trial run", status: .pending),
-        ]
+        // Order matches the host workflow: credentials → Agent Plugin spec → docs → SKILL.md → build.
+        progressSteps = Self.factoryProgressStepOrder.map {
+            ProgressStepState(id: $0.id, title: $0.title, status: .pending)
+        }
         if skillDraft.plannedKind == .customCapability {
             setProgressStep("docs", status: .completed)
             setProgressStep("credentials", status: .completed)
@@ -512,18 +519,38 @@ final class PluginCreationController: ObservableObject {
 
     private func markProgressFailed(fromStage stage: String?) {
         switch stage?.lowercased() {
-        case "crawl", "docs":
-            setProgressStep("docs", status: .failed)
         case "credentials", "auth":
-            markProgressCompleted("docs")
             setProgressStep("credentials", status: .failed)
-        case "factory", "build":
-            markProgressCompleted("docs")
+        case "spec", "validate":
             markProgressCompleted("credentials")
+            setProgressStep("spec", status: .failed)
+        case "crawl", "docs":
+            markProgressCompleted("credentials")
+            markProgressCompleted("spec")
+            setProgressStep("docs", status: .failed)
+        case "skill":
+            markProgressCompleted("credentials")
+            markProgressCompleted("spec")
+            markProgressCompleted("docs")
+            setProgressStep("skill", status: .failed)
+        case "factory", "build", "builder", "package":
+            markProgressCompleted("credentials")
+            markProgressCompleted("spec")
+            markProgressCompleted("docs")
+            markProgressCompleted("skill")
             setProgressStep("factory", status: .failed)
-        case "review":
-            markProgressCompleted("docs")
+        case "trial":
             markProgressCompleted("credentials")
+            markProgressCompleted("spec")
+            markProgressCompleted("docs")
+            markProgressCompleted("skill")
+            markProgressCompleted("factory")
+            setProgressStep("trial", status: .failed)
+        case "review":
+            markProgressCompleted("credentials")
+            markProgressCompleted("spec")
+            markProgressCompleted("docs")
+            markProgressCompleted("skill")
             markProgressCompleted("factory")
             setProgressStep("review", status: .failed)
         default:
@@ -535,15 +562,43 @@ final class PluginCreationController: ObservableObject {
         switch event.kind {
         case "progress":
             switch event.stage {
+            case "validate", "spec":
+                markProgressCompleted("credentials")
+                markProgressActive("spec")
             case "docs":
+                markProgressCompleted("credentials")
+                markProgressCompleted("spec")
                 markProgressActive("docs")
-            case "factory":
-                markProgressCompleted("docs")
+            case "skill":
                 markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressActive("skill")
+            case "factory", "builder", "package":
+                markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressCompleted("skill")
                 markProgressActive("factory")
-            case "complete":
-                markProgressCompleted("docs")
+            case "trial":
                 markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressCompleted("skill")
+                markProgressCompleted("factory")
+                markProgressActive("trial")
+            case "review":
+                markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressCompleted("skill")
+                markProgressCompleted("factory")
+                markProgressActive("review")
+            case "promote", "complete":
+                markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressCompleted("skill")
                 markProgressCompleted("factory")
                 markProgressCompleted("review")
                 markProgressCompleted("trial")
@@ -553,8 +608,10 @@ final class PluginCreationController: ObservableObject {
         case "log":
             let message = event.message
             if message.contains("draft_started") || message.contains("direct_test") {
-                markProgressCompleted("docs")
                 markProgressCompleted("credentials")
+                markProgressCompleted("spec")
+                markProgressCompleted("docs")
+                markProgressCompleted("skill")
                 markProgressActive("factory")
             }
             if message.contains("review decision=approved") {
@@ -590,13 +647,15 @@ final class PluginCreationController: ObservableObject {
                 }
                 switch result.status {
                 case .completed:
+                    markProgressCompleted("credentials")
+                    markProgressCompleted("spec")
                     markProgressCompleted("docs")
+                    markProgressCompleted("skill")
                     markProgressCompleted("factory")
                     markProgressCompleted("review")
                     markProgressCompleted("trial")
                     await PluginFactoryListStore.shared.reload()
                     if let saved = parseSuccessResult(result.resultJSON) {
-                        markProgressCompleted("credentials")
                         phase = .succeeded(pluginID: saved.pluginID, outcome: .plugin)
                         NotificationCenter.default.post(
                             name: ChatShellNotification.pluginFactorySucceeded,
@@ -607,7 +666,6 @@ final class PluginCreationController: ObservableObject {
                             ]
                         )
                     } else if let saved = PluginFactoryListStore.shared.releases.first {
-                        markProgressCompleted("credentials")
                         phase = .succeeded(pluginID: saved.pluginID, outcome: .plugin)
                         NotificationCenter.default.post(
                             name: ChatShellNotification.pluginFactorySucceeded,

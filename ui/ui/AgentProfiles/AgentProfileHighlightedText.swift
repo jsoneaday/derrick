@@ -1,3 +1,4 @@
+import AppKit
 import Structure
 import SwiftUI
 
@@ -24,14 +25,16 @@ struct AgentProfileHighlightedText: View {
 
 struct MessagingMarkdownText: View {
     let text: String
-    var font: Font = .body
     var baseColor: Color = .primary
+    var fontSize: CGFloat = 13
 
     var body: some View {
-        Text(Self.attributed(text))
-            .font(font)
-            .foregroundStyle(baseColor)
-            .textSelection(.enabled)
+        let attributed = Self.attributed(text)
+        SelectableLinkTextView(
+            attributedString: attributed,
+            fontSize: fontSize,
+            textColor: NSColor(baseColor)
+        )
     }
 
     static func attributed(_ text: String) -> AttributedString {

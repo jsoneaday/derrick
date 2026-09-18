@@ -27,9 +27,11 @@ enum ConnectorAuthPreference: Sendable {
         }
 
         // Derrick cannot run an OAuth install dance. Ask for a call token instead.
+        // Use `bot_token` so host prompts, Keychain slots, and connector runtime agree
+        // (daemon/ingress look for bot_token first; api_token alone used to look "missing").
         if discovery.authScheme == .oauth || discovery.secrets.contains(where: isInstallCredential) {
             if let fallback = try? PluginSecretField(
-                id: "api_token",
+                id: "bot_token",
                 label: "API token or bot token",
                 kind: .token
             ) {

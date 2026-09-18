@@ -67,7 +67,10 @@ actor MCPServiceToolHost {
                     code: "plugin_factory"
                 )
                 if let progress = WorkflowProgressPublisher.userFacingFactoryProgress(from: message) {
-                    await WorkflowProgressPublisher.publish(stage: "factory", message: progress)
+                    await WorkflowProgressPublisher.publish(
+                        stage: WorkflowProgressPublisher.factoryStage(from: message),
+                        message: progress
+                    )
                 }
             },
         )

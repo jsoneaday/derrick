@@ -41,6 +41,8 @@ public enum ConnectorContractPrompts: Sendable {
         vendor: PluginFactoryCreateInput.ConnectorVendor?,
         crawlSummary: String?,
         inboxAPISummary: String? = nil,
+        agentPluginSpecSummary: String? = nil,
+        agentPluginSpecSourceURL: String? = nil,
         reference: String?,
         includeVendorBindings: Bool = true
     ) throws -> String {
@@ -51,21 +53,35 @@ public enum ConnectorContractPrompts: Sendable {
             "Create an Agent Plugin messaging connector for \(vendorLabel).",
             "Scope id: \(scopeID)",
             "Implement messaging_ops: \(scopeSpec.ops.map { "\"\($0)\"" }.joined(separator: ", ")).",
+        ]
+        if let agentPluginSpecSummary, !agentPluginSpecSummary.isEmpty {
+            parts.append(
+                AgentPluginSpec.forcedPromptBlock(
+                    summary: agentPluginSpecSummary,
+                    sourceURL: agentPluginSpecSourceURL
+                )
+            )
+        }
+        parts.append(
             try dump(
                 scopeID: scopeID,
                 vendorName: includeVendorBindings ? vendor?.rawValue : nil,
                 preamble: "Obey this protocol JSON. Do not add ops or vendor calls outside it. Vendor HTTP bindings are host facts; use those URLs."
-            ),
+            )
+        )
+        parts.append(
             """
             test_input_json must include a hops array with http_results fixtures that exercise every messaging_op you implement \
             (\(scopeSpec.ops.joined(separator: ", "))) through to result.emit.
-            """,
+            """
+        )
+        parts.append(
             PluginFactoryCreateInput.defaultDescription(
                 vendor: vendor,
                 customVendorName: vendor == .custom ? vendorLabel : nil,
                 scope: scope
-            ),
-        ]
+            )
+        )
         if let reference, !reference.isEmpty {
             parts.append(reference)
         }

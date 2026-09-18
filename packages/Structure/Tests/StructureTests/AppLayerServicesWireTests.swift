@@ -502,6 +502,42 @@ import Testing
         #expect(try PluginSecretKeychain.load(pluginID: destID, fieldID: "bot_token") == "legacy-token")
     }
 
+    @Test func pluginSecretResolverAcceptsApiTokenCallCredentialAlias() throws {
+        let pluginID = "test-api-token-alias-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "api_token")
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "bot_token")
+        }
+        try PluginSecretKeychain.save(
+            pluginID: pluginID,
+            fieldID: "api_token",
+            value: "xoxb-create"
+        )
+        #expect(PluginSecretResolver.hasCallCredential(pluginID: pluginID))
+        #expect(PluginSecretResolver.resolveCallCredential(pluginID: pluginID) == "xoxb-create")
+
+        let fields = [PluginSecretDescriptor(id: "bot_token", label: "Bot token", kind: "token")]
+        PluginSecretKeychain.migrateCallCredentialAliases(pluginID: pluginID, fields: fields)
+        #expect(try PluginSecretKeychain.load(pluginID: pluginID, fieldID: "bot_token") == "xoxb-create")
+    }
+
+    @Test func hostManifestRewritesCallCredentialAliasToSchemeField() throws {
+        let auth = ConnectorAuthDiscovery(
+            authScheme: .botToken,
+            secrets: [
+                try PluginSecretField(id: "api_token", label: "API token or bot token", kind: .token),
+            ],
+            setupHint: nil,
+            crawlSummary: nil
+        )
+        let manifest = PluginFactoryManifestInput.connector(
+            pluginID: "messaging-connector-9",
+            description: "Messaging connector",
+            auth: auth
+        )
+        #expect(manifest.secrets.map(\.id) == ["bot_token"])
+    }
+
     @Test func pluginSecretKeychainSharedStoreIsReadableAfterSave() throws {
         let pluginID = "test-shared-store-\(UUID().uuidString)"
         defer {

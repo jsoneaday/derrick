@@ -43,19 +43,9 @@ struct SidebarView: View {
                     workspace = .chats
                     chatSessions.openNewChat()
                 }
-                SidebarActionRow(
-                    row: SidebarRow(
-                        id: SidebarPrimaryActions.newPlugin.id,
-                        icon: SidebarPrimaryActions.newPlugin.icon,
-                        title: SidebarPrimaryActions.newPlugin.title,
-                        isProminent: workspace == .plugins
-                    )
-                ) {
-                    NotificationCenter.default.post(
-                        name: ChatShellNotification.startPluginCreation,
-                        object: nil
-                    )
-                }
+
+                pluginsSection
+
                 SidebarActionRow(
                     row: SidebarRow(
                         id: "chats",
@@ -139,6 +129,48 @@ struct SidebarView: View {
         }
     }
 
+    private var pluginsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Parent is not navigational — Create and List do the work.
+            SidebarActionRow(
+                row: SidebarRow(
+                    id: SidebarPrimaryActions.plugins.id,
+                    icon: SidebarPrimaryActions.plugins.icon,
+                    title: SidebarPrimaryActions.plugins.title,
+                    isProminent: workspace.isPluginsSection
+                )
+            )
+            SidebarActionRow(
+                row: SidebarRow(
+                    id: SidebarPrimaryActions.pluginsCreate.id,
+                    icon: SidebarPrimaryActions.pluginsCreate.icon,
+                    title: SidebarPrimaryActions.pluginsCreate.title,
+                    isProminent: workspace == .pluginsCreate
+                ),
+                indented: true
+            ) {
+                NotificationCenter.default.post(
+                    name: ChatShellNotification.startPluginCreation,
+                    object: nil
+                )
+            }
+            SidebarActionRow(
+                row: SidebarRow(
+                    id: SidebarPrimaryActions.pluginsList.id,
+                    icon: SidebarPrimaryActions.pluginsList.icon,
+                    title: SidebarPrimaryActions.pluginsList.title,
+                    isProminent: workspace == .pluginsList
+                ),
+                indented: true
+            ) {
+                NotificationCenter.default.post(
+                    name: ChatShellNotification.openPluginList,
+                    object: nil
+                )
+            }
+        }
+    }
+
     private var debugLogsHint: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Diagnostics")
@@ -174,10 +206,7 @@ struct SidebarView: View {
                     } else {
                         ForEach(chatSessions.recentSessions) { session in
                             Button {
-                                let isCreator = session.metadata["pluginCreator"] == "true"
-                                    || PluginSpecProcession.isCreatorTabID(session.sessionID)
-                                workspace = isCreator ? .plugins : .chats
-                                chatSessions.selectSession(id: session.sessionID)
+                                openRecent(session)
                             } label: {
                                 Text(session.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                                      ? session.title!
@@ -198,6 +227,26 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private func openRecent(_ session: ChatSessionDTO) {
+        let isCreator = session.metadata["pluginCreator"] == "true"
+            || PluginSpecProcession.isCreatorTabID(session.sessionID)
+        let started = session.metadata["pluginCreatorStarted"] == "true"
+        if isCreator, !started {
+            // Unstarted Create screens are not sessions — open a fresh in-memory Create instead.
+            NotificationCenter.default.post(
+                name: ChatShellNotification.startPluginCreation,
+                object: nil
+            )
+            return
+        }
+        if isCreator {
+            workspace = .pluginsCreate
+        } else {
+            workspace = .chats
+        }
+        chatSessions.selectSession(id: session.sessionID)
     }
 }
 
@@ -238,15 +287,21 @@ struct SidebarRow: Identifiable, Hashable, Sendable {
 
 enum SidebarPrimaryActions {
     static let newChat = SidebarRow(id: "new-chat", icon: "plus.circle.fill", title: "New chat")
-    static let newPlugin = SidebarRow(id: "new-plugin", icon: "puzzlepiece.extension.fill", title: "Plugins")
+    static let plugins = SidebarRow(id: "plugins", icon: "puzzlepiece.extension.fill", title: "Plugins")
+    static let pluginsCreate = SidebarRow(id: "plugins-create", icon: "plus.square", title: "Create")
+    static let pluginsList = SidebarRow(id: "plugins-list", icon: "list.bullet", title: "List")
+    /// Kept for older tests / settings that still refer to the former single Plugins row.
+    static let newPlugin = plugins
 }
 
 struct SidebarActionRow: View {
     let row: SidebarRow
+    var indented: Bool = false
     var action: (() -> Void)?
 
-    init(row: SidebarRow, action: (() -> Void)? = nil) {
+    init(row: SidebarRow, indented: Bool = false, action: (() -> Void)? = nil) {
         self.row = row
+        self.indented = indented
         self.action = action
     }
 
@@ -268,7 +323,8 @@ struct SidebarActionRow: View {
             }
             .font(.callout)
             .padding(.vertical, 6)
-            .padding(.horizontal, 10)
+            .padding(.leading, indented ? 28 : 10)
+            .padding(.trailing, 10)
             .background(row.isProminent ? Color.black.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)

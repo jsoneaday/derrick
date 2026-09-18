@@ -101,7 +101,71 @@ public enum PluginSecretKeychain: Sendable {
         }
     }
 
+    /// When a declared call-credential field is empty, copy from a sibling alias
+    /// (`api_token` → `bot_token`, etc.) so older creates keep working.
+    public static func migrateCallCredentialAliases(
+        pluginID: String,
+        fields: [PluginSecretDescriptor]
+    ) {
+        let aliases = PluginSecretResolver.callCredentialFieldIDs
+        for field in fields {
+            guard aliases.contains(field.id),
+                  !hasKeychainValue(pluginID: pluginID, fieldID: field.id)
+            else { continue }
+            for alias in aliases where alias != field.id {
+                guard let value = try? loadFromKeychain(pluginID: pluginID, fieldID: alias)
+                else { continue }
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                try? save(pluginID: pluginID, fieldID: field.id, value: trimmed)
+                break
+            }
+        }
+    }
+
     public static func deleteForTesting(pluginID: String, fieldID: String) {
+        deleteStoredSecret(pluginID: pluginID, fieldID: fieldID)
+    }
+
+    /// Removes every stored secret for a plugin (shared app-group files + Keychain).
+    /// Pass `fieldIDs` from the manifest when known; files matching the plugin prefix are
+    /// always scanned so leftover fields from older installs are not orphaned.
+    public static func deleteAllStoredSecrets(pluginID: String, fieldIDs: [String] = []) {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var ids = Set(fieldIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        ids.formUnion(discoveredSharedStoreFieldIDs(pluginID: trimmed))
+        // Common slots even when no file / manifest was found.
+        for fallback in ["bot_token", "api_token", "api_key", "password", "username", "token"] {
+            ids.insert(fallback)
+        }
+        for fieldID in ids {
+            deleteStoredSecret(pluginID: trimmed, fieldID: fieldID)
+        }
+    }
+
+    /// Best-effort wipe of shared secret files that no longer map to an installed plugin.
+    public static func deleteOrphanedSharedSecrets(keepingPluginIDs: Set<String>) {
+        guard let directory = try? sharedStoreDirectory() else { return }
+        let prefix = "\(accountPrefix)_"
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in entries {
+            let name = url.lastPathComponent
+            guard name.hasPrefix(prefix) else { continue }
+            guard let pluginID = pluginIDFromSharedStoreFilename(name) else {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            if !keepingPluginIDs.contains(pluginID) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    private static func deleteStoredSecret(pluginID: String, fieldID: String) {
         if let url = try? sharedStoreURL(pluginID: pluginID, fieldID: fieldID) {
             try? FileManager.default.removeItem(at: url)
         }
@@ -114,6 +178,39 @@ public enum PluginSecretKeychain: Sendable {
             ]
             SecItemDelete(query as CFDictionary)
         }
+    }
+
+    private static func discoveredSharedStoreFieldIDs(pluginID: String) -> Set<String> {
+        guard let directory = try? sharedStoreDirectory() else { return [] }
+        // Filename encoding replaces `:` and `/` in the full account string.
+        // account(pluginID, "") ends with `/` → encoded prefix ends with `_`.
+        let encodedPrefix = account(pluginID: pluginID, fieldID: "")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        var fields = Set<String>()
+        for url in entries {
+            let name = url.lastPathComponent
+            guard name.hasPrefix(encodedPrefix) else { continue }
+            let field = String(name.dropFirst(encodedPrefix.count))
+            if !field.isEmpty {
+                fields.insert(field)
+            }
+        }
+        return fields
+    }
+
+    private static func pluginIDFromSharedStoreFilename(_ name: String) -> String? {
+        // plugin-secret_<pluginID>_<fieldID>  (':' and '/' already '_')
+        let prefix = "\(accountPrefix)_"
+        guard name.hasPrefix(prefix) else { return nil }
+        let rest = String(name.dropFirst(prefix.count))
+        guard let split = rest.lastIndex(of: "_") else { return nil }
+        let pluginID = String(rest[..<split])
+        return pluginID.isEmpty ? nil : pluginID
     }
 
     private static func services() -> [String] {

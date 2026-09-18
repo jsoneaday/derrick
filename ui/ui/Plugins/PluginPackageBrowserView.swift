@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PluginPackageBrowserView: View {
     @ObservedObject var controller: PluginPackageBrowserController
+    @FocusState private var editPromptFocused: Bool
 
     private let chromeFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
     private let sidebarWidth: CGFloat = 220
@@ -34,6 +35,19 @@ struct PluginPackageBrowserView: View {
         .background(chromeFill)
         .task {
             await controller.reloadList()
+        }
+        .onAppear {
+            focusEditPromptIfPossible()
+        }
+        .onChange(of: controller.selectedPluginID) { _, _ in
+            focusEditPromptIfPossible()
+        }
+    }
+
+    private func focusEditPromptIfPossible() {
+        guard controller.selectedPluginID != nil else { return }
+        DispatchQueue.main.async {
+            editPromptFocused = true
         }
     }
 
@@ -221,6 +235,7 @@ struct PluginPackageBrowserView: View {
                 )
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...5)
+                .focused($editPromptFocused)
                 .disabled(controller.selectedPluginID == nil)
                 .accessibilityIdentifier("plugin-package-edit-prompt")
 

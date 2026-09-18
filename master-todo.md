@@ -4,6 +4,32 @@ Living list. Newest decisions first. Check items off in the same change that lan
 
 ## Now
 
+### Plugin factory: staged workflow (reliability) — creation first
+
+**Goal:** Most reliable, repeatable create path so users struggle less. Workflow is the only orchestrator; every gate is host-enforced.
+
+**Create stages (do this next):**
+1. Validate input
+2. Fetch Agent Plugin spec from live published URL (https://agent-plugins.org/specification); disclaimer that the latest published version always preferred over any cached/bundled copy
+3. Fetch vendor/inbox docs (connectors) — same force-read pattern as today
+4. Builder draft
+5. Host package checks (SKILL.md, manifest, hash rules)
+6. Compile/trial
+7. Independent reviewer
+8. Promote or retry with structured feedback (attempt budget is workflow policy)
+
+Progressive disclosure stays for chat use; builder gets goal + forced summaries + prior feedback only.
+
+**Edit — deferred until create stages are correct:**
+- Today Plugins **Update**/`beginEdit` still starts `pluginFactoryCreate` (create-with-edit-prompt). Wire kind `pluginFactoryEdit` exists but is unused.
+- After create pipeline is solid: integrate edit into the **same** staged workflow (load prior release, ship new version). Do not leave edit on the older glued create path.
+
+- [x] Host force-fetch Agent Plugin spec before builder (prefer live latest; bundled fallback).
+- [x] Clearer create workflow stages (`validate` → `spec` → `docs` → `builder`/`review`/`trial` → `promote`) + stage-mapped failures.
+- [ ] Further split builder/review/trial into separate workflow tool steps (still one `plugin_factory_build` today; progress stages already map).
+- [ ] Structured retry feedback packet surfaced as first-class workflow events (session already retries inside the tool).
+- [ ] **Later:** real `pluginFactoryEdit` on the same staged pipeline.
+
 ### Messaging tabs vs Slack reply threads (locked)
 
 - **Conversations** (Slack channels/DMs the bot is in) are **tabs**. Show every discovered conversation. Only the selected tab loads the 100-message window.

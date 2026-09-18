@@ -2,10 +2,10 @@ import SwiftUI
 
 struct ChatTabBarView: View {
     enum TabFilter: Equatable {
-        /// Regular chats and plugin surfaces — never plugin-creator tabs.
+        /// Regular chats plus in-progress plugin create sessions (not fresh empty creates).
         case chats
-        /// Only the Plugins creator tab(s).
-        case plugins
+        /// Plugin creator tabs only.
+        case pluginsCreate
     }
 
     @ObservedObject var store: ChatSessionStore
@@ -18,8 +18,10 @@ struct ChatTabBarView: View {
     private var visibleTabs: [ChatTab] {
         switch filter {
         case .chats:
-            return store.tabs.filter { !$0.isPluginCreator }
-        case .plugins:
+            return store.tabs.filter { tab in
+                !tab.isPluginCreator || tab.isOngoingPluginCreator
+            }
+        case .pluginsCreate:
             return store.tabs.filter(\.isPluginCreator)
         }
     }
@@ -41,7 +43,9 @@ struct ChatTabBarView: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1)
         }
-        .accessibilityIdentifier(filter == .plugins ? "chat-tab-bar-plugins" : "chat-tab-bar-chats")
+        .accessibilityIdentifier(
+            filter == .pluginsCreate ? "chat-tab-bar-plugins-create" : "chat-tab-bar-chats"
+        )
     }
 
     private func browserTab(_ tab: ChatTab) -> some View {
@@ -86,7 +90,6 @@ struct ChatTabBarView: View {
             BrowserTabShape(cornerRadius: tabCorner)
                 .fill(isSelected ? selectedFill : Color.primary.opacity(0.03))
         }
-        // Sit on top of the strip hairline so the selected tab merges into the pane.
         .padding(.bottom, isSelected ? -1 : 0)
         .zIndex(isSelected ? 1 : 0)
     }

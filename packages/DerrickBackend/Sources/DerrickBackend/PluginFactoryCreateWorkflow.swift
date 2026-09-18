@@ -2,6 +2,9 @@ import DBRepository
 import Foundation
 import Structure
 
+/// Host-orchestrated plugin create: validate → Agent Plugin spec → vendor docs → factory build → promote.
+/// Builder/review/trial still run inside `plugin_factory_build`, but the workflow logs finer stages and
+/// maps tool failures to the matching stage for the UI.
 enum PluginFactoryCreateWorkflow {
     private struct FactoryBuildResult: Decodable {
         let ok: Bool?
@@ -19,22 +22,30 @@ enum PluginFactoryCreateWorkflow {
         }
     }
 
+    typealias ExecuteTool = (
+        String,
+        String,
+        ExecutionContextWire,
+        ServicePrincipal,
+        String?,
+        String?,
+        String,
+        String
+    ) async throws -> MCPToolCallResultDTO
+
     static func run(
         workflowID: String,
         request: WorkflowStartRequest,
         baseContext: ExecutionContextWire,
         repositoryProvider: @escaping @Sendable () async throws -> DBRepository,
-        executeTool: @escaping (
-            String,
-            String,
-            ExecutionContextWire,
-            ServicePrincipal,
-            String?,
-            String?,
-            String,
-            String
-        ) async throws -> MCPToolCallResultDTO
+        executeTool: @escaping ExecuteTool
     ) async throws {
+        try await log(
+            workflowID: workflowID,
+            stage: "validate",
+            message: "Checking plugin create inputs…",
+            repositoryProvider: repositoryProvider
+        )
         let input = try PluginFactoryCreateInput.decodeJSON(request.inputJSON)
         guard input.pluginType == .connector || input.pluginType == .custom else {
             try await fail(
@@ -64,12 +75,28 @@ enum PluginFactoryCreateWorkflow {
             return
         }
 
+        let spec = try await AgentPluginSpecFetch.resolve(
+            workflowID: workflowID,
+            request: request,
+            baseContext: baseContext,
+            executeTool: executeTool,
+            log: { message in
+                try await log(
+                    workflowID: workflowID,
+                    stage: "spec",
+                    message: message,
+                    repositoryProvider: repositoryProvider
+                )
+            }
+        )
+
         if input.pluginType == .custom {
             try await runCustomBuild(
                 workflowID: workflowID,
                 request: request,
                 input: input,
                 pluginID: pluginID,
+                spec: spec,
                 baseContext: baseContext,
                 repositoryProvider: repositoryProvider,
                 executeTool: executeTool
@@ -180,13 +207,21 @@ enum PluginFactoryCreateWorkflow {
 
         try await log(
             workflowID: workflowID,
-            stage: "factory",
-            message: "Building \(vendor.displayName) connector — waiting on the plugin builder, then tests and safety review…",
+            stage: "skill",
+            message: "Writing SKILL.md from the Agent Plugin spec…",
+            repositoryProvider: repositoryProvider
+        )
+        try await log(
+            workflowID: workflowID,
+            stage: "builder",
+            message: "Building \(vendor.displayName) connector — draft, trial, then safety review…",
             repositoryProvider: repositoryProvider
         )
         let goal = input.connectorBuildGoal(
             crawlSummary: crawlSummary,
-            inboxAPISummary: inboxAPISummary
+            inboxAPISummary: inboxAPISummary,
+            agentPluginSpecSummary: spec.summary,
+            agentPluginSpecSourceURL: spec.sourceURL
         )
         let buildArgs = try buildArguments(goal: goal, hostManifest: input.hostManifest)
         let buildResult = try await executeTool(
@@ -197,13 +232,16 @@ enum PluginFactoryCreateWorkflow {
             request.helperAPIKey,
             request.helperReviewerModelJSON,
             workflowID,
-            "factory"
+            "builder"
         )
         if buildResult.isError {
             try await fail(
                 workflowID: workflowID,
-                stage: "factory",
-                message: userFacingToolError(buildResult, fallback: "Plugin factory could not finish building the connector."),
+                stage: failureStage(from: buildResult, fallback: "builder"),
+                message: userFacingToolError(
+                    buildResult,
+                    fallback: "Plugin factory could not finish building the connector."
+                ),
                 repositoryProvider: repositoryProvider
             )
             return
@@ -220,13 +258,19 @@ enum PluginFactoryCreateWorkflow {
                 ?? "Plugin factory did not return a saved connector."
             try await fail(
                 workflowID: workflowID,
-                stage: "factory",
+                stage: "builder",
                 message: PluginFactoryCreateFailureMessage.userFacing(raw),
                 repositoryProvider: repositoryProvider
             )
             return
         }
 
+        try await log(
+            workflowID: workflowID,
+            stage: "promote",
+            message: "Saving /\(pluginID)…",
+            repositoryProvider: repositoryProvider
+        )
         let resultJSON = try JSONEncoder.service.encode(
             PluginFactoryCreateResult(
                 pluginID: pluginID,
@@ -249,26 +293,27 @@ enum PluginFactoryCreateWorkflow {
         request: WorkflowStartRequest,
         input: PluginFactoryCreateInput,
         pluginID: String,
+        spec: AgentPluginSpecFetch.Document,
         baseContext: ExecutionContextWire,
         repositoryProvider: @escaping @Sendable () async throws -> DBRepository,
-        executeTool: @escaping (
-            String,
-            String,
-            ExecutionContextWire,
-            ServicePrincipal,
-            String?,
-            String?,
-            String,
-            String
-        ) async throws -> MCPToolCallResultDTO
+        executeTool: @escaping ExecuteTool
     ) async throws {
         try await log(
             workflowID: workflowID,
-            stage: "factory",
-            message: "Writing SKILL.md, building the guest program, and running trial tests…",
+            stage: "skill",
+            message: "Writing SKILL.md from the Agent Plugin spec…",
             repositoryProvider: repositoryProvider
         )
-        let goal = input.customBuildGoal()
+        try await log(
+            workflowID: workflowID,
+            stage: "builder",
+            message: "Building the guest program and running trial tests…",
+            repositoryProvider: repositoryProvider
+        )
+        let goal = input.customBuildGoal(
+            agentPluginSpecSummary: spec.summary,
+            agentPluginSpecSourceURL: spec.sourceURL
+        )
         let buildArgs = try buildArguments(goal: goal, hostManifest: nil)
         let buildResult = try await executeTool(
             AllowedMCPTool.pluginFactoryBuild.rawValue,
@@ -278,13 +323,16 @@ enum PluginFactoryCreateWorkflow {
             request.helperAPIKey,
             request.helperReviewerModelJSON,
             workflowID,
-            "factory"
+            "builder"
         )
         if buildResult.isError {
             try await fail(
                 workflowID: workflowID,
-                stage: "factory",
-                message: userFacingToolError(buildResult, fallback: "Plugin factory could not finish building the plugin."),
+                stage: failureStage(from: buildResult, fallback: "builder"),
+                message: userFacingToolError(
+                    buildResult,
+                    fallback: "Plugin factory could not finish building the plugin."
+                ),
                 repositoryProvider: repositoryProvider
             )
             return
@@ -301,13 +349,19 @@ enum PluginFactoryCreateWorkflow {
                 ?? "Plugin factory did not return a saved plugin."
             try await fail(
                 workflowID: workflowID,
-                stage: "factory",
+                stage: "builder",
                 message: PluginFactoryCreateFailureMessage.userFacing(raw),
                 repositoryProvider: repositoryProvider
             )
             return
         }
 
+        try await log(
+            workflowID: workflowID,
+            stage: "promote",
+            message: "Saving /\(savedID)…",
+            repositoryProvider: repositoryProvider
+        )
         let resultJSON = try JSONEncoder.service.encode(
             PluginFactoryCreateResult(
                 pluginID: savedID,
@@ -343,6 +397,24 @@ enum PluginFactoryCreateWorkflow {
             return summary
         }
         return try? JSONDecoder.service.decode(FactoryBuildResult.self, from: data)
+    }
+
+    private static func failureStage(from result: MCPToolCallResultDTO, fallback: String) -> String {
+        guard let outcome = ToolExecutionOutcome.decode(from: result.text) else {
+            return fallback
+        }
+        switch outcome.stage {
+        case .review:
+            return "review"
+        case .validation:
+            return "package"
+        case .compilation:
+            return "package"
+        case .execution:
+            return "trial"
+        case .none, .network, .timeout, .persistence:
+            return fallback
+        }
     }
 
     private static func userFacingToolError(_ result: MCPToolCallResultDTO, fallback: String) -> String {

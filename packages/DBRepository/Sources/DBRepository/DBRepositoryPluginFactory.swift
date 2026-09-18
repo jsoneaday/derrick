@@ -172,18 +172,7 @@ public extension DBRepository {
     }
 
     func deletePluginFactoryRelease(pluginID: String, version: String? = nil) throws {
-        let versionClause = version.map {
-            " AND version = \(quoted($0))"
-        } ?? ""
-        try withDatabaseHandle { handle in
-            try Self.execute(
-                """
-                DELETE FROM plugin_factory_releases
-                WHERE plugin_id = \(quoted(pluginID))\(versionClause);
-                """,
-                on: handle
-            )
-        }
+        _ = try purgePlugin(pluginID: pluginID, version: version)
     }
 
     /// Replaces an existing version in place after a manual package edit.
@@ -192,7 +181,17 @@ public extension DBRepository {
         guard release.verifyIntegrity() else {
             throw DBRepositoryError.sqliteOperationFailed("Refusing to store a release with an invalid content hash.")
         }
-        try deletePluginFactoryRelease(pluginID: release.pluginID, version: release.version)
+        // Version-only row replace — do not cascade associated plugin data.
+        try withDatabaseHandle { handle in
+            try Self.execute(
+                """
+                DELETE FROM plugin_factory_releases
+                WHERE plugin_id = \(quoted(release.pluginID))
+                  AND version = \(quoted(release.version));
+                """,
+                on: handle
+            )
+        }
         try savePluginFactoryRelease(release)
     }
 }

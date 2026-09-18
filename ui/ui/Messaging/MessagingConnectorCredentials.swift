@@ -17,6 +17,7 @@ enum MessagingConnectorCredentials {
             repository: repository
         )
         migrateLegacyCredentialsIfNeeded(pluginID: pluginID, secrets: secrets)
+        PluginSecretKeychain.migrateCallCredentialAliases(pluginID: pluginID, fields: secrets)
         PluginSecretKeychain.promoteToSharedGroup(pluginID: pluginID, fields: secrets)
         PluginSecretHostMirror.syncDevelopmentSecretsToKeychain(
             pluginID: pluginID,

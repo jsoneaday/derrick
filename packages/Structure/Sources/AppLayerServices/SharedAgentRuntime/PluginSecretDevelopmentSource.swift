@@ -79,7 +79,7 @@ public enum PluginSecretDevelopmentSource: Sendable {
         // Factory Slack connectors often use slack-connector (or another unused id).
         // `.env` still documents SLACK_BOT_KEY from the original slack-connection plugin.
         if trimmedPluginID.localizedCaseInsensitiveContains("slack"),
-           ["bot_token", "token", "api_key"].contains(trimmedFieldID) {
+           PluginSecretResolver.callCredentialFieldIDs.contains(trimmedFieldID) {
             keys.append(contentsOf: ["SLACK_BOT_KEY", "SLACK_BOT_TOKEN"])
             if trimmedPluginID != "slack-connection" {
                 keys.append(environmentVariableKey(pluginID: "slack-connection", fieldID: "bot_token"))

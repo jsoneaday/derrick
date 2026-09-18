@@ -17,4 +17,12 @@ import Testing
         let attributed = MessagingMarkdownText.attributed("hello")
         #expect(String(attributed.characters) == "hello")
     }
+
+    @Test func parsesMarkdownLinks() {
+        let attributed = MessagingMarkdownText.attributed(
+            "See [AccuWeather](https://www.accuweather.com) for details."
+        )
+        #expect(attributed.containsLinks)
+        #expect(String(attributed.characters).contains("AccuWeather"))
+    }
 }

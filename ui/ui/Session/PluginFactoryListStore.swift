@@ -32,7 +32,7 @@ final class PluginFactoryListStore: ObservableObject {
 
     func configure(repository: DBRepository) async {
         self.repository = repository
-        await purgeLegacySlackConnectors()
+        await purgeOrphanedPluginData()
         await reload()
     }
 
@@ -59,35 +59,55 @@ final class PluginFactoryListStore: ObservableObject {
     func delete(_ release: PluginFactoryReleaseSummary) async {
         guard let repository else { return }
         do {
-            try await repository.deletePluginFactoryRelease(
+            var secretFields: [String] = []
+            if let full = try await repository.pluginFactoryRelease(
+                pluginID: release.pluginID,
+                version: release.version
+            ) {
+                secretFields = PluginSecretField.resolvedDescriptors(
+                    pluginID: release.pluginID,
+                    fromManifestJSON: full.manifestJSON
+                ).map(\.id)
+            }
+            let result = try await repository.purgePlugin(
                 pluginID: release.pluginID,
                 version: release.version
             )
+            if result.purgedAssociatedData {
+                PluginSecretKeychain.deleteAllStoredSecrets(
+                    pluginID: release.pluginID,
+                    fieldIDs: secretFields
+                )
+                NotificationCenter.default.post(
+                    name: ChatShellNotification.pluginDeleted,
+                    object: nil,
+                    userInfo: [ChatShellNotification.pluginIDUserInfoKey: release.pluginID]
+                )
+            }
+            _ = try await repository.purgeOrphanedPluginAssociatedData()
+            let installed = (try? await repository.listInstalledPluginIDs()) ?? []
+            PluginSecretKeychain.deleteOrphanedSharedSecrets(keepingPluginIDs: installed)
             await reload()
         } catch {
             lastError = error.localizedDescription
         }
     }
 
-    /// Removes legacy Slack reference connectors installed outside the LLM create path.
-    func purgeLegacySlackConnectors() async {
+    /// Removes leftover messaging / chat / secret data for plugins that no longer have a release.
+    func purgeOrphanedPluginData() async {
         guard let repository else { return }
         do {
-            let summaries = try await repository.listPluginFactoryReleaseSummaries()
-            var pluginIDs = Set<String>()
-            for summary in summaries where PluginFactoryLegacyPurge.isLegacySlackPluginID(summary.pluginID) {
-                pluginIDs.insert(summary.pluginID)
+            let orphanResults = try await repository.purgeOrphanedPluginAssociatedData()
+            for result in orphanResults where result.purgedAssociatedData {
+                PluginSecretKeychain.deleteAllStoredSecrets(pluginID: result.pluginID)
+                NotificationCenter.default.post(
+                    name: ChatShellNotification.pluginDeleted,
+                    object: nil,
+                    userInfo: [ChatShellNotification.pluginIDUserInfoKey: result.pluginID]
+                )
             }
-            for pluginID in pluginIDs {
-                try await repository.deletePluginFactoryRelease(pluginID: pluginID)
-            }
-            let connectors = try await repository.listMessagingConnectors()
-            let keep = Set(
-                connectors
-                    .map(\.pluginID)
-                    .filter { !PluginFactoryLegacyPurge.isLegacySlackPluginID($0) }
-            )
-            try await repository.pruneMessagingConnectors(keeping: keep)
+            let installed = (try? await repository.listInstalledPluginIDs()) ?? []
+            PluginSecretKeychain.deleteOrphanedSharedSecrets(keepingPluginIDs: installed)
         } catch {
             lastError = error.localizedDescription
         }

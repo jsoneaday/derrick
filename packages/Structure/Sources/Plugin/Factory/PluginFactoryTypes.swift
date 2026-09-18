@@ -95,7 +95,12 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
         self.permissions = permissions
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        self.secrets = Self.normalizedSecrets(pluginID: pluginID, secrets: secrets, role: role)
+        self.secrets = Self.normalizedSecrets(
+            pluginID: pluginID,
+            secrets: secrets,
+            role: role,
+            authScheme: authScheme
+        )
         self.authScheme = DerrickExtensionPointers.resolvedAuthScheme(
             declared: authScheme,
             role: role,
@@ -122,15 +127,66 @@ public struct PluginFactoryManifestInput: Sendable, Hashable {
         )
     }
 
-    /// Slack connectors always declare `bot_token` so the host can prompt or read `.env`.
+    /// Prefer one call-credential field id per auth scheme so create and runtime agree.
     private static func normalizedSecrets(
         pluginID: String,
         secrets: [PluginSecretField],
-        role: PluginRole
+        role: PluginRole,
+        authScheme: ConnectorAuthScheme?
     ) -> [PluginSecretField] {
-        if !secrets.isEmpty { return secrets }
         guard role.isConnector else { return secrets }
-        return PluginSecretField.resolvedFields(pluginID: pluginID, declared: secrets)
+        let canonical = canonicalizeCallCredentialSecrets(secrets, authScheme: authScheme)
+        if !canonical.isEmpty { return canonical }
+        return PluginSecretField.resolvedFields(pluginID: pluginID, declared: canonical)
+    }
+
+    private static func canonicalizeCallCredentialSecrets(
+        _ secrets: [PluginSecretField],
+        authScheme: ConnectorAuthScheme?
+    ) -> [PluginSecretField] {
+        guard let preferredID = preferredCallCredentialFieldID(for: authScheme) else {
+            return secrets
+        }
+        let callIDs = Set(PluginSecretResolver.callCredentialFieldIDs)
+        guard secrets.contains(where: { callIDs.contains($0.id) }) else {
+            return secrets
+        }
+        if secrets.contains(where: { $0.id == preferredID }) {
+            return secrets.filter { $0.id == preferredID || !callIDs.contains($0.id) }
+        }
+        var result: [PluginSecretField] = []
+        var replaced = false
+        for secret in secrets {
+            if callIDs.contains(secret.id) {
+                if replaced { continue }
+                if let preferred = try? PluginSecretField(
+                    id: preferredID,
+                    label: secret.label,
+                    kind: secret.kind
+                ) {
+                    result.append(preferred)
+                } else {
+                    result.append(secret)
+                }
+                replaced = true
+            } else {
+                result.append(secret)
+            }
+        }
+        return result
+    }
+
+    private static func preferredCallCredentialFieldID(
+        for authScheme: ConnectorAuthScheme?
+    ) -> String? {
+        switch authScheme {
+        case .botToken, .oauth:
+            return "bot_token"
+        case .apiKey:
+            return "api_key"
+        case .basic, .none:
+            return nil
+        }
     }
 
     public func encodedJSON() throws -> String {

@@ -57,7 +57,12 @@ import Testing
                     text: outcome
                 )
             case "web.crawl":
-                let pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+                let pages: String
+                if call.argumentsJSON.contains("agent-plugins.org") {
+                    pages = #"{"pages":[{"url":"https://agent-plugins.org/specification","title":"Spec","text":"plugin.json and skills/SKILL.md are required."}]}"#
+                } else {
+                    pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+                }
                 let outcome = try ToolExecutionOutcome.completed(
                     output: ToolExecutionOutcome.Output(format: .json, value: pages)
                 ).encodedJSON()
@@ -125,7 +130,12 @@ import Testing
         InProcessServiceBridges.mcpCallTool = { request in
             switch request.toolName {
             case "web.crawl":
-                let pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+                let pages: String
+                if request.argumentsJSON.contains("agent-plugins.org") {
+                    pages = #"{"pages":[{"url":"https://agent-plugins.org/specification","title":"Spec","text":"plugin.json and skills/SKILL.md are required."}]}"#
+                } else {
+                    pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+                }
                 let outcome = try ToolExecutionOutcome.completed(
                     output: ToolExecutionOutcome.Output(format: .json, value: pages)
                 ).encodedJSON()

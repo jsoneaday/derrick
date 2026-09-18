@@ -65,11 +65,12 @@ import Testing
         _ = PluginSpecProcession.advance(session: &session, utterance: "A short brief of my notes")
         _ = PluginSpecProcession.advance(session: &session, utterance: "files on this Mac")
         _ = PluginSpecProcession.advance(session: &session, utterance: "yes I can open them")
+        // Claimed outcome already parked Return ("brief"); after Work, triggers + Present bind
+        // and the procession asks wrongness without a Trigger question.
         _ = PluginSpecProcession.advance(session: &session, utterance: "summarize them")
-        _ = PluginSpecProcession.advance(session: &session, utterance: "a brief")
-        _ = PluginSpecProcession.advance(session: &session, utterance: "when I ask in chat")
         #expect(session.draft.present == .conversation)
         #expect(session.draft.presentSource == .inferred)
+        #expect(session.draft.triggers == [.chat, .mention, .schedule])
         #expect(session.ask == .wrongness)
         let done = PluginSpecProcession.advance(session: &session, utterance: "nothing, that is fine")
         #expect(done.isComplete)
@@ -81,46 +82,39 @@ import Testing
         _ = PluginSpecProcession.advance(session: &session, utterance: "Read my Slack inbox")
         _ = PluginSpecProcession.advance(session: &session, utterance: "Slack")
         _ = PluginSpecProcession.advance(session: &session, utterance: "yes I am logged in")
+        // "list my channels" binds Work and parks Return (.list); triggers + Present infer next.
         _ = PluginSpecProcession.advance(session: &session, utterance: "list my channels")
-        _ = PluginSpecProcession.advance(session: &session, utterance: "thread items")
-        _ = PluginSpecProcession.advance(session: &session, utterance: "from messaging")
         #expect(session.draft.present == .thread)
-        #expect(session.draft.triggers == [.messaging])
+        #expect(session.draft.triggers == [.chat, .messaging, .mention])
+        #expect(session.ask == .wrongness)
     }
 
-    @Test func triggerAcceptsEveryListedWayToCallThePlugin() {
-        var session = PluginSpecSession()
-        session.ask = .slot(.trigger)
-        session.draft.claimedOutcome = "Slack"
-        session.draft.connect = PluginConnectBinding(klass: .messagingInbox, detail: "Slack")
-        session.draft.access = .reachable
-        session.draft.work = .send
-        session.draft.returnClass = .message
-        let turn = PluginSpecProcession.advance(
-            session: &session,
-            utterance: "all of the ones you listed"
-        )
-        #expect(session.draft.triggers == Set(PluginTriggerClass.allCases))
-        #expect(session.ask != .slot(.trigger))
-        #expect(turn.reply.contains("not ready") == false)
+    @Test func triggersAreInferredForMessagingWithoutAsking() {
+        var draft = PluginSpecDraft()
+        draft.claimedOutcome = "Slack"
+        draft.connect = PluginConnectBinding(klass: .messagingInbox, detail: "Slack")
+        draft.access = .reachable
+        draft.work = .send
+        draft.returnClass = .message
+        let ask = PluginSpecProcession.nextAsk(&draft)
+        #expect(draft.triggers == [.chat, .messaging, .mention])
+        #expect(ask != .slot(.trigger))
     }
 
-    @Test func triggerAcceptsChatAndSlashTogether() {
-        var session = PluginSpecSession()
-        session.ask = .slot(.trigger)
-        session.draft.claimedOutcome = "Notes"
-        session.draft.connect = PluginConnectBinding(klass: .localFiles, detail: "files on this Mac")
-        session.draft.access = .reachable
-        session.draft.work = .summarize
-        session.draft.returnClass = .brief
-        _ = PluginSpecProcession.advance(
-            session: &session,
-            utterance: "when I ask in chat and when I type /name"
-        )
-        #expect(session.draft.triggers == [.chat, .mention])
+    @Test func triggersAreInferredForCustomWithoutAsking() {
+        var draft = PluginSpecDraft()
+        draft.claimedOutcome = "Summarize notes"
+        draft.connect = PluginConnectBinding(klass: .localFiles, detail: "files on this Mac")
+        draft.access = .reachable
+        draft.work = .summarize
+        draft.returnClass = .brief
+        let ask = PluginSpecProcession.nextAsk(&draft)
+        #expect(draft.triggers == [.chat, .mention, .schedule])
+        #expect(ask != .slot(.trigger))
+        #expect(ask == .wrongness || ask == .presentChoice)
     }
 
-    @Test func allThreeSoundsGoodBindsEveryTrigger() {
+    @Test func triggerClassifierStillParsesVolunteeredWays() {
         #expect(
             PluginSpecClassifier.triggers(from: "all")
                 == Set(PluginTriggerClass.allCases)
@@ -135,7 +129,7 @@ import Testing
         )
     }
 
-    @Test func slackScreenshotConversationBindsEveryTriggerAndDoesNotRepeatTheAsk() {
+    @Test func slackScreenshotConversationSkipsTriggerAskAfterCredentials() {
         var session = PluginSpecSession()
         let afterGoal = PluginSpecProcession.advance(
             session: &session,
@@ -183,20 +177,10 @@ import Testing
         let afterForm = PluginSpecProcession.completeAccessCollection(session: &session)
         #expect(session.accessSecretsCollected)
         #expect(session.draft.access == .reachable)
-        #expect(session.ask == .slot(.trigger))
-        #expect(afterForm.reply == "How would you like to run this plugin? You can pick more than one: chat, a job or schedule, typing /name, or from messaging.")
-        #expect(afterForm.reply.contains("job/schedule") == false)
-
-        let unclear = PluginSpecProcession.advance(session: &session, utterance: "whatever you think")
-        #expect(session.ask == .slot(.trigger))
-        #expect(unclear.reply == "You can pick more than one: chat, a job or schedule, typing /name, or from messaging.")
-        #expect(unclear.reply.contains("job/schedule") == false)
-
-        let bound = PluginSpecProcession.advance(session: &session, utterance: "all three sounds good")
-        #expect(session.draft.triggers == Set(PluginTriggerClass.allCases))
+        #expect(session.draft.triggers == [.chat, .messaging, .mention])
         #expect(session.ask != .slot(.trigger))
-        #expect(bound.reply != PluginSpecProcession.question(for: .slot(.trigger)))
-        #expect(bound.reply != unclear.reply)
+        #expect(afterForm.reply.contains("How would you like to run") == false)
+        #expect(session.ask == .wrongness || session.ask == .presentChoice || session.ask == .slot(.work) || session.ask == .slot(.returnPayload))
     }
 
     @Test func creatorTabTitleUsesDescriptionAndTruncates() {
@@ -309,7 +293,7 @@ import Testing
         )
         #expect(oauthOnly.preferringCallCredential().authScheme == .botToken)
         #expect(oauthOnly.preferringCallCredential().authScheme.isSupportedInWizard)
-        #expect(oauthOnly.preferringCallCredential().secrets.map(\.id) == ["api_token"])
+        #expect(oauthOnly.preferringCallCredential().secrets.map(\.id) == ["bot_token"])
         #expect(oauthOnly.preferringCallCredential().secrets.map(\.id).contains("client_id") == false)
     }
 
@@ -574,7 +558,7 @@ import Testing
         )
         #expect(input.pluginID == "slack-connector-1")
         #expect(input.auth?.authScheme.isSupportedInWizard == true)
-        #expect(input.auth?.secrets.map(\.id) == ["api_token"])
+        #expect(input.auth?.secrets.map(\.id) == ["bot_token"])
         #expect(
             PluginAccessAskPolicy.credentialFormPrompt(discovery: oauthOnly)
                 .lowercased().contains("client id") == false

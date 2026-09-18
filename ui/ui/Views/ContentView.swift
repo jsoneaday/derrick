@@ -280,6 +280,7 @@ struct ContentView: View {
     @ObservedObject private var pluginFactoryList = PluginFactoryListStore.shared
     @ObservedObject private var agentProfiles = AgentProfileStore.shared
     @StateObject private var pluginCreationController = PluginCreationController()
+    @StateObject private var pluginPackageBrowser = PluginPackageBrowserController()
     @State private var pluginAutocompleteHighlight = 0
     @State private var pluginAutocompleteDismissed = false
 
@@ -414,32 +415,17 @@ struct ContentView: View {
             }
 
             VStack(spacing: 0) {
-                if workspace != .debugLogs {
-                    ChatTabBarView(
-                        store: chatSessions,
-                        filter: workspace == .plugins ? .plugins : .chats
-                    )
-                }
                 switch workspace {
                 case .debugLogs:
                     DebugLogsView(repository: repository)
-                case .chats, .plugins:
-                    if chatSessions.selectedTab?.surface == .thread {
-                        MessagingConversationView(
-                            store: messaging,
-                            onInboundBannerTap: {
-                                Task { @MainActor in
-                                    await openInboundBannerConversation()
-                                }
-                            },
-                            presentsInbox: chatSessions.selectedTab?.threadID == nil
-                        )
-                    } else if let surface = chatSessions.selectedTab?.surface,
-                              surface == .generatedView || surface == .file || surface == .image {
-                        PluginPresentTabBody(surface: surface)
-                    } else {
-                        mainPanel
-                    }
+                case .pluginsList:
+                    PluginPackageBrowserView(controller: pluginPackageBrowser)
+                case .chats:
+                    ChatTabBarView(store: chatSessions, filter: .chats)
+                    chatsMainContent
+                case .pluginsCreate:
+                    ChatTabBarView(store: chatSessions, filter: .pluginsCreate)
+                    mainPanel
                 }
             }
             .overlay {
@@ -475,9 +461,10 @@ struct ContentView: View {
             switch newValue {
             case .chats:
                 ensureChatMenuSelection()
-            case .plugins:
-                ensurePluginsMenuSelection()
-            case .debugLogs:
+                requestPromptFocusIfNeeded()
+            case .pluginsCreate:
+                requestPromptFocusIfNeeded()
+            case .pluginsList, .debugLogs:
                 break
             }
         }
@@ -485,10 +472,15 @@ struct ContentView: View {
             Task { @MainActor in
                 await syncSelectedChatTabWithMessaging()
             }
+            requestPromptFocusIfNeeded()
         }
         .onAppear {
             messaging.setWorkspaceActive(chatSessions.selectedTab?.surface == .thread)
             refreshProviderCredentialUI()
+            if workspace == .chats {
+                ensureChatMenuSelection()
+                requestPromptFocusIfNeeded()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshProviderCredentialUI()
@@ -535,7 +527,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginCreation)) { _ in
             bindPluginCreatorCompletion()
             chatSessions.openOrFocusPluginCreator()
-            workspace = .plugins
+            workspace = .pluginsCreate
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginList)) { _ in
+            workspace = .pluginsList
+            Task { await pluginPackageBrowser.reloadList() }
         }
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.startPluginEdit)) { notification in
             guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
@@ -547,7 +543,7 @@ struct ContentView: View {
             else {
                 return
             }
-            workspace = .plugins
+            workspace = .pluginsList
             pluginCreationController.beginEdit(
                 pluginID: pluginID,
                 version: version,
@@ -556,6 +552,19 @@ struct ContentView: View {
                 helperAPIKey: currentHelperAPIKey,
                 helperReviewerModelJSON: currentHelperReviewerModelJSON
             )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.pluginFactorySucceeded)) { notification in
+            // Drop the Create tab that finished; Recents should not keep a leftover "Plugins" session.
+            chatSessions.retirePluginCreatorTabs()
+            workspace = .pluginsList
+            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
+                  !pluginID.isEmpty
+            else {
+                Task { await pluginPackageBrowser.reloadList() }
+                return
+            }
+            let version = notification.userInfo?[ChatShellNotification.pluginVersionUserInfoKey] as? String
+            Task { await pluginPackageBrowser.handleFactorySucceeded(pluginID: pluginID, version: version) }
         }
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginInChat)) { notification in
             guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
@@ -566,6 +575,15 @@ struct ContentView: View {
             Task { @MainActor in
                 await routeToPluginTab(pluginID)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.pluginDeleted)) { notification in
+            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
+                  !pluginID.isEmpty
+            else {
+                return
+            }
+            chatSessions.closeTabs(forPluginID: pluginID)
+            Task { await messaging.syncConnectorsFromFactory() }
         }
         .sheet(isPresented: $isPresentingAPIKeyPrompt) {
             apiKeyPrompt()
@@ -987,8 +1005,28 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private var chatsMainContent: some View {
+        if chatSessions.selectedTab?.surface == .thread {
+            MessagingConversationView(
+                store: messaging,
+                onInboundBannerTap: {
+                    Task { @MainActor in
+                        await openInboundBannerConversation()
+                    }
+                },
+                presentsInbox: chatSessions.selectedTab?.threadID == nil
+            )
+        } else if let surface = chatSessions.selectedTab?.surface,
+                  surface == .generatedView || surface == .file || surface == .image {
+            PluginPresentTabBody(surface: surface)
+        } else {
+            mainPanel
+        }
+    }
+
+    @ViewBuilder
     var mainPanel: some View {
-        let panel = Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
+        Color(red: 248.0/255.0, green: 248.0/255.0, blue: 246.0/255.0)
             .ignoresSafeArea()
             .overlay {
                 GeometryReader { proxy in
@@ -998,14 +1036,6 @@ struct ContentView: View {
                     panelContent(inputHeight: inputHeight, panelWidth: panelWidth)
                 }
             }
-        // Plugin tab + pill sub-tabs only while the Plugins menu is active.
-        if workspace == .plugins, chatSessions.selectedTab?.isPluginCreator == true {
-            PluginsWorkspaceShellView {
-                panel
-            }
-        } else {
-            panel
-        }
     }
 
     func panelContent(inputHeight: CGFloat, panelWidth: CGFloat) -> some View {
@@ -1400,6 +1430,18 @@ struct ContentView: View {
         promptFocusToken += 1
     }
 
+    private func requestPromptFocusIfNeeded() {
+        switch workspace {
+        case .chats:
+            guard chatSessions.selectedTab?.surface != .thread else { return }
+            promptFocusToken += 1
+        case .pluginsCreate:
+            promptFocusToken += 1
+        case .pluginsList, .debugLogs:
+            break
+        }
+    }
+
     private func promptInputHeight(for availableHeight: CGFloat) -> CGFloat {
         min(max(availableHeight * 0.10, 100), 300)
     }
@@ -1501,25 +1543,20 @@ struct ContentView: View {
         }
     }
 
-    /// Chat menu: hide Plugin tab by leaving any creator selection.
+    /// Chat menu: keep ongoing create sessions; leave fresh empty create screens.
     private func ensureChatMenuSelection() {
-        guard chatSessions.selectedTab?.isPluginCreator == true else { return }
-        if let chat = chatSessions.tabs.last(where: { !$0.isPluginCreator }) {
-            chatSessions.selectSession(id: chat.id)
-        } else {
-            chatSessions.openNewChat()
-        }
-    }
-
-    /// Plugins menu: show/focus a Plugin tab (creator).
-    private func ensurePluginsMenuSelection() {
-        if chatSessions.selectedTab?.isPluginCreator == true { return }
-        if let creator = chatSessions.tabs.last(where: \.isPluginCreator) {
-            chatSessions.selectSession(id: creator.id)
+        guard let selected = chatSessions.selectedTab else { return }
+        if selected.isPluginCreator, !selected.isOngoingPluginCreator {
+            if let ongoing = chatSessions.tabs.last(where: \.isOngoingPluginCreator) {
+                chatSessions.selectSession(id: ongoing.id)
+            } else if let chat = chatSessions.tabs.last(where: { !$0.isPluginCreator }) {
+                chatSessions.selectSession(id: chat.id)
+            } else {
+                chatSessions.openNewChat()
+            }
             return
         }
-        bindPluginCreatorCompletion()
-        chatSessions.openOrFocusPluginCreator()
+        // Ongoing creator or normal chat is fine under Chat.
     }
 
     private func bindPluginCreatorCompletion() {
@@ -1538,6 +1575,8 @@ struct ContentView: View {
     @discardableResult
     private func routeToPluginTab(_ pluginID: String, present: PluginPresent? = nil) async -> Bool {
         workspace = .chats
+        // Finished Create sessions must not linger next to the new plugin tab.
+        chatSessions.retirePluginCreatorTabs()
         let connector = await isMessagingConnector(pluginID)
         let binding: ChatTabSurfacePolicy.Binding
         if let present {

@@ -79,6 +79,21 @@ import Testing
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- \(GuestContract.Schema.connectorParams.rawValue) ---"))
     }
 
+    @Test func factoryGoalInjectsHostForcedAgentPluginSpec() throws {
+        let goal = try ConnectorContractPrompts.factoryGoal(
+            vendorLabel: "Slack",
+            scope: .fullSync,
+            vendor: .slack,
+            crawlSummary: nil,
+            agentPluginSpecSummary: "Skills require SKILL.md",
+            agentPluginSpecSourceURL: AgentPluginSpec.publishedURL.absoluteString,
+            reference: nil
+        )
+        #expect(goal.contains("Prefer the latest published"))
+        #expect(goal.contains("Skills require SKILL.md"))
+        #expect(goal.contains("agent-plugins.org/specification"))
+    }
+
     @Test func legacySendOnlyInputStillBuildsFullSyncGoal() throws {
         let sendOnly = """
         {"pluginType":"connector","vendor":"slack","scope":"send_only","description":"x"}
