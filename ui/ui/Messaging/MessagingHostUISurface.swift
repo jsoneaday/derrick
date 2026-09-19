@@ -45,7 +45,6 @@ struct MessagingHostUISurface: View {
             onSelectTab: { id in
                 Task { await store.selectThread(id: id) }
             },
-            onCloseTab: { _ in },
             onSubmitChannel: {
                 let text = draft
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

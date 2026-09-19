@@ -18,7 +18,6 @@ public struct HostUINodeBindings {
     public var replyThreadWarning: String?
     public var inboundBanner: String?
     public var onSelectTab: (String) -> Void
-    public var onCloseTab: (String) -> Void
     public var onSubmitChannel: () -> Void
     public var onSubmitThread: () -> Void
     public var onOpenThread: (HostUIMessageRow) -> Void
@@ -47,7 +46,6 @@ public struct HostUINodeBindings {
         replyThreadWarning: String? = nil,
         inboundBanner: String? = nil,
         onSelectTab: @escaping (String) -> Void = { _ in },
-        onCloseTab: @escaping (String) -> Void = { _ in },
         onSubmitChannel: @escaping () -> Void = {},
         onSubmitThread: @escaping () -> Void = {},
         onOpenThread: @escaping (HostUIMessageRow) -> Void = { _ in },
@@ -74,7 +72,6 @@ public struct HostUINodeBindings {
         self.replyThreadWarning = replyThreadWarning
         self.inboundBanner = inboundBanner
         self.onSelectTab = onSelectTab
-        self.onCloseTab = onCloseTab
         self.onSubmitChannel = onSubmitChannel
         self.onSubmitThread = onSubmitThread
         self.onOpenThread = onOpenThread

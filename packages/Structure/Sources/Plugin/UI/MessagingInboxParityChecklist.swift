@@ -1,7 +1,6 @@
 import Foundation
 
-/// Phase 0 parity checklist for host messaging UI.
-/// Renderer cutover must cover every item before retiring `MessagingConversationView` layout.
+/// Behaviors the host messaging inbox must keep covering after HostUI schema render.
 public enum MessagingInboxParityChecklist: String, CaseIterable, Sendable {
     case channelTabs = "channel_tabs"
     case messageList = "message_list"
