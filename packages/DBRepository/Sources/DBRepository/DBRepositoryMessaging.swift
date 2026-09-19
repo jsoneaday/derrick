@@ -64,6 +64,18 @@ public extension DBRepository {
         }
     }
 
+    /// Removes one connector and cascaded threads/messages.
+    func deleteMessagingConnector(pluginID: String) throws {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_connectors
+            WHERE plugin_id = \(quoted(trimmed));
+            """, on: handle)
+        }
+    }
+
     func setMessagingConnectorListening(pluginID: String, listening: Bool) throws {
         let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

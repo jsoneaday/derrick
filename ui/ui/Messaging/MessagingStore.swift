@@ -36,6 +36,7 @@ final class MessagingStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private lazy var connectorRuntime = ConnectorMessagingRuntime()
     private var inboundObserver: DerrickDarwinNotifyObserver?
+    private var hostUIPresentObserver: DerrickDarwinNotifyObserver?
     private var knownInboundMessageIDs: Set<String> = []
     private var inboundIDsPrimed = false
     private var inboundBannerTask: Task<Void, Never>?
@@ -58,13 +59,42 @@ final class MessagingStore: ObservableObject {
             }
         }
         inboundObserver?.start()
+        hostUIPresentObserver = DerrickDarwinNotifyObserver(
+            darwinName: HostUIPresentWake.darwinName,
+            localName: HostUIPresentWake.localNotificationName
+        ) { [weak self] in
+            let pluginID = HostUIPresentWake.takePendingPluginID()
+            Task { @MainActor in
+                await self?.refreshHostUIRoot(matching: pluginID)
+            }
+        }
+        hostUIPresentObserver?.start()
         NotificationCenter.default.publisher(for: HostUIPresentWake.localNotificationName)
             .receive(on: RunLoop.main)
             .sink { [weak self] note in
                 let pluginID = note.userInfo?[HostUIPresentWake.pluginIDKey] as? String
+                    ?? HostUIPresentWake.takePendingPluginID()
                 Task { await self?.refreshHostUIRoot(matching: pluginID) }
             }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: PluginFactoryDeletionSignal.didDeletePluginNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] note in
+                let pluginID = note.userInfo?[PluginFactoryDeletionSignal.pluginIDKey] as? String
+                let fullyRemoved = note.userInfo?[PluginFactoryDeletionSignal.fullyRemovedKey] as? Bool ?? false
+                Task { await self?.handlePluginDeleted(pluginID: pluginID, fullyRemoved: fullyRemoved) }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handlePluginDeleted(pluginID: String?, fullyRemoved: Bool) async {
+        guard fullyRemoved, let pluginID else { return }
+        if selectedPluginID == pluginID {
+            session.clearSelection()
+            recordedHostUIRoot = nil
+        }
+        await catalog.reloadFromFactory(preservingPluginIDs: [])
+        await refreshHostUIRoot(matching: nil)
     }
 
     var connectors: [MessagingConnectorDTO] { catalog.connectors }
@@ -84,16 +114,12 @@ final class MessagingStore: ObservableObject {
     var showNewMessagesPill: Bool { session.showNewMessagesPill }
     var lastError: String? { session.lastError ?? catalog.lastError }
     var hostUIRoot: HostUINode {
-        recordedHostUIRoot ?? (try? HostUILibraryStore.messagingInbox()) ?? HostUINode(element: "screen")
-    }
-    var showsHostConversationTabs: Bool {
-        hostUIRoot.contains(element: "tab_strip")
-    }
-    var showsHostMessageSidebar: Bool {
-        guard let sidebar = hostUIRoot.first(element: "sidebar") else { return false }
-        let when = sidebar.configString["visible_when"] ?? "reply_thread"
-        if when == "always" { return true }
-        return isViewingReplyThread
+        if let recorded = recordedHostUIRoot, !(recorded.children ?? []).isEmpty {
+            return recorded
+        }
+        // Host bootstrap from the library example until a saved present tree exists.
+        // Once the guest emits ui.present, that tree is persisted and used instead.
+        return (try? HostUILibraryStore.messagingInbox()) ?? HostUINode(element: "screen")
     }
     var selectedConnector: MessagingConnectorDTO? {
         guard let selectedPluginID else { return nil }
@@ -178,6 +204,7 @@ final class MessagingStore: ObservableObject {
 
     func configure(repository: DBRepository) async {
         self.repository = repository
+        await HostUIPresentStore.shared.configure(persister: repository)
         await catalog.configure(repository: repository)
         session.configure(repository: repository, catalog: catalog)
         session.dropSelectionIfConnectorMissing()

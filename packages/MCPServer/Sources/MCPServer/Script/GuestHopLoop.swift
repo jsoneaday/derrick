@@ -330,11 +330,19 @@ public enum GuestHopLoop: Sendable {
     }
 
     private static func uiPresentText(_ payload: [String: PluginJSON]) -> String {
+        if let root = try? HostUILibraryStore.node(fromPresentPayload: payload) {
+            let parts = [
+                root.element,
+                root.id,
+                root.contains(element: "tab_strip") ? "tabs" : nil,
+                root.contains(element: "sidebar") ? "sidebar" : nil,
+            ].compactMap { $0 }
+            return "Host UI: \(parts.joined(separator: " / "))"
+        }
         let title = payload["title"]?.stringValue ?? "Plugin"
         let body = payload["markdown"]?.stringValue
             ?? payload["summary"]?.stringValue
             ?? payload["text"]?.stringValue
-            ?? payload["html"]?.stringValue
             ?? ""
         return body.isEmpty ? title : "\(title)\n\(body)"
     }

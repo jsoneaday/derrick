@@ -13,6 +13,9 @@ import Testing
         #expect(ids.contains("composer"))
         #expect(ids.contains("select"))
         #expect(ids.contains("text_field"))
+        #expect(ids.contains("section"))
+        #expect(ids.contains("calendar"))
+        #expect(ids.contains("time"))
     }
 
     @Test func messagingInboxExampleUsesLibraryElements() throws {
@@ -55,6 +58,32 @@ import Testing
         #expect(throws: HostUILibraryError.self) {
             try HostUILibraryStore.node(fromPresentPayload: payload)
         }
+    }
+
+    @Test func presentStorePersistsThroughPersister() async throws {
+        final class MemoryPersister: HostUIPresentPersisting, @unchecked Sendable {
+            var roots: [String: HostUINode] = [:]
+            func saveHostUIPresent(pluginID: String, root: HostUINode) async throws {
+                roots[pluginID] = root
+            }
+            func loadHostUIPresent(pluginID: String) async throws -> HostUINode? {
+                roots[pluginID]
+            }
+        }
+        let persister = MemoryPersister()
+        let store = HostUIPresentStore()
+        await store.configure(persister: persister)
+        let root = HostUINode(element: "screen", id: "saved", children: [
+            HostUINode(element: "calendar", id: "day"),
+        ])
+        await store.record(pluginID: "p1", root: root)
+        #expect(persister.roots["p1"]?.id == "saved")
+
+        let cold = HostUIPresentStore()
+        await cold.configure(persister: persister)
+        let loaded = await cold.root(pluginID: "p1")
+        #expect(loaded?.id == "saved")
+        #expect(loaded?.contains(element: "calendar") == true)
     }
 
     @Test func envelopeListAcceptsUIPresentRoot() throws {

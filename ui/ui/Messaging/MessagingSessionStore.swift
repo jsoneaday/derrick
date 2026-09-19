@@ -86,6 +86,18 @@ final class MessagingSessionStore: ObservableObject {
         selectedPluginID = pluginID
     }
 
+    func clearSelection() {
+        selectedPluginID = nil
+        selectedThreadID = nil
+        selectedReplyParentVendorMessageID = nil
+        tabs = []
+        threads = []
+        visibleMessages = []
+        visibleReplyMessages = []
+        replyThreadWarning = nil
+        lastError = nil
+    }
+
     func openConnector(pluginID: String, autoOpenMostRecent: Bool = true) async {
         selectConnector(pluginID: pluginID)
         await reloadThreads(autoOpenMostRecent: autoOpenMostRecent)

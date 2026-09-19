@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "elements": {
     "screen": {
       "description": "A full pane that can hold other elements. Config holds chooses what the pane is for (message_exchange for send and receive, arbitrary for anything else). Config selection=conversations shows a chooser among listed conversations.",
@@ -13,6 +13,12 @@
       "config": {
         "holds": ["messages", "arbitrary"],
         "visible_when": ["reply_thread", "always"]
+      }
+    },
+    "section": {
+      "description": "Groups related children with visual separation. Config title is an optional heading above the group. Prefer section over inventing layout chrome.",
+      "config": {
+        "title": ["string"]
       }
     },
     "tab_strip": {
@@ -31,19 +37,31 @@
       "binds": ["selected_conversation", "selected_thread"]
     },
     "text_field": {
-      "description": "A single-line or multi-line input box. Config placeholder is the empty hint."
+      "description": "A single-line or multi-line input box. Config placeholder is the empty hint. Config label is an optional caption above the field."
     },
     "select": {
-      "description": "A drop-down. Bind conversations to pick a room, or pass options in config."
+      "description": "A drop-down. Bind conversations to pick a room, or pass options in config. Config label is an optional caption."
     },
     "button": {
-      "description": "A pressable control. Config label is the visible name."
+      "description": "A pressable control. Config label is the visible name. Config style is primary or secondary."
     },
     "text": {
-      "description": "Plain or markdown text."
+      "description": "Plain or markdown text. Config style is title, body, callout, or caption."
     },
     "table": {
       "description": "Rows and columns for a scanable list."
+    },
+    "calendar": {
+      "description": "Pick a calendar date (day/month/year). Config label is an optional caption. Use calendar alone for dates; pair with time in a section when both are needed.",
+      "config": {
+        "label": ["string"]
+      }
+    },
+    "time": {
+      "description": "Pick a time of day. Config label is an optional caption. Use time alone for clock values; pair with calendar in a section when both are needed.",
+      "config": {
+        "label": ["string"]
+      }
     }
   },
   "examples": {

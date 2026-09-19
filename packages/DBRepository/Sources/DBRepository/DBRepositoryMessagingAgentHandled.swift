@@ -53,6 +53,17 @@ public extension DBRepository {
         }
     }
 
+    func deleteMessagingAgentHandled(pluginID: String) throws {
+        let trimmedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPluginID.isEmpty else { return }
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_agent_handled
+            WHERE plugin_id = \(quoted(trimmedPluginID));
+            """, on: handle)
+        }
+    }
+
     /// Lets `$profile` inbound retry when a turn was claimed but never posted a reply.
     func releaseUnansweredProfileTokenClaims() throws {
         try withDatabaseHandle { handle in

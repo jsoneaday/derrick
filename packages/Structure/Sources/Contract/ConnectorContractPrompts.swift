@@ -109,10 +109,14 @@ public enum ConnectorContractPrompts: Sendable {
         parts.append(
             """
             After listing conversations, emit ui.present in the same envelope list as result.emit. \
-            Use element ids from the host UI catalog summary only. Prefer asking for the messaging_inbox example tree, then adapt. \
+            Compose a root tree from host-ui-library.json element ids only — choose layout from the vendor's docs \
+            and what the library can express (screen, section, tab_strip, lists, composer, sidebar, forms, calendar, time, …). \
+            The messaging_inbox example is a reference composition, not a required template. \
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
-            Keep http hops for vendor calls. The host records ui.present and finishes that hop — do not wait for another guest run after present. \
+            Do not invent vendor widgets. Follow crawled API notes for nesting. \
+            Keep http hops for vendor calls. The host validates, records, and persists ui.present, then finishes that hop — \
+            do not wait for another guest run after present. \
             skill_files must include at least one skills/<name>/SKILL.md (Agent Skills required).
             """
         )

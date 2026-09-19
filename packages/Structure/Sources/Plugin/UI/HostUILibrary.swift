@@ -154,21 +154,89 @@ public enum HostUILibraryStore: Sendable {
 }
 
 public enum HostUIPresentWake: Sendable {
+    public static let darwinName = "derrick.hostUIPresent.didChange"
     public static let localNotificationName = Notification.Name("derrick.hostUIPresent.didChange")
     public static let pluginIDKey = "pluginID"
+    private static let pendingFileName = "pending_host_ui_present.json"
+
+    public static func postDarwin(pluginID: String) {
+        let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        if let url = pendingFileURL(),
+           let data = try? JSONEncoder().encode(["pluginID": id]) {
+            try? data.write(to: url, options: .atomic)
+        }
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(darwinName as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
+
+    public static func takePendingPluginID() -> String? {
+        guard let url = pendingFileURL(),
+              let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode([String: String].self, from: data),
+              let id = payload["pluginID"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !id.isEmpty
+        else {
+            return nil
+        }
+        try? FileManager.default.removeItem(at: url)
+        return id
+    }
+
+    public static func clearPending(pluginID: String) {
+        let wanted = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wanted.isEmpty,
+              let url = pendingFileURL(),
+              let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode([String: String].self, from: data),
+              payload["pluginID"]?.trimmingCharacters(in: .whitespacesAndNewlines) == wanted
+        else {
+            return
+        }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func pendingFileURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: DerrickAppSupport.applicationGroupIdentifier)?
+            .appendingPathComponent(pendingFileName, isDirectory: false)
+    }
+}
+
+/// Durable store for validated `ui.present` trees. Implementations typically write SQLite.
+public protocol HostUIPresentPersisting: Sendable {
+    func saveHostUIPresent(pluginID: String, root: HostUINode) async throws
+    func loadHostUIPresent(pluginID: String) async throws -> HostUINode?
 }
 
 /// Last `ui.present` tree per plugin. Guest hops write; Chat tabs read.
+/// Memory cache plus optional durable persister (DB) so trees survive restart.
 public actor HostUIPresentStore {
     public static let shared = HostUIPresentStore()
 
     private var roots: [String: HostUINode] = [:]
+    private var persister: (any HostUIPresentPersisting)?
 
-    public func record(pluginID: String, root: HostUINode) {
+    public init() {}
+
+    public func configure(persister: (any HostUIPresentPersisting)?) {
+        self.persister = persister
+    }
+
+    public func record(pluginID: String, root: HostUINode) async {
         let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
         roots[id] = root
+        if let persister {
+            try? await persister.saveHostUIPresent(pluginID: id, root: root)
+        }
         let postedID = id
+        HostUIPresentWake.postDarwin(pluginID: postedID)
         Task { @MainActor in
             NotificationCenter.default.post(
                 name: HostUIPresentWake.localNotificationName,
@@ -178,9 +246,23 @@ public actor HostUIPresentStore {
         }
     }
 
-    public func root(pluginID: String) -> HostUINode? {
+    public func root(pluginID: String) async -> HostUINode? {
         let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return roots[id]
+        guard !id.isEmpty else { return nil }
+        if let cached = roots[id] {
+            return cached
+        }
+        if let loaded = try? await persister?.loadHostUIPresent(pluginID: id) {
+            roots[id] = loaded
+            return loaded
+        }
+        return nil
+    }
+
+    public func clear(pluginID: String) {
+        let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        roots.removeValue(forKey: id)
     }
 }
 

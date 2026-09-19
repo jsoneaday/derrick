@@ -69,6 +69,7 @@ import Testing
         #expect(goal.contains("tab_strip"))
         #expect(goal.contains("skills/<name>/SKILL.md"))
         #expect(goal.contains("selection=conversations"))
+        #expect(goal.contains("reference composition"))
         #expect(ConnectorContractPrompts.reviewerGuide().contains("If a rule is not in the JSON"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- connector-contract.json ---"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- vendor slack ---"))

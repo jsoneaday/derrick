@@ -19,6 +19,7 @@ actor MCPServiceToolHost {
         if let host { return host }
 
         let repo = try await MCPServiceStore.shared.sharedRepository()
+        await HostUIPresentStore.shared.configure(persister: repo)
         let budget = MemoryBudget(maxTokenCount: 200_000)
         let coordinator = MemoryCoordinator(
             store: repo,

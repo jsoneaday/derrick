@@ -66,6 +66,7 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(try tableExists(named: "memory_sessions", at: url))
         XCTAssertTrue(try tableExists(named: "plugin_factory_releases", at: url))
         XCTAssertTrue(try tableExists(named: "messaging_connectors", at: url))
+        XCTAssertTrue(try tableExists(named: "plugin_host_ui", at: url))
         XCTAssertTrue(try tableExists(named: "workflow_runs", at: url))
         XCTAssertFalse(try tableExists(named: "plugins", at: url))
 
@@ -100,6 +101,76 @@ final class DBRepositoryTests: XCTestCase {
         let loaded = try await repository.pluginFactoryRelease(pluginID: "keep-me", version: "1.0.0")
         XCTAssertEqual(loaded?.pluginID, "keep-me")
         XCTAssertEqual(loaded?.contentHash, release.contentHash)
+    }
+
+    func testHostUIPresentRoundTrip() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let root = HostUINode(
+            element: "screen",
+            id: "inbox",
+            children: [
+                HostUINode(element: "section", config: ["title": .string("When")]),
+                HostUINode(element: "calendar", id: "day"),
+                HostUINode(element: "time", id: "at"),
+            ]
+        )
+        try await repository.upsertHostUIPresent(pluginID: "demo.plugin", root: root)
+        let loaded = try await repository.hostUIPresent(pluginID: "demo.plugin")
+        XCTAssertEqual(loaded?.id, "inbox")
+        XCTAssertEqual(loaded?.contains(element: "calendar"), true)
+        XCTAssertEqual(loaded?.contains(element: "time"), true)
+        XCTAssertEqual(loaded?.contains(element: "section"), true)
+    }
+
+    func testDeletingLastPluginReleaseAlsoDeletesHostUIPresent() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let release = makeGoFactoryRelease(pluginID: "ui-plugin", manifestName: "ui-plugin")
+        try await repository.savePluginFactoryRelease(release)
+        let root = HostUINode(element: "screen", id: "inbox", children: [
+            HostUINode(element: "calendar", id: "day"),
+        ])
+        try await repository.upsertHostUIPresent(pluginID: "ui-plugin", root: root)
+        let before = try await repository.hostUIPresent(pluginID: "ui-plugin")
+        XCTAssertNotNil(before)
+
+        try await repository.deletePluginFactoryRelease(pluginID: "ui-plugin", version: "1.0.0")
+        let afterUI = try await repository.hostUIPresent(pluginID: "ui-plugin")
+        XCTAssertNil(afterUI)
+        let connectorsAfterUI = try await repository.listMessagingConnectors()
+        XCTAssertFalse(connectorsAfterUI.contains(where: { $0.pluginID == "ui-plugin" }))
+    }
+
+    func testPurgingPluginRemovesMessagingAndHandledRows() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let release = makeGoFactoryRelease(pluginID: "msg-plugin", manifestName: "msg-plugin")
+        try await repository.savePluginFactoryRelease(release)
+        try await repository.upsertMessagingConnector(
+            MessagingConnectorDTO(pluginID: "msg-plugin", displayName: "Msg")
+        )
+        try await repository.upsertMessagingThread(
+            MessagingThreadDTO(
+                id: "t1",
+                pluginID: "msg-plugin",
+                vendorThreadID: "C1",
+                title: "general"
+            )
+        )
+        _ = try await repository.claimMessagingAgentHandling(pluginID: "msg-plugin", vendorMessageID: "m1")
+        try await repository.upsertHostUIPresent(
+            pluginID: "msg-plugin",
+            root: HostUINode(element: "screen", id: "inbox")
+        )
+
+        try await repository.deletePluginFactoryRelease(pluginID: "msg-plugin")
+        let hostUI = try await repository.hostUIPresent(pluginID: "msg-plugin")
+        let connectors = try await repository.listMessagingConnectors()
+        let threads = try await repository.listMessagingThreads(pluginID: "msg-plugin")
+        XCTAssertNil(hostUI)
+        XCTAssertFalse(connectors.contains(where: { $0.pluginID == "msg-plugin" }))
+        XCTAssertTrue(threads.isEmpty)
     }
 
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
