@@ -309,12 +309,30 @@ public final class XPCDockerRunner: @unchecked Sendable {
             dockerReachableState.markCompleted()
             await reportBootstrapTaskCompleted(.docker)
             Task {
+                await pruneLeftoverDockerArtifacts()
                 await prewarmWorkerImage()
             }
         } catch {
             debugLog("Docker reachability check failed: \(error.localizedDescription)")
             dockerReachableState.markFailed(error)
             imagePrewarmState.markFailed(error)
+        }
+    }
+
+    /// Stopped Derrick containers and dangling labeled worker images. Does not
+    /// remove running jobs or the live `derrick-worker:go-v1` tag.
+    private func pruneLeftoverDockerArtifacts() async {
+        let executor = makeDockerExecutor()
+        let removed = await DerrickDockerOrphanSweeper.sweep(
+            executor: executor,
+            scope: .stoppedOnly
+        )
+        if removed > 0 {
+            debugLog("Removed \(removed) leftover Docker container(s)")
+        }
+        let pruned = await DerrickDockerDanglingImagePruner.prune(executor: executor)
+        if !pruned {
+            debugLog("Dangling worker image prune skipped")
         }
     }
 

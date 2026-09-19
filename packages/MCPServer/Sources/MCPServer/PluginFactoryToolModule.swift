@@ -92,7 +92,7 @@ public enum PluginFactoryToolModule: MCPToolModule {
         let diagnostics: [ToolExecutionOutcome.Diagnostic]
         let retryAllowed: Bool
         switch error {
-        case .invalidManifest, .invalidSkillPath, .reservedPluginID, .invalidSource:
+        case .invalidManifest, .invalidSkillPath, .missingSkillFiles, .reservedPluginID, .invalidSource:
             status = .blocked
             stage = .validation
             diagnostics = [diagnostic(for: error)]

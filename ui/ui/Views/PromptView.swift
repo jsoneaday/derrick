@@ -132,7 +132,7 @@ struct PromptInputView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
-        var lastFocusedToken: Int = 0
+        var lastFocusedToken: Int = -1
 
         init(text: Binding<String>) {
             _text = text

@@ -270,14 +270,18 @@ struct E2EEnvironment {
         )
         let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
 
-        fputs("[E2E] factory build scope=\(scope.rawValue)…\n", stderr)
+        fputs("[E2E] factory build scope=\(scope.rawValue) via LiveFactoryBuilder…\n", stderr)
+        let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        guard !apiKey.isEmpty else {
+            throw E2EError.factoryFailed("OPENAI_API_KEY is required; reference Slack drafts were removed.")
+        }
         let executor = GoPluginFactoryDockerExecutor(executor: dockerExecutor)
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 5)
         ).build(
             userGoal: goal,
             hostManifest: input.hostManifest,
-            builder: E2EFactoryBuilder(scope: scope),
+            builder: LiveFactoryBuilder(apiKey: apiKey),
             executor: executor,
             reviewer: E2EHarnessReviewer(),
             logger: { message in

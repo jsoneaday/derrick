@@ -33,11 +33,31 @@ public enum DerrickDockerRuntimeIdentity: Sendable {
         [psLabelFilterArguments] + namePrefixes.map(psNameFilterArguments)
     }
 
+    /// Stopped oneshots only — UI launch must not `rm` a container that is still running a job.
+    public static let stoppedStatuses = ["exited", "dead", "created"]
+
     public static func isAllowedPsFilter(_ filter: String) -> Bool {
         if filter == "label=\(labelAssignment)" {
             return true
         }
         return namePrefixes.contains { filter == "name=\($0)" }
+    }
+
+    public static func isAllowedPsStatus(_ status: String) -> Bool {
+        stoppedStatuses.contains(status)
+    }
+
+    /// `docker ps` argv that lists only stopped Derrick containers.
+    public static var psStoppedListArguments: [[String]] {
+        identityFilters.flatMap { identity in
+            stoppedStatuses.map { status in
+                ["ps", "-aq", "--filter", identity, "--filter", "status=\(status)"]
+            }
+        }
+    }
+
+    private static var identityFilters: [String] {
+        ["label=\(labelAssignment)"] + namePrefixes.map { "name=\($0)" }
     }
 
     public static func createHasRuntimeLabel(_ dockerArgs: [String]) -> Bool {

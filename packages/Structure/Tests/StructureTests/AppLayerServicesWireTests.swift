@@ -502,6 +502,42 @@ import Testing
         #expect(try PluginSecretKeychain.load(pluginID: destID, fieldID: "bot_token") == "legacy-token")
     }
 
+    @Test func pluginSecretResolverAcceptsApiTokenCallCredentialAlias() throws {
+        let pluginID = "test-api-token-alias-\(UUID().uuidString)"
+        defer {
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "api_token")
+            PluginSecretKeychain.deleteForTesting(pluginID: pluginID, fieldID: "bot_token")
+        }
+        try PluginSecretKeychain.save(
+            pluginID: pluginID,
+            fieldID: "api_token",
+            value: "xoxb-create"
+        )
+        #expect(PluginSecretResolver.hasCallCredential(pluginID: pluginID))
+        #expect(PluginSecretResolver.resolveCallCredential(pluginID: pluginID) == "xoxb-create")
+
+        let fields = [PluginSecretDescriptor(id: "bot_token", label: "Bot token", kind: "token")]
+        PluginSecretKeychain.migrateCallCredentialAliases(pluginID: pluginID, fields: fields)
+        #expect(try PluginSecretKeychain.load(pluginID: pluginID, fieldID: "bot_token") == "xoxb-create")
+    }
+
+    @Test func hostManifestRewritesCallCredentialAliasToSchemeField() throws {
+        let auth = ConnectorAuthDiscovery(
+            authScheme: .botToken,
+            secrets: [
+                try PluginSecretField(id: "api_token", label: "API token or bot token", kind: .token),
+            ],
+            setupHint: nil,
+            crawlSummary: nil
+        )
+        let manifest = PluginFactoryManifestInput.connector(
+            pluginID: "messaging-connector-9",
+            description: "Messaging connector",
+            auth: auth
+        )
+        #expect(manifest.secrets.map(\.id) == ["bot_token"])
+    }
+
     @Test func pluginSecretKeychainSharedStoreIsReadableAfterSave() throws {
         let pluginID = "test-shared-store-\(UUID().uuidString)"
         defer {
@@ -1253,6 +1289,25 @@ import Testing
         #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("label=app.derrick=runtime"))
         #expect(DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=derrick-guest-runtime"))
         #expect(!DerrickDockerRuntimeIdentity.isAllowedPsFilter("name=nginx"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("exited"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("dead"))
+        #expect(DerrickDockerRuntimeIdentity.isAllowedPsStatus("created"))
+        #expect(!DerrickDockerRuntimeIdentity.isAllowedPsStatus("running"))
+        #expect(DerrickDockerRuntimeIdentity.psStoppedListArguments.count == 18)
+        #expect(
+            DerrickDockerRuntimeIdentity.psStoppedListArguments.contains {
+                $0 == [
+                    "ps", "-aq",
+                    "--filter", "name=derrick-guest-runtime",
+                    "--filter", "status=exited",
+                ]
+            }
+        )
+        #expect(
+            DockerWorkerRuntime.danglingImagePruneArguments == [
+                "image", "prune", "-f", "--filter", "label=derrick.worker.binaries",
+            ]
+        )
         #expect(
             DerrickDockerRuntimeIdentity.createHasRuntimeLabel(
                 ["create"] + DerrickDockerRuntimeIdentity.createLabelArguments + [DockerWorkerRuntime.image]
@@ -1564,7 +1619,7 @@ import Testing
         #expect(goal.contains("sync_threads"))
         #expect(goal.contains("poll_inbox"))
         #expect(goal.contains("ui.present"))
-        #expect(goal.contains("host-ui-library.json"))
+        #expect(goal.contains("host UI catalog (summary)"))
         #expect(goal.contains("Host plugin id"))
         #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
         #expect(!goal.contains("must sync and send messages"))

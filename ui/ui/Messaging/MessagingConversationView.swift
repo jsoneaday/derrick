@@ -49,7 +49,49 @@ struct MessagingConversationView: View {
             }
             .onAppear {
                 syncPickerSelection(with: store.threads)
+                focusPrimaryComposer()
             }
+            .onChange(of: store.conversationLanding) { _, _ in
+                focusPrimaryComposer()
+            }
+            .onChange(of: store.selectedThread?.id) { _, _ in
+                focusPrimaryComposer()
+            }
+            .onChange(of: store.selectedPluginID) { _, _ in
+                focusPrimaryComposer()
+            }
+    }
+
+    private func focusPrimaryComposer() {
+        DispatchQueue.main.async {
+            switch store.conversationLanding {
+            case .catalogRoot:
+                break
+            case .vendorConnector:
+                if store.isViewingReplyThread {
+                    threadComposerFocused = true
+                    return
+                }
+                if presentsInbox {
+                    if store.isConnectorSyncing, store.tabs.isEmpty { return }
+                    composerFocused = true
+                    return
+                }
+                if store.selectedThread != nil {
+                    composerFocused = true
+                    return
+                }
+                if store.canPickThread { return }
+                if store.needsThreadDiscovery || store.isConnectorSyncing { return }
+                if store.canComposeManualChannel {
+                    if channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        channelFocused = true
+                    } else {
+                        composerFocused = true
+                    }
+                }
+            }
+        }
     }
 
     private func syncPickerSelection(with threads: [MessagingThreadDTO]) {
@@ -293,20 +335,9 @@ struct MessagingConversationView: View {
                 }
             }
             if let banner = store.inboundBanner, !banner.isEmpty {
-                Button {
+                InAppNotificationToast(text: banner, kind: .message) {
                     onInboundBannerTap?()
-                } label: {
-                    Text(banner)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: 520)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 10)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -665,6 +696,7 @@ private struct MessagingBubble: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .foregroundStyle(message.replyCount > 0 ? Color.accentColor : .primary.opacity(0.75))
                     .help(message.replyCount > 0 ? "Open thread" : "Reply in thread")
                     .accessibilityLabel(replyActionTitle)
@@ -678,26 +710,21 @@ private struct MessagingBubble: View {
     }
 
     private var messageBody: some View {
-        ViewThatFits(in: .horizontal) {
-            bubbleLabel
-                .fixedSize()
-                .modifier(MessagingBubbleChrome(direction: message.direction))
-            bubbleLabel
-                .fixedSize(horizontal: false, vertical: true)
-                .modifier(MessagingBubbleChrome(direction: message.direction))
-        }
-        .frame(
-            maxWidth: .infinity,
-            alignment: message.direction == .outbound ? .trailing : .leading
-        )
+        bubbleLabel
+            .frame(maxWidth: 420, alignment: message.direction == .outbound ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .modifier(MessagingBubbleChrome(direction: message.direction))
+            .frame(
+                maxWidth: .infinity,
+                alignment: message.direction == .outbound ? .trailing : .leading
+            )
     }
 
     private var bubbleLabel: some View {
         MessagingMarkdownText(
             text: message.body,
-            font: .system(size: 13)
+            fontSize: 13
         )
-        .multilineTextAlignment(.leading)
     }
 
     private var replyActionTitle: String {
@@ -714,15 +741,25 @@ private struct MessagingBubble: View {
 private struct MessagingBubbleChrome: ViewModifier {
     let direction: MessagingMessageDirection
 
+    private var kind: InAppNotificationKind {
+        direction == .outbound ? .message : .info
+    }
+
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(direction == .outbound
-                          ? Color.black.opacity(0.08)
-                          : Color.white)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        direction == .outbound
+                            ? InAppNotificationBannerChrome.fill
+                            : Color.white
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(kind.accent.opacity(direction == .outbound ? 0.28 : 0.14), lineWidth: 1)
             )
     }
 }

@@ -53,6 +53,9 @@ public struct PluginSpecTurn: Equatable, Sendable {
 public enum PluginSpecProcession: Sendable {
     public static let creatorTabID = "plugin-creator"
     public static let creatorTabIDPrefix = "plugin-creator"
+    /// Chat tab title for the Plugins workspace (Create plugin + Plugins browser).
+    public static let pluginsTabTitle = "Plugins"
+    /// Label for the Create plugin subtab and seeded creator turn prompt.
     public static let creatorTabTitlePrefix = "Create plugin"
     public static let creatorTabTitleSnippetLimit = 42
 
@@ -110,7 +113,8 @@ public enum PluginSpecProcession: Sendable {
         case .slot(.returnPayload):
             return "What should come back — a brief, a list, a message, a file, an image, or thread items?"
         case .slot(.trigger):
-            return "How would you like to run this plugin? You can pick more than one: chat, a job or schedule, typing /name, or from messaging."
+            // Trigger is inferred from plugin kind; never asked.
+            return "What would make this the wrong plugin? What must not happen?"
         case .presentChoice:
             return "In this chat tab, should this show as readable text, a view you can scan, or a file?"
         case .wrongness:
@@ -284,12 +288,15 @@ public enum PluginSpecProcession: Sendable {
         if draft.access == .unreachable { return .blocked(.accessUnreachable) }
         if draft.work == nil { return .slot(.work) }
         if draft.returnClass == nil { return .slot(.returnPayload) }
-        if draft.triggers.isEmpty { return .slot(.trigger) }
+        bindInferredTriggers(onto: &draft)
         if draft.present == nil {
-            if case .needsHumanChoice = PluginPresentPolicy.bind(spec: draft) {
+            switch PluginPresentPolicy.bind(spec: draft) {
+            case .decided(let present):
+                draft.present = present
+                draft.presentSource = .inferred
+            case .needsHumanChoice:
                 return .presentChoice
             }
-            return .wrongness
         }
         if draft.wrongness?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             return .wrongness
@@ -311,7 +318,7 @@ public enum PluginSpecProcession: Sendable {
         return PluginAccessAskPolicy.documentationURL(from: draft.connect)
     }
 
-    /// Host binds Present after Return (and Trigger) without asking, unless tied.
+    /// Host binds Present after Return without asking, unless tied.
     public static func bindInferredPresent(onto draft: inout PluginSpecDraft) {
         guard draft.present == nil, draft.returnClass != nil else { return }
         switch PluginPresentPolicy.bind(spec: draft) {
@@ -323,11 +330,27 @@ public enum PluginSpecProcession: Sendable {
         }
     }
 
+    /// Host fills Trigger from connect/kind. Never asked in Create.
+    public static func bindInferredTriggers(onto draft: inout PluginSpecDraft) {
+        guard draft.triggers.isEmpty, draft.connect != nil || draft.returnClass != nil else { return }
+        draft.triggers = defaultTriggers(for: draft)
+    }
+
+    /// Triggers that apply for this connect kind — not a user multi-select.
+    public static func defaultTriggers(for draft: PluginSpecDraft) -> Set<PluginTriggerClass> {
+        if draft.isMessagingConnect {
+            return [.chat, .messaging, .mention]
+        }
+        return [.chat, .mention, .schedule]
+    }
+
     private static func applyParkedBindings(_ session: inout PluginSpecSession) {
         if session.ask == .accessSecret {
+            bindInferredTriggers(onto: &session.draft)
             bindInferredPresent(onto: &session.draft)
             return
         }
+        bindInferredTriggers(onto: &session.draft)
         bindInferredPresent(onto: &session.draft)
         var progressed = true
         while progressed {
@@ -338,15 +361,18 @@ public enum PluginSpecProcession: Sendable {
                 session.draft.parked[slot.rawValue] = nil
                 progressed = true
             }
+            bindInferredTriggers(onto: &session.draft)
             bindInferredPresent(onto: &session.draft)
         }
         session.ask = nextAsk(&session.draft)
+        bindInferredTriggers(onto: &session.draft)
         bindInferredPresent(onto: &session.draft)
         session.ask = nextAsk(&session.draft)
     }
 
     private static func parkLaterSlots(from text: String, onto draft: inout PluginSpecDraft) {
-        let later: [PluginSpecSlot] = [.connect, .access, .work, .returnPayload, .trigger]
+        // Trigger is host-inferred; do not park volunteered trigger answers as a slot.
+        let later: [PluginSpecSlot] = [.connect, .access, .work, .returnPayload]
         for slot in later {
             if extract(slot, from: text) != nil {
                 draft.parked[slot.rawValue] = text
@@ -450,9 +476,6 @@ public enum PluginSpecProcession: Sendable {
             }
             return "That is not a place Derrick can open. Name a site, a feed, files on this Mac, or an app you already use."
         }
-        if case .slot(.trigger) = ask, PluginSpecClassifier.triggers(from: utterance).isEmpty {
-            return "You can pick more than one: chat, a job or schedule, typing /name, or from messaging."
-        }
         return nil
     }
 
@@ -461,9 +484,9 @@ public enum PluginSpecProcession: Sendable {
 
     You fill a finite spec. Ask only the next unfilled legal slot. Received means bound, not merely spoken.
 
-    Slots, in order: Connect, Access, Work, Return, Trigger.
+    Slots, in order: Connect, Access, Work, Return.
     Oracles, not slots: claimed outcome (first), wrongness (last).
-    Present is bound by the host after Return. Do not ask for Present unless the host cannot decide.
+    Present and Trigger are bound by the host after Return. Do not ask for them unless the host cannot decide Present.
 
     Park volunteered later answers. Do not jump ahead.
     """

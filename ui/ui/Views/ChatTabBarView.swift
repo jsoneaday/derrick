@@ -1,16 +1,35 @@
 import SwiftUI
 
 struct ChatTabBarView: View {
+    enum TabFilter: Equatable {
+        /// Regular chats plus in-progress plugin create sessions (not fresh empty creates).
+        case chats
+        /// Plugin creator tabs only.
+        case pluginsCreate
+    }
+
     @ObservedObject var store: ChatSessionStore
+    var filter: TabFilter = .chats
 
     private let stripColor = Color(red: 236.0 / 255.0, green: 236.0 / 255.0, blue: 233.0 / 255.0)
     private let selectedFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
     private let tabCorner: CGFloat = 8
 
+    private var visibleTabs: [ChatTab] {
+        switch filter {
+        case .chats:
+            return store.tabs.filter { tab in
+                !tab.isPluginCreator || tab.isOngoingPluginCreator
+            }
+        case .pluginsCreate:
+            return store.tabs.filter(\.isPluginCreator)
+        }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .bottom, spacing: 2) {
-                ForEach(store.tabs) { tab in
+                ForEach(visibleTabs) { tab in
                     browserTab(tab)
                         .id("\(tab.id)-\(tab.title)")
                 }
@@ -24,6 +43,9 @@ struct ChatTabBarView: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1)
         }
+        .accessibilityIdentifier(
+            filter == .pluginsCreate ? "chat-tab-bar-plugins-create" : "chat-tab-bar-chats"
+        )
     }
 
     private func browserTab(_ tab: ChatTab) -> some View {
@@ -46,7 +68,7 @@ struct ChatTabBarView: View {
             }
             .buttonStyle(.plain)
 
-            if store.tabs.count > 1 {
+            if visibleTabs.count > 1 {
                 Button {
                     store.closeTab(id: tab.id)
                 } label: {
@@ -68,7 +90,6 @@ struct ChatTabBarView: View {
             BrowserTabShape(cornerRadius: tabCorner)
                 .fill(isSelected ? selectedFill : Color.primary.opacity(0.03))
         }
-        // Sit on top of the strip hairline so the selected tab merges into the pane.
         .padding(.bottom, isSelected ? -1 : 0)
         .zIndex(isSelected ? 1 : 0)
     }

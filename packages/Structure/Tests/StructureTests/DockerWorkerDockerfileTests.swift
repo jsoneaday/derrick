@@ -21,6 +21,12 @@ import Testing
         #expect(text.contains("derrick.worker.binaries"))
         #expect(text.contains("docker rmi \"golang:${tag}\""))
         #expect(text.contains("Keep the live derrick-worker tag"))
+        #expect(text.contains("derrick-guest-runtime"))
+        #expect(text.contains("label=app.derrick=runtime"))
+        #expect(text.contains("exited dead created"))
+        #expect(text.contains("--filter \"status=$2\""))
+        #expect(text.contains("docker rm -f"))
+        #expect(text.contains("still-running containers"))
     }
 
     private func repoRoot() -> URL {

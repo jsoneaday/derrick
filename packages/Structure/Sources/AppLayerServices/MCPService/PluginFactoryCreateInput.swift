@@ -269,10 +269,12 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         )
     }
 
-    /// Factory goal passed to `plugin_factory_build` after vendor docs are crawled.
+    /// Factory goal passed to `plugin_factory_build` after host-forced spec + vendor docs.
     public func connectorBuildGoal(
         crawlSummary: String?,
-        inboxAPISummary: String? = nil
+        inboxAPISummary: String? = nil,
+        agentPluginSpecSummary: String? = nil,
+        agentPluginSpecSourceURL: String? = nil
     ) -> String {
         let vendorLabel = vendor?.displayName ?? customVendorName ?? "messaging"
         let summary = crawlSummary ?? auth?.crawlSummary
@@ -302,6 +304,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 vendor: vendor,
                 crawlSummary: summary,
                 inboxAPISummary: inboxAPISummary,
+                agentPluginSpecSummary: agentPluginSpecSummary,
+                agentPluginSpecSourceURL: agentPluginSpecSourceURL,
                 reference: extra.joined(separator: "\n"),
                 includeVendorBindings: true
             )
@@ -314,11 +318,22 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         }
     }
 
-    public func customBuildGoal() -> String {
+    public func customBuildGoal(
+        agentPluginSpecSummary: String? = nil,
+        agentPluginSpecSourceURL: String? = nil
+    ) -> String {
         var lines = [
             "Create an Agent Plugin capability.",
             description,
         ]
+        if let agentPluginSpecSummary, !agentPluginSpecSummary.isEmpty {
+            lines.append(
+                AgentPluginSpec.forcedPromptBlock(
+                    summary: agentPluginSpecSummary,
+                    sourceURL: agentPluginSpecSourceURL
+                )
+            )
+        }
         if let skillMarkdown, !skillMarkdown.isEmpty {
             lines.append("SKILL.md draft:\n\(skillMarkdown)")
         }
@@ -347,7 +362,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             return .preview
         case "auth", "discover", "credentials":
             return .credentials
-        case "crawl", "docs", "factory", "build", "review":
+        case "crawl", "docs", "factory", "build", "review", "spec", "builder", "trial", "package":
             return .build
         default:
             return .build

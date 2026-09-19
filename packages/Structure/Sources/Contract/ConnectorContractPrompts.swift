@@ -41,6 +41,8 @@ public enum ConnectorContractPrompts: Sendable {
         vendor: PluginFactoryCreateInput.ConnectorVendor?,
         crawlSummary: String?,
         inboxAPISummary: String? = nil,
+        agentPluginSpecSummary: String? = nil,
+        agentPluginSpecSourceURL: String? = nil,
         reference: String?,
         includeVendorBindings: Bool = true
     ) throws -> String {
@@ -51,21 +53,35 @@ public enum ConnectorContractPrompts: Sendable {
             "Create an Agent Plugin messaging connector for \(vendorLabel).",
             "Scope id: \(scopeID)",
             "Implement messaging_ops: \(scopeSpec.ops.map { "\"\($0)\"" }.joined(separator: ", ")).",
+        ]
+        if let agentPluginSpecSummary, !agentPluginSpecSummary.isEmpty {
+            parts.append(
+                AgentPluginSpec.forcedPromptBlock(
+                    summary: agentPluginSpecSummary,
+                    sourceURL: agentPluginSpecSourceURL
+                )
+            )
+        }
+        parts.append(
             try dump(
                 scopeID: scopeID,
                 vendorName: includeVendorBindings ? vendor?.rawValue : nil,
                 preamble: "Obey this protocol JSON. Do not add ops or vendor calls outside it. Vendor HTTP bindings are host facts; use those URLs."
-            ),
+            )
+        )
+        parts.append(
             """
             test_input_json must include a hops array with http_results fixtures that exercise every messaging_op you implement \
             (\(scopeSpec.ops.joined(separator: ", "))) through to result.emit.
-            """,
+            """
+        )
+        parts.append(
             PluginFactoryCreateInput.defaultDescription(
                 vendor: vendor,
                 customVendorName: vendor == .custom ? vendorLabel : nil,
                 scope: scope
-            ),
-        ]
+            )
+        )
         if let reference, !reference.isEmpty {
             parts.append(reference)
         }
@@ -93,13 +109,11 @@ public enum ConnectorContractPrompts: Sendable {
         parts.append(
             """
             After listing conversations, emit ui.present in the same envelope list as result.emit. \
-            Use a root tree whose element ids come only from host-ui-library.json. \
-            Prefer the messaging_inbox example: screen holds=message_exchange and selection=conversations, tab_strip bind=conversations, \
-            message_list and composer on the selected conversation, sidebar for replies. \
+            Use element ids from the host UI catalog summary only. Prefer asking for the messaging_inbox example tree, then adapt. \
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
-            Ask the host to build those pieces; do not invent vendor widgets. Follow crawled API notes for nesting. \
-            Keep http hops for vendor calls. The host records ui.present and finishes that hop — do not wait for another guest run after present.
+            Keep http hops for vendor calls. The host records ui.present and finishes that hop — do not wait for another guest run after present. \
+            skill_files must include at least one skills/<name>/SKILL.md (Agent Skills required).
             """
         )
         return parts.joined(separator: "\n\n")
@@ -135,11 +149,10 @@ public enum ConnectorContractPrompts: Sendable {
         lines.append("--- \(GuestContract.Schema.connectorResultEmit.rawValue) ---")
         lines.append(try GuestContract.loadSchemaText(.connectorResultEmit))
         lines.append("")
-        lines.append("--- host-ui-library.json ---")
-        lines.append(try HostUILibraryStore.loadText())
+        lines.append("--- host UI catalog (summary) ---")
+        lines.append(try HostUIDisclosure.catalogSummary())
         lines.append("")
-        lines.append("--- \(GuestContract.Schema.hostUINode.rawValue) ---")
-        lines.append(try GuestContract.loadSchemaText(.hostUINode))
+        lines.append("Ask the host for HostUIDisclosure.elementSchema(id:) or exampleTree(named:) before inventing config. Do not expect a full host-ui-library.json dump.")
         if let vendor, let vendorJSON = try ConnectorContractStore.loadVendorText(vendor.vendor) {
             lines.append("")
             lines.append("--- vendor \(vendor.vendor) ---")

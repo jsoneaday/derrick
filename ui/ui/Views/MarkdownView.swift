@@ -310,27 +310,24 @@ struct MarkdownResponseView: View {
     private func blockView(for block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
-            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+            markdownText(text)
                 .font(headingFont(level: level))
                 .fontWeight(.semibold)
                 .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
         case .paragraph(let text):
-            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+            markdownText(text)
                 .lineSpacing(2)
                 .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
         case .bullet(let text):
             HStack(alignment: .top, spacing: 6) {
                 Text("•")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.secondary)
-                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                markdownText(text)
                     .lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
             }
             .padding(.leading, 12)
         case .numbered(let number, let text):
@@ -338,10 +335,9 @@ struct MarkdownResponseView: View {
                 Text("\(number).")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                markdownText(text)
                     .lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
             }
             .padding(.leading, 12)
         case .blockquote(let text):
@@ -349,11 +345,10 @@ struct MarkdownResponseView: View {
                 Rectangle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(width: 4)
-                Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                markdownText(text)
                     .lineSpacing(2)
                     .font(.system(.body).italic())
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
@@ -376,6 +371,16 @@ struct MarkdownResponseView: View {
             .padding(15)
             .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
         }
+    }
+
+    private func markdownText(_ text: String) -> some View {
+        let attributed = (try? AttributedString(markdown: text)) ?? AttributedString(text)
+        return SelectableLinkTextView(
+            attributedString: attributed,
+            fontSize: 15,
+            textColor: .labelColor,
+            maxIdealWidth: 720
+        )
     }
 
     private func headingFont(level: Int) -> Font {

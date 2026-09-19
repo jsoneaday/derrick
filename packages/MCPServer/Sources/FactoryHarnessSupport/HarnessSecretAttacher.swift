@@ -10,10 +10,8 @@ public struct HarnessSecretAttacher: HostHTTPSecretAttacher {
     }
 
     public func apply(url: URL) async -> (url: URL, headers: [String: String]) {
-        for fieldID in ["bot_token", "token", "api_key"] {
-            if let token = PluginSecretResolver.resolve(pluginID: pluginID, fieldID: fieldID) {
-                return (url, ["Authorization": "Bearer \(token)"])
-            }
+        if let token = PluginSecretResolver.resolveCallCredential(pluginID: pluginID) {
+            return (url, ["Authorization": "Bearer \(token)"])
         }
         return (url, [:])
     }

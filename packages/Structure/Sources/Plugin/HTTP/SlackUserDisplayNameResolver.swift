@@ -55,12 +55,7 @@ public enum SlackUserDisplayNameResolver: Sendable {
     }
 
     static func resolveBotToken(pluginID: String) -> String? {
-        for fieldID in ["bot_token", "token", "api_key"] {
-            if let value = PluginSecretResolver.resolve(pluginID: pluginID, fieldID: fieldID) {
-                return value
-            }
-        }
-        return nil
+        PluginSecretResolver.resolveCallCredential(pluginID: pluginID)
     }
 
     static func fetchDisplayName(userID: String, token: String) async -> String? {

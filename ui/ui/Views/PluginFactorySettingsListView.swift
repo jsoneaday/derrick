@@ -38,7 +38,7 @@ struct PluginFactorySettingsListView: View {
                     }
                 }
                 .padding(.leading, SettingsLayout.fieldIndent)
-                Text("Type / and the plugin name in Chat to open it in a tab. Create plugin asks one spec slot at a time in a Chat tab.")
+                Text("Type / and the plugin name in Chat to open it in a tab. Plugins opens Create plugin and a browser for installed package files.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

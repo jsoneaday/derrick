@@ -273,6 +273,7 @@ final class ConversationModel {
         let effectiveThinking: ModelThinkingOption?
         let userRagBase: String
         let retrievalLimit: Int
+        let skillIndexBlock = await Self.skillIndexPromptBlock(repository: repository)
         if let profileContext {
             effectiveModel = (try? JSONDecoder().decode(LLMModelChoice.self, from: profileContext.modelJSON)) ?? model
             effectiveThinking = profileContext.thinkingJSON.flatMap {
@@ -285,6 +286,7 @@ final class ConversationModel {
                         ? profileContext.rag.customInstructions!
                         : ragInstructions,
                 profileContext.instructions.trimmingCharacters(in: .whitespacesAndNewlines),
+                skillIndexBlock,
             ]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
@@ -292,7 +294,8 @@ final class ConversationModel {
         } else {
             effectiveModel = model
             effectiveThinking = thinking
-            userRagBase = [ragInstructions, WorkerOverlays.userFacingWithSpawn]
+            userRagBase = [ragInstructions, WorkerOverlays.userFacingWithSpawn, skillIndexBlock]
+                .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
             retrievalLimit = 5
         }
@@ -511,12 +514,43 @@ final class ConversationModel {
         return (pluginID, remainder)
     }
 
+    /// Cheap skill routing index for system prompts (progressive disclosure layer 1).
+    private static func skillIndexPromptBlock(repository: DBRepository) async -> String {
+        do {
+            let summaries = try await repository.listPluginFactoryReleaseSummaries()
+            var latestByPlugin: [String: PluginFactoryReleaseSummary] = [:]
+            for summary in summaries {
+                if latestByPlugin[summary.pluginID] == nil {
+                    latestByPlugin[summary.pluginID] = summary
+                }
+            }
+            var entries: [PluginSkillDisclosure.IndexEntry] = []
+            for summary in latestByPlugin.values.sorted(by: { $0.pluginID < $1.pluginID }) {
+                guard let release = try await repository.pluginFactoryRelease(
+                    pluginID: summary.pluginID,
+                    version: summary.version
+                ) else { continue }
+                entries.append(contentsOf: PluginSkillDisclosure.index(from: release))
+            }
+            return PluginSkillDisclosure.indexPromptBlock(entries: entries)
+        } catch {
+            return ""
+        }
+    }
+
     private static func pluginIDs(from listJSON: String) -> Set<String> {
         guard let data = listJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
+              let root = try? JSONSerialization.jsonObject(with: data) else {
             return []
         }
-        return Set(obj.compactMap { $0["plugin_id"] })
+        if let rows = root as? [[String: String]] {
+            return Set(rows.compactMap { $0["plugin_id"] })
+        }
+        if let object = root as? [String: Any],
+           let releases = object["releases"] as? [[String: Any]] {
+            return Set(releases.compactMap { $0["plugin_id"] as? String })
+        }
+        return []
     }
 
     /// Builds the existing conversation pipeline stream for one envelope body (turn engine unchanged).

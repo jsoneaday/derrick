@@ -23,10 +23,6 @@ let package = Package(
             targets: ["SlackConnectorE2EHarness"]
         ),
         .executable(
-            name: "SlackConnectorInstallReference",
-            targets: ["SlackConnectorInstallReference"]
-        ),
-        .executable(
             name: "SlackConnectorBootstrapProbe",
             targets: ["SlackConnectorBootstrapProbe"]
         ),
@@ -69,12 +65,25 @@ let package = Package(
         ),
         .target(
             name: "FactoryHarnessSupport",
-            dependencies: ["MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            dependencies: [
+                "MCPServer",
+                "Plugin",
+                "LLMAgentClient",
+                "Structure",
+                "DBRepository",
+            ],
             path: "Sources/FactoryHarnessSupport"
         ),
         .executableTarget(
             name: "FactoryHarness",
-            dependencies: ["FactoryHarnessSupport", "MCPServer", "Plugin", "LLMAgentClient", "Structure"],
+            dependencies: [
+                "FactoryHarnessSupport",
+                "MCPServer",
+                "Plugin",
+                "LLMAgentClient",
+                "Structure",
+                "DBRepository",
+            ],
             path: "Sources/FactoryHarness"
         ),
         .executableTarget(
@@ -103,18 +112,6 @@ let package = Package(
                 "DerrickBackend",
             ],
             path: "Sources/SlackConnectorLiveHarness"
-        ),
-        .executableTarget(
-            name: "SlackConnectorInstallReference",
-            dependencies: [
-                "FactoryHarnessSupport",
-                "MCPServer",
-                "Plugin",
-                "Structure",
-                "DBRepository",
-                "DerrickBackend",
-            ],
-            path: "Sources/SlackConnectorInstallReference"
         ),
         .executableTarget(
             name: "SlackConnectorBootstrapProbe",

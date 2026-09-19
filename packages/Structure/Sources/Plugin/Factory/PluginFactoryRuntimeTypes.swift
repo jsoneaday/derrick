@@ -27,19 +27,20 @@ public struct PluginFactoryRuntime: Sendable, Equatable {
         return PluginFactoryRuntime(language: language, entrypoint: entrypoint)
     }
 
-    /// Package-relative guest source path used when hashing and verifying releases.
+    /// Package-relative guest source path from `extensions.app.derrick.entrypoint`.
+    /// `runtimeJSON` is ignored (legacy argument); prefer manifest.
     public static func guestSourcePackagePath(
         runtimeJSON: String,
         manifestJSON: String,
         defaultPath: String = "app.derrick/plugin.go"
     ) -> String {
-        if let runtime = decode(from: runtimeJSON) {
-            return normalizePackageRelativePath(runtime.entrypoint)
-        }
         if let data = manifestJSON.data(using: .utf8),
            let manifest = try? AgentPluginManifest.decode(data),
            let entrypoint = manifest.derrick?.entrypoint {
             return normalizePackageRelativePath(entrypoint)
+        }
+        if let runtime = decode(from: runtimeJSON) {
+            return normalizePackageRelativePath(runtime.entrypoint)
         }
         return defaultPath
     }

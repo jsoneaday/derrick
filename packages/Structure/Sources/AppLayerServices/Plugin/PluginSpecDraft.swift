@@ -136,12 +136,9 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
 
     public func asSkillDraft(pluginName: String = "") -> PluginSkillDraft {
         let outcome = claimedOutcome ?? ""
-        var skillTriggers: Set<PluginSkillDraft.Trigger> = []
-        if triggers.isEmpty {
-            skillTriggers = [.chat]
-        } else {
-            skillTriggers = Set(triggers.map(Self.skillTrigger))
-        }
+        var draftCopy = self
+        PluginSpecProcession.bindInferredTriggers(onto: &draftCopy)
+        let skillTriggers = Set(draftCopy.triggers.map(Self.skillTrigger))
         let purposeParts = [
             outcome,
             connect.map { "Connect: \($0.klass.rawValue) \($0.detail)" },
@@ -152,7 +149,7 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
         return PluginSkillDraft(
             goal: outcome,
             purpose: purposeParts.joined(separator: ". "),
-            triggers: skillTriggers,
+            triggers: skillTriggers.isEmpty ? [.chat] : skillTriggers,
             examples: [
                 PluginSkillDraft.Example(
                     userSays: outcome.isEmpty ? "Run this plugin" : outcome,

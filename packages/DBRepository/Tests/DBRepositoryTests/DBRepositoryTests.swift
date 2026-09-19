@@ -123,6 +123,32 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertTrue(loaded?.verifyIntegrity() == true)
     }
 
+    func testReplacePluginFactoryReleaseUpdatesSameVersion() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let release = makeGoFactoryRelease(
+            pluginID: "weather-tool",
+            manifestName: "weather-tool",
+            skillFiles: ["skills/weather/SKILL.md": "# Weather"]
+        )
+        try await repository.savePluginFactoryRelease(release)
+
+        var drafts = Dictionary(uniqueKeysWithValues: release.editableTextPackageFiles().map {
+            ($0.path, $0.body)
+        })
+        drafts["skills/weather/SKILL.md"] = "# Weather\n\nEdited."
+        let updated = release.replacingEditableTextPackageFiles(drafts)
+        try await repository.replacePluginFactoryRelease(updated)
+
+        let loaded = try await repository.pluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0"
+        )
+        XCTAssertEqual(loaded?.skillFiles["skills/weather/SKILL.md"], "# Weather\n\nEdited.")
+        XCTAssertEqual(loaded?.contentHash, updated.contentHash)
+        XCTAssertTrue(loaded?.verifyIntegrity() == true)
+    }
+
     func testPluginFactoryReleaseRejectsStaleContentHash() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -600,11 +626,10 @@ final class DBRepositoryTests: XCTestCase {
     ) -> PluginFactoryRelease {
         let artifact = Data("compiled".utf8)
         let guestSource = "package main"
-        let manifestJSON = "{\"name\":\"\(manifestName)\"}"
-        let runtimeJSON = #"{"language":"go"}"#
+        let manifestJSON = "{\"name\":\"\(manifestName)\",\"extensions\":{\"app.derrick\":{\"entrypoint\":\"./app.derrick/plugin.go\"}}}"
+        let runtimeJSON = ""
         var files: [String: Data] = [
             "plugin.json": Data(manifestJSON.utf8),
-            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
             "app.derrick/plugin.go": Data(guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]

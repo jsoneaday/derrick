@@ -748,6 +748,58 @@ import WebCrawler
         }
     }
 
+    @Test func orphanSweeperStoppedOnlyListsExitedDeadAndCreated() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            if args.first == "ps",
+               args.contains("name=derrick-guest-runtime"),
+               args.contains("status=exited") {
+                return DockerCLIResult(exitCode: 0, stdout: Data("cccccccccccc\n".utf8), stderr: Data())
+            }
+            if args.first == "ps" {
+                return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        let removed = await DerrickDockerOrphanSweeper.sweep(executor: executor, scope: .stoppedOnly)
+        #expect(removed == 1)
+        let calls = await recorder.calls
+        #expect(calls.filter { $0.first == "ps" }.count == DerrickDockerRuntimeIdentity.psStoppedListArguments.count)
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=exited") })
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=dead") })
+        #expect(calls.contains { $0.first == "ps" && $0.contains("status=created") })
+        #expect(!calls.contains { $0.contains("status=running") })
+        let rm = try #require(calls.first { $0.first == "rm" })
+        #expect(rm.contains("cccccccccccc"))
+        for call in calls where call.first == "ps" || call.first == "rm" {
+            #expect(
+                DockerRunRequestValidator.validate(
+                    DockerHostLaunch.makeRequest(dockerArguments: call, timeoutSeconds: 60)
+                ) == nil
+            )
+        }
+    }
+
+    @Test func danglingImagePrunerUsesLabeledPruneOnly() async throws {
+        let recorder = DockerCallRecorder()
+        let executor: DockerCLIExecutor = { args, _, _ in
+            await recorder.append(args)
+            return DockerCLIResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        #expect(await DerrickDockerDanglingImagePruner.prune(executor: executor))
+        let calls = await recorder.calls
+        #expect(calls == [DockerWorkerRuntime.danglingImagePruneArguments])
+        #expect(
+            DockerRunRequestValidator.validate(
+                DockerHostLaunch.makeRequest(
+                    dockerArguments: DockerWorkerRuntime.danglingImagePruneArguments,
+                    timeoutSeconds: 60
+                )
+            ) == nil
+        )
+    }
+
     @Test func orphanSweeperSkipsRemoveWhenNothingMatches() async throws {
         let recorder = DockerCallRecorder()
         let executor: DockerCLIExecutor = { args, _, _ in
@@ -1020,6 +1072,54 @@ import WebCrawler
         #expect(outcome.stage == .execution)
         #expect(result.text.contains("exit 7"))
         #expect(result.text.contains("guest runtime failed"))
+    }
+
+    @Test func pluginSkillActivatesOnDemand() async throws {
+        let release = PluginFactoryRelease(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            manifestJSON: #"{"name":"weather-tool"}"#,
+            runtimeJSON: "",
+            guestSource: "package main",
+            compiledArtifact: Data(),
+            skillFiles: [
+                "skills/weather/SKILL.md": "---\nname: weather\ndescription: Forecasts\n---\n# Full skill\n",
+                "skills/weather/references/api.md": "# API",
+            ],
+            contentHash: try PluginContentHash(hex: String(repeating: "c", count: 64)),
+            reviewSummary: "ok"
+        )
+        let bridge = try await MCPLocalBridge.make { server in
+            await server.register(
+                PluginRuntimeToolModule.makeSkillRegistration { pluginID in
+                    pluginID == release.pluginID ? release : nil
+                }
+            )
+        }
+
+        let activated = try await bridge.client.callTool(
+            named: "plugin.skill",
+            arguments: [
+                "plugin_id": .string("weather-tool"),
+                "action": .string("activate"),
+                "skill": .string("weather"),
+            ]
+        )
+        #expect(!activated.isError)
+        #expect(activated.text.contains("# Full skill"))
+
+        let referenced = try await bridge.client.callTool(
+            named: "plugin.skill",
+            arguments: [
+                "plugin_id": .string("weather-tool"),
+                "action": .string("reference"),
+                "path": .string("api.md"),
+            ]
+        )
+        #expect(!referenced.isError)
+        #expect(referenced.text.contains("weather"))
+        #expect(referenced.text.contains("api.md"))
+        #expect(referenced.text.contains("# API"))
     }
 
     @Test func pluginFactorySurfacesReviewFailureOutcome() async throws {

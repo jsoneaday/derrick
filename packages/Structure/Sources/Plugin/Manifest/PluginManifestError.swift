@@ -23,6 +23,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
     case invalidDependency(String)
     case invalidContentHash(String)
     case invalidSkill(String)
+    case missingSkillFiles
 
     public var errorDescription: String? {
         switch self {
@@ -53,7 +54,7 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
         case .pathEscapesRoot(let p):
             return "Path escapes the plugin root: \(p)"
         case .missingRuntime:
-            return "app.derrick runtime.json is required for a handle plugin"
+            return "extensions.app.derrick.entrypoint is required for a handle plugin"
         case .missingFile(let p):
             return "Missing plugin file: \(p)"
         case .unknownAuthProvider(let p):
@@ -70,6 +71,8 @@ public enum PluginManifestError: Error, Equatable, LocalizedError {
             return "Invalid content hash: \(h)"
         case .invalidSkill(let s):
             return "Invalid skill: \(s)"
+        case .missingSkillFiles:
+            return "Agent Plugin packages require at least one skills/<name>/SKILL.md"
         }
     }
 }

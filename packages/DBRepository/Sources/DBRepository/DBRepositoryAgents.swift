@@ -88,6 +88,16 @@ public extension DBRepository {
         }
     }
 
+    func deleteChatSession(applicationName: String, sessionID: String) throws {
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM chat_sessions
+            WHERE application_name = \(quoted(applicationName))
+              AND session_id = \(quoted(sessionID));
+            """, on: handle)
+        }
+    }
+
     // MARK: - Agents
 
     func upsertAgentRecord(_ record: AgentRecord, applicationName: String) throws {

@@ -261,14 +261,15 @@ public struct PluginFactory: Sendable {
             throw PluginFactoryError.invalidPackagedOutput(error.localizedDescription)
         }
 
-        let runtimeJSON = try runtimeJSON(for: manifest)
         let guestPath = PluginFactoryRuntime.guestSourcePackagePath(
-            runtimeJSON: runtimeJSON,
+            runtimeJSON: "",
             manifestJSON: draft.manifestJSON
         )
+        guard draft.skillFiles.keys.contains(where: { PluginFactorySkillFile.isSkillMarkdownPath($0) }) else {
+            throw PluginFactoryError.missingSkillFiles
+        }
         var files: [String: Data] = [
             "plugin.json": Data(draft.manifestJSON.utf8),
-            "app.derrick/runtime.json": Data(runtimeJSON.utf8),
             guestPath: Data(draft.guestSource.utf8),
             "app.derrick/plugin": artifact,
         ]
@@ -284,7 +285,7 @@ public struct PluginFactory: Sendable {
             pluginID: manifest.name.rawValue,
             version: version,
             manifestJSON: draft.manifestJSON,
-            runtimeJSON: runtimeJSON,
+            runtimeJSON: "",
             guestSource: draft.guestSource,
             compiledArtifact: artifact,
             skillFiles: draft.skillFiles,
@@ -334,18 +335,6 @@ public struct PluginFactory: Sendable {
         if let first = findings.first {
             throw PluginFactoryError.invalidSource(first)
         }
-    }
-
-    private func runtimeJSON(for manifest: AgentPluginManifest) throws -> String {
-        guard let entrypoint = manifest.derrick?.entrypoint else {
-            throw PluginFactoryError.invalidManifest("A Go entrypoint is required.")
-        }
-        let object: [String: String] = [
-            "language": "go",
-            "entrypoint": entrypoint,
-        ]
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return String(decoding: data, as: UTF8.self)
     }
 
     private func validateOutput(_ data: Data) throws {

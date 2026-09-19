@@ -270,6 +270,10 @@ private struct JobResultStandaloneCard: View {
     let shortID: String
     let onDismiss: () -> Void
 
+    private var kind: InAppNotificationKind {
+        result.failed ? .failure : .success
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             JobResultModalHeader(shortID: shortID, failed: result.failed)
@@ -279,14 +283,26 @@ private struct JobResultStandaloneCard: View {
         .frame(width: 576)
         .fixedSize(horizontal: false, vertical: true)
         .background(
-            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+            RoundedRectangle(
+                cornerRadius: InAppNotificationBannerChrome.cornerRadius,
+                style: .continuous
+            )
+            .fill(InAppNotificationBannerChrome.fill)
         )
-        .clipShape(RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: InAppNotificationBannerChrome.cornerRadius,
+                style: .continuous
+            )
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: ModalPopupDefaults.cornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(
+                cornerRadius: InAppNotificationBannerChrome.cornerRadius,
+                style: .continuous
+            )
+            .strokeBorder(kind.accent.opacity(0.4), lineWidth: 1.5)
         )
+        .shadow(color: .black.opacity(0.1), radius: 14, y: 4)
         .padding(16)
         .preferredColorScheme(.light)
     }
@@ -296,16 +312,16 @@ struct JobResultModalHeader: View {
     var shortID: String?
     var failed: Bool = false
 
+    private var kind: InAppNotificationKind {
+        failed ? .failure : .success
+    }
+
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: failed ? "exclamationmark.circle" : "checkmark.circle")
+            Image(systemName: kind.symbolName)
                 .font(ModalChrome.symbolFont)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(
-                    failed
-                        ? Color(red: 0.72, green: 0.22, blue: 0.18)
-                        : Color(red: 0.176, green: 0.286, blue: 0.576)
-                )
+                .foregroundStyle(kind.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(failed ? "Derrick · Job failed" : "Derrick · Job finished")
                     .font(.headline)

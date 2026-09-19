@@ -81,16 +81,27 @@ struct ChatTab: Identifiable, Hashable {
         return (rest, nil)
     }
 
-    /// Recents can restore this tab with no turns; New plugin must still show the creator.
+    /// True when the creator tab has user progress beyond the seeded opening turn.
+    var isOngoingPluginCreator: Bool {
+        isPluginCreator && turns.count > 1
+    }
+
+    /// Unused Create tab — in memory only until the user starts prompting.
+    var isUnusedPluginCreator: Bool {
+        isPluginCreator && !isOngoingPluginCreator
+    }
+
+    /// Recents can restore this tab with no turns; Plugins must still show the creator.
     static func pluginCreator(existing: ChatTab? = nil) -> ChatTab {
         var tab = existing ?? ChatTab(
             id: PluginSpecProcession.newCreatorTabID(),
-            title: PluginSpecProcession.creatorTabTitlePrefix,
+            title: PluginSpecProcession.pluginsTabTitle,
             isPluginCreator: true,
             specSession: PluginSpecSession()
         )
-        if tab.title.isEmpty {
-            tab.title = PluginSpecProcession.creatorTabTitlePrefix
+        if tab.title.isEmpty || tab.title == PluginSpecProcession.creatorTabTitlePrefix
+            || tab.title.hasPrefix(PluginSpecProcession.creatorTabTitlePrefix + " - ") {
+            tab.title = PluginSpecProcession.pluginsTabTitle
         }
         tab.isPluginCreator = true
         if tab.specSession == nil {
@@ -99,7 +110,7 @@ struct ChatTab: Identifiable, Hashable {
         if tab.turns.isEmpty {
             tab.turns = [
                 ChatTurn(
-                    prompt: "Create plugin",
+                    prompt: PluginSpecProcession.creatorTabTitlePrefix,
                     response: PluginSpecProcession.openingQuestion,
                     status: .complete
                 ),
@@ -121,10 +132,7 @@ struct ChatTab: Identifiable, Hashable {
                 toolName: isDocsReview ? AllowedMCPTool.webSearch.rawValue : nil
             )
         )
-        if let outcome = session.draft.claimedOutcome,
-           !outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            title = PluginSpecProcession.creatorTabTitle(from: outcome)
-        }
+        title = PluginSpecProcession.pluginsTabTitle
         return turn
     }
 
@@ -218,6 +226,7 @@ final class ChatSessionStore: ObservableObject {
         if tabs.isEmpty {
             if let latest = recentSessions.first(where: {
                 !JobSessionID.isJobSession($0.sessionID)
+                    && !Self.isUnstartedPluginCreatorSession($0)
             }) {
                 selectSession(id: latest.sessionID)
             } else {
@@ -232,10 +241,22 @@ final class ChatSessionStore: ObservableObject {
         guard let repository else { return }
         let rows = (try? await repository.listRecentChatSessions(
             applicationName: applicationName,
+            limit: 20
+        )) ?? []
+        // Drop legacy Create screens that were saved before the user prompted.
+        for session in rows where Self.isUnstartedPluginCreatorSession(session) {
+            try? await repository.deleteChatSession(
+                applicationName: applicationName,
+                sessionID: session.sessionID
+            )
+        }
+        let cleaned = (try? await repository.listRecentChatSessions(
+            applicationName: applicationName,
             limit: 5
         )) ?? []
-        recentSessions = rows.filter {
+        recentSessions = cleaned.filter {
             !JobSessionID.isJobSession($0.sessionID)
+                && !Self.isUnstartedPluginCreatorSession($0)
         }
     }
 
@@ -247,12 +268,16 @@ final class ChatSessionStore: ObservableObject {
         persistSessionShell(sessionID: id, title: tab.title, tab: tab)
     }
 
+    /// Opens Create plugin. Reuses an unused in-memory Create tab; does not persist until the user prompts.
     @discardableResult
     func openOrFocusPluginCreator() -> String {
+        if let existing = tabs.last(where: \.isUnusedPluginCreator) {
+            selectedSessionID = existing.id
+            return existing.id
+        }
         let tab = ChatTab.pluginCreator()
         tabs.append(tab)
         selectedSessionID = tab.id
-        persistSessionShell(sessionID: tab.id, title: tab.title, tab: tab)
         return tab.id
     }
 
@@ -489,6 +514,11 @@ final class ChatSessionStore: ObservableObject {
                 return
             }
             if PluginSpecProcession.isCreatorTabID(id) || tab.isPluginCreator {
+                // Never restore an unused Create into Chat — those stay in-memory only.
+                if session.map(Self.isUnstartedPluginCreatorSession) ?? true {
+                    openNewChat()
+                    return
+                }
                 tab = ChatTab.pluginCreator(existing: tab)
             }
             tabs.append(tab)
@@ -583,6 +613,48 @@ final class ChatSessionStore: ObservableObject {
                 openNewChat()
             }
         }
+    }
+
+    /// Removes Create-plugin tabs (and their saved sessions) after a successful build opens the plugin.
+    func retirePluginCreatorTabs() {
+        let creators = tabs.filter(\.isPluginCreator)
+        guard !creators.isEmpty else { return }
+        let ids = creators.map(\.id)
+        for id in ids {
+            activeTasks[id]?.cancel()
+            activeTasks[id] = nil
+            accessDocsTasks[id]?.cancel()
+            accessDocsTasks[id] = nil
+            accessDocsGeneration[id] = nil
+        }
+        tabs.removeAll { ids.contains($0.id) }
+        if let selected = selectedSessionID, ids.contains(selected) {
+            selectedSessionID = tabs.last?.id
+        }
+        guard let repository else { return }
+        Task {
+            for id in ids {
+                try? await repository.deleteChatSession(
+                    applicationName: applicationName,
+                    sessionID: id
+                )
+            }
+            await refreshRecents()
+        }
+    }
+
+    /// Drops Chat tabs for a deleted plugin (root + thread tabs).
+    func closeTabs(forPluginID pluginID: String) {
+        let trimmed = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let matching = tabs.filter { tab in
+            tab.pluginID == trimmed
+                || ChatTab.pluginTabIdentity(tab.id)?.pluginID == trimmed
+        }
+        for tab in matching {
+            closeTab(id: tab.id)
+        }
+        Task { await refreshRecents() }
     }
 
     func sendPrompt(
@@ -762,10 +834,15 @@ final class ChatSessionStore: ObservableObject {
 
     private func persistSessionShell(sessionID: String, title: String, tab: ChatTab) {
         guard let repository else { return }
+        // Unused Create screens stay in-memory only until the user starts prompting.
+        if tab.isUnusedPluginCreator {
+            return
+        }
         let now = Date.now
         var metadata: [String: String] = ["surface": tab.surface.rawValue]
         if tab.isPluginCreator {
             metadata["pluginCreator"] = "true"
+            metadata["pluginCreatorStarted"] = "true"
         }
         if let pluginID = tab.pluginID {
             metadata["pluginID"] = pluginID
@@ -785,6 +862,14 @@ final class ChatSessionStore: ObservableObject {
             try? await repository.upsertChatSession(dto)
             await refreshRecents()
         }
+    }
+
+    /// Legacy or incomplete Create rows that never received a user prompt.
+    private static func isUnstartedPluginCreatorSession(_ session: ChatSessionDTO) -> Bool {
+        let isCreator = session.metadata["pluginCreator"] == "true"
+            || PluginSpecProcession.isCreatorTabID(session.sessionID)
+        guard isCreator else { return false }
+        return session.metadata["pluginCreatorStarted"] != "true"
     }
 
     private func tab(from session: ChatSessionDTO?, id: String, title: String) -> ChatTab {

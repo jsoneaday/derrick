@@ -16,12 +16,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
     }
 
     public func hasCredentials() -> Bool {
-        for fieldID in ["bot_token", "token", "api_key"] {
-            if PluginSecretResolver.resolve(pluginID: pluginID, fieldID: fieldID) != nil {
-                return true
-            }
-        }
-        return false
+        PluginSecretResolver.hasCallCredential(pluginID: pluginID)
     }
 
     public func syncThreads(repository: DBRepository) async throws {
