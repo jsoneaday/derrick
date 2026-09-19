@@ -107,8 +107,8 @@ import Testing
 
         #expect(release.pluginID == "weather-tool")
         #expect(release.version == "1.2.3")
-        #expect(release.runtimeJSON.contains("\"language\":\"go\""))
-        #expect(release.runtimeJSON.contains("plugin.go"))
+        #expect(release.runtimeJSON.isEmpty)
+        #expect(release.skillFiles.keys.contains("skills/weather/SKILL.md"))
         #expect(!release.contentHash.rawValue.isEmpty)
         #expect(release.verifyIntegrity())
         var tampered = release.packageFiles()
@@ -321,11 +321,13 @@ import Testing
             version: "1.0.0",
             description: "Weather summaries.",
             guestSource: guestGoSource(),
+            skillFiles: sampleSkillFileEntries(name: "weather")
         )
         let draft = try response.draft()
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.schema == PluginContract.agentPluginSchema)
         #expect(manifest.derrick?.entrypoint == "./app.derrick/plugin.go")
+        #expect(draft.skillFiles.keys.contains("skills/weather/SKILL.md"))
     }
 
     @Test func builderNormalizesUnderscorePluginIDAndWritesSecretLabels() throws {
@@ -334,6 +336,7 @@ import Testing
             version: "1.0.0",
             description: "Slack send and receive.",
             guestSource: guestGoSource(),
+            skillFiles: sampleSkillFileEntries(name: "slack"),
             secrets: [
                 try PluginSecretField(id: "username", label: "Slack username", kind: .username),
                 try PluginSecretField(id: "password", label: "Slack password", kind: .password),
@@ -353,6 +356,7 @@ import Testing
             version: "1.0.0",
             description: "Slack send and receive.",
             guestSource: guestGoSource(),
+            skillFiles: sampleSkillFileEntries(name: "slack"),
             role: .connector,
             messagingOps: ["send_message"]
         )
@@ -372,6 +376,7 @@ import Testing
             version: "1.0.0",
             description: "Slack full sync.",
             guestSource: guestGoSource(),
+            skillFiles: sampleSkillFileEntries(name: "slack"),
             role: .connector
         )
         let draft = try response.draft()
@@ -616,12 +621,17 @@ import Testing
 
     @Test func builderDraftFromModelTextAcceptsNestedTestInputJSON() throws {
         let goJSON = String(data: try JSONEncoder().encode(guestGoSource()), encoding: .utf8)!
+        let skillJSON = String(
+            data: try JSONEncoder().encode(sampleSkillFileEntries(name: "weather")),
+            encoding: .utf8
+        )!
         let text = """
-        {"description":"Weather","go_source":\(goJSON),"test_input_json":{"kind":"manual"}}
+        {"description":"Weather","go_source":\(goJSON),"test_input_json":{"kind":"manual"},"skill_files":\(skillJSON)}
         """
         let draft = try PluginFactoryBuilderResponse.draft(fromModelText: text)
         #expect(String(decoding: draft.testInput, as: UTF8.self).contains("manual"))
         #expect(draft.guestSource.contains("package main"))
+        #expect(draft.skillFiles.keys.contains("skills/weather/SKILL.md"))
     }
 
     @Test func builderDraftFromModelTextNamesMissingGoSource() {
@@ -660,8 +670,25 @@ import Testing
         PluginFactoryDraft(
             manifestJSON: manifestJSON(),
             guestSource: guestGoSource(),
-            testInput: Data(#"{"kind":"manual"}"#.utf8)
+            testInput: Data(#"{"kind":"manual"}"#.utf8),
+            skillFiles: sampleSkillFiles(name: "weather")
         )
+    }
+
+    private func sampleSkillFiles(name: String) -> [String: String] {
+        [
+            "skills/\(name)/SKILL.md":
+                "---\nname: \(name)\ndescription: Test skill\n---\n"
+        ]
+    }
+
+    private func sampleSkillFileEntries(name: String) -> [PluginFactorySkillFile] {
+        [
+            PluginFactorySkillFile(
+                path: "skills/\(name)/SKILL.md",
+                body: "---\nname: \(name)\ndescription: Test skill\n---\n"
+            )
+        ]
     }
 
     private func manifestJSON() -> String {
@@ -704,7 +731,10 @@ private func connectorDraft(testInput: Data) -> PluginFactoryDraft {
     return PluginFactoryDraft(
         manifestJSON: manifestJSON,
         guestSource: connectorGuestGoSource(),
-        testInput: testInput
+        testInput: testInput,
+        skillFiles: [
+            "skills/slack/SKILL.md": "---\nname: slack\ndescription: Test skill\n---\n"
+        ]
     )
 }
 
