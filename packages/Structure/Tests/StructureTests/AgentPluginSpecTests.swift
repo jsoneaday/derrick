@@ -10,7 +10,8 @@ import Structure
         #expect(block.contains("Prefer the latest published"))
         #expect(block.contains("agent-plugins.org/specification"))
         #expect(block.contains("Skills require SKILL.md"))
-        #expect(block.contains("skills/<name>/SKILL.md"))
+        #expect(block.contains("Obey this package model"))
+        #expect(!block.contains("Include at least one skills/<name>/SKILL.md"))
     }
 
     @Test func bundledFallbackMentionsManifestAndSkills() {

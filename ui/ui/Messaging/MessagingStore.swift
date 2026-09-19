@@ -27,18 +27,13 @@ final class MessagingStore: ObservableObject {
     let session: MessagingSessionStore
     @Published private(set) var isConnectorSyncing = false
     @Published var isSending = false
-    @Published private(set) var inboundBanner: String?
-    @Published private(set) var inboundBannerPluginID: String?
-    @Published private(set) var inboundBannerThreadID: String?
     @Published private(set) var recordedHostUIRoot: HostUINode?
 
     private var repository: DBRepository?
     private var cancellables = Set<AnyCancellable>()
     private lazy var connectorRuntime = ConnectorMessagingRuntime()
     private var inboundObserver: DerrickDarwinNotifyObserver?
-    private var knownInboundMessageIDs: Set<String> = []
-    private var inboundIDsPrimed = false
-    private var inboundBannerTask: Task<Void, Never>?
+    let inboundBannerService = MessagingInboundBannerService()
     private var connectorCommandGeneration = 0
 
     init() {
@@ -48,6 +43,9 @@ final class MessagingStore: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         session.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        inboundBannerService.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         inboundObserver = DerrickDarwinNotifyObserver(
@@ -67,6 +65,10 @@ final class MessagingStore: ObservableObject {
             .store(in: &cancellables)
     }
 
+    var inboundBanner: String? { inboundBannerService.bannerText }
+    var inboundBannerPluginID: String? { inboundBannerService.bannerPluginID }
+    var inboundBannerThreadID: String? { inboundBannerService.bannerThreadID }
+
     var connectors: [MessagingConnectorDTO] { catalog.connectors }
     var threads: [MessagingThreadDTO] { session.threads }
     var tabs: [MessagingTab] { session.tabs }
@@ -84,7 +86,10 @@ final class MessagingStore: ObservableObject {
     var showNewMessagesPill: Bool { session.showNewMessagesPill }
     var lastError: String? { session.lastError ?? catalog.lastError }
     var hostUIRoot: HostUINode {
-        recordedHostUIRoot ?? (try? HostUILibraryStore.messagingInbox()) ?? HostUINode(element: "screen")
+        let base = recordedHostUIRoot
+            ?? (try? HostUILibraryStore.messagingInbox())
+            ?? HostUINode(element: "screen")
+        return HostUILibraryStore.withDefaultMessagingServices(base)
     }
     var showsHostConversationTabs: Bool {
         hostUIRoot.contains(element: "tab_strip")
@@ -230,7 +235,7 @@ final class MessagingStore: ObservableObject {
             }
             try? await repository.setMessagingConnectorListening(pluginID: pluginID, listening: true)
             await catalog.refreshBadges()
-            DerrickMessagingIngressSignal.postPoll()
+            MessagingPollRefreshService.requestPoll()
         }
         await session.openConnector(
             pluginID: pluginID,
@@ -239,7 +244,7 @@ final class MessagingStore: ObservableObject {
         guard session.selectedPluginID == pluginID else { return false }
         publishForegroundPresence()
         primeInboundMessageIDs()
-        if repository != nil, catalog.contains(pluginID: pluginID), session.threads.isEmpty {
+        if repository != nil, catalog.contains(pluginID: pluginID) {
             let generation = beginConnectorCommand()
             setConnectorSyncing(true)
             Task { @MainActor in
@@ -311,6 +316,11 @@ final class MessagingStore: ObservableObject {
               let thread = selectedThread else {
             return
         }
+        let optimisticID = MessagingOptimisticSendService.begin(
+            on: session,
+            body: text,
+            parentVendorMessageID: parentVendorMessageID
+        )
         isSending = true
         defer { isSending = false }
         do {
@@ -325,6 +335,9 @@ final class MessagingStore: ObservableObject {
             )
             session.setLastError(nil)
         } catch {
+            if let optimisticID {
+                MessagingOptimisticSendService.cancel(on: session, id: optimisticID)
+            }
             let detail = error.localizedDescription
             session.setLastError(detail)
             Task {
@@ -365,16 +378,28 @@ final class MessagingStore: ObservableObject {
                 return
             }
             await session.selectThread(id: thread.id)
-            try await connectorRuntime.send(
-                pluginID: pluginID,
-                text: body,
-                thread: thread,
-                repository: repository,
-                store: self,
-                session: session
+            let optimisticID = MessagingOptimisticSendService.begin(
+                on: session,
+                body: body,
+                parentVendorMessageID: nil
             )
-            session.setLastError(nil)
-            DerrickMessagingIngressSignal.postPoll()
+            do {
+                try await connectorRuntime.send(
+                    pluginID: pluginID,
+                    text: body,
+                    thread: thread,
+                    repository: repository,
+                    store: self,
+                    session: session
+                )
+                session.setLastError(nil)
+                MessagingPollRefreshService.requestPoll()
+            } catch {
+                if let optimisticID {
+                    MessagingOptimisticSendService.cancel(on: session, id: optimisticID)
+                }
+                throw error
+            }
         } catch {
             session.setLastError(error.localizedDescription)
         }
@@ -392,7 +417,7 @@ final class MessagingStore: ObservableObject {
             try await openChannelThread(pluginID: pluginID, channelID: channel, repository: repository)
             await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: true)
             session.setLastError(nil)
-            DerrickMessagingIngressSignal.postPoll()
+            MessagingPollRefreshService.requestPoll()
         } catch {
             session.setLastError(error.localizedDescription)
         }
@@ -422,43 +447,33 @@ final class MessagingStore: ObservableObject {
         await session.selectThread(id: thread.id)
         session.setLastError(nil)
         primeInboundMessageIDs()
-        DerrickMessagingIngressSignal.postPoll()
+        MessagingPollRefreshService.requestPoll()
     }
 
     func selectThread(id: String) async {
         await session.selectThread(id: id)
         primeInboundMessageIDs()
         publishForegroundPresence()
-        DerrickMessagingIngressSignal.postPoll()
+        MessagingPollRefreshService.requestPoll()
     }
 
     func openReplyThread(parentVendorMessageID: String) async {
-        await session.openReplyThread(parentVendorMessageID: parentVendorMessageID)
-        publishForegroundPresence()
-        DerrickMessagingIngressSignal.postPoll()
-        guard let pluginID = selectedPluginID, let thread = selectedThread else { return }
-        do {
-            try await connectorRuntime.pollConversation(
-                pluginID: pluginID,
-                vendorThreadID: thread.vendorThreadID,
-                parentVendorMessageID: parentVendorMessageID,
-                threadID: thread.id,
-                session: session
-            )
-            session.setLastError(nil)
-            primeInboundMessageIDs()
-        } catch {
-            let mapped = ConnectorReplyThreadAccessMessage.userFacing(
-                fromVendorDetail: error.localizedDescription
-            ) ?? error.localizedDescription
-            session.setReplyThreadWarning(mapped)
-        }
+        await MessagingReplyThreadService.open(
+            parentVendorMessageID: parentVendorMessageID,
+            session: session,
+            connectorRuntime: connectorRuntime,
+            pluginID: selectedPluginID,
+            thread: selectedThread,
+            primeInbound: { [weak self] in self?.primeInboundMessageIDs() },
+            publishPresence: { [weak self] in self?.publishForegroundPresence() }
+        )
     }
 
     func closeReplyThread() {
-        session.closeReplyThread()
-        publishForegroundPresence()
-        DerrickMessagingIngressSignal.postPoll()
+        MessagingReplyThreadService.close(
+            session: session,
+            publishPresence: { [weak self] in self?.publishForegroundPresence() }
+        )
     }
 
     func closeTab(id: String) {
@@ -486,70 +501,34 @@ final class MessagingStore: ObservableObject {
     }
 
     func refreshFromDaemonInbound() async {
-        await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: false)
-        if let threadID = selectedThreadID {
-            await session.reloadMessagesForThread(id: threadID)
-        }
-        await session.markVisibleConversationRead()
-        await catalog.refreshBadges()
-        presentInboundBannerIfNeeded()
-    }
-
-    private func currentInboundMessageIDs() -> Set<String> {
-        Set(
-            (session.visibleMessages + session.visibleReplyMessages)
-                .filter { $0.direction == .inbound }
-                .map(\.id)
+        await MessagingPollRefreshService.refreshFromDaemon(
+            session: session,
+            catalog: catalog,
+            onAfterReload: { [weak self] in
+                self?.presentInboundBannerIfNeeded()
+            }
         )
     }
 
+    private func visibleInboundMessages() -> [MessagingMessageDTO] {
+        (session.visibleMessages + session.visibleReplyMessages)
+            .filter { $0.direction == .inbound }
+    }
+
     private func primeInboundMessageIDs() {
-        knownInboundMessageIDs = currentInboundMessageIDs()
-        inboundIDsPrimed = true
+        inboundBannerService.prime(visibleInbound: visibleInboundMessages())
     }
 
     private func presentInboundBannerIfNeeded() {
-        let current = currentInboundMessageIDs()
-        defer { knownInboundMessageIDs = current }
-        guard inboundIDsPrimed else {
-            inboundIDsPrimed = true
-            return
-        }
-        guard session.isMessagingWorkspace else { return }
-        let newIDs = current.subtracting(knownInboundMessageIDs)
-        guard !newIDs.isEmpty else { return }
-        let newest = (session.visibleReplyMessages + session.visibleMessages)
-            .last { newIDs.contains($0.id) && $0.direction == .inbound }
-        guard let newest else { return }
-        let sender = newest.sender.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body = newest.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preview = body.count > 140 ? String(body.prefix(139)) + "…" : body
-        let text: String
-        if sender.isEmpty {
-            text = preview
-        } else if preview.isEmpty {
-            text = sender
-        } else {
-            text = "\(sender): \(preview)"
-        }
-        inboundBannerTask?.cancel()
-        inboundBanner = text
-        inboundBannerPluginID = session.selectedPluginID
-        inboundBannerThreadID = newest.threadID
-        inboundBannerTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            guard !Task.isCancelled else { return }
-            inboundBanner = nil
-            inboundBannerPluginID = nil
-            inboundBannerThreadID = nil
-        }
+        _ = inboundBannerService.presentIfNeeded(
+            visibleInbound: visibleInboundMessages(),
+            isMessagingWorkspace: session.isMessagingWorkspace,
+            pluginID: session.selectedPluginID
+        )
     }
 
     func clearInboundBanner() {
-        inboundBannerTask?.cancel()
-        inboundBanner = nil
-        inboundBannerPluginID = nil
-        inboundBannerThreadID = nil
+        inboundBannerService.clear()
     }
 
     func refreshHostUIRoot(matching pluginID: String?) async {

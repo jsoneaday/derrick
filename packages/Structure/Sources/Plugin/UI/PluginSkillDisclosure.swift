@@ -120,22 +120,38 @@ public enum HostUIDisclosure: Sendable {
         }
         var lines: [String] = [
             "Host UI catalog (ids only). Ask for an element schema before using unfamiliar config keys.",
-            "Emit ui.present trees using only these element ids. The Swift host renders them.",
+            "Emit ui.present trees using only these element ids. The Swift host renders controls and runs host services.",
+            "Prefer the messaging_inbox example as the default base for connectors; adapt from it. Do not reimplement send, poll, banners, or reply chrome in guest code.",
+            "Elements with role=service are invisible host capabilities (optimistic_send, inbound_banners, poll_refresh, reply_pane). For holds=message_exchange the host always applies that service pack.",
         ]
-        for id in elements.keys.sorted() {
-            let description: String
-            if let obj = elements[id] as? [String: Any],
-               let text = obj["description"] as? String {
-                description = text
-            } else {
-                description = "Host control."
+        let controls = elements.keys.sorted().filter { id in
+            (elements[id] as? [String: Any])?["role"] as? String != "service"
+        }
+        let services = elements.keys.sorted().filter { id in
+            (elements[id] as? [String: Any])?["role"] as? String == "service"
+        }
+        lines.append("Controls:")
+        for id in controls {
+            lines.append("- \(id): \(elementDescription(id, in: elements))")
+        }
+        if !services.isEmpty {
+            lines.append("Services (host-owned, invisible):")
+            for id in services {
+                lines.append("- \(id): \(elementDescription(id, in: elements))")
             }
-            lines.append("- \(id): \(description)")
         }
         if let examples = json["examples"] as? [String: Any] {
             lines.append("Named examples (ask by name for full tree): \(examples.keys.sorted().joined(separator: ", "))")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func elementDescription(_ id: String, in elements: [String: Any]) -> String {
+        if let obj = elements[id] as? [String: Any],
+           let text = obj["description"] as? String {
+            return text
+        }
+        return "Host control."
     }
 
     /// Full element definition when the model asks for a specific control.

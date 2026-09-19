@@ -21,7 +21,6 @@ enum AppWorkspace: Equatable {
 enum ChatShellNotification {
     static let startPluginCreation = Notification.Name("derrick.startPluginCreation")
     static let startPluginEdit = Notification.Name("derrick.startPluginEdit")
-    static let openPluginInChat = Notification.Name("derrick.openPluginInChat")
     static let openPluginList = Notification.Name("derrick.openPluginList")
     static let pluginFactorySucceeded = Notification.Name("derrick.pluginFactorySucceeded")
     /// Posted when a plugin (all versions) is removed so Chat can drop its tabs.

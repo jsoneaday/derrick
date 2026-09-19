@@ -36,6 +36,10 @@ final class MessagingSessionStore: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var isMessagingWorkspace = false
 
+    /// Local outbound rows shown before Slack ack / poll. Never persisted.
+    private var pendingOutboundIDs: Set<String> = []
+    private var pendingOutboundByID: [String: MessagingMessageDTO] = [:]
+
     private var repository: DBRepository?
     private var catalog: MessagingCatalogStore?
     private var hasOlder = false
@@ -239,6 +243,7 @@ final class MessagingSessionStore: ObservableObject {
         selectedThreadID = nil
         selectedReplyParentVendorMessageID = nil
         replyThreadWarning = nil
+        clearOptimisticOutbound()
         tabs = []
         threads = []
         visibleMessages = []
@@ -255,6 +260,115 @@ final class MessagingSessionStore: ObservableObject {
             return
         }
         lastError = WorkerImageFailureDisplay.userFacing(from: message)
+    }
+
+    /// Shows an outbound bubble immediately. Dropped when a persisted twin arrives or send fails.
+    @discardableResult
+    func beginOptimisticOutbound(
+        body: String,
+        parentVendorMessageID: String?
+    ) -> String? {
+        guard let threadID = selectedThreadID else { return nil }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = MessagingMessageDTO(
+            threadID: threadID,
+            vendorMessageID: nil,
+            direction: .outbound,
+            sender: "derrick",
+            body: trimmed,
+            parentVendorMessageID: (parent?.isEmpty == false) ? parent : nil
+        )
+        pendingOutboundIDs.insert(message.id)
+        pendingOutboundByID[message.id] = message
+        applyPendingOverlay()
+        scrollToBottomToken += 1
+        return message.id
+    }
+
+    func cancelOptimisticOutbound(id: String) {
+        pendingOutboundIDs.remove(id)
+        pendingOutboundByID.removeValue(forKey: id)
+        applyPendingOverlay()
+    }
+
+    /// After DB reload, drop pending rows that match a persisted outbound (same body/parent).
+    func reconcileOptimisticOutbound(against persisted: [MessagingMessageDTO]) {
+        guard !pendingOutboundIDs.isEmpty else { return }
+        var claimed = Set<String>()
+        for message in persisted where message.direction == .outbound {
+            guard let id = pendingOutboundIDs.first(where: { pendingID in
+                guard !claimed.contains(pendingID),
+                      let pending = pendingOutboundByID[pendingID]
+                else { return false }
+                return Self.isPersistedTwin(message, of: pending)
+            }) else { continue }
+            claimed.insert(id)
+            pendingOutboundIDs.remove(id)
+            pendingOutboundByID.removeValue(forKey: id)
+        }
+    }
+
+    private static func isPersistedTwin(
+        _ persisted: MessagingMessageDTO,
+        of pending: MessagingMessageDTO
+    ) -> Bool {
+        guard persisted.direction == .outbound,
+              persisted.threadID == pending.threadID,
+              persisted.body == pending.body,
+              persisted.parentVendorMessageID == pending.parentVendorMessageID,
+              abs(persisted.createdAt.timeIntervalSince(pending.createdAt)) < 180
+        else { return false }
+        // DB pending rows use pending:<uuid> until Slack acks; still twins of UI optimistic rows.
+        return true
+    }
+
+    private func applyPendingOverlay() {
+        guard let threadID = selectedThreadID else { return }
+        let channelPending = pendingOutboundByID.values.filter {
+            !$0.isReply && $0.threadID == threadID && pendingOutboundIDs.contains($0.id)
+        }
+        let replyParent = selectedReplyParentVendorMessageID
+        let replyPending = pendingOutboundByID.values.filter {
+            $0.isReply
+                && $0.threadID == threadID
+                && $0.parentVendorMessageID == replyParent
+                && pendingOutboundIDs.contains($0.id)
+        }
+        visibleMessages = Self.merging(
+            persisted: visibleMessages.filter { !pendingOutboundIDs.contains($0.id) },
+            pending: Array(channelPending)
+        )
+        visibleReplyMessages = Self.merging(
+            persisted: visibleReplyMessages.filter { !pendingOutboundIDs.contains($0.id) },
+            pending: Array(replyPending)
+        )
+    }
+
+    static func merging(
+        persisted: [MessagingMessageDTO],
+        pending: [MessagingMessageDTO]
+    ) -> [MessagingMessageDTO] {
+        var claimedPersisted = Set<String>()
+        let unmatched = pending.filter { p in
+            if let twin = persisted.first(where: {
+                !claimedPersisted.contains($0.id) && isPersistedTwin($0, of: p)
+            }) {
+                claimedPersisted.insert(twin.id)
+                return false
+            }
+            return true
+        }
+        return (persisted + unmatched).sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func clearOptimisticOutbound() {
+        pendingOutboundIDs.removeAll()
+        pendingOutboundByID.removeAll()
     }
 
     func reloadThreadsForSelectedConnector(autoOpenMostRecent: Bool) async {
@@ -290,7 +404,11 @@ final class MessagingSessionStore: ObservableObject {
                 limit: MessagingViewport.maxVisibleMessages,
                 filter: .channelRoots
             )
-            visibleMessages = page
+            reconcileOptimisticOutbound(against: page)
+            let channelPending = pendingOutboundByID.values.filter {
+                !$0.isReply && $0.threadID == threadID && pendingOutboundIDs.contains($0.id)
+            }
+            visibleMessages = Self.merging(persisted: page, pending: Array(channelPending))
             hasOlder = page.count == MessagingViewport.maxVisibleMessages
             isNearBottom = true
             showJumpToLatest = false
@@ -319,11 +437,29 @@ final class MessagingSessionStore: ObservableObject {
             return
         }
         do {
-            visibleReplyMessages = try await repository.listMessagingMessages(
+            let page = try await repository.listMessagingMessages(
                 threadID: threadID,
                 limit: MessagingViewport.maxVisibleMessages,
                 filter: .replyThread(parentVendorMessageID: parent)
             )
+            reconcileOptimisticOutbound(against: page)
+            let replyPending = pendingOutboundByID.values.filter {
+                $0.isReply
+                    && $0.threadID == threadID
+                    && $0.parentVendorMessageID == parent
+                    && pendingOutboundIDs.contains($0.id)
+            }
+            visibleReplyMessages = Self.merging(persisted: page, pending: Array(replyPending))
+            if let latestReply = visibleReplyMessages.last(where: { $0.parentVendorMessageID == parent }) {
+                lastReplyPreviewByParentID[parent] = latestReply.body
+            }
+            // Keep parent root replyCount in sync for affordances when DB row lags poll.
+            if let idx = visibleMessages.firstIndex(where: { $0.vendorMessageID == parent }) {
+                let replyCount = visibleReplyMessages.filter { $0.parentVendorMessageID == parent }.count
+                if replyCount > visibleMessages[idx].replyCount {
+                    visibleMessages[idx].replyCount = replyCount
+                }
+            }
             refreshReplyThreadAccessWarning()
             isNearBottom = true
             showJumpToLatest = false

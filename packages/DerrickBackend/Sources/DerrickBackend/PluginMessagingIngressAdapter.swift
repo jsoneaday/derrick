@@ -282,41 +282,53 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
     ) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var params: [String: PluginJSON] = [
-            "vendor_thread_id": .string(vendorThreadID),
-            "text": .string(trimmed),
-        ]
-        if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !parent.isEmpty {
-            params["parent_vendor_message_id"] = .string(parent)
-            params["thread_ts"] = .string(parent)
-        }
-        let result = try await invoker.invoke(
-            pluginID: pluginID,
-            operation: .sendMessage,
-            params: params
-        )
-        let sent = try ConnectorMessagingParser.requireSentMessage(result)
-        let outbound = MessagingMessageDTO(
+        let localID = UUID().uuidString
+        let pending = MessagingMessageDTO(
+            id: localID,
             threadID: threadID,
-            vendorMessageID: sent.vendorMessageID,
+            vendorMessageID: "pending:\(localID)",
             direction: .outbound,
             sender: "derrick",
             body: trimmed,
-            createdAt: sent.createdAt,
             parentVendorMessageID: parentVendorMessageID
         )
-        _ = try await repository.insertMessagingMessage(outbound, incrementUnread: false)
+        _ = try await repository.insertMessagingMessage(pending, incrementUnread: false)
+        // Show in the host UI before the vendor round-trip finishes (agent + user sends).
+        DerrickMessagingInboundSignal.postRefresh()
+        do {
+            var params: [String: PluginJSON] = [
+                "vendor_thread_id": .string(vendorThreadID),
+                "text": .string(trimmed),
+            ]
+            if let parent = parentVendorMessageID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !parent.isEmpty {
+                params["parent_vendor_message_id"] = .string(parent)
+                params["thread_ts"] = .string(parent)
+            }
+            let result = try await invoker.invoke(
+                pluginID: pluginID,
+                operation: .sendMessage,
+                params: params
+            )
+            let sent = try ConnectorMessagingParser.requireSentMessage(result)
+            try await repository.promoteMessagingOutbound(
+                id: localID,
+                vendorMessageID: sent.vendorMessageID,
+                createdAt: sent.createdAt
+            )
+            DerrickMessagingInboundSignal.postRefresh()
+        } catch {
+            try? await repository.deleteMessagingMessage(id: localID)
+            DerrickMessagingInboundSignal.postRefresh()
+            throw error
+        }
     }
 
     public func bootstrap(repository: DBRepository) async throws {
-        let existing = try await repository.listMessagingThreads(pluginID: pluginID)
-        if !existing.isEmpty {
-            return
-        }
         let manifestJSON = try await repository.listLatestPluginFactoryManifests()
             .first(where: { $0.pluginID == pluginID })?
             .manifestJSON ?? ""
+        // Always refresh the conversation catalog so every bot-visible channel appears as a tab.
         if PluginFactoryValidationExpectations.supportsSyncThreads(manifestJSON: manifestJSON) {
             try await syncThreads(repository: repository)
         }

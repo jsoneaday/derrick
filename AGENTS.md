@@ -9,6 +9,7 @@ You are an Apple Swift and SwiftUI expoert building a Desktop Agent Harness usin
 4.RRun validation
 5. Revise.
 6. Deliver result.
+7. Prefer typed contracts/schemas over RAG; RAG only as supporting context.
 
 ## Architecture
 

@@ -208,7 +208,7 @@ enum PluginFactoryCreateWorkflow {
         try await log(
             workflowID: workflowID,
             stage: "skill",
-            message: "Writing SKILL.md from the Agent Plugin spec…",
+            message: "Building Agent Plugin package (spec + guest)…",
             repositoryProvider: repositoryProvider
         )
         try await log(
@@ -301,7 +301,7 @@ enum PluginFactoryCreateWorkflow {
         try await log(
             workflowID: workflowID,
             stage: "skill",
-            message: "Writing SKILL.md from the Agent Plugin spec…",
+            message: "Building Agent Plugin package (spec + guest)…",
             repositoryProvider: repositoryProvider
         )
         try await log(

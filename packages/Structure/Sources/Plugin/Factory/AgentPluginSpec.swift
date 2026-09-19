@@ -34,7 +34,7 @@ public enum AgentPluginSpec: Sendable {
 
         \(clipped)
         --- end Agent Plugins Specification ---
-        Obey this package model. Include at least one skills/<name>/SKILL.md. Do not invent app.derrick/runtime.json.
+        Obey this package model. Do not invent app.derrick/runtime.json.
         """
     }
 
