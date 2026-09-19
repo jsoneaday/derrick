@@ -118,6 +118,8 @@ public struct HostUIMessage: View {
     private let onOpenThread: (() -> Void)?
 
     private let navy = Color(red: 0.176, green: 0.286, blue: 0.576)
+    /// Cream fill for outbound — matches host notification / prior MessagingBubble chrome.
+    private let outboundFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
 
     public init(row: HostUIMessageRow, onOpenThread: (() -> Void)? = nil) {
         self.row = row
@@ -136,14 +138,15 @@ public struct HostUIMessage: View {
                 HostUIMarkdownText(row.body)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
+                    .frame(maxWidth: 420, alignment: row.outbound ? .trailing : .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.white)
+                            .fill(row.outbound ? outboundFill : Color.white)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .strokeBorder(
-                                navy.opacity(row.outbound ? 0.32 : 0.14),
+                                navy.opacity(row.outbound ? 0.28 : 0.14),
                                 lineWidth: 1
                             )
                     )
@@ -171,12 +174,13 @@ public struct HostUIMessage: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(row.replyCount > 0 ? Color.accentColor : .primary.opacity(0.75))
+                    .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
             if !row.outbound { Spacer(minLength: 80) }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var replyTitle: String {
@@ -191,17 +195,20 @@ public struct HostUIMessageList: View {
     private let onOpenThread: ((HostUIMessageRow) -> Void)?
     private let onNearBottomChange: ((Bool) -> Void)?
     private let onLoadOlder: (() -> Void)?
+    private let scrollToBottomToken: Int
 
     public init(
         rows: [HostUIMessageRow],
         onOpenThread: ((HostUIMessageRow) -> Void)? = nil,
         onNearBottomChange: ((Bool) -> Void)? = nil,
-        onLoadOlder: (() -> Void)? = nil
+        onLoadOlder: (() -> Void)? = nil,
+        scrollToBottomToken: Int = 0
     ) {
         self.rows = rows
         self.onOpenThread = onOpenThread
         self.onNearBottomChange = onNearBottomChange
         self.onLoadOlder = onLoadOlder
+        self.scrollToBottomToken = scrollToBottomToken
     }
 
     public var body: some View {
@@ -229,10 +236,17 @@ public struct HostUIMessageList: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: rows.last?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("hostui-scroll-bottom", anchor: .bottom)
-                }
+                scrollToBottom(proxy)
             }
+            .onChange(of: scrollToBottomToken) { _, _ in
+                scrollToBottom(proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo("hostui-scroll-bottom", anchor: .bottom)
         }
     }
 }

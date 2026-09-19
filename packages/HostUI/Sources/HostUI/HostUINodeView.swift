@@ -66,7 +66,8 @@ public struct HostUINodeView: View {
         guard let sidebar = sidebars.first else { return false }
         let when = sidebar.configString["visible_when"] ?? "reply_thread"
         if when == "always" { return true }
-        return bindings.isViewingReplyThread && bindings.hasService(.replyPane)
+        // Show whenever a reply thread is open; reply_pane is advisory for guest trees.
+        return bindings.isViewingReplyThread
     }
 
     @ViewBuilder
@@ -152,7 +153,8 @@ public struct HostUINodeView: View {
                 rows: rows,
                 onOpenThread: isThread ? nil : bindings.onOpenThread,
                 onNearBottomChange: isThread ? nil : bindings.onNearBottomChange,
-                onLoadOlder: isThread ? nil : bindings.onLoadOlder
+                onLoadOlder: isThread ? nil : bindings.onLoadOlder,
+                scrollToBottomToken: bindings.scrollToBottomToken
             )
             if !isThread, bindings.showJumpToLatest || bindings.showNewMessagesPill {
                 Button(action: bindings.onJumpToLatest) {
