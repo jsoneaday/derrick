@@ -200,6 +200,37 @@ public extension DBRepository {
         }
     }
 
+    /// Deletes one message by primary key (optimistic outbound rollback).
+    func deleteMessagingMessage(id: String) throws {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            DELETE FROM messaging_messages WHERE id = \(quoted(trimmed));
+            """, on: handle)
+        }
+    }
+
+    /// Promotes a local pending outbound row to the vendor-acked message id.
+    func promoteMessagingOutbound(
+        id: String,
+        vendorMessageID: String,
+        createdAt: Date
+    ) throws {
+        let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let vendor = vendorMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty, !vendor.isEmpty else { return }
+        let created = Self.iso8601Formatter().string(from: createdAt)
+        try withDatabaseHandle { handle in
+            try Self.execute("""
+            UPDATE messaging_messages
+            SET vendor_message_id = \(quoted(vendor)),
+                created_at = \(quoted(created))
+            WHERE id = \(quoted(trimmedID));
+            """, on: handle)
+        }
+    }
+
     /// Newest-first page, then reverse for chat-style display (oldest of the window first).
     func listMessagingMessages(
         threadID: String,

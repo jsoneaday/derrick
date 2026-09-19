@@ -24,8 +24,39 @@ import Testing
         #expect(root.element == "screen")
         #expect(root.contains(element: "tab_strip"))
         #expect(root.contains(element: "sidebar"))
+        #expect(root.contains(element: "optimistic_send"))
         #expect(root.first(element: "sidebar")?.configString["holds"] == "messages")
         #expect(root.opensFirstConversation)
+    }
+
+    @Test func defaultMessagingServicesMergeOntoSlimPresent() {
+        let slim = HostUINode(
+            element: "screen",
+            config: [
+                "holds": .string("message_exchange"),
+                "selection": .string("conversations"),
+            ],
+            children: [
+                HostUINode(element: "tab_strip", bind: "conversations"),
+            ]
+        )
+        let merged = HostUILibraryStore.withDefaultMessagingServices(slim)
+        for id in HostUILibraryStore.defaultMessagingServiceIDs {
+            #expect(merged.contains(element: id))
+        }
+    }
+
+    @Test func bundledLibraryListsServiceElements() throws {
+        let ids = try HostUILibraryStore.elementIDs()
+        #expect(ids.contains("optimistic_send"))
+        #expect(ids.contains("inbound_banners"))
+        #expect(ids.contains("poll_refresh"))
+        #expect(ids.contains("reply_pane"))
+    }
+
+    @Test func parityChecklistCoversMessagingBehaviors() {
+        #expect(MessagingInboxParityChecklist.allCases.count >= 10)
+        #expect(MessagingInboxParityChecklist.allCases.contains(.optimisticOutbound))
     }
 
     @Test func screenWithoutTabStripDoesNotOpenAConversation() {

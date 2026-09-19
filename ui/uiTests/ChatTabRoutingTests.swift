@@ -49,9 +49,9 @@ import CoreGraphics
         #expect(store.selectedTab?.title == "#general")
     }
 
-    @Test func settingsSidebarIncludesPlugins() {
-        #expect(LLMModelSettingsSidebarItem.plugins.title == "Plugins")
-        #expect(LLMModelSettingsSidebarItem.allCases.contains(.plugins))
+    @Test func settingsSidebarOmitsPlugins() {
+        #expect(!LLMModelSettingsSidebarItem.allCases.map(\.rawValue).contains("plugins"))
+        #expect(LLMModelSettingsSidebarItem.allCases.contains(.pluginBuilder))
     }
 
     @Test func hostBindsSurfaceWithoutAskingTheHuman() {
@@ -97,15 +97,17 @@ import CoreGraphics
         #expect(SidebarPrimaryActions.pluginsList.id == "plugins-list")
     }
 
-    @Test func chatTabBarIncludesOngoingCreatesOnly() {
+    @Test func chatTabBarExcludesAllPluginCreators() {
         #expect(ChatTabBarView.TabFilter.chats != .pluginsCreate)
         let fresh = ChatTab.pluginCreator()
+        #expect(fresh.isPluginCreator)
         #expect(fresh.isOngoingPluginCreator == false)
         var ongoing = ChatTab.pluginCreator()
         ongoing.turns.append(
             ChatTurn(prompt: "Slack bot", response: "Next question", status: .complete)
         )
         #expect(ongoing.isOngoingPluginCreator)
+        #expect(ongoing.isPluginCreator)
     }
 
     @Test func pluginsCreateAndListAreSeparateFromChat() {
@@ -165,6 +167,9 @@ import CoreGraphics
         )
         #expect(started.isOngoingPluginCreator)
         #expect(!started.isUnusedPluginCreator)
+        // Both belong under Plugins → Create, not Chat.
+        #expect(unused.isPluginCreator)
+        #expect(started.isPluginCreator)
     }
 
     @MainActor

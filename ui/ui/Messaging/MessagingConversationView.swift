@@ -1,7 +1,7 @@
-import HostUI
 import Structure
 import SwiftUI
 
+/// Landing / picker chrome for messaging; active conversations render via HostUI.
 struct MessagingConversationView: View {
     @ObservedObject var store: MessagingStore
     var onInboundBannerTap: (() -> Void)? = nil
@@ -12,7 +12,6 @@ struct MessagingConversationView: View {
     @State private var channelID = ""
     @State private var selectedVendorThreadID = ""
     @FocusState private var composerFocused: Bool
-    @FocusState private var threadComposerFocused: Bool
     @FocusState private var channelFocused: Bool
 
     var body: some View {
@@ -27,7 +26,7 @@ struct MessagingConversationView: View {
                         if store.isConnectorSyncing, store.tabs.isEmpty {
                             discoveringThreads
                         } else {
-                            conversation
+                            hostUIConversation
                         }
                     } else if store.selectedThread == nil, store.isConnectorSyncing {
                         discoveringThreads
@@ -40,7 +39,7 @@ struct MessagingConversationView: View {
                     } else if store.selectedThread == nil {
                         emptyThreads
                     } else {
-                        conversation
+                        hostUIConversation
                     }
                 }
             }
@@ -62,16 +61,21 @@ struct MessagingConversationView: View {
             }
     }
 
+    private var hostUIConversation: some View {
+        MessagingHostUISurface(
+            store: store,
+            draft: $draft,
+            threadDraft: $threadDraft,
+            onInboundBannerTap: onInboundBannerTap
+        )
+    }
+
     private func focusPrimaryComposer() {
         DispatchQueue.main.async {
             switch store.conversationLanding {
             case .catalogRoot:
                 break
             case .vendorConnector:
-                if store.isViewingReplyThread {
-                    threadComposerFocused = true
-                    return
-                }
                 if presentsInbox {
                     if store.isConnectorSyncing, store.tabs.isEmpty { return }
                     composerFocused = true
@@ -109,7 +113,7 @@ struct MessagingConversationView: View {
         VStack(spacing: 10) {
             Text("Connector")
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-            Text("Installed connectors appear as Chat tabs. Type / then the plugin name, or open one from Settings → Plugins.")
+            Text("Installed connectors appear as Chat tabs. Type / then the plugin name, or open one from Plugins → List.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -118,58 +122,58 @@ struct MessagingConversationView: View {
     }
 
     private var threadPicker: some View {
-        HostUIScreen {
-            VStack(alignment: .leading, spacing: 14) {
-                HostUIText(store.selectedConnectorDisplayName, style: .title, multilineCenter: true)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HostUIText(
-                    "Choose a conversation. Derrick shows names from the connector; the vendor ID is used behind the scenes.",
-                    style: .callout,
-                    multilineCenter: true
-                )
+        VStack(alignment: .leading, spacing: 14) {
+            Text(store.selectedConnectorDisplayName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                HostUISection {
-                    HostUISelect(
-                        label: "Conversation",
-                        options: store.threads.map {
-                            HostUISelectOption(id: $0.vendorThreadID, label: $0.title)
-                        },
-                        selection: $selectedVendorThreadID
-                    )
-                }
+            Text("Choose a conversation. Derrick shows names from the connector; the vendor ID is used behind the scenes.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
 
-                HStack {
-                    if let pluginID = store.selectedPluginID {
-                        HostUIButton(
-                            "Refresh list",
-                            systemImage: "arrow.clockwise",
-                            chrome: .secondary,
-                            disabled: store.isConnectorSyncing
-                        ) {
-                            Task { await store.refreshConnector(pluginID: pluginID) }
-                        }
-                    }
-                    Spacer()
-                    HostUIButton(
-                        "Open conversation",
-                        systemImage: "bubble.left.and.bubble.right",
-                        disabled: selectedVendorThreadID.isEmpty || store.isConnectorSyncing
-                    ) {
-                        Task { await store.openDiscoveredThread(vendorThreadID: selectedVendorThreadID) }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Conversation")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Conversation", selection: $selectedVendorThreadID) {
+                    ForEach(store.threads, id: \.vendorThreadID) { thread in
+                        Text(thread.title).tag(thread.vendorThreadID)
                     }
                 }
-
-                if let error = store.lastError {
-                    HostUIText(error, style: .caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
-            .padding(.horizontal, 24)
-            .frame(maxWidth: 520)
+
+            HStack {
+                if let pluginID = store.selectedPluginID {
+                    Button {
+                        Task { await store.refreshConnector(pluginID: pluginID) }
+                    } label: {
+                        Label("Refresh list", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(store.isConnectorSyncing)
+                }
+                Spacer()
+                Button {
+                    Task { await store.openDiscoveredThread(vendorThreadID: selectedVendorThreadID) }
+                } label: {
+                    Label("Open conversation", systemImage: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .disabled(selectedVendorThreadID.isEmpty || store.isConnectorSyncing)
+            }
+
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: 520)
     }
 
     private var discoveringThreads: some View {
@@ -203,60 +207,77 @@ struct MessagingConversationView: View {
     }
 
     private var channelCompose: some View {
-        HostUIScreen {
-            VStack(alignment: .leading, spacing: 14) {
-                HostUIText(store.selectedConnectorDisplayName, style: .title, multilineCenter: true)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HostUIText(
-                    store.canComposeSendOnly
-                        ? "Send-only connector — enter a destination ID and message."
-                        : "Enter a destination ID to open a conversation. Incoming messages appear after you connect.",
-                    style: .callout,
-                    multilineCenter: true
-                )
+        VStack(alignment: .leading, spacing: 14) {
+            Text(store.selectedConnectorDisplayName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                HostUITextField(
-                    label: "Destination ID",
-                    placeholder: "Destination ID",
-                    text: $channelID
-                )
-                .focused($channelFocused)
+            Text(store.canComposeSendOnly
+                 ? "Send-only connector — enter a destination ID and message."
+                 : "Enter a destination ID to open a conversation. Incoming messages appear after you connect.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
 
-                if !store.canComposeSendOnly {
-                    HStack {
-                        Spacer()
-                        HostUIButton(
-                            "Connect to channel",
-                            systemImage: "antenna.radiowaves.left.and.right",
-                            disabled: channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                || store.isConnectorSyncing
-                        ) {
-                            Task { await store.connectToChannel(channelID) }
-                        }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Destination ID")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Destination ID", text: $channelID)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($channelFocused)
+            }
+
+            if !store.canComposeSendOnly {
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await store.connectToChannel(channelID) }
+                    } label: {
+                        Label("Connect to channel", systemImage: "antenna.radiowaves.left.and.right")
                     }
-                }
-
-                HostUIComposer(
-                    placeholder: "Message",
-                    sendTitle: "Send message",
-                    text: $draft,
-                    isSending: store.isSending,
-                    canSend: canSubmitChannelCompose,
-                    onSend: submitChannelCompose
-                )
-                .focused($composerFocused)
-
-                if let error = store.lastError {
-                    HostUIText(error, style: .caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .buttonStyle(ModalPrimaryButtonStyle())
+                    .disabled(channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isConnectorSyncing)
                 }
             }
-            .padding(.horizontal, 24)
-            .frame(maxWidth: 520)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Message")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Message", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .focused($composerFocused)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    submitChannelCompose()
+                } label: {
+                    Label(store.isSending ? "Sending…" : "Send message", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(ModalPrimaryButtonStyle())
+                .disabled(!canSubmitChannelCompose)
+            }
+
+            if let error = store.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: 520)
     }
 
     private var canSubmitChannelCompose: Bool {
@@ -300,163 +321,5 @@ struct MessagingConversationView: View {
                     .frame(maxWidth: 420)
             }
         }
-    }
-
-    private var conversation: some View {
-        ZStack(alignment: .top) {
-            MessagingHostUISurface(
-                store: store,
-                draft: $draft,
-                threadDraft: $threadDraft,
-                onSubmitChannel: submitChannelDraft,
-                onSubmitThread: submitThreadDraft
-            )
-            if let banner = store.inboundBanner, !banner.isEmpty {
-                InAppNotificationToast(text: banner, kind: .message) {
-                    onInboundBannerTap?()
-                }
-                .padding(.top, 10)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.35), value: store.inboundBanner)
-        .onChange(of: store.isViewingReplyThread) { _, open in
-            if open {
-                threadComposerFocused = true
-            } else {
-                threadDraft = ""
-                composerFocused = true
-            }
-        }
-    }
-
-    private func submitChannelDraft() {
-        let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        draft = ""
-        Task {
-            await store.sendMessage(text, parentVendorMessageID: nil)
-            composerFocused = true
-        }
-    }
-
-    private func submitThreadDraft() {
-        let text = threadDraft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        threadDraft = ""
-        let parent = store.selectedReplyParentVendorMessageID
-        Task {
-            await store.sendMessage(text, parentVendorMessageID: parent)
-            threadComposerFocused = true
-        }
-    }
-}
-
-struct MessagingBubble: View {
-    let message: MessagingMessageDTO
-    var showsReplyAction = false
-    var lastReplyPreview: String? = nil
-    var onOpenThread: () -> Void = {}
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if message.direction == .outbound { Spacer(minLength: 80) }
-            VStack(alignment: message.direction == .outbound ? .trailing : .leading, spacing: 4) {
-                    Text(message.sender)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                messageBody
-                if showsReplyAction {
-                    Button(action: onOpenThread) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.caption.weight(.semibold))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(replyActionTitle)
-                                    .font(.caption.weight(.semibold))
-                                if message.replyCount > 0, let preview = lastReplyPreview, !preview.isEmpty {
-                                    AgentProfileHighlightedText(
-                                        text: preview,
-                                        font: .caption2,
-                                        baseColor: .secondary
-                                    )
-                                    .lineLimit(1)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white)
-                                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .foregroundStyle(message.replyCount > 0 ? Color.accentColor : .primary.opacity(0.75))
-                    .help(message.replyCount > 0 ? "Open thread" : "Reply in thread")
-                    .accessibilityLabel(replyActionTitle)
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: message.direction == .outbound ? .trailing : .leading)
-            if message.direction == .inbound { Spacer(minLength: 80) }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var messageBody: some View {
-        bubbleLabel
-            .frame(maxWidth: 420, alignment: message.direction == .outbound ? .trailing : .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .modifier(MessagingBubbleChrome(direction: message.direction))
-            .frame(
-                maxWidth: .infinity,
-                alignment: message.direction == .outbound ? .trailing : .leading
-            )
-    }
-
-    private var bubbleLabel: some View {
-        MessagingMarkdownText(
-            text: message.body,
-            fontSize: 13
-        )
-    }
-
-    private var replyActionTitle: String {
-        if message.replyCount == 1 {
-            return "1 reply"
-        }
-        if message.replyCount > 1 {
-            return "\(message.replyCount) replies"
-        }
-        return "Reply in thread"
-    }
-}
-
-private struct MessagingBubbleChrome: ViewModifier {
-    let direction: MessagingMessageDirection
-
-    private var kind: InAppNotificationKind {
-        direction == .outbound ? .message : .info
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        direction == .outbound
-                            ? InAppNotificationBannerChrome.fill
-                            : Color.white
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(kind.accent.opacity(direction == .outbound ? 0.28 : 0.14), lineWidth: 1)
-            )
     }
 }

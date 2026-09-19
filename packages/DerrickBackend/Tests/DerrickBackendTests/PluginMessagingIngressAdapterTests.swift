@@ -30,9 +30,39 @@ import Testing
         #expect(threads.first?.vendorThreadID == "C123")
     }
 
-    @Test func bootstrapSkipsVendorSyncWhenConversationsAlreadyExist() async throws {
+    @Test func bootstrapRefreshesConversationCatalogWhenSyncSupported() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let manifestJSON = """
+        {"$schema":"\(PluginContract.agentPluginSchema)","name":"slack-connection","version":"1.0.0",\
+        "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector",\
+        "messaging_ops":["sync_threads","poll_inbox","send_message"]}}}
+        """
+        let guestSource = "package main"
+        let runtimeJSON = #"{"language":"go","entrypoint":"./app.derrick/plugin.go"}"#
+        let draft = PluginFactoryRelease(
+            pluginID: "slack-connection",
+            version: "1.0.0",
+            manifestJSON: manifestJSON,
+            runtimeJSON: runtimeJSON,
+            guestSource: guestSource,
+            compiledArtifact: Data("x".utf8),
+            skillFiles: [:],
+            contentHash: try PluginContentHash(hex: String(repeating: "a", count: 64)),
+            reviewSummary: "ok"
+        )
+        let release = PluginFactoryRelease(
+            pluginID: draft.pluginID,
+            version: draft.version,
+            manifestJSON: draft.manifestJSON,
+            runtimeJSON: draft.runtimeJSON,
+            guestSource: draft.guestSource,
+            compiledArtifact: draft.compiledArtifact,
+            skillFiles: draft.skillFiles,
+            contentHash: PluginContentHash.hash(files: draft.packageFiles()),
+            reviewSummary: draft.reviewSummary
+        )
+        try await repository.savePluginFactoryRelease(release)
         try await repository.upsertMessagingConnector(
             MessagingConnectorDTO(pluginID: "slack-connection", displayName: "Slack Connection")
         )
@@ -44,18 +74,22 @@ import Testing
             )
         )
 
-        final class InvokeCounter: @unchecked Sendable {
-            var count = 0
-        }
-        let counter = InvokeCounter()
         let invoker = ConnectorPluginInvoker { _, _ in
-            counter.count += 1
-            Issue.record("bootstrap must not invoke the plugin when conversations already exist")
-            return ""
+            let envelopes = """
+            [{"verb":"result.emit","threads":[\
+            {"vendor_thread_id":"C123","title":"#general"},\
+            {"vendor_thread_id":"C456","title":"#random"}\
+            ]}]
+            """
+            let outcome = ToolExecutionOutcome.completed(
+                output: ToolExecutionOutcome.Output(format: .json, value: envelopes)
+            )
+            return try outcome.encodedJSON()
         }
         let adapter = PluginMessagingIngressAdapter(pluginID: "slack-connection", invoker: invoker)
         try await adapter.bootstrap(repository: repository)
-        #expect(counter.count == 0)
+        let threads = try await repository.listMessagingThreads(pluginID: "slack-connection")
+        #expect(Set(threads.map(\.vendorThreadID)) == ["C123", "C456"])
     }
 
     @Test func syncThreadsDropsConversationsThePluginNoLongerReturns() async throws {
@@ -185,6 +219,8 @@ import Testing
         let messages = try await repository.listMessagingMessages(threadID: thread.id, limit: 10)
         #expect(messages.map(\.body) == ["hello slack"])
         #expect(messages.first?.direction == .outbound)
+        #expect(messages.first?.vendorMessageID == "42.0")
+        #expect(messages.count == 1)
     }
 
     @Test func sendMessagePassesParentVendorMessageID() async throws {

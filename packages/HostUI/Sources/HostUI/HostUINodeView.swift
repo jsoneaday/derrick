@@ -1,306 +1,213 @@
 import Structure
 import SwiftUI
 
-/// Maps a validated `HostUINode` tree onto the shared HostUI controls.
-/// Interactive binds must be supplied by the host via `HostUINodeBindings`.
+/// Maps a validated `HostUINode` tree onto HostUI controls and activates declared services.
 public struct HostUINodeView: View {
     private let node: HostUINode
     private let bindings: HostUINodeBindings
 
-    public init(node: HostUINode, bindings: HostUINodeBindings = HostUINodeBindings()) {
+    public init(node: HostUINode, bindings: HostUINodeBindings) {
         self.node = node
         self.bindings = bindings
     }
 
+    public init(node: HostUINode) {
+        self.node = node
+        self.bindings = .empty()
+    }
+
     public var body: some View {
-        switch HostUIElementID(rawValue: node.element) {
-        case .screen:
-            screenBody
-        case .sidebar:
-            if bindings.isSidebarVisible(for: node) {
-                HostUISidebar {
-                    childrenColumn(nodes: node.children ?? [])
+        let root = node.element == HostUIElementID.screen.rawValue ? node : HostUINode(
+            element: HostUIElementID.screen.rawValue,
+            children: [node]
+        )
+        messagingScreen(root)
+    }
+
+    @ViewBuilder
+    private func messagingScreen(_ root: HostUINode) -> some View {
+        let kids = root.children ?? []
+        let tabs = kids.filter { $0.element == HostUIElementID.tabStrip.rawValue }
+        let sidebars = kids.filter { $0.element == HostUIElementID.sidebar.rawValue }
+        let main = kids.filter {
+            $0.element != HostUIElementID.tabStrip.rawValue
+                && $0.element != HostUIElementID.sidebar.rawValue
+                && HostUIElementID(rawValue: $0.element)?.isService != true
+        }
+
+        ZStack(alignment: .top) {
+            HostUIScreen {
+                VStack(spacing: 0) {
+                    if !tabs.isEmpty, !bindings.tabs.isEmpty {
+                        HostUITabStrip(
+                            tabs: bindings.tabs,
+                            selectedID: bindings.selectedTabID,
+                            onSelect: bindings.onSelectTab
+                        )
+                    }
+                    HStack(spacing: 0) {
+                        mainColumn(main)
+                        if shouldShowSidebar(sidebars) {
+                            Divider()
+                            ForEach(Array(sidebars.enumerated()), id: \.offset) { _, sidebar in
+                                HostUISidebar {
+                                    sidebarColumn(sidebar)
+                                }
+                            }
+                        }
+                    }
                 }
-            } else {
-                EmptyView()
             }
+            if bindings.hasService(.inboundBanners),
+               let banner = bindings.inboundBanner,
+               !banner.isEmpty {
+                bannerToast(banner)
+                    .padding(.top, 10)
+            }
+        }
+    }
+
+    private func shouldShowSidebar(_ sidebars: [HostUINode]) -> Bool {
+        guard !sidebars.isEmpty else { return false }
+        guard let sidebar = sidebars.first else { return false }
+        let when = sidebar.configString["visible_when"] ?? "reply_thread"
+        if when == "always" { return true }
+        return bindings.isViewingReplyThread && bindings.hasService(.replyPane)
+    }
+
+    @ViewBuilder
+    private func mainColumn(_ nodes: [HostUINode]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(nodes.enumerated()), id: \.offset) { _, child in
+                nodeContent(child, isThread: false)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func sidebarColumn(_ sidebar: HostUINode) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(bindings.replyThreadTitle)
+                    .font(.headline)
+                Spacer()
+                Button(action: bindings.onCloseReplyThread) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            if let warning = bindings.replyThreadWarning, !warning.isEmpty {
+                Text(warning)
+                    .font(.caption)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(Array((sidebar.children ?? []).enumerated()), id: \.offset) { _, child in
+                nodeContent(child, isThread: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func nodeContent(_ node: HostUINode, isThread: Bool) -> some View {
+        switch HostUIElementID(rawValue: node.element) {
+        case .messageList:
+            messageList(bind: node.bind, isThread: isThread)
+        case .composer:
+            composer(bind: node.bind, isThread: isThread)
+        case .text:
+            HostUIText(node.configString["text"] ?? "")
+                .padding()
+        case .button:
+            HostUIButton(node.configString["label"] ?? "Button") {}
+                .padding()
+        case .textField:
+            HostUITextField(node.configString["placeholder"] ?? "", text: .constant(""))
+                .padding()
+        case .calendar:
+            HostUICalendar(label: node.configString["label"], date: .constant(Date()))
+                .padding()
+        case .time:
+            HostUITime(label: node.configString["label"], date: .constant(Date()))
+                .padding()
         case .section:
             HostUISection(title: node.configString["title"]) {
-                childrenColumn(nodes: node.children ?? [])
+                ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
+                    nodeContent(child, isThread: isThread)
+                }
             }
-        case .text:
-            HostUIText(
-                node.configString["value"] ?? node.id ?? "",
-                style: HostUITextStyle(rawValue: node.configString["style"] ?? "body") ?? .body,
-                multilineCenter: node.configString["align"] == "center"
-            )
-        case .textField:
-            HostUITextField(
-                label: node.configString["label"],
-                placeholder: node.configString["placeholder"] ?? "",
-                text: bindings.stringBinding(for: node)
-            )
-        case .select:
-            HostUISelect(
-                label: node.configString["label"],
-                options: bindings.selectOptions(for: node),
-                selection: bindings.stringBinding(for: node)
-            )
-        case .button:
-            HostUIButton(
-                node.configString["label"] ?? "Button",
-                chrome: HostUIButtonChrome(rawValue: node.configString["style"] ?? "primary") ?? .primary,
-                action: { bindings.buttonAction(for: node)() }
-            )
-        case .calendar:
-            HostUICalendar(
-                label: node.configString["label"],
-                date: bindings.dateBinding(for: node)
-            )
-        case .time:
-            HostUITime(
-                label: node.configString["label"],
-                date: bindings.dateBinding(for: node)
-            )
-        case .composer:
-            HostUIComposer(
-                placeholder: node.configString["placeholder"] ?? "Message",
-                text: bindings.stringBinding(for: node),
-                isSending: bindings.isSending(for: node),
-                canSend: bindings.canSend(for: node),
-                onSend: bindings.buttonAction(for: node)
-            )
-        case .table:
-            HostUITable(
-                columns: bindings.tableColumns(for: node),
-                rows: bindings.tableRows(for: node)
-            )
-        case .message:
-            HostUIMessage(
-                sender: node.configString["sender"] ?? "",
-                body: node.configString["body"] ?? node.configString["value"] ?? ""
-            )
-        case .tabStrip:
-            HostUITabStrip(
-                tabs: bindings.tabItems(for: node),
-                selectedID: bindings.selectedTabID(for: node),
-                onSelect: bindings.tabSelectAction(for: node)
-            )
-        case .messageList:
-            HostUIMessageList(
-                rows: bindings.messageRows(for: node),
-                bottomID: bindings.messageBottomID(for: node),
-                loadsOlder: bindings.loadsOlder(for: node),
-                scrollToBottomToken: bindings.scrollToBottomToken(for: node),
-                scrollAnchorID: bindings.scrollAnchorID(for: node),
-                onLoadOlder: bindings.loadOlderAction(for: node),
-                onNearBottomChange: bindings.nearBottomAction(for: node)
-            )
+            .padding(.horizontal)
+        case .optimisticSend, .inboundBanners, .pollRefresh, .replyPane, .tabStrip, .sidebar, .screen, .select, .table, .message:
+            EmptyView()
         case .none:
             EmptyView()
         }
     }
 
     @ViewBuilder
-    private var screenBody: some View {
-        let kids = node.children ?? []
-        let tabs = kids.filter { $0.element == HostUIElementID.tabStrip.rawValue }
-        let sidebars = kids.filter { $0.element == HostUIElementID.sidebar.rawValue }
-        let main = kids.filter {
-            $0.element != HostUIElementID.tabStrip.rawValue
-                && $0.element != HostUIElementID.sidebar.rawValue
-        }
-        HostUIScreen {
-            VStack(spacing: 0) {
-                ForEach(Array(tabs.enumerated()), id: \.offset) { _, child in
-                    HostUINodeView(node: child, bindings: bindings)
+    private func messageList(bind: String?, isThread: Bool) -> some View {
+        let rows = isThread || bind == "selected_thread"
+            ? bindings.threadMessages
+            : bindings.channelMessages
+        ZStack(alignment: .bottom) {
+            HostUIMessageList(
+                rows: rows,
+                onOpenThread: isThread ? nil : bindings.onOpenThread,
+                onNearBottomChange: isThread ? nil : bindings.onNearBottomChange,
+                onLoadOlder: isThread ? nil : bindings.onLoadOlder
+            )
+            if !isThread, bindings.showJumpToLatest || bindings.showNewMessagesPill {
+                Button(action: bindings.onJumpToLatest) {
+                    Text(bindings.showNewMessagesPill ? "New messages" : "Jump to latest")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.white, in: Capsule())
+                        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 1)
                 }
-                HStack(spacing: 0) {
-                    childrenColumn(nodes: main)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    ForEach(Array(sidebars.enumerated()), id: \.offset) { _, child in
-                        if bindings.isSidebarVisible(for: child) {
-                            Divider()
-                            HostUINodeView(node: child, bindings: bindings)
-                        }
-                    }
-                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 12)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private func childrenColumn(nodes: [HostUINode]) -> some View {
-        if nodes.isEmpty {
-            EmptyView()
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(nodes.enumerated()), id: \.offset) { _, child in
-                    HostUINodeView(node: child, bindings: bindings)
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: child.element == HostUIElementID.messageList.rawValue
-                                ? .infinity
-                                : nil,
-                            alignment: .topLeading
-                        )
-                }
+    private func composer(bind: String?, isThread: Bool) -> some View {
+        let thread = isThread || bind == "selected_thread"
+        HostUIComposer(
+            text: thread ? bindings.threadDraft : bindings.channelDraft,
+            placeholder: thread ? "Reply" : "Message",
+            isSending: bindings.isSending,
+            canSend: thread ? bindings.canSendThread : bindings.canSendChannel,
+            onSubmit: thread ? bindings.onSubmitThread : bindings.onSubmitChannel
+        )
+    }
+
+    private func bannerToast(_ text: String) -> some View {
+        Button(action: bindings.onBannerTap) {
+            HStack(spacing: 10) {
+                Image(systemName: "bubble.left.fill")
+                    .foregroundStyle(Color(red: 0.176, green: 0.286, blue: 0.576))
+                Text(text)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(2)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color(red: 0.176, green: 0.286, blue: 0.576).opacity(0.35), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
         }
-    }
-}
-
-/// Host-owned values and actions for interactive nodes in a present tree.
-public struct HostUINodeBindings {
-    public var strings: [String: Binding<String>]
-    public var dates: [String: Binding<Date>]
-    public var selectOptions: [String: [HostUISelectOption]]
-    public var tableColumns: [String: [String]]
-    public var tableRows: [String: [HostUITableRow]]
-    public var actions: [String: () -> Void]
-    public var tabItems: [String: [HostUITabItem]]
-    public var selectedTabIDs: [String: String]
-    public var tabSelectActions: [String: (String) -> Void]
-    public var messageRows: [String: [HostUIMessageRow]]
-    public var messageBottomIDs: [String: String]
-    public var loadsOlderFlags: [String: Bool]
-    public var scrollToBottomTokens: [String: Int]
-    public var scrollAnchorIDs: [String: String?]
-    public var loadOlderActions: [String: () -> Void]
-    public var nearBottomActions: [String: (Bool) -> Void]
-    public var canSendFlags: [String: Bool]
-    public var isSendingFlags: [String: Bool]
-    public var sidebarVisible: [String: Bool]
-    public var defaultSidebarVisible: Bool
-
-    public init(
-        strings: [String: Binding<String>] = [:],
-        dates: [String: Binding<Date>] = [:],
-        selectOptions: [String: [HostUISelectOption]] = [:],
-        tableColumns: [String: [String]] = [:],
-        tableRows: [String: [HostUITableRow]] = [:],
-        actions: [String: () -> Void] = [:],
-        tabItems: [String: [HostUITabItem]] = [:],
-        selectedTabIDs: [String: String] = [:],
-        tabSelectActions: [String: (String) -> Void] = [:],
-        messageRows: [String: [HostUIMessageRow]] = [:],
-        messageBottomIDs: [String: String] = [:],
-        loadsOlderFlags: [String: Bool] = [:],
-        scrollToBottomTokens: [String: Int] = [:],
-        scrollAnchorIDs: [String: String?] = [:],
-        loadOlderActions: [String: () -> Void] = [:],
-        nearBottomActions: [String: (Bool) -> Void] = [:],
-        canSendFlags: [String: Bool] = [:],
-        isSendingFlags: [String: Bool] = [:],
-        sidebarVisible: [String: Bool] = [:],
-        defaultSidebarVisible: Bool = true
-    ) {
-        self.strings = strings
-        self.dates = dates
-        self.selectOptions = selectOptions
-        self.tableColumns = tableColumns
-        self.tableRows = tableRows
-        self.actions = actions
-        self.tabItems = tabItems
-        self.selectedTabIDs = selectedTabIDs
-        self.tabSelectActions = tabSelectActions
-        self.messageRows = messageRows
-        self.messageBottomIDs = messageBottomIDs
-        self.loadsOlderFlags = loadsOlderFlags
-        self.scrollToBottomTokens = scrollToBottomTokens
-        self.scrollAnchorIDs = scrollAnchorIDs
-        self.loadOlderActions = loadOlderActions
-        self.nearBottomActions = nearBottomActions
-        self.canSendFlags = canSendFlags
-        self.isSendingFlags = isSendingFlags
-        self.sidebarVisible = sidebarVisible
-        self.defaultSidebarVisible = defaultSidebarVisible
-    }
-
-    func stringBinding(for node: HostUINode) -> Binding<String> {
-        key(for: node).flatMap { strings[$0] } ?? .constant("")
-    }
-
-    func dateBinding(for node: HostUINode) -> Binding<Date> {
-        key(for: node).flatMap { dates[$0] } ?? .constant(Date())
-    }
-
-    func selectOptions(for node: HostUINode) -> [HostUISelectOption] {
-        key(for: node).flatMap { selectOptions[$0] } ?? []
-    }
-
-    func tableColumns(for node: HostUINode) -> [String] {
-        key(for: node).flatMap { tableColumns[$0] } ?? []
-    }
-
-    func tableRows(for node: HostUINode) -> [HostUITableRow] {
-        key(for: node).flatMap { tableRows[$0] } ?? []
-    }
-
-    func buttonAction(for node: HostUINode) -> () -> Void {
-        key(for: node).flatMap { actions[$0] } ?? {}
-    }
-
-    func tabItems(for node: HostUINode) -> [HostUITabItem] {
-        key(for: node).flatMap { tabItems[$0] } ?? []
-    }
-
-    func selectedTabID(for node: HostUINode) -> String? {
-        key(for: node).flatMap { selectedTabIDs[$0] }
-    }
-
-    func tabSelectAction(for node: HostUINode) -> (String) -> Void {
-        key(for: node).flatMap { tabSelectActions[$0] } ?? { _ in }
-    }
-
-    func messageRows(for node: HostUINode) -> [HostUIMessageRow] {
-        key(for: node).flatMap { messageRows[$0] } ?? []
-    }
-
-    func messageBottomID(for node: HostUINode) -> String {
-        key(for: node).flatMap { messageBottomIDs[$0] } ?? "host-ui-scroll-bottom"
-    }
-
-    func loadsOlder(for node: HostUINode) -> Bool {
-        key(for: node).flatMap { loadsOlderFlags[$0] } ?? false
-    }
-
-    func scrollToBottomToken(for node: HostUINode) -> Int {
-        key(for: node).flatMap { scrollToBottomTokens[$0] } ?? 0
-    }
-
-    func scrollAnchorID(for node: HostUINode) -> String? {
-        key(for: node).flatMap { scrollAnchorIDs[$0] } ?? nil
-    }
-
-    func loadOlderAction(for node: HostUINode) -> () -> Void {
-        key(for: node).flatMap { loadOlderActions[$0] } ?? {}
-    }
-
-    func nearBottomAction(for node: HostUINode) -> (Bool) -> Void {
-        key(for: node).flatMap { nearBottomActions[$0] } ?? { _ in }
-    }
-
-    func canSend(for node: HostUINode) -> Bool {
-        key(for: node).flatMap { canSendFlags[$0] } ?? true
-    }
-
-    func isSending(for node: HostUINode) -> Bool {
-        key(for: node).flatMap { isSendingFlags[$0] } ?? false
-    }
-
-    func isSidebarVisible(for node: HostUINode) -> Bool {
-        if let key = key(for: node), let flagged = sidebarVisible[key] {
-            return flagged
-        }
-        let when = node.configString["visible_when"] ?? "always"
-        if when == "always" { return defaultSidebarVisible }
-        return defaultSidebarVisible
-    }
-
-    private func key(for node: HostUINode) -> String? {
-        if let id = node.id, !id.isEmpty { return id }
-        if let bind = node.bind, !bind.isEmpty { return bind }
-        return nil
+        .buttonStyle(.plain)
     }
 }

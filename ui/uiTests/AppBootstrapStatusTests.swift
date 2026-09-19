@@ -20,6 +20,7 @@ import Testing
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title.contains("Docker"))
         #expect(result.message.lowercased().contains("install"))
+        #expect(result.recovery == .retryDocker)
     }
 
     @MainActor
@@ -32,7 +33,34 @@ import Testing
         let result = AppBootstrapStatus.classifyError(error)
         #expect(result.title == "Docker Desktop Not Running")
         #expect(result.message.lowercased().contains("start docker"))
-        #expect(result.recovery == .none)
+        #expect(result.recovery == .retryDocker)
+    }
+
+    @MainActor
+    @Test func classifyDockerReachabilityTimeout() {
+        let error = NSError(
+            domain: "XPCDockerRunner",
+            code: 504,
+            userInfo: [NSLocalizedDescriptionKey: "Docker Desktop did not respond within 60s."]
+        )
+        let result = AppBootstrapStatus.classifyError(error)
+        #expect(result.title == "Docker Desktop Not Running")
+        #expect(result.message.lowercased().contains("start docker"))
+        #expect(result.recovery == .retryDocker)
+    }
+
+    @MainActor
+    @Test func dockerFailureCannotBeDismissed() {
+        let status = freshStatus()
+        status.beginLoadingSession()
+        status.markFailed(
+            title: "Docker Desktop Not Running",
+            message: "Start Docker Desktop.",
+            recovery: .retryDocker
+        )
+        #expect(status.phase == .failed)
+        #expect(status.isModalPresented)
+        #expect(!status.canDismissFailure)
     }
 
     @MainActor

@@ -34,7 +34,8 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
                 """
                 The host already assigned plugin_id \(host.pluginID) and these secret ids: \
                 \(host.secrets.map(\.id).joined(separator: ", ")). \
-                Return go_source and test_input_json. Do not pick a different plugin_id or secret ids.
+                Do not pick a different plugin_id or secret ids. The host writes plugin.json. \
+                Package layout follows the Agent Plugins Specification in the goal.
                 """
             )
         }

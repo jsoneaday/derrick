@@ -264,10 +264,10 @@ public enum PluginSkillDraftPlanner {
             Host notes:
             \(hostNotes.joined(separator: "\n"))
 
-            SKILL.md draft (write this into skills/):
+            SKILL.md draft:
             \(skillMarkdown(for: draft))
 
-            Return go_source, test_input_json, and skill_files. The host writes plugin.json when a host manifest is supplied; otherwise include a valid manifest in your output path via the builder contract.
+            When no host manifest is supplied, include a valid plugin.json via the builder contract. The host writes plugin.json when a host manifest is supplied.
             """
         }
     }

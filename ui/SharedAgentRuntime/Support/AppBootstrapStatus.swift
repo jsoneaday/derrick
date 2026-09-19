@@ -327,6 +327,19 @@ final class AppBootstrapStatus: ObservableObject {
         case none
         case retryDaemon
         case openLoginItems
+        /// Docker is required. Modal stays until Try Again succeeds.
+        case retryDocker
+    }
+
+    /// Whether the person can dismiss a failure modal without fixing the problem.
+    var canDismissFailure: Bool {
+        guard phase == .failed else { return false }
+        switch failureRecovery {
+        case .retryDocker:
+            return false
+        case .none, .retryDaemon, .openLoginItems:
+            return true
+        }
     }
 
     struct ClassifiedFailure: Equatable, Sendable {
@@ -353,17 +366,21 @@ final class AppBootstrapStatus: ObservableObject {
             || lower.contains("no such file") && lower.contains("docker") {
             return ClassifiedFailure(
                 title: "Docker Desktop Required",
-                message: "Docker Desktop does not appear to be installed or the docker command is not available. Install Docker Desktop, open it once, then restart Derrick."
+                message: "Docker Desktop does not appear to be installed or the docker command is not available. Install Docker Desktop, open it once, then restart Derrick.",
+                recovery: .retryDocker
             )
         }
         if lower.contains("cannot connect to the docker daemon")
             || lower.contains("connect to the docker daemon")
             || lower.contains("error during connect")
             || lower.contains("docker.sock")
-            || lower.contains("is the docker daemon running") {
+            || lower.contains("is the docker daemon running")
+            || lower.contains("docker desktop did not respond")
+            || lower.contains("docker desktop is installed but not running") {
             return ClassifiedFailure(
                 title: "Docker Desktop Not Running",
-                message: "Docker Desktop is installed but not running, or Derrick cannot reach the Docker engine. Start Docker Desktop, wait until it is idle, then restart Derrick."
+                message: "Docker Desktop is installed but not running, or Derrick cannot reach the Docker engine. Start Docker Desktop, wait until it is idle, then tap Try Again.",
+                recovery: .retryDocker
             )
         }
         if lower.contains("shared database") || lower.contains("authorization denied") {

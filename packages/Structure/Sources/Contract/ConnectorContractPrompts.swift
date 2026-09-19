@@ -112,11 +112,14 @@ public enum ConnectorContractPrompts: Sendable {
             Compose a root tree from host-ui-library.json element ids only — choose layout from the vendor's docs \
             and what the library can express (screen, section, tab_strip, lists, composer, sidebar, forms, calendar, time, …). \
             The messaging_inbox example is a reference composition, not a required template. \
+            messaging_inbox includes host services (optimistic_send, inbound_banners, poll_refresh, reply_pane). Guest code must not reimplement send UX, poll refresh, banners, or reply chrome; the host owns those. \
+            For holds=message_exchange the host always applies the default messaging service pack even if the present tree omits a service node. \
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
             Do not invent vendor widgets. Follow crawled API notes for nesting. \
             Keep http hops for vendor calls. The host validates, records, and persists ui.present, then finishes that hop — \
             do not wait for another guest run after present. \
+            Prefer typed HostUIDisclosure.elementSchema(id:) / exampleTree(named:) over RAG when you need control or service details. \
             skill_files must include at least one skills/<name>/SKILL.md (Agent Skills required).
             """
         )

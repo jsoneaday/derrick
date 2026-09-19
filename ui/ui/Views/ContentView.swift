@@ -469,6 +469,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: chatSessions.selectedSessionID) { _, _ in
+            if workspace == .chats {
+                ensureChatMenuSelection()
+            }
             Task { @MainActor in
                 await syncSelectedChatTabWithMessaging()
             }
@@ -565,16 +568,6 @@ struct ContentView: View {
             }
             let version = notification.userInfo?[ChatShellNotification.pluginVersionUserInfoKey] as? String
             Task { await pluginPackageBrowser.handleFactorySucceeded(pluginID: pluginID, version: version) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.openPluginInChat)) { notification in
-            guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
-                  !pluginID.isEmpty
-            else {
-                return
-            }
-            Task { @MainActor in
-                await routeToPluginTab(pluginID)
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: ChatShellNotification.pluginDeleted)) { notification in
             guard let pluginID = notification.userInfo?[ChatShellNotification.pluginIDUserInfoKey] as? String,
@@ -688,10 +681,10 @@ struct ContentView: View {
             minHeight: 0,
             maxWidth: 440,
             maxHeight: bootstrapModalMaxHeight,
-            onBackdropDismiss: bootstrapStatus.phase == .failed
+            onBackdropDismiss: bootstrapStatus.canDismissFailure
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
-            onEscape: bootstrapStatus.phase == .failed
+            onEscape: bootstrapStatus.canDismissFailure
                 ? { bootstrapStatus.dismissFailure() }
                 : nil,
             header: {
@@ -763,6 +756,12 @@ struct ContentView: View {
                             }
                             .buttonStyle(ModalSecondaryButtonStyle())
                             .keyboardShortcut(.cancelAction)
+                            Button("Try Again") {
+                                Task { await retryClientBootstrap() }
+                            }
+                            .buttonStyle(ModalPrimaryButtonStyle())
+                            .keyboardShortcut(.defaultAction)
+                        } else if bootstrapStatus.failureRecovery == .retryDocker {
                             Button("Try Again") {
                                 Task { await retryClientBootstrap() }
                             }
@@ -855,6 +854,7 @@ struct ContentView: View {
                 bootstrapStatus.beginTask(.docker)
 
                 // Docker reachability, daemon, and DB are independent — run in parallel.
+                // Ready still requires all three: Docker down must block the session.
                 let dockerPeerTask = Task { try await prewarmLaunchDockerPeer() }
                 async let health = connectLaunchDaemon()
                 async let repo = loadLaunchRepository()
@@ -868,14 +868,16 @@ struct ContentView: View {
                 let repoResult = try await repo
                 bootstrapStatus.completeTask(.database)
 
+                let peer = try await dockerPeerTask.value
+
                 sessionReady = true
                 bootstrapStatus.markReady()
                 await chatSessions.configure(repository: repoResult)
                 await messaging.configure(repository: repoResult)
                 await DerrickNotificationService.shared.activateSession(repository: repoResult)
 
-                Task {
-                    if let peer = try? await dockerPeerTask.value {
+                if let peer {
+                    Task {
                         do {
                             try await AgentServiceClient.shared.setDockerHelperPeerEndpoint(peer)
                             debugLog("Docker helper peer endpoint handed to daemon MCP")
@@ -947,7 +949,8 @@ struct ContentView: View {
     private func prewarmLaunchDockerPeer() async throws -> NSXPCListenerEndpoint? {
         bootstrapStatus.updateTask(.docker, message: "Starting Docker runtime…")
         _ = XPCDockerRunner.shared
-        try await XPCDockerRunner.shared.waitUntilDockerReachable()
+        // Always probe now so Try Again re-checks after Docker was down.
+        try await XPCDockerRunner.shared.verifyDockerEngineReachableForBootstrap()
         bootstrapStatus.completeTask(.docker)
         do {
             return try await XPCDockerRunner.shared.fetchPeerListenerEndpoint()
@@ -1543,20 +1546,14 @@ struct ContentView: View {
         }
     }
 
-    /// Chat menu: keep ongoing create sessions; leave fresh empty create screens.
+    /// Chat menu never hosts Create — leave any plugin-creator selection for a real chat.
     private func ensureChatMenuSelection() {
-        guard let selected = chatSessions.selectedTab else { return }
-        if selected.isPluginCreator, !selected.isOngoingPluginCreator {
-            if let ongoing = chatSessions.tabs.last(where: \.isOngoingPluginCreator) {
-                chatSessions.selectSession(id: ongoing.id)
-            } else if let chat = chatSessions.tabs.last(where: { !$0.isPluginCreator }) {
-                chatSessions.selectSession(id: chat.id)
-            } else {
-                chatSessions.openNewChat()
-            }
-            return
+        guard let selected = chatSessions.selectedTab, selected.isPluginCreator else { return }
+        if let chat = chatSessions.tabs.last(where: { !$0.isPluginCreator }) {
+            chatSessions.selectSession(id: chat.id)
+        } else {
+            chatSessions.openNewChat()
         }
-        // Ongoing creator or normal chat is fine under Chat.
     }
 
     private func bindPluginCreatorCompletion() {
