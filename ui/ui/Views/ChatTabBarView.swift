@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ChatTabBarView: View {
     enum TabFilter: Equatable {
-        /// Regular chats plus in-progress plugin create sessions (not fresh empty creates).
+        /// Regular chats only. Plugin create tabs stay under Plugins → Create.
         case chats
         /// Plugin creator tabs only.
         case pluginsCreate
@@ -18,9 +18,8 @@ struct ChatTabBarView: View {
     private var visibleTabs: [ChatTab] {
         switch filter {
         case .chats:
-            return store.tabs.filter { tab in
-                !tab.isPluginCreator || tab.isOngoingPluginCreator
-            }
+            // Create lives under Plugins → Create only — never in Chat.
+            return store.tabs.filter { !$0.isPluginCreator }
         case .pluginsCreate:
             return store.tabs.filter(\.isPluginCreator)
         }

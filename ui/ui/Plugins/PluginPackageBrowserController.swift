@@ -34,11 +34,32 @@ final class PluginPackageBrowserController: ObservableObject {
         await PluginFactoryListStore.shared.reload()
         groups = PluginFactoryListStore.shared.groups
         if let selectedPluginID,
-           !groups.contains(where: { $0.pluginID == selectedPluginID }) {
+           let group = groups.first(where: { $0.pluginID == selectedPluginID }) {
+            if let selectedVersion,
+               group.releases.contains(where: { $0.version == selectedVersion }) {
+                await loadRelease(pluginID: selectedPluginID, version: selectedVersion)
+            } else if let latest = group.latest {
+                await selectVersion(latest.version, pluginID: selectedPluginID)
+            } else {
+                clearSelection()
+            }
+        } else if selectedPluginID != nil {
             clearSelection()
-        } else if let selectedPluginID, let selectedVersion {
-            await loadRelease(pluginID: selectedPluginID, version: selectedVersion)
         }
+    }
+
+    func deleteVersion(_ version: String, pluginID: String) async {
+        guard let release = groups.first(where: { $0.pluginID == pluginID })?
+            .releases.first(where: { $0.version == version })
+        else { return }
+        await PluginFactoryListStore.shared.delete(release)
+        if let error = PluginFactoryListStore.shared.lastError {
+            errorMessage = error
+            return
+        }
+        statusMessage = "Deleted /\(pluginID) v\(version)."
+        errorMessage = nil
+        await reloadList()
     }
 
     func selectPlugin(_ pluginID: String) async {

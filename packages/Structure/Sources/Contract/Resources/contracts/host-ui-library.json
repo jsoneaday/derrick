@@ -44,6 +44,41 @@
     },
     "table": {
       "description": "Rows and columns for a scanable list."
+    },
+    "section": {
+      "description": "A titled group of child elements. Config title is the heading."
+    },
+    "calendar": {
+      "description": "Pick a calendar date (day/month/year). Config label is an optional caption. Use calendar alone for dates; pair with time in a section when both are needed.",
+      "config": {
+        "label": ["string"]
+      }
+    },
+    "time": {
+      "description": "Pick a time of day. Config label is an optional caption. Use time alone for clock values; pair with calendar in a section when both are needed.",
+      "config": {
+        "label": ["string"]
+      }
+    },
+    "optimistic_send": {
+      "description": "Host service (invisible). Shows outbound messages immediately on send and dedupes when poll/ack returns the same message. Bind selected_conversation or selected_thread.",
+      "role": "service",
+      "binds": ["selected_conversation", "selected_thread"]
+    },
+    "inbound_banners": {
+      "description": "Host service (invisible). Shows a short in-app toast for new inbound messages with session-lifetime dedupe by vendor message id.",
+      "role": "service",
+      "binds": ["selected_conversation", "selected_thread"]
+    },
+    "poll_refresh": {
+      "description": "Host service (invisible). Polls the connector inbox and refreshes the open conversation when new mail arrives.",
+      "role": "service",
+      "binds": ["selected_conversation", "selected_thread"]
+    },
+    "reply_pane": {
+      "description": "Host service (invisible). Opens and loads a reply thread side pane for a parent message; primes inbound banners so existing replies are not re-toasted.",
+      "role": "service",
+      "binds": ["selected_thread"]
     }
   },
   "examples": {
@@ -55,6 +90,26 @@
         "selection": "conversations"
       },
       "children": [
+        {
+          "element": "optimistic_send",
+          "id": "svc-optimistic",
+          "bind": "selected_conversation"
+        },
+        {
+          "element": "inbound_banners",
+          "id": "svc-banners",
+          "bind": "selected_conversation"
+        },
+        {
+          "element": "poll_refresh",
+          "id": "svc-poll",
+          "bind": "selected_conversation"
+        },
+        {
+          "element": "reply_pane",
+          "id": "svc-reply",
+          "bind": "selected_thread"
+        },
         {
           "element": "tab_strip",
           "id": "conversations",

@@ -13,6 +13,7 @@
 		DE50733C2FF6FCAF00D95676 /* MCPServer in Frameworks */ = {isa = PBXBuildFile; productRef = DE50733B2FF6FCAF00D95676 /* MCPServer */; };
 		DEAA100B2FFF00000042F228 /* DockerRunnerHelper.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = DEAA10012FFF00000042F228 /* DockerRunnerHelper.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DEAE00013010000000AE001 /* AppEvents in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00023010000000AE001 /* AppEvents */; };
+		DEHU00013010000000HU001 /* HostUI in Frameworks */ = {isa = PBXBuildFile; productRef = DEHU00023010000000HU001 /* HostUI */; };
 		DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */ = {isa = PBXBuildFile; productRef = DEAE00043010000000AE001 /* PolicyUserInteraction */; };
 		DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = DEAR00022A00000000AR001 /* AgentRuntime */; };
 		DEAS100F2A00000000AS001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DED0C0032A0000000042F230 /* DockerRunnerXPC */; };
@@ -37,6 +38,7 @@
 		DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */ = {isa = PBXBuildFile; productRef = DEE6B0053010000000E6B001 /* EgressProxy */; };
 		DEF685FE30096EB600165A82 /* PartialJSON in Frameworks */ = {isa = PBXBuildFile; productRef = DEF685FD30096EB600165A82 /* PartialJSON */; };
 		DEF68601300A71F600165A82 /* Lib in Frameworks */ = {isa = PBXBuildFile; productRef = DEF68600300A71F600165A82 /* Lib */; };
+		DEHU00012A00000000HU001 /* HostUI in Frameworks */ = {isa = PBXBuildFile; productRef = DEHU00022A00000000HU001 /* HostUI */; };
 		DEJB10102A00000000JB001 /* Structure in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10202A00000000JB001 /* Structure */; };
 		DEJB10112A00000000JB001 /* DBRepository in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10212A00000000JB001 /* DBRepository */; };
 		DEJB10122A00000000JB001 /* DockerRunnerXPC in Frameworks */ = {isa = PBXBuildFile; productRef = DEJB10222A00000000JB001 /* DockerRunnerXPC */; };
@@ -299,12 +301,14 @@
 				DED0C0042A0000000042F230 /* DockerRunnerXPC in Frameworks */,
 				DED0C0122A0000000042F240 /* MCPToolCatalog in Frameworks */,
 				DEAE00013010000000AE001 /* AppEvents in Frameworks */,
+				DEHU00012A00000000HU001 /* HostUI in Frameworks */,
 				DEAE00033010000000AE001 /* PolicyUserInteraction in Frameworks */,
 				DEPR00012A00000000PR001 /* PolicyRuntime in Frameworks */,
 				DEE6B0043010000000E6B001 /* EgressProxy in Frameworks */,
 				DEAR00012A00000000AR001 /* AgentRuntime in Frameworks */,
 				DESC00012A00000000SC001 /* Structure in Frameworks */,
 				DEUISE0012A00000000SE001 /* ServiceEnsureUp in Frameworks */,
+				DEHU00013010000000HU001 /* HostUI in Frameworks */,
 			);
 		};
 		DE1B9F102FEB74260042F227 /* Frameworks */ = {
@@ -468,12 +472,14 @@
 				DED0C0022A0000000042F230 /* DockerRunnerXPC */,
 				DED0C0112A0000000042F240 /* MCPToolCatalog */,
 				DEAE00023010000000AE001 /* AppEvents */,
+				DEHU00022A00000000HU001 /* HostUI */,
 				DEAE00043010000000AE001 /* PolicyUserInteraction */,
 				DEPR00022A00000000PR001 /* PolicyRuntime */,
 				DEE6B0053010000000E6B001 /* EgressProxy */,
 				DEAR00022A00000000AR001 /* AgentRuntime */,
 				DESC00022A00000000SC001 /* Structure */,
 				DEUISE0022A00000000SE001 /* ServiceEnsureUp */,
+				DEHU00023010000000HU001 /* HostUI */,
 			);
 			productName = Derrick;
 			productReference = DE1B9F062FEB74250042F227 /* Derrick.app */;
@@ -715,6 +721,7 @@
 				DED0C0012A0000000042F230 /* XCLocalSwiftPackageReference "../packages/DockerRunnerXPC" */,
 				DED0C0102A0000000042F240 /* XCLocalSwiftPackageReference "../packages/MCPToolCatalog" */,
 				DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */,
+				DEHU00032A00000000HU001 /* XCLocalSwiftPackageReference "../packages/HostUI" */,
 				DEAE00063010000000AE001 /* XCLocalSwiftPackageReference "../packages/PolicyUserInteraction" */,
 				DEPR00032A00000000PR001 /* XCLocalSwiftPackageReference "../packages/PolicyRuntime" */,
 				DEE6B0033010000000E6B001 /* XCLocalSwiftPackageReference "../packages/EgressProxy" */,
@@ -723,6 +730,7 @@
 				DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */,
 				DEDBK0012A00000000BK001 /* XCLocalSwiftPackageReference "../packages/DerrickBackend" */,
 				DE75C7E4304A5F850079F1FD /* XCLocalSwiftPackageReference "../packages/Structure" */,
+				DEHU00053010000000HU001 /* XCLocalSwiftPackageReference "../packages/HostUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE1B9F072FEB74250042F227 /* Products */;
@@ -1478,6 +1486,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Structure;
 		};
+		DEHU00053010000000HU001 /* XCLocalSwiftPackageReference "../packages/HostUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/HostUI;
+		};
 		DEAE00053010000000AE001 /* XCLocalSwiftPackageReference "../packages/AppEvents" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/AppEvents;
@@ -1509,6 +1521,10 @@
 		DEF685FF300A71F600165A82 /* XCLocalSwiftPackageReference "../packages/Lib" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../packages/Lib;
+		};
+		DEHU00032A00000000HU001 /* XCLocalSwiftPackageReference "../packages/HostUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/HostUI;
 		};
 		DEJB10302A00000000JB001 /* XCLocalSwiftPackageReference "../packages/ServiceEnsureUp" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -1555,6 +1571,10 @@
 		DEAE00023010000000AE001 /* AppEvents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AppEvents;
+		};
+		DEHU00023010000000HU001 /* HostUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HostUI;
 		};
 		DEAE00043010000000AE001 /* PolicyUserInteraction */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1652,6 +1672,10 @@
 		DEF68600300A71F600165A82 /* Lib */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Lib;
+		};
+		DEHU00022A00000000HU001 /* HostUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HostUI;
 		};
 		DEJB10202A00000000JB001 /* Structure */ = {
 			isa = XCSwiftPackageProductDependency;

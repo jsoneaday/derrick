@@ -296,7 +296,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 extra.append("SKILL.md draft:\n\(skillMarkdown)")
             }
             extra.append(
-                "The host writes plugin.json. Return go_source and test_input_json only. Do not invent a plugin_id or secrets list."
+                "The host writes plugin.json. Do not invent a plugin_id or secrets list."
             )
             return try ConnectorContractPrompts.factoryGoal(
                 vendorLabel: vendorLabel,
@@ -338,7 +338,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             lines.append("SKILL.md draft:\n\(skillMarkdown)")
         }
         lines.append(
-            "Return go_source, test_input_json, and skill_files. Include a valid plugin.json via the builder contract when no host manifest is supplied."
+            "When no host manifest is supplied, include a valid plugin.json via the builder contract. The host writes plugin.json when a host manifest is supplied."
         )
         return lines.joined(separator: "\n\n")
     }

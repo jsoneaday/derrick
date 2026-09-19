@@ -1,87 +1,11 @@
 import Foundation
 
-public struct PluginUIRequest: Codable, Sendable, Hashable {
-    public var requestID: String
-    public var title: String
-    public var message: String
-    public var widgets: [PluginRuntimeUIWidget]
+/// Validated host library tree from a guest `ui.present` envelope.
+public struct PluginUIPresentRequest: Codable, Sendable, Hashable {
+    public var root: HostUINode
 
-    public init(
-        requestID: String,
-        title: String,
-        message: String = "",
-        widgets: [PluginRuntimeUIWidget] = []
-    ) {
-        self.requestID = requestID
-        self.title = title
-        self.message = message
-        self.widgets = widgets
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case title, message, widgets
-    }
-}
-
-public struct PluginRuntimeUIWidget: Codable, Sendable, Hashable {
-    public var id: String
-    public var kind: String
-    public var label: String
-    public var options: [String]
-
-    public init(
-        id: String,
-        kind: String,
-        label: String,
-        options: [String] = []
-    ) {
-        self.id = id
-        self.kind = kind
-        self.label = label
-        self.options = options
-    }
-}
-
-public struct PluginUIAction: Codable, Sendable, Hashable {
-    public var requestID: String
-    public var widgetID: String
-    public var value: PluginJSON?
-
-    public init(requestID: String, widgetID: String, value: PluginJSON? = nil) {
-        self.requestID = requestID
-        self.widgetID = widgetID
-        self.value = value
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case widgetID = "widget_id"
-        case value
-    }
-}
-
-public struct PluginUIResult: Codable, Sendable, Hashable {
-    public var requestID: String
-    public var action: PluginUIAction?
-    public var cancelled: Bool
-    public var error: PluginRuntimeError?
-
-    public init(
-        requestID: String,
-        action: PluginUIAction? = nil,
-        cancelled: Bool = false,
-        error: PluginRuntimeError? = nil
-    ) {
-        self.requestID = requestID
-        self.action = action
-        self.cancelled = cancelled
-        self.error = error
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case requestID = "request_id"
-        case action, cancelled, error
+    public init(root: HostUINode) {
+        self.root = root
     }
 }
 

@@ -73,28 +73,43 @@ struct PluginPackageBrowserView: View {
                             isExpanded: expansionBinding(for: group.pluginID)
                         ) {
                             ForEach(group.releases) { release in
-                                Button {
-                                    Task {
-                                        await controller.selectVersion(
-                                            release.version,
-                                            pluginID: group.pluginID
-                                        )
-                                    }
-                                } label: {
-                                    HStack {
+                                HStack(spacing: 6) {
+                                    Button {
+                                        Task {
+                                            await controller.selectVersion(
+                                                release.version,
+                                                pluginID: group.pluginID
+                                            )
+                                        }
+                                    } label: {
                                         Text("v\(release.version)")
                                             .font(.caption.monospaced())
-                                        Spacer(minLength: 0)
-                                        if group.pluginID == controller.selectedPluginID,
-                                           release.version == controller.selectedVersion {
-                                            Image(systemName: "checkmark")
-                                                .font(.caption2.weight(.semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
+                                            .foregroundStyle(
+                                                group.pluginID == controller.selectedPluginID
+                                                    && release.version == controller.selectedVersion
+                                                    ? .primary
+                                                    : .secondary
+                                            )
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(Rectangle())
                                     }
-                                    .contentShape(Rectangle())
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        Task {
+                                            await controller.deleteVersion(
+                                                release.version,
+                                                pluginID: group.pluginID
+                                            )
+                                        }
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Delete /\(group.pluginID) v\(release.version)")
                                 }
-                                .buttonStyle(.plain)
                             }
                         } label: {
                             Button {

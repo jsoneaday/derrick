@@ -20,6 +20,10 @@
           "binds": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "role": {
+            "type": "string",
+            "enum": ["control", "service"]
           }
         }
       }

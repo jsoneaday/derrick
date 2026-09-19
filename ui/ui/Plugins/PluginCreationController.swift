@@ -36,12 +36,12 @@ final class PluginCreationController: ObservableObject {
         var status: Status
     }
 
-    /// Host create order: credentials → Agent Plugin spec → docs → SKILL.md → build.
+    /// Host create order: credentials → Agent Plugin spec → docs → package build → review.
     static let factoryProgressStepOrder: [(id: String, title: String)] = [
         ("credentials", "Save credentials"),
         ("spec", "Read Agent Plugin spec"),
         ("docs", "Read API docs"),
-        ("skill", "Write SKILL.md"),
+        ("skill", "Package skills"),
         ("factory", "Build guest program"),
         ("review", "Safety review"),
         ("trial", "Trial run"),
@@ -494,7 +494,7 @@ final class PluginCreationController: ObservableObject {
     }
 
     private func resetProgressSteps() {
-        // Order matches the host workflow: credentials → Agent Plugin spec → docs → SKILL.md → build.
+        // Order matches the host workflow: credentials → Agent Plugin spec → docs → package build.
         progressSteps = Self.factoryProgressStepOrder.map {
             ProgressStepState(id: $0.id, title: $0.title, status: .pending)
         }

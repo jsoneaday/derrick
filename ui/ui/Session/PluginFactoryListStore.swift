@@ -3,6 +3,12 @@ import DBRepository
 import Foundation
 import Structure
 
+public enum PluginFactoryDeletionSignal {
+    public static let didDeletePluginNotification = Notification.Name("derrick.pluginFactory.didDeletePlugin")
+    public static let pluginIDKey = "pluginID"
+    public static let fullyRemovedKey = "fullyRemoved"
+}
+
 @MainActor
 final class PluginFactoryListStore: ObservableObject {
     static let shared = PluginFactoryListStore()
@@ -78,10 +84,20 @@ final class PluginFactoryListStore: ObservableObject {
                     pluginID: release.pluginID,
                     fieldIDs: secretFields
                 )
+                await HostUIPresentStore.shared.clear(pluginID: release.pluginID)
+                HostUIPresentWake.clearPending(pluginID: release.pluginID)
                 NotificationCenter.default.post(
                     name: ChatShellNotification.pluginDeleted,
                     object: nil,
                     userInfo: [ChatShellNotification.pluginIDUserInfoKey: release.pluginID]
+                )
+                NotificationCenter.default.post(
+                    name: PluginFactoryDeletionSignal.didDeletePluginNotification,
+                    object: nil,
+                    userInfo: [
+                        PluginFactoryDeletionSignal.pluginIDKey: release.pluginID,
+                        PluginFactoryDeletionSignal.fullyRemovedKey: true,
+                    ]
                 )
             }
             _ = try await repository.purgeOrphanedPluginAssociatedData()
@@ -100,6 +116,8 @@ final class PluginFactoryListStore: ObservableObject {
             let orphanResults = try await repository.purgeOrphanedPluginAssociatedData()
             for result in orphanResults where result.purgedAssociatedData {
                 PluginSecretKeychain.deleteAllStoredSecrets(pluginID: result.pluginID)
+                await HostUIPresentStore.shared.clear(pluginID: result.pluginID)
+                HostUIPresentWake.clearPending(pluginID: result.pluginID)
                 NotificationCenter.default.post(
                     name: ChatShellNotification.pluginDeleted,
                     object: nil,

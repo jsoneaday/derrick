@@ -122,6 +122,22 @@ private final class PrewarmState: @unchecked Sendable {
         pending.forEach { _ = $0.resume(throwing: error) }
     }
 
+    /// Clears a prior success/failure so a fresh probe can run (bootstrap Try Again).
+    func reset() {
+        lock.lock()
+        completed = false
+        failure = nil
+        let pending = waiters
+        waiters.removeAll()
+        lock.unlock()
+        let cancelled = NSError(
+            domain: "XPCDockerRunner",
+            code: 499,
+            userInfo: [NSLocalizedDescriptionKey: "Docker reachability check was restarted."]
+        )
+        pending.forEach { _ = $0.resume(throwing: cancelled) }
+    }
+
     func wait(timeoutNanoseconds: UInt64, timeoutError: Error) async throws {
         try await withCheckedThrowingContinuation { continuation in
             let waiter = PrewarmWaiter(continuation)
@@ -230,6 +246,11 @@ public final class XPCDockerRunner: @unchecked Sendable {
         )
     }
 
+    /// Fresh Docker engine probe for client bootstrap / Try Again. Ignores a prior failed cache.
+    public func verifyDockerEngineReachableForBootstrap() async throws {
+        try await probeDockerEngineReachability(updateBootstrapUI: true)
+    }
+
     /// Waits until the worker image is built or verified. Joins an in-flight background build.
     public func waitUntilPrewarmed() async throws {
         try await waitUntilDockerReachable()
@@ -289,33 +310,69 @@ public final class XPCDockerRunner: @unchecked Sendable {
         }
     }
 
-    private func prewarmEnvironment() async {
+            private func prewarmEnvironment() async {
         do {
-            await reportBootstrap(phase: .checkingDocker, message: "Checking Docker Desktop…")
-            let version = try await runXPCCommand(
-                dockerArguments: ["version", "--format", "{{.Server.Version}}"],
-                timeoutSeconds: 20
-            )
-            if version.exitCode != 0 {
-                throw NSError(
-                    domain: "XPCDockerRunner",
-                    code: 503,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            String(decoding: version.stderr, as: UTF8.self)
-                    ]
-                )
-            }
-            dockerReachableState.markCompleted()
-            await reportBootstrapTaskCompleted(.docker)
+            try await probeDockerEngineReachability(updateBootstrapUI: true)
             Task {
                 await pruneLeftoverDockerArtifacts()
                 await prewarmWorkerImage()
             }
         } catch {
             debugLog("Docker reachability check failed: \(error.localizedDescription)")
+            // probeDockerEngineReachability already marked failed.
+        }
+    }
+
+    private func probeDockerEngineReachability(updateBootstrapUI: Bool) async throws {
+        dockerReachableState.reset()
+        if updateBootstrapUI {
+            await reportBootstrap(phase: .checkingDocker, message: "Checking Docker Desktop…")
+        }
+        do {
+            let version = try await runXPCCommand(
+                dockerArguments: ["version", "--format", "{{.Server.Version}}"],
+                timeoutSeconds: 20
+            )
+            if let launchError = version.launchError, !launchError.isEmpty {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 503,
+                    userInfo: [NSLocalizedDescriptionKey: launchError]
+                )
+            }
+            if version.exitCode != 0 {
+                let stderr = String(decoding: version.stderr, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 503,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: stderr.isEmpty
+                            ? "Cannot connect to the Docker daemon. Is the docker daemon running?"
+                            : stderr
+                    ]
+                )
+            }
+            let serverVersion = String(decoding: version.stdout, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !serverVersion.isEmpty else {
+                throw NSError(
+                    domain: "XPCDockerRunner",
+                    code: 503,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Cannot connect to the Docker daemon. Is the docker daemon running?"
+                    ]
+                )
+            }
+            dockerReachableState.markCompleted()
+            if updateBootstrapUI {
+                await reportBootstrapTaskCompleted(.docker)
+            }
+        } catch {
             dockerReachableState.markFailed(error)
             imagePrewarmState.markFailed(error)
+            throw error
         }
     }
 

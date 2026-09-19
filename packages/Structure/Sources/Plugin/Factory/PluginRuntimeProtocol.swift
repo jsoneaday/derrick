@@ -84,10 +84,10 @@ public struct PluginRuntimeRequest: Codable, Sendable, Hashable {
 
     public init(
         sequence: Int,
-        payload: PluginUIRequest
+        payload: PluginUIPresentRequest
     ) throws {
         try self.init(
-            requestID: payload.requestID,
+            requestID: UUID().uuidString,
             sequence: sequence,
             operation: .uiRequest,
             payload: Self.jsonValue(payload)
@@ -147,7 +147,7 @@ public struct PluginRuntimeRequest: Codable, Sendable, Hashable {
         case .httpRequest:
             return decode(HostHTTPRequest.self).map { .http($0) }
         case .uiRequest:
-            return decode(PluginUIRequest.self).map { .ui($0) }
+            return decode(PluginUIPresentRequest.self).map { .ui($0) }
         case .secretRequest:
             return decode(PluginSecretRequest.self).map { .secret($0) }
         case .storageRead:
@@ -195,7 +195,7 @@ public struct PluginRuntimeRequest: Codable, Sendable, Hashable {
 
 public enum PluginRuntimeTypedPayload: Sendable, Hashable {
     case http(HostHTTPRequest)
-    case ui(PluginUIRequest)
+    case ui(PluginUIPresentRequest)
     case secret(PluginSecretRequest)
     case storageRead(PluginStorageReadRequest)
     case storageWrite(PluginStorageWriteRequest)

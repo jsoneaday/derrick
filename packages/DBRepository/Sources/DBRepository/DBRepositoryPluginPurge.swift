@@ -13,6 +13,7 @@ public struct PluginPurgeResult: Sendable, Equatable {
     public var removedChatSessions: Int
     public var removedWorkflowRuns: Int
     public var removedContentSensitivityGrants: Int
+    public var removedHostUIPresents: Int
 
     public init(
         pluginID: String,
@@ -22,7 +23,8 @@ public struct PluginPurgeResult: Sendable, Equatable {
         removedAgentHandled: Int = 0,
         removedChatSessions: Int = 0,
         removedWorkflowRuns: Int = 0,
-        removedContentSensitivityGrants: Int = 0
+        removedContentSensitivityGrants: Int = 0,
+        removedHostUIPresents: Int = 0
     ) {
         self.pluginID = pluginID
         self.removedReleaseCount = removedReleaseCount
@@ -32,6 +34,7 @@ public struct PluginPurgeResult: Sendable, Equatable {
         self.removedChatSessions = removedChatSessions
         self.removedWorkflowRuns = removedWorkflowRuns
         self.removedContentSensitivityGrants = removedContentSensitivityGrants
+        self.removedHostUIPresents = removedHostUIPresents
     }
 
     public var removedAnything: Bool {
@@ -41,6 +44,7 @@ public struct PluginPurgeResult: Sendable, Equatable {
             || removedChatSessions > 0
             || removedWorkflowRuns > 0
             || removedContentSensitivityGrants > 0
+            || removedHostUIPresents > 0
     }
 }
 
@@ -197,6 +201,7 @@ private extension DBRepository {
         result.removedChatSessions = associated.removedChatSessions
         result.removedWorkflowRuns = associated.removedWorkflowRuns
         result.removedContentSensitivityGrants = associated.removedContentSensitivityGrants
+        result.removedHostUIPresents = associated.removedHostUIPresents
         return result
     }
 
@@ -206,6 +211,21 @@ private extension DBRepository {
         quoted: (String) -> String
     ) throws -> PluginPurgeResult {
         var result = PluginPurgeResult(pluginID: pluginID, purgedAssociatedData: true)
+
+        result.removedHostUIPresents = try scalarCount(
+            """
+            SELECT COUNT(*) FROM plugin_host_ui
+            WHERE plugin_id = \(quoted(pluginID));
+            """,
+            on: handle
+        )
+        try execute(
+            """
+            DELETE FROM plugin_host_ui
+            WHERE plugin_id = \(quoted(pluginID));
+            """,
+            on: handle
+        )
 
         result.removedAgentHandled = try scalarCount(
             """
@@ -344,6 +364,10 @@ private extension DBRepository {
         )
         ids.formUnion(try stringSet(
             "SELECT DISTINCT plugin_id FROM messaging_agent_handled;",
+            on: handle
+        ))
+        ids.formUnion(try stringSet(
+            "SELECT DISTINCT plugin_id FROM plugin_host_ui;",
             on: handle
         ))
         // Chat / workflow orphans are harder to reverse-map; connector + handled cover messaging.
