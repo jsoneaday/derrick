@@ -28,6 +28,7 @@ public struct HostUINodeBindings {
     public var showJumpToLatest: Bool
     public var showNewMessagesPill: Bool
     public var onJumpToLatest: () -> Void
+    public var scrollToBottomToken: Int
     /// Declared / default service ids active for this tree.
     public var activeServices: Set<String>
 
@@ -56,6 +57,7 @@ public struct HostUINodeBindings {
         showJumpToLatest: Bool = false,
         showNewMessagesPill: Bool = false,
         onJumpToLatest: @escaping () -> Void = {},
+        scrollToBottomToken: Int = 0,
         activeServices: Set<String> = []
     ) {
         self.tabs = tabs
@@ -82,6 +84,7 @@ public struct HostUINodeBindings {
         self.showJumpToLatest = showJumpToLatest
         self.showNewMessagesPill = showNewMessagesPill
         self.onJumpToLatest = onJumpToLatest
+        self.scrollToBottomToken = scrollToBottomToken
         self.activeServices = activeServices
     }
 

@@ -49,14 +49,34 @@ struct MessagingHostUISurface: View {
                 let text = draft
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 draft = ""
-                Task { await store.sendMessage(text, parentVendorMessageID: nil) }
+                let optimisticID = store.beginOptimisticSend(
+                    text: text,
+                    parentVendorMessageID: nil
+                )
+                Task {
+                    await store.sendMessage(
+                        text,
+                        parentVendorMessageID: nil,
+                        optimisticID: optimisticID
+                    )
+                }
             },
             onSubmitThread: {
                 let text = threadDraft
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 threadDraft = ""
                 let parent = store.selectedReplyParentVendorMessageID
-                Task { await store.sendMessage(text, parentVendorMessageID: parent) }
+                let optimisticID = store.beginOptimisticSend(
+                    text: text,
+                    parentVendorMessageID: parent
+                )
+                Task {
+                    await store.sendMessage(
+                        text,
+                        parentVendorMessageID: parent,
+                        optimisticID: optimisticID
+                    )
+                }
             },
             onOpenThread: { row in
                 guard let message = store.visibleMessages.first(where: { $0.id == row.id }),
@@ -81,6 +101,7 @@ struct MessagingHostUISurface: View {
             onJumpToLatest: {
                 Task { await store.jumpToLatest() }
             },
+            scrollToBottomToken: store.scrollToBottomToken,
             activeServices: services
         )
     }

@@ -19,6 +19,7 @@ public enum DerrickMessagingIngressSignal: Sendable {
 /// Wakes the UI to reload messaging state after derrickd persisted inbound rows.
 public enum DerrickMessagingInboundSignal: Sendable {
     public static let darwinName = "derrick.ui.messagingInbound"
+    public static let localNotificationName = Notification.Name("derrick.ui.messagingInbound.local")
 
     public static func postRefresh() {
         let name = CFNotificationName(darwinName as CFString)
@@ -29,5 +30,6 @@ public enum DerrickMessagingInboundSignal: Sendable {
             nil,
             true
         )
+        NotificationCenter.default.post(name: localNotificationName, object: nil)
     }
 }

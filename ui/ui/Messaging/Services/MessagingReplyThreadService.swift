@@ -10,7 +10,7 @@ enum MessagingReplyThreadService {
         connectorRuntime: ConnectorMessagingRuntime,
         pluginID: String?,
         thread: MessagingThreadDTO?,
-        primeInbound: () -> Void,
+        primeInbound: @escaping () -> Void,
         publishPresence: () -> Void
     ) async {
         await session.openReplyThread(parentVendorMessageID: parentVendorMessageID)
@@ -18,21 +18,24 @@ enum MessagingReplyThreadService {
         publishPresence()
         MessagingPollRefreshService.requestPoll()
         guard let pluginID, let thread else { return }
-        do {
-            try await connectorRuntime.pollConversation(
-                pluginID: pluginID,
-                vendorThreadID: thread.vendorThreadID,
-                parentVendorMessageID: parentVendorMessageID,
-                threadID: thread.id,
-                session: session
-            )
-            session.setLastError(nil)
-            primeInbound()
-        } catch {
-            let mapped = ConnectorReplyThreadAccessMessage.userFacing(
-                fromVendorDetail: error.localizedDescription
-            ) ?? error.localizedDescription
-            session.setReplyThreadWarning(mapped)
+        // Paint from DB first; Slack poll catches peer replies without blocking the pane.
+        Task {
+            do {
+                try await connectorRuntime.pollConversation(
+                    pluginID: pluginID,
+                    vendorThreadID: thread.vendorThreadID,
+                    parentVendorMessageID: parentVendorMessageID,
+                    threadID: thread.id,
+                    session: session
+                )
+                session.setLastError(nil)
+                primeInbound()
+            } catch {
+                let mapped = ConnectorReplyThreadAccessMessage.userFacing(
+                    fromVendorDetail: error.localizedDescription
+                ) ?? error.localizedDescription
+                session.setReplyThreadWarning(mapped)
+            }
         }
     }
 
