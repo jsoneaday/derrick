@@ -55,8 +55,13 @@ import Testing
     }
 
     @Test func parityChecklistCoversMessagingBehaviors() {
-        #expect(MessagingInboxParityChecklist.allCases.count >= 10)
-        #expect(MessagingInboxParityChecklist.allCases.contains(.optimisticOutbound))
+        let cases = MessagingInboxParityChecklist.allCases
+        #expect(cases.count == 10)
+        #expect(cases.contains(.channelTabs))
+        #expect(cases.contains(.optimisticOutbound))
+        #expect(cases.contains(.inboundBannerDedupe))
+        #expect(cases.contains(.pollDarwinRefresh))
+        #expect(cases.contains(.replySidebar))
     }
 
     @Test func screenWithoutTabStripDoesNotOpenAConversation() {

@@ -90,18 +90,6 @@ final class MessagingSessionStore: ObservableObject {
         selectedPluginID = pluginID
     }
 
-    func clearSelection() {
-        selectedPluginID = nil
-        selectedThreadID = nil
-        selectedReplyParentVendorMessageID = nil
-        tabs = []
-        threads = []
-        visibleMessages = []
-        visibleReplyMessages = []
-        replyThreadWarning = nil
-        lastError = nil
-    }
-
     func openConnector(pluginID: String, autoOpenMostRecent: Bool = true) async {
         selectConnector(pluginID: pluginID)
         await reloadThreads(autoOpenMostRecent: autoOpenMostRecent)
@@ -132,17 +120,6 @@ final class MessagingSessionStore: ObservableObject {
         visibleReplyMessages = []
         replyThreadWarning = nil
         Task { await loadNewestWindow() }
-    }
-
-    func closeTab(id: String) {
-        tabs.removeAll { $0.id == id }
-        if selectedThreadID == id {
-            selectedThreadID = tabs.last?.id
-            selectedReplyParentVendorMessageID = nil
-            visibleReplyMessages = []
-            replyThreadWarning = nil
-            Task { await loadNewestWindow() }
-        }
     }
 
     func toggleMuteSelectedThread() async {
@@ -213,39 +190,6 @@ final class MessagingSessionStore: ObservableObject {
         showNewMessagesPill = false
         isNearBottom = true
         scrollToBottomToken += 1
-    }
-
-    func applyPersistedInbound(_ result: MessagingPersistResult) async {
-        let viewing = currentRoute.isViewing(pluginID: result.thread.pluginID, threadID: result.thread.id)
-        if selectedPluginID == result.thread.pluginID {
-            await reloadThreads(autoOpenMostRecent: false)
-        }
-        guard viewing, result.inserted else {
-            await catalog?.refreshBadges()
-            return
-        }
-        if result.message.isReply {
-            await loadNewestWindow()
-            if selectedReplyParentVendorMessageID == result.message.parentVendorMessageID {
-                await loadReplyWindow()
-            }
-            await markVisibleConversationRead()
-            await catalog?.refreshBadges()
-            return
-        }
-        if isNearBottom {
-            visibleMessages.append(result.message)
-            if visibleMessages.count > MessagingViewport.maxVisibleMessages {
-                visibleMessages.removeFirst(visibleMessages.count - MessagingViewport.maxVisibleMessages)
-                hasOlder = true
-            }
-            scrollToBottomToken += 1
-        } else {
-            showNewMessagesPill = true
-            showJumpToLatest = true
-        }
-        await markVisibleConversationRead()
-        await catalog?.refreshBadges()
     }
 
     func dropSelectionIfConnectorMissing() {
@@ -385,10 +329,6 @@ final class MessagingSessionStore: ObservableObject {
 
     func reloadThreadsForSelectedConnector(autoOpenMostRecent: Bool) async {
         await reloadThreads(autoOpenMostRecent: autoOpenMostRecent)
-    }
-
-    func reloadMessagesForSelectedThread() async {
-        await loadNewestWindow()
     }
 
     func reloadMessagesForThread(id: String) async {

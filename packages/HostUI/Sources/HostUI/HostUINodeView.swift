@@ -11,11 +11,6 @@ public struct HostUINodeView: View {
         self.bindings = bindings
     }
 
-    public init(node: HostUINode) {
-        self.node = node
-        self.bindings = .empty()
-    }
-
     public var body: some View {
         let root = node.element == HostUIElementID.screen.rawValue ? node : HostUINode(
             element: HostUIElementID.screen.rawValue,
@@ -68,7 +63,6 @@ public struct HostUINodeView: View {
     }
 
     private func shouldShowSidebar(_ sidebars: [HostUINode]) -> Bool {
-        guard !sidebars.isEmpty else { return false }
         guard let sidebar = sidebars.first else { return false }
         let when = sidebar.configString["visible_when"] ?? "reply_thread"
         if when == "always" { return true }
@@ -136,7 +130,8 @@ public struct HostUINodeView: View {
         case .section:
             HostUISection(title: node.configString["title"]) {
                 ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
-                    nodeContent(child, isThread: isThread)
+                    // AnyView breaks the recursive opaque-return cycle for nested sections.
+                    AnyView(nodeContent(child, isThread: isThread))
                 }
             }
             .padding(.horizontal)

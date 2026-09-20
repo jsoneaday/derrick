@@ -77,8 +77,7 @@ struct MessagingConversationView: View {
                 break
             case .vendorConnector:
                 if presentsInbox {
-                    if store.isConnectorSyncing, store.tabs.isEmpty { return }
-                    composerFocused = true
+                    // HostUI composer owns focus for the inbox path.
                     return
                 }
                 if store.selectedThread != nil {
@@ -300,19 +299,11 @@ struct MessagingConversationView: View {
         VStack(spacing: 10) {
             Text(store.selectedConnectorDisplayName)
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-            if store.isConnectorSyncing {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Syncing channels and recent messages…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No conversations yet. Open a connector that lists conversations, or refresh the list.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
-            }
+            Text("No conversations yet. Open a connector that lists conversations, or refresh the list.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
             if let error = store.lastError {
                 Text(error)
                     .font(.caption)

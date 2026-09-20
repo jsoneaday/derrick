@@ -2,7 +2,6 @@ import AppKit
 import Combine
 import DBRepository
 import Foundation
-import Plugin
 import Structure
 
 /// Messaging's first paint: the empty catalog vs a specific vendor connector.
@@ -102,15 +101,6 @@ final class MessagingStore: ObservableObject {
             ?? HostUINode(element: "screen")
         return HostUILibraryStore.withDefaultMessagingServices(base)
     }
-    var showsHostConversationTabs: Bool {
-        hostUIRoot.contains(element: "tab_strip")
-    }
-    var showsHostMessageSidebar: Bool {
-        guard let sidebar = hostUIRoot.first(element: "sidebar") else { return false }
-        let when = sidebar.configString["visible_when"] ?? "reply_thread"
-        if when == "always" { return true }
-        return isViewingReplyThread
-    }
     var selectedConnector: MessagingConnectorDTO? {
         guard let selectedPluginID else { return nil }
         return connectors.first { $0.pluginID == selectedPluginID }
@@ -176,8 +166,6 @@ final class MessagingStore: ObservableObject {
         }
         return false
     }
-    /// Legacy alias for manual destination entry (send-only or connectors without thread discovery).
-    var canComposeNewChannel: Bool { canComposeManualChannel }
 
     func setConnectorSyncing(_ syncing: Bool) {
         isConnectorSyncing = syncing
@@ -486,10 +474,6 @@ final class MessagingStore: ObservableObject {
             session: session,
             publishPresence: { [weak self] in self?.publishForegroundPresence() }
         )
-    }
-
-    func closeTab(id: String) {
-        session.closeTab(id: id)
     }
 
     func toggleMuteSelectedThread() async {
