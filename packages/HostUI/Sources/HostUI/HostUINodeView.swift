@@ -180,7 +180,7 @@ public struct HostUINodeView: View {
             HostUITable(rows: tableRows(from: node))
                 .padding()
         case .text:
-            HostUIText(node.configString["text"] ?? "")
+            HostUIMarkdownText(node.configString["text"] ?? "", fontSize: 13)
                 .padding()
         case .button:
             HostUIButton(node.configString["label"] ?? "Button") {}

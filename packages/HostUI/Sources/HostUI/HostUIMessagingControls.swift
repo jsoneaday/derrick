@@ -276,25 +276,12 @@ public struct HostUIComposer: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(placeholder)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                        .allowsHitTesting(false)
-                }
-                TextField("", text: $text, axis: .vertical)
-                    .font(.system(size: 13))
-                    .lineLimit(1...6)
-                    .textFieldStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(.clear)
-                    .onSubmit(submitIfAllowed)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 12)
-            .frame(minHeight: 76, alignment: .topLeading)
+            HostUITextField(placeholder, text: $text, axis: .vertical, chrome: .plain)
+                .onSubmit(submitIfAllowed)
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
+                .frame(minHeight: 76, alignment: .topLeading)
 
             Rectangle()
                 .fill(Color(nsColor: .separatorColor))
@@ -302,15 +289,12 @@ public struct HostUIComposer: View {
 
             HStack(spacing: 12) {
                 Spacer(minLength: 0)
-                Button(action: submitIfAllowed) {
-                    HStack(spacing: 6) {
-                        Image(systemName: isSending ? "hourglass" : "paperplane.fill")
-                        Text(isSending ? "Sending…" : sendTitle)
-                    }
-                }
-                .buttonStyle(HostUIPrimaryButtonStyle())
-                .disabled(!canSubmit)
-                .opacity(canSubmit ? 1 : 0.45)
+                HostUIButton(
+                    isSending ? "Sending…" : sendTitle,
+                    systemImage: isSending ? "hourglass" : "paperplane.fill",
+                    disabled: !canSubmit,
+                    action: submitIfAllowed
+                )
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
