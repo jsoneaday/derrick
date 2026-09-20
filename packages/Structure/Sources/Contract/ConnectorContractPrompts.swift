@@ -109,6 +109,7 @@ public enum ConnectorContractPrompts: Sendable {
         parts.append(
             """
             After listing conversations, emit ui.present in the same envelope list as result.emit. \
+            The factory rejects a connector whose direct test never emits a valid ui.present. \
             The host shows only that recorded tree; it never substitutes a default screen. \
             Prefer the messaging_inbox example as the default present tree (copy it, then adapt). \
             If the vendor needs a different layout, compose from host-ui-library.json element ids only \

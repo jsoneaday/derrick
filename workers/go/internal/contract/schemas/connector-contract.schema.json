@@ -27,6 +27,7 @@
         "live_http_results_accumulate",
         "direct_test_poll_requires_non_empty_messages",
         "direct_test_threads_requires_non_empty",
+        "direct_test_requires_ui_present",
         "runtime_empty_messages_ok_if_vendor_ok"
       ],
       "properties": {
@@ -36,6 +37,7 @@
         "live_http_results_accumulate": { "type": "boolean" },
         "direct_test_poll_requires_non_empty_messages": { "type": "boolean" },
         "direct_test_threads_requires_non_empty": { "type": "boolean" },
+        "direct_test_requires_ui_present": { "type": "boolean" },
         "runtime_empty_messages_ok_if_vendor_ok": { "type": "boolean" }
       },
       "additionalProperties": false

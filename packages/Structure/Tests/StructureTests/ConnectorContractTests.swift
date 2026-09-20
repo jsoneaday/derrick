@@ -19,6 +19,7 @@ import Testing
         #expect(document.rules.runtimeEmptyMessagesOKIfVendorOK)
         #expect(document.rules.directTestPollRequiresNonEmptyMessages)
         #expect(document.rules.directTestThreadsRequiresNonEmpty)
+        #expect(document.rules.directTestRequiresUIPresent)
     }
 
     @Test func slackVendorProfileBindsCallIDs() throws {
@@ -113,14 +114,14 @@ import Testing
         try PluginFactoryDraftValidator.validateDirectTest(
             draft: slackFullSyncDraft(),
             manifest: try slackFullSyncManifest(),
-            hopRun: legalSlackFullSyncHopRun()
+            hopRun: try legalSlackFullSyncHopRun()
         )
     }
 
     @Test func validatorRejectsHistoryURLOnSyncThreadsHop() throws {
         try expectDirectTestFailure(
             containing: "must not call",
-            hopRun: legalSlackFullSyncHopRun(
+            hopRun: try legalSlackFullSyncHopRun(
                 syncURL: "https://slack.com/api/conversations.history?channel=C1"
             )
         )
@@ -129,7 +130,7 @@ import Testing
     @Test func validatorRejectsRepliesURLOnChannelPoll() throws {
         try expectDirectTestFailure(
             containing: "must not call",
-            hopRun: legalSlackFullSyncHopRun(
+            hopRun: try legalSlackFullSyncHopRun(
                 channelPollURL: "https://slack.com/api/conversations.replies?channel=C1&ts=1"
             )
         )
@@ -138,7 +139,7 @@ import Testing
     @Test func validatorRejectsHistoryURLOnReplyPoll() throws {
         try expectDirectTestFailure(
             containing: "must not call",
-            hopRun: legalSlackFullSyncHopRun(
+            hopRun: try legalSlackFullSyncHopRun(
                 replyPollURL: "https://slack.com/api/conversations.history?channel=C1"
             )
         )
@@ -149,7 +150,7 @@ import Testing
         try expectDirectTestFailure(
             containing: "must not call",
             draft: slackFullSyncDraft(testInput: testInput),
-            hopRun: legalSlackFullSyncHopRun(
+            hopRun: try legalSlackFullSyncHopRun(
                 syncURL: "https://slack.com/api/conversations.history?channel=C1"
             )
         )
@@ -163,25 +164,39 @@ import Testing
         try PluginFactoryDraftValidator.validateDirectTest(
             draft: slackFullSyncDraft(testInput: testInput),
             manifest: try slackFullSyncManifest(),
-            hopRun: legalSlackFullSyncHopRun()
+            hopRun: try legalSlackFullSyncHopRun()
         )
     }
 
     @Test func validatorRequiresNonEmptyDirectTestThreadsAndMessages() throws {
         try expectDirectTestFailure(
             containing: "non-empty threads",
-            hopRun: legalSlackFullSyncHopRun(threadsJSON: "[]")
+            hopRun: try legalSlackFullSyncHopRun(threadsJSON: "[]")
         )
         try expectDirectTestFailure(
             containing: "non-empty messages",
-            hopRun: legalSlackFullSyncHopRun(messagesJSON: "[]")
+            hopRun: try legalSlackFullSyncHopRun(messagesJSON: "[]")
         )
     }
 
     @Test func validatorRejectsThreadEmitMissingTitleFromSchema() throws {
         try expectDirectTestFailure(
             containing: "title",
-            hopRun: legalSlackFullSyncHopRun(threadsJSON: #"[{"vendor_thread_id":"C1"}]"#)
+            hopRun: try legalSlackFullSyncHopRun(threadsJSON: #"[{"vendor_thread_id":"C1"}]"#)
+        )
+    }
+
+    @Test func validatorRejectsConnectorDirectTestWithoutUIPresent() throws {
+        try expectDirectTestFailure(
+            containing: "ui.present",
+            hopRun: try legalSlackFullSyncHopRun(includePresent: false)
+        )
+    }
+
+    @Test func validatorRejectsUnknownHostUIPresentElement() throws {
+        try expectDirectTestFailure(
+            containing: "valid host UI",
+            hopRun: try legalSlackFullSyncHopRun(presentRootJSON: #"{"element":"slack_channel_list"}"#)
         )
     }
 
@@ -275,11 +290,30 @@ private func legalSlackFullSyncHopRun(
     replyPollURL: String = "https://slack.com/api/conversations.replies?channel=C1&ts=1",
     sendURL: String = "https://slack.com/api/chat.postMessage",
     threadsJSON: String = #"[{"vendor_thread_id":"C1","title":"general"}]"#,
-    messagesJSON: String = #"[{"vendor_thread_id":"C1","vendor_message_id":"1","direction":"inbound","sender":"a","body":"hi","created_at":"1"}]"#
-) -> PluginFactoryHopTestRun {
+    messagesJSON: String = #"[{"vendor_thread_id":"C1","vendor_message_id":"1","direction":"inbound","sender":"a","body":"hi","created_at":"1"}]"#,
+    includePresent: Bool = true,
+    presentRootJSON: String? = nil
+) throws -> PluginFactoryHopTestRun {
+    let syncEmit: PluginFactoryExecutionResult
+    if includePresent {
+        let rootJSON: String
+        if let presentRootJSON {
+            rootJSON = presentRootJSON
+        } else {
+            rootJSON = String(
+                decoding: try JSONEncoder().encode(try HostUILibraryStore.messagingInbox()),
+                as: UTF8.self
+            )
+        }
+        syncEmit = emitHop(
+            #"{"verb":"ui.present","root":\#(rootJSON)},{"verb":"result.emit","threads":\#(threadsJSON)}"#
+        )
+    } else {
+        syncEmit = emitHop(#"{"verb":"result.emit","threads":\#(threadsJSON)}"#)
+    }
     let hops = [
         requestHop(id: "sync-1", method: "GET", url: syncURL),
-        emitHop(#"{"verb":"result.emit","threads":\#(threadsJSON)}"#),
+        syncEmit,
         requestHop(id: "poll-1", method: "GET", url: channelPollURL),
         emitHop(#"{"verb":"result.emit","messages":\#(messagesJSON)}"#),
         requestHop(id: "replies-1", method: "GET", url: replyPollURL),

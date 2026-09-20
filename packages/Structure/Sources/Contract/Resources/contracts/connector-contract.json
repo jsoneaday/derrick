@@ -64,8 +64,9 @@
     "poll_loads_one_conversation": true,
     "paginate_within_op": true,
     "live_http_results_accumulate": true,
-    "direct_test_poll_requires_non_empty_messages": true,
-    "direct_test_threads_requires_non_empty": true,
-    "runtime_empty_messages_ok_if_vendor_ok": true
+        "direct_test_poll_requires_non_empty_messages": true,
+        "direct_test_threads_requires_non_empty": true,
+        "direct_test_requires_ui_present": true,
+        "runtime_empty_messages_ok_if_vendor_ok": true
   }
 }

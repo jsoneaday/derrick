@@ -205,6 +205,9 @@ public enum PluginFactoryDraftValidator: Sendable {
         }
 
         let document = try? ConnectorContractStore.loadProtocol()
+        if document?.rules.directTestRequiresUIPresent ?? true {
+            findings.append(contentsOf: connectorPresentFindings(in: hopRun))
+        }
         let requireSentMessage = document?.ops[ConnectorMessagingOperation.sendMessage.rawValue]?
             .success.requiresSentMessage ?? true
         let requirePollMessages = document?.rules.directTestPollRequiresNonEmptyMessages ?? true
@@ -250,6 +253,28 @@ public enum PluginFactoryDraftValidator: Sendable {
 
         _ = manifest
         return findings
+    }
+
+    /// Connectors must record a library-valid `ui.present` during the direct test.
+    private static func connectorPresentFindings(in hopRun: PluginFactoryHopTestRun) -> [String] {
+        var presents: [PluginEnvelope] = []
+        for hop in hopRun.hopResults {
+            guard let envelopes = try? PluginEnvelopeList.decode(hop.stdout) else { continue }
+            presents.append(contentsOf: envelopes.filter { $0.verb == .uiPresent })
+        }
+        guard let present = presents.first else {
+            return [
+                "Connector direct test must emit ui.present with a host UI library tree. A connector is not usable without a screen."
+            ]
+        }
+        do {
+            _ = try HostUILibraryStore.node(fromPresentPayload: present.payload)
+        } catch {
+            return [
+                "Connector ui.present must be a valid host UI library tree. \(error.localizedDescription)"
+            ]
+        }
+        return []
     }
 
     private static func hopParamsSchemaFindings(in script: PluginFactoryTestScript) -> [String] {
