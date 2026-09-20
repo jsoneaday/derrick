@@ -54,6 +54,21 @@ final class MessagingSessionStore: ObservableObject {
         selectedReplyParentVendorMessageID != nil
     }
 
+    /// Reply pane label. Never the Slack channel (`selectedThread.title`).
+    var replyThreadTitle: String {
+        guard let parentID = selectedReplyParentVendorMessageID else { return "Thread" }
+        let body = visibleReplyMessages.first(where: { $0.vendorMessageID == parentID })?.body
+            ?? visibleMessages.first(where: { $0.vendorMessageID == parentID })?.body
+        guard let body else { return "Thread" }
+        let oneLine = body
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if oneLine.isEmpty { return "Thread" }
+        if oneLine.count <= 48 { return oneLine }
+        return String(oneLine.prefix(48)) + "…"
+    }
+
     var currentRoute: MessagingRoute {
         MessagingRoute(
             isMessagingWorkspace: isMessagingWorkspace,

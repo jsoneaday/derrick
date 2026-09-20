@@ -20,7 +20,7 @@ public enum MessagingInboxParityChecklist: String, CaseIterable, Sendable {
         case .messageList:
             return "Scrolling channel message list with older-page load"
         case .bubbleChrome:
-            return "Inbound/outbound bubbles with navy/white chrome"
+            return "One bubble chrome for inbound and outbound; direction only places the row"
         case .composer:
             return "Channel and reply composers with send"
         case .replySidebar:

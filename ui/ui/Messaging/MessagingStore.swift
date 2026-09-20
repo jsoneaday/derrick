@@ -87,6 +87,7 @@ final class MessagingStore: ObservableObject {
     var selectedThreadID: String? { session.selectedThreadID }
     var selectedReplyParentVendorMessageID: String? { session.selectedReplyParentVendorMessageID }
     var isViewingReplyThread: Bool { session.isViewingReplyThread }
+    var replyThreadTitle: String { session.replyThreadTitle }
     var visibleMessages: [MessagingMessageDTO] { session.visibleMessages }
     var visibleReplyMessages: [MessagingMessageDTO] { session.visibleReplyMessages }
     var lastReplyPreviewByParentID: [String: String] { session.lastReplyPreviewByParentID }

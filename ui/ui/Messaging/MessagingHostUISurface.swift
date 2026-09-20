@@ -31,7 +31,9 @@ struct MessagingHostUISurface: View {
                 )
             },
             selectedTabID: store.selectedThreadID,
-            channelMessages: store.visibleMessages.map { messageRow(from: $0, showsReply: true) },
+            channelMessages: store.visibleMessages
+                .filter { !$0.isReply }
+                .map { messageRow(from: $0, showsReply: true) },
             threadMessages: store.visibleReplyMessages.map { messageRow(from: $0, showsReply: false) },
             channelDraft: $draft,
             threadDraft: $threadDraft,
@@ -39,7 +41,7 @@ struct MessagingHostUISurface: View {
             canSendChannel: store.canSendInSelectedThread,
             canSendThread: store.canSendInSelectedThread,
             isViewingReplyThread: store.isViewingReplyThread,
-            replyThreadTitle: store.selectedThread?.title ?? "Thread",
+            replyThreadTitle: store.replyThreadTitle,
             replyThreadWarning: store.replyThreadWarning,
             inboundBanner: store.inboundBanner,
             onSelectTab: { id in
@@ -113,7 +115,9 @@ struct MessagingHostUISurface: View {
             body: message.body,
             outbound: message.direction == .outbound,
             replyCount: message.replyCount,
-            replyPreview: message.vendorMessageID.flatMap { store.lastReplyPreviewByParentID[$0] },
+            replyPreview: message.vendorMessageID.flatMap { id in
+                store.lastReplyPreviewByParentID[id].map(HostUIMessagingLayout.collapsedReplyPreview)
+            },
             showsReplyAction: showsReply && message.vendorMessageID != nil
         )
     }
