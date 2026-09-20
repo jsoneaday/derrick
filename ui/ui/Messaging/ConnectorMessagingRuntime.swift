@@ -26,9 +26,10 @@ final class ConnectorMessagingRuntime {
         do {
             try await client.bootstrap(pluginID: pluginID)
             guard generation == nil || store.connectorCommandID == generation else { return }
-            let shouldAutoOpen = session.selectedThreadID == nil && store.hostUIRoot.opensFirstConversation
+            let shouldAutoOpen = session.selectedThreadID == nil
+                && store.hostUIRoot?.opensFirstConversation == true
             await session.reloadThreadsForSelectedConnector(autoOpenMostRecent: shouldAutoOpen)
-            if session.selectedThreadID == nil, store.hostUIRoot.opensFirstConversation,
+            if session.selectedThreadID == nil, store.hostUIRoot?.opensFirstConversation == true,
                let threadID = session.threads.first?.id {
                 await session.selectThread(id: threadID)
             }

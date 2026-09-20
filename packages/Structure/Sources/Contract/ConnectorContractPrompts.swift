@@ -109,11 +109,12 @@ public enum ConnectorContractPrompts: Sendable {
         parts.append(
             """
             After listing conversations, emit ui.present in the same envelope list as result.emit. \
-            Compose a root tree from host-ui-library.json element ids only — choose layout from the vendor's docs \
-            and what the library can express (screen, section, tab_strip, lists, composer, sidebar, forms, calendar, time, …). \
-            The messaging_inbox example is a reference composition, not a required template. \
-            messaging_inbox includes host services (optimistic_send, inbound_banners, poll_refresh, reply_pane). Guest code must not reimplement send UX, poll refresh, banners, or reply chrome; the host owns those. \
-            For holds=message_exchange the host always applies the default messaging service pack even if the present tree omits a service node. \
+            The host shows only that recorded tree; it never substitutes a default screen. \
+            Prefer the messaging_inbox example as the default present tree (copy it, then adapt). \
+            If the vendor needs a different layout, compose from host-ui-library.json element ids only \
+            (screen, section, tab_strip, lists, composer, sidebar, forms, calendar, time, …). \
+            Include each host service you want as a child (optimistic_send, inbound_banners, poll_refresh, reply_pane). \
+            Omitted services do not run. Guest code must not reimplement send UX, poll refresh, banners, or reply chrome. \
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
             Do not invent vendor widgets. Follow crawled API notes for nesting. \

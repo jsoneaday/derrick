@@ -68,6 +68,7 @@ import Testing
         #expect(goal.contains("host UI catalog (summary)"))
         #expect(goal.contains("tab_strip"))
         #expect(goal.contains("messaging_inbox"))
+        #expect(goal.contains("never substitutes"))
         #expect(goal.contains("optimistic_send"))
         #expect(goal.contains("selection=conversations"))
         #expect(goal.contains("skill_files must include"))

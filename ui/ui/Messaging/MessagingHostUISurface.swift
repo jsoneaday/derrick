@@ -2,7 +2,7 @@ import HostUI
 import Structure
 import SwiftUI
 
-/// Renders `store.hostUIRoot` through the HostUI tree pipeline (controls + services).
+/// Renders a recorded `ui.present` tree through HostUI controls and services.
 struct MessagingHostUISurface: View {
     @ObservedObject var store: MessagingStore
     @Binding var draft: String
@@ -13,13 +13,14 @@ struct MessagingHostUISurface: View {
     var body: some View {
         VStack(spacing: 0) {
             channelHeader
-            HostUINodeView(node: store.hostUIRoot, bindings: makeBindings())
+            if let root = store.hostUIRoot {
+                HostUINodeView(node: root, bindings: makeBindings(root: root))
+            }
         }
         .background(Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0))
     }
 
-    private func makeBindings() -> HostUINodeBindings {
-        let root = store.hostUIRoot
+    private func makeBindings(root: HostUINode) -> HostUINodeBindings {
         let services = HostUILibraryStore.serviceIDs(in: root)
         return HostUINodeBindings(
             tabs: store.tabs.map {
