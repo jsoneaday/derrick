@@ -118,6 +118,8 @@ public struct HostUIMessage: View {
     private let onOpenThread: (() -> Void)?
 
     private let navy = Color(red: 0.176, green: 0.286, blue: 0.576)
+    /// Cream fill for outbound — matches host notification / prior MessagingBubble chrome.
+    private let outboundFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
 
     public init(row: HostUIMessageRow, onOpenThread: (() -> Void)? = nil) {
         self.row = row
@@ -133,20 +135,7 @@ public struct HostUIMessage: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                HostUIMarkdownText(row.body)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.white)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                navy.opacity(row.outbound ? 0.32 : 0.14),
-                                lineWidth: 1
-                            )
-                    )
+                messageBody
                 if row.showsReplyAction, let onOpenThread {
                     Button(action: onOpenThread) {
                         HStack(alignment: .top, spacing: 8) {
@@ -156,7 +145,7 @@ public struct HostUIMessage: View {
                                 Text(replyTitle)
                                     .font(.caption.weight(.semibold))
                                 if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
-                                    HostUIMarkdownText(preview, font: .caption2)
+                                    HostUIMarkdownText(preview, fontSize: 11)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
@@ -171,12 +160,37 @@ public struct HostUIMessage: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(row.replyCount > 0 ? Color.accentColor : .primary.opacity(0.75))
+                    .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
             if !row.outbound { Spacer(minLength: 80) }
         }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var messageBody: some View {
+        HostUIMarkdownText(row.body, fontSize: 13)
+            .frame(maxWidth: 420, alignment: row.outbound ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(row.outbound ? outboundFill : Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        navy.opacity(row.outbound ? 0.28 : 0.14),
+                        lineWidth: 1
+                    )
+            )
+            .frame(
+                maxWidth: .infinity,
+                alignment: row.outbound ? .trailing : .leading
+            )
     }
 
     private var replyTitle: String {
@@ -191,17 +205,20 @@ public struct HostUIMessageList: View {
     private let onOpenThread: ((HostUIMessageRow) -> Void)?
     private let onNearBottomChange: ((Bool) -> Void)?
     private let onLoadOlder: (() -> Void)?
+    private let scrollToBottomToken: Int
 
     public init(
         rows: [HostUIMessageRow],
         onOpenThread: ((HostUIMessageRow) -> Void)? = nil,
         onNearBottomChange: ((Bool) -> Void)? = nil,
-        onLoadOlder: (() -> Void)? = nil
+        onLoadOlder: (() -> Void)? = nil,
+        scrollToBottomToken: Int = 0
     ) {
         self.rows = rows
         self.onOpenThread = onOpenThread
         self.onNearBottomChange = onNearBottomChange
         self.onLoadOlder = onLoadOlder
+        self.scrollToBottomToken = scrollToBottomToken
     }
 
     public var body: some View {
@@ -229,10 +246,17 @@ public struct HostUIMessageList: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: rows.last?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("hostui-scroll-bottom", anchor: .bottom)
-                }
+                scrollToBottom(proxy)
             }
+            .onChange(of: scrollToBottomToken) { _, _ in
+                scrollToBottom(proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo("hostui-scroll-bottom", anchor: .bottom)
         }
     }
 }
@@ -240,6 +264,7 @@ public struct HostUIMessageList: View {
 public struct HostUIComposer: View {
     @Binding private var text: String
     private let placeholder: String
+    private let sendTitle: String
     private let isSending: Bool
     private let canSend: Bool
     private let onSubmit: () -> Void
@@ -247,39 +272,57 @@ public struct HostUIComposer: View {
     public init(
         text: Binding<String>,
         placeholder: String = "Message",
+        sendTitle: String = "Send",
         isSending: Bool = false,
         canSend: Bool = true,
         onSubmit: @escaping () -> Void
     ) {
         self._text = text
         self.placeholder = placeholder
+        self.sendTitle = sendTitle
         self.isSending = isSending
         self.canSend = canSend
         self.onSubmit = onSubmit
     }
 
     public var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             TextField(placeholder, text: $text, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                )
-                .onSubmit(onSubmit)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+                .onSubmit(submitIfAllowed)
 
-            Button(action: onSubmit) {
-                Image(systemName: isSending ? "hourglass" : "paperplane.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 36, height: 36)
+            Divider()
+
+            HStack {
+                Spacer(minLength: 0)
+                HostUIButton(
+                    isSending ? "Sending…" : sendTitle,
+                    systemImage: "paperplane.fill",
+                    disabled: !canSubmit,
+                    action: submitIfAllowed
+                )
             }
-            .buttonStyle(.borderless)
-            .disabled(!canSend || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
+        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var canSubmit: Bool {
+        canSend
+            && !isSending
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitIfAllowed() {
+        guard canSubmit else { return }
+        onSubmit()
     }
 }

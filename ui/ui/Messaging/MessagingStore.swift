@@ -49,7 +49,8 @@ final class MessagingStore: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         inboundObserver = DerrickDarwinNotifyObserver(
-            darwinName: DerrickMessagingInboundSignal.darwinName
+            darwinName: DerrickMessagingInboundSignal.darwinName,
+            localName: DerrickMessagingInboundSignal.localNotificationName
         ) { [weak self] in
             Task { @MainActor in
                 await self?.refreshFromDaemonInbound()
@@ -310,13 +311,27 @@ final class MessagingStore: ObservableObject {
         )
     }
 
-    func sendMessage(_ text: String, parentVendorMessageID: String? = nil) async {
+    /// Paint an outbound bubble immediately (call from the submit tap, before `Task`).
+    @discardableResult
+    func beginOptimisticSend(text: String, parentVendorMessageID: String?) -> String? {
+        MessagingOptimisticSendService.begin(
+            on: session,
+            body: text,
+            parentVendorMessageID: parentVendorMessageID
+        )
+    }
+
+    func sendMessage(
+        _ text: String,
+        parentVendorMessageID: String? = nil,
+        optimisticID: String? = nil
+    ) async {
         guard let repository,
               let pluginID = selectedPluginID,
               let thread = selectedThread else {
             return
         }
-        let optimisticID = MessagingOptimisticSendService.begin(
+        let pendingID = optimisticID ?? MessagingOptimisticSendService.begin(
             on: session,
             body: text,
             parentVendorMessageID: parentVendorMessageID
@@ -335,8 +350,8 @@ final class MessagingStore: ObservableObject {
             )
             session.setLastError(nil)
         } catch {
-            if let optimisticID {
-                MessagingOptimisticSendService.cancel(on: session, id: optimisticID)
+            if let pendingID {
+                MessagingOptimisticSendService.cancel(on: session, id: pendingID)
             }
             let detail = error.localizedDescription
             session.setLastError(detail)

@@ -88,21 +88,48 @@ public struct HostUIText: View {
 public struct HostUITextField: View {
     @Binding private var text: String
     private let placeholder: String
+    private let axis: Axis?
 
-    public init(_ placeholder: String, text: Binding<String>) {
+    public init(_ placeholder: String, text: Binding<String>, axis: Axis? = nil) {
         self.placeholder = placeholder
         self._text = text
+        self.axis = axis
+    }
+
+    /// Labeled form-style field used by composers and factory forms.
+    public init(
+        placeholder: String,
+        text: Binding<String>,
+        axis: Axis? = nil
+    ) {
+        self.placeholder = placeholder
+        self._text = text
+        self.axis = axis
     }
 
     public var body: some View {
-        TextField(placeholder, text: $text)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-            )
+        Group {
+            if let axis {
+                TextField(placeholder, text: $text, axis: axis)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+            } else {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+            }
+        }
     }
 }
 
