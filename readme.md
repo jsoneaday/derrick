@@ -1,6 +1,6 @@
 # Derrick
 
-A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isolated sandboxed agent actions in Docker, build connector plugins, schedule background jobs, and manage messaging connectors — with human-in-the-loop approvals and a security-first execution model.
+A native Swift macOS desktop agent: chat, just-in-time software (plugins), messaging connectors, scheduled jobs, and human-in-the-loop approvals. Agent work runs in a headless daemon; untrusted code runs in Docker.
 
 **License:** [Apache 2.0](LICENSE)
 
@@ -8,26 +8,26 @@ A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isol
 
 | Area | Description |
 |------|-------------|
-| **Chat** | Multi-tab conversations with OpenAI, Gemini, and other configured models |
-| **Tools (MCP)** | Model Context Protocol tool host inside the headless daemon |
-| **Scripts** | Agent-generated Go executed in isolated Docker containers. Includes a secondary agent code reviewer and approvals flow. |
-| **Plugin factory** | LLM-assisted creation of versioned, reviewed connector plugins |
-| **Jobs** | Scheduled and deferred tool/agent runs that survive app quit |
-| **Messaging** | Connector plugins (e.g. Slack) with threads, history, and live sync |
-| **Policy & HITL** | Approvals for tools, network access, usage limits, and credentials |
+| **Chat** | Multi-tab conversations with OpenAI, Gemini, and other configured models. Talk to a named agent profile with `$shortName` when you want that profile; a mention of the name is not enough. |
+| **Just-in-time software** | Describe the software you need. Derrick builds, reviews, and installs a versioned plugin for that moment — a connector, a skill, or a one-shot tool — instead of shipping a catalog of pre-written apps. |
+| **Messaging** | Installed connectors (Slack today) open as Chat tabs. The host renders the plugin's `ui.present` tree (default `messaging_inbox` or a custom HostUI layout). Connectors without a screen are rejected. |
+| **Jobs** | Scheduled and deferred runs that continue after you quit the app. |
+| **Tools (MCP)** | Model Context Protocol tools hosted in the daemon for chat turns. |
+| **Scripts** | Agent-written Go, compiled and run in isolated Docker containers, with a reviewer and approvals. |
+| **Policy & HITL** | Approvals for tools, network access, usage limits, and connector credentials. |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Derrick.app (UI) — SwiftUI client only                     │
-│  Chat · Messaging · Plugins · Settings · Approval modals      │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ Mach XPC (signed messages)
-┌───────────────────────────▼─────────────────────────────────┐
-│  derrickd (JobKeepAlive Login Item)                         │
-│  Agent turns · Job scheduler · MCP tool host · Notifications│
-└───────────────┬─────────────────────────┬───────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  Derrick.app (UI) — SwiftUI client only                           │
+│  Chat · Messaging · Just-in-time software · Settings · Approvals  │
+└────────────────────────────────┬──────────────────────────────────┘
+                                 │ Mach XPC (signed messages)
+┌────────────────────────────────▼──────────────────────────────────┐
+│  derrickd (JobKeepAlive Login Item)                               │
+│  Agent turns · Job scheduler · MCP tool host · Notifications      │
+└───────────────┬─────────────────────────────────┬─────────────────┘
                 │ in-process              │ XPC
         ┌───────▼────────┐        ┌───────▼──────────────────┐
         │ SQLite (WAL)   │        │ DockerRunnerHelper XPC │
@@ -42,7 +42,8 @@ A native Swift macOS 27 desktop agent harness: chat with LLM providers, run isol
 
 - **UI** is a client: it does not own agent turns or MCP when the daemon is up.
 - **Daemon** (`derrickd`) is the single owner of OS notifications and in-process Agent/Job/MCP modules.
-- **Docker** runs untrusted Go for `script_exec`, plugin factory builds, and approved plugin invocations.
+- **Docker** runs untrusted Go for `script_exec`, just-in-time plugin builds, and approved plugin invocations.
+- **HostUI** (`packages/HostUI`) paints plugin screens from a declared schema. The host does not invent a default inbox.
 
 See [docs/adr-headless-backend.md](docs/adr-headless-backend.md) and [docs/services-plan.md](docs/services-plan.md).
 
@@ -102,7 +103,7 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 
 ### Messaging
 
-Connector plugins declare `role: connector` in the manifest. Messages are persisted in SQLite; connector plugins sync and send through the guest runtime. See [docs/messaging-design.md](docs/messaging-design.md).
+Connectors are just-in-time software with `role: connector`. They must emit a HostUI tree (`ui.present`) — copy `messaging_inbox` or compose their own. Messages live in SQLite; sync and send still go through the guest. See [docs/messaging-design.md](docs/messaging-design.md).
 
 ## Repository layout
 
@@ -112,7 +113,8 @@ Connector plugins declare `role: connector` in the manifest. Messages are persis
 | `packages/DBRepository` | SQLite schema, migrations, messaging tables |
 | `packages/MCPServer` | MCP bridge, script execution, plugin runtime |
 | `packages/Structure` | Architecture map: wire types, protocols, JSON schemas (`AppLayerServices/`, `Policy/`, `Plugin/`, `Contract/`, …) |
-| `packages/Plugin` | Plugin factory runtime and bundled skill/reviewer resources |
+| `packages/HostUI` | Schema-driven screens for connectors and plugin present trees |
+| `packages/Plugin` | Just-in-time software factory (builder, reviewer, release) |
 | `packages/DerrickBackend` | Daemon runtime, notifications, HITL polling |
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
 | `packages/PolicyRuntime` | Store-backed policy evaluators (`Structure/Policy/PolicyRuntime`) |
