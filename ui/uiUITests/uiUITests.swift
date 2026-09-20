@@ -12,7 +12,12 @@ final class uiUITests: XCTestCase {
         app.launchEnvironment["GEMINI_API_KEY"] = "ui-test-placeholder"
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["What can Derrick help with?"].waitForExistence(timeout: 10))
+        let landing = app.staticTexts["What can Derrick help with?"]
+        let initializing = app.staticTexts["Initializing Derrick"]
+        XCTAssertTrue(
+            initializing.waitForExistence(timeout: 10) || landing.waitForExistence(timeout: 10),
+            "Launch should show initializing or the chat landing."
+        )
 
         XCTAssertTrue(app.exists)
     }

@@ -13,6 +13,7 @@ UNIT_TEST_PACKAGES=(
   DockerRunnerXPC
   EgressProxy
   FileExtractor
+  HostUI
   Lib
   LLMAgentClient
   MCPClient
