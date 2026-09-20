@@ -135,21 +135,7 @@ public struct HostUIMessage: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                HostUIMarkdownText(row.body)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: 420, alignment: row.outbound ? .trailing : .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(row.outbound ? outboundFill : Color.white)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                navy.opacity(row.outbound ? 0.28 : 0.14),
-                                lineWidth: 1
-                            )
-                    )
+                messageBody
                 if row.showsReplyAction, let onOpenThread {
                     Button(action: onOpenThread) {
                         HStack(alignment: .top, spacing: 8) {
@@ -159,7 +145,7 @@ public struct HostUIMessage: View {
                                 Text(replyTitle)
                                     .font(.caption.weight(.semibold))
                                 if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
-                                    HostUIMarkdownText(preview, font: .caption2)
+                                    HostUIMarkdownText(preview, fontSize: 11)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
@@ -175,12 +161,36 @@ public struct HostUIMessage: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
             if !row.outbound { Spacer(minLength: 80) }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var messageBody: some View {
+        HostUIMarkdownText(row.body, fontSize: 13)
+            .frame(maxWidth: 420, alignment: row.outbound ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(row.outbound ? outboundFill : Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        navy.opacity(row.outbound ? 0.28 : 0.14),
+                        lineWidth: 1
+                    )
+            )
+            .frame(
+                maxWidth: .infinity,
+                alignment: row.outbound ? .trailing : .leading
+            )
     }
 
     private var replyTitle: String {
@@ -276,13 +286,16 @@ public struct HostUIComposer: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HostUITextField(
-                placeholder: placeholder,
-                text: $text,
-                axis: .vertical
-            )
-            .onSubmit(submitIfAllowed)
+        VStack(alignment: .leading, spacing: 0) {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(1...6)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+                .onSubmit(submitIfAllowed)
+
+            Divider()
 
             HStack {
                 Spacer(minLength: 0)
@@ -293,7 +306,11 @@ public struct HostUIComposer: View {
                     action: submitIfAllowed
                 )
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
         }
+        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
