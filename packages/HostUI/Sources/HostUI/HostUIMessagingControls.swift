@@ -254,6 +254,7 @@ public struct HostUIMessageList: View {
 public struct HostUIComposer: View {
     @Binding private var text: String
     private let placeholder: String
+    private let sendTitle: String
     private let isSending: Bool
     private let canSend: Bool
     private let onSubmit: () -> Void
@@ -261,39 +262,50 @@ public struct HostUIComposer: View {
     public init(
         text: Binding<String>,
         placeholder: String = "Message",
+        sendTitle: String = "Send",
         isSending: Bool = false,
         canSend: Bool = true,
         onSubmit: @escaping () -> Void
     ) {
         self._text = text
         self.placeholder = placeholder
+        self.sendTitle = sendTitle
         self.isSending = isSending
         self.canSend = canSend
         self.onSubmit = onSubmit
     }
 
     public var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(1...6)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                )
-                .onSubmit(onSubmit)
+        VStack(alignment: .leading, spacing: 10) {
+            HostUITextField(
+                placeholder: placeholder,
+                text: $text,
+                axis: .vertical
+            )
+            .onSubmit(submitIfAllowed)
 
-            Button(action: onSubmit) {
-                Image(systemName: isSending ? "hourglass" : "paperplane.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 36, height: 36)
+            HStack {
+                Spacer(minLength: 0)
+                HostUIButton(
+                    isSending ? "Sending…" : sendTitle,
+                    systemImage: "paperplane.fill",
+                    disabled: !canSubmit,
+                    action: submitIfAllowed
+                )
             }
-            .buttonStyle(.borderless)
-            .disabled(!canSend || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var canSubmit: Bool {
+        canSend
+            && !isSending
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitIfAllowed() {
+        guard canSubmit else { return }
+        onSubmit()
     }
 }
