@@ -28,6 +28,33 @@ public struct MessagingAgentRoute: Sendable, Hashable {
     }
 }
 
+/// In-flight connector agent turn, shown in Derrick until a reply is posted.
+public struct MessagingAgentWorkInFlight: Codable, Sendable, Hashable {
+    public let pluginID: String
+    public let threadID: String
+    public let parentVendorMessageID: String
+    public let profileHandle: String
+    public let displayName: String
+
+    public init(
+        pluginID: String,
+        threadID: String,
+        parentVendorMessageID: String,
+        profileHandle: String,
+        displayName: String
+    ) {
+        self.pluginID = pluginID
+        self.threadID = threadID
+        self.parentVendorMessageID = parentVendorMessageID
+        self.profileHandle = profileHandle
+        self.displayName = displayName
+    }
+
+    public var statusLabel: String {
+        "\(displayName) is working"
+    }
+}
+
 /// Lightweight profile row for inbound help text and routing.
 public struct AgentProfileCatalogEntry: Sendable, Hashable {
     public let handle: String
@@ -51,13 +78,14 @@ public enum AgentProfileHelpFormatter: Sendable {
         The user mentioned Derrick without a specific request. Briefly list the available agent profiles:
         \(profileList)
 
-        Explain they can start a message with $handle (for example $orchestrator or $researcher). \
-        Mention that this channel can have its own default profile in Derrick. Offer to help.
+        Explain they can talk to a profile by putting $ and the short name at the start \
+        (for example $orchestrator or $researcher). Mentioning a short name later in a sentence \
+        does not switch profiles. Mention that this channel can have its own default profile in Derrick. Offer to help.
         """
     }
 }
 
-/// Parses connector message bodies for bot mentions and `$handle` profile tokens.
+/// Parses connector message bodies for bot mentions and talk-to `$shortName` tokens.
 public enum ConnectorMentionParser: Sendable {
     public static let botReplyPrefix = "[\(DerrickAppSupport.hostAppProductName)]"
 
@@ -145,7 +173,7 @@ public enum ConnectorMentionParser: Sendable {
         return (handle, prompt)
     }
 
-    /// `$handle` token anywhere in the body, or `[Derrick:handle]` on an automated reply.
+    /// Talk-to `$shortName`, or `[Derrick:handle]` on an automated reply.
     public static func profileHandle(inMessageBody body: String) -> String? {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         if let handle = AgentProfileTokenParser.parse(message: trimmed).handle {
@@ -161,7 +189,7 @@ public enum ConnectorMentionParser: Sendable {
         return AgentProfileHandle.normalize(String(trimmed[prefix.endIndex..<close]))
     }
 
-    /// Newest prior `$handle` or `[Derrick:handle]` in a Slack thread.
+    /// Newest prior talk-to `$shortName` or `[Derrick:handle]` in a thread.
     public static func continuationProfileHandle(
         in messages: [MessagingMessageDTO],
         excludingVendorMessageID: String?

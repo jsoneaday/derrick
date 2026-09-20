@@ -9,35 +9,62 @@ enum MessagingAgentTurnClient {
         let repository = try await JobServiceStore.shared.sharedRepository()
         try await ensureBuiltins(repository: repository)
         let profile = try await resolveProfile(handle: route.profileHandle, repository: repository)
-        let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON))
-            ?? .defaultHelperModel
-        let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: model) ?? ""
-        let profileContextJSON = try JSONEncoder().encode(AgentProfileTurnContext(profile: profile))
-        let sessionID = MessagingAgentSessionID.make(
+        let parentVendorMessageID = route.parentVendorMessageID
+            ?? route.inboundVendorMessageID
+        let work = MessagingAgentWorkInFlight(
             pluginID: route.pluginID,
             threadID: route.threadID,
-            profileHandle: profile.handle
+            parentVendorMessageID: parentVendorMessageID,
+            profileHandle: profile.handle,
+            displayName: profile.displayName
         )
-        let request = AgentTurnRequest(
-            turnID: UUID().uuidString,
-            sessionID: sessionID,
-            prompt: route.prompt,
-            apiKey: apiKey,
-            modelJSON: profile.modelJSON,
-            thinkingJSON: profile.thinkingJSON,
-            profileContextJSON: profileContextJSON
+        try await repository.upsertMessagingAgentWork(work)
+        DerrickMessagingInboundSignal.postRefresh()
+        do {
+            let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON))
+                ?? .defaultHelperModel
+            let apiKey = await LLMProviderCredentialGate.resolveAPIKey(for: model) ?? ""
+            let profileContextJSON = try JSONEncoder().encode(AgentProfileTurnContext(profile: profile))
+            let sessionID = MessagingAgentSessionID.make(
+                pluginID: route.pluginID,
+                threadID: route.threadID,
+                profileHandle: profile.handle
+            )
+            let request = AgentTurnRequest(
+                turnID: UUID().uuidString,
+                sessionID: sessionID,
+                prompt: route.prompt,
+                apiKey: apiKey,
+                modelJSON: profile.modelJSON,
+                thinkingJSON: profile.thinkingJSON,
+                profileContextJSON: profileContextJSON
+            )
+            let response = try await AgentServiceTurnHost.shared.runCollectedTurn(request: request)
+            let outbound = MessagingAgentOutboundFormatter.formatReply(response, profileHandle: profile.handle)
+            try await sendConnectorMessage(
+                route: route,
+                text: outbound,
+                repository: repository
+            )
+            fputs(
+                "[MessagingAgentTurnClient] relayed pluginID=\(route.pluginID) profile=\(profile.handle) chars=\(outbound.count)\n",
+                stderr
+            )
+        } catch {
+            try? await repository.clearMessagingAgentWork(
+                pluginID: work.pluginID,
+                threadID: work.threadID,
+                parentVendorMessageID: work.parentVendorMessageID
+            )
+            DerrickMessagingInboundSignal.postRefresh()
+            throw error
+        }
+        try await repository.clearMessagingAgentWork(
+            pluginID: work.pluginID,
+            threadID: work.threadID,
+            parentVendorMessageID: work.parentVendorMessageID
         )
-        let response = try await AgentServiceTurnHost.shared.runCollectedTurn(request: request)
-        let outbound = MessagingAgentOutboundFormatter.formatReply(response, profileHandle: profile.handle)
-        try await sendConnectorMessage(
-            route: route,
-            text: outbound,
-            repository: repository
-        )
-        fputs(
-            "[MessagingAgentTurnClient] relayed pluginID=\(route.pluginID) profile=\(profile.handle) chars=\(outbound.count)\n",
-            stderr
-        )
+        DerrickMessagingInboundSignal.postRefresh()
     }
 
     private static func ensureBuiltins(repository: DBRepository) async throws {

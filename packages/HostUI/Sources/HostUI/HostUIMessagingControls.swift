@@ -93,6 +93,8 @@ public struct HostUIMessageRow: Identifiable, Hashable, Sendable {
     public var replyCount: Int
     public var replyPreview: String?
     public var showsReplyAction: Bool
+    /// Shown only while an agent turn for this parent has started.
+    public var agentWorkStatus: String?
 
     public init(
         id: String,
@@ -101,7 +103,8 @@ public struct HostUIMessageRow: Identifiable, Hashable, Sendable {
         outbound: Bool,
         replyCount: Int = 0,
         replyPreview: String? = nil,
-        showsReplyAction: Bool = false
+        showsReplyAction: Bool = false,
+        agentWorkStatus: String? = nil
     ) {
         self.id = id
         self.sender = sender
@@ -110,6 +113,7 @@ public struct HostUIMessageRow: Identifiable, Hashable, Sendable {
         self.replyCount = replyCount
         self.replyPreview = replyPreview
         self.showsReplyAction = showsReplyAction
+        self.agentWorkStatus = agentWorkStatus
     }
 }
 
@@ -132,6 +136,9 @@ public struct HostUIMessage: View {
                         .foregroundStyle(.secondary)
                 }
                 HostUIMessageBubble(bodyMarkdown: row.body)
+                if let work = row.agentWorkStatus, !work.isEmpty {
+                    HostUIAgentWorkIndicator(status: work)
+                }
                 if row.showsReplyAction, let onOpenThread {
                     replyAffordance(onOpenThread)
                 }

@@ -28,6 +28,7 @@ final class MessagingSessionStore: ObservableObject {
     @Published private(set) var visibleMessages: [MessagingMessageDTO] = []
     @Published private(set) var visibleReplyMessages: [MessagingMessageDTO] = []
     @Published private(set) var lastReplyPreviewByParentID: [String: String] = [:]
+    @Published private(set) var agentWorkInFlight: [MessagingAgentWorkInFlight] = []
     @Published var replyThreadWarning: String?
     @Published var scrollToBottomToken = 0
     @Published var scrollAnchorID: String?
@@ -52,6 +53,11 @@ final class MessagingSessionStore: ObservableObject {
 
     var isViewingReplyThread: Bool {
         selectedReplyParentVendorMessageID != nil
+    }
+
+    func agentWorkStatus(forParent parentID: String?) -> String? {
+        guard let parentID, !parentID.isEmpty else { return nil }
+        return agentWorkInFlight.first { $0.parentVendorMessageID == parentID }?.statusLabel
     }
 
     /// Reply pane label. Never the Slack channel (`selectedThread.title`).
@@ -99,6 +105,7 @@ final class MessagingSessionStore: ObservableObject {
             threads = []
             visibleMessages = []
             visibleReplyMessages = []
+            agentWorkInFlight = []
             replyThreadWarning = nil
             lastError = nil
         }
@@ -219,6 +226,7 @@ final class MessagingSessionStore: ObservableObject {
         threads = []
         visibleMessages = []
         visibleReplyMessages = []
+        agentWorkInFlight = []
     }
 
     func setReplyThreadWarning(_ message: String?) {
@@ -362,6 +370,7 @@ final class MessagingSessionStore: ObservableObject {
         guard let repository, let threadID = selectedThreadID else {
             visibleMessages = []
             lastReplyPreviewByParentID = [:]
+            agentWorkInFlight = []
             hasOlder = false
             return
         }
@@ -389,6 +398,7 @@ final class MessagingSessionStore: ObservableObject {
                 threadID: threadID,
                 parentVendorMessageIDs: parentIDs
             )
+            agentWorkInFlight = try await repository.listMessagingAgentWork(threadID: threadID)
         } catch {
             setLastError(error.localizedDescription)
         }
@@ -428,6 +438,7 @@ final class MessagingSessionStore: ObservableObject {
                 }
             }
             refreshReplyThreadAccessWarning()
+            agentWorkInFlight = (try? await repository.listMessagingAgentWork(threadID: threadID)) ?? agentWorkInFlight
             isNearBottom = true
             showJumpToLatest = false
             showNewMessagesPill = false

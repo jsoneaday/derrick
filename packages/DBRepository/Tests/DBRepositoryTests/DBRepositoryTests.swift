@@ -98,6 +98,7 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertFalse(try tableExists(named: "news_readers", at: url))
         XCTAssertTrue(try tableExists(named: "agent_profiles", at: url))
         XCTAssertTrue(try tableExists(named: "messaging_agent_handled", at: url))
+        XCTAssertTrue(try tableExists(named: "messaging_agent_work", at: url))
         let loaded = try await repository.pluginFactoryRelease(pluginID: "keep-me", version: "1.0.0")
         XCTAssertEqual(loaded?.pluginID, "keep-me")
         XCTAssertEqual(loaded?.contentHash, release.contentHash)

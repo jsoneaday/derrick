@@ -2,7 +2,8 @@ import DBRepository
 import Foundation
 import Structure
 
-/// Routes newly persisted inbound connector messages to agent profiles when the bot is mentioned.
+/// Routes inbound connector messages to agent profiles when the bot is @mentioned
+/// or a talk-to `$shortName` addresses a profile.
 public enum MessagingAgentIngressRouter: Sendable {
     public static func processInbound(
         _ rows: [MessagingPersistResult],

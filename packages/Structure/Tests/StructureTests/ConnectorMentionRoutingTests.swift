@@ -55,7 +55,36 @@ import Testing
             botUserID: "U123"
         )
         #expect(routed?.profileHandle == AgentProfileHandle.orchestrator)
-        #expect(routed?.prompt == "hi how are you?")
+        #expect(routed?.prompt == "how are you?")
+    }
+
+    @Test func resolvePromptIgnoresMidClauseProfileMentionWithoutBotMention() {
+        let ignored = ConnectorMentionParser.resolvePrompt(
+            body: "it doesn't work? but $orchestrator told me it does work",
+            botUserID: "U123"
+        )
+        #expect(ignored == nil)
+    }
+
+    @Test func resolvePromptKeepsChannelDefaultWhenProfileIsOnlyMentioned() {
+        let resolved = ConnectorMentionParser.resolvePrompt(
+            body: "<@U123> it doesn't work? but $orchestrator told me it does work",
+            botUserID: "U123",
+            channelDefaultProfileHandle: "researcher"
+        )
+        #expect(resolved?.profileHandle == AgentProfileHandle.researcher)
+        #expect(resolved?.prompt == "it doesn't work? but $orchestrator told me it does work")
+    }
+
+    @Test func agentWorkStatusLabelUsesDisplayName() {
+        let work = MessagingAgentWorkInFlight(
+            pluginID: "slack-connection",
+            threadID: "t1",
+            parentVendorMessageID: "171.1",
+            profileHandle: AgentProfileHandle.orchestrator,
+            displayName: "Orchestrator"
+        )
+        #expect(work.statusLabel == "Orchestrator is working")
     }
 
     @Test func resolvePromptIgnoresPlainInboundWithoutMentionOrHandle() {
