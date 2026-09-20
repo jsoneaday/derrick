@@ -102,10 +102,15 @@ final class MessagingStore: ObservableObject {
     var showNewMessagesPill: Bool { session.showNewMessagesPill }
     var lastError: String? { session.lastError ?? catalog.lastError }
     var hostUIRoot: HostUINode {
-        let base = recordedHostUIRoot
-            ?? (try? HostUILibraryStore.messagingInbox())
-            ?? HostUINode(element: "screen")
-        return HostUILibraryStore.withDefaultMessagingServices(base)
+        if let recordedHostUIRoot {
+            return recordedHostUIRoot
+        }
+        // Template only until the plugin presents a tree. A recorded present is never replaced.
+        return (try? HostUILibraryStore.messagingInbox())
+            ?? HostUINode(
+                element: "screen",
+                config: ["holds": .string("arbitrary")]
+            )
     }
     var selectedConnector: MessagingConnectorDTO? {
         guard let selectedPluginID else { return nil }
