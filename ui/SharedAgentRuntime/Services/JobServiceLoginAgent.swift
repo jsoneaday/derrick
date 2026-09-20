@@ -71,13 +71,13 @@ public enum JobServiceLoginAgent {
         return (plist, exe)
     }
 
-    /// Register / refresh daemon. Call from the main actor after services are healthy.
+    /// Register / refresh daemon. Must not run on the main actor: `launchctl` and
+    /// SMAppService register wait synchronously and freeze the first window.
     ///
     /// The session LaunchAgent (`derrick.ui.Daemon.session`) is the start path.
     /// SMAppService Login Items is not: the Settings switch stays on while launchd
     /// points at a previous DerivedData bundle, and `unregister()` forces a new
     /// approval with no in-app prompt.
-    @MainActor
     @discardableResult
     public static func ensureRegistered() async throws -> Result {
         let paths = preflightPaths()
@@ -427,7 +427,6 @@ public enum JobServiceLoginAgent {
 
     // MARK: - SMAppService
 
-    @MainActor
     private static func registerViaSMAppService() throws -> Result? {
         let status = smAgent.status
         switch status {

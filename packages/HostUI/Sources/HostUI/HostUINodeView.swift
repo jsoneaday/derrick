@@ -12,45 +12,13 @@ public struct HostUINodeView: View {
     }
 
     public var body: some View {
-        let root = node.element == HostUIElementID.screen.rawValue ? node : HostUINode(
-            element: HostUIElementID.screen.rawValue,
-            children: [node]
-        )
-        messagingScreen(root)
-    }
-
-    @ViewBuilder
-    private func messagingScreen(_ root: HostUINode) -> some View {
-        let kids = root.children ?? []
-        let tabs = kids.filter { $0.element == HostUIElementID.tabStrip.rawValue }
-        let sidebars = kids.filter { $0.element == HostUIElementID.sidebar.rawValue }
-        let main = kids.filter {
-            $0.element != HostUIElementID.tabStrip.rawValue
-                && $0.element != HostUIElementID.sidebar.rawValue
-                && HostUIElementID(rawValue: $0.element)?.isService != true
-        }
-
+        let root = HostUIScreenLayout.normalized(node)
         ZStack(alignment: .top) {
             HostUIScreen {
-                VStack(spacing: 0) {
-                    if !tabs.isEmpty, !bindings.tabs.isEmpty {
-                        HostUITabStrip(
-                            tabs: bindings.tabs,
-                            selectedID: bindings.selectedTabID,
-                            onSelect: bindings.onSelectTab
-                        )
-                    }
-                    HStack(spacing: 0) {
-                        mainColumn(main)
-                        if shouldShowSidebar(sidebars) {
-                            Divider()
-                            ForEach(Array(sidebars.enumerated()), id: \.offset) { _, sidebar in
-                                HostUISidebar {
-                                    sidebarColumn(sidebar)
-                                }
-                            }
-                        }
-                    }
+                if HostUIScreenLayout.isMessageExchange(root) {
+                    messageExchangeChrome(root)
+                } else {
+                    genericStack(root)
                 }
             }
             if bindings.hasService(.inboundBanners),
@@ -60,6 +28,68 @@ public struct HostUINodeView: View {
                     .padding(.top, 10)
             }
         }
+    }
+
+    @ViewBuilder
+    private func messageExchangeChrome(_ root: HostUINode) -> some View {
+        let tabs = HostUIScreenLayout.tabStripNodes(in: root)
+        let sidebars = replySidebars(in: root)
+        let main = HostUIScreenLayout.mainNodes(in: root)
+
+        VStack(spacing: 0) {
+            if !tabs.isEmpty, !bindings.tabs.isEmpty {
+                HostUITabStrip(
+                    tabs: bindings.tabs,
+                    selectedID: bindings.selectedTabID,
+                    onSelect: bindings.onSelectTab
+                )
+            }
+            HStack(spacing: 0) {
+                mainColumn(main)
+                if shouldShowSidebar(sidebars) {
+                    Divider()
+                    ForEach(Array(sidebars.enumerated()), id: \.offset) { _, sidebar in
+                        HostUISidebar {
+                            sidebarColumn(sidebar)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func genericStack(_ root: HostUINode) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(HostUIScreenLayout.visibleChildren(of: root).enumerated()), id: \.offset) { _, child in
+                if child.element == HostUIElementID.sidebar.rawValue {
+                    if shouldShowSidebar([child]) {
+                        HostUISidebar {
+                            sidebarColumn(child)
+                        }
+                    }
+                } else {
+                    nodeContent(child, isThread: false)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Sidebar nodes, or a host reply pane when `reply_pane` is declared without a sidebar child.
+    private func replySidebars(in root: HostUINode) -> [HostUINode] {
+        let declared = HostUIScreenLayout.sidebarNodes(in: root)
+        if !declared.isEmpty { return declared }
+        guard bindings.hasService(.replyPane) else { return [] }
+        return [
+            HostUINode(
+                element: HostUIElementID.sidebar.rawValue,
+                config: [
+                    "holds": .string("messages"),
+                    "visible_when": .string("reply_thread"),
+                ]
+            ),
+        ]
     }
 
     private func shouldShowSidebar(_ sidebars: [HostUINode]) -> Bool {
@@ -130,6 +160,25 @@ public struct HostUINodeView: View {
             messageList(bind: node.bind, isThread: isThread)
         case .composer:
             composer(bind: node.bind, isThread: isThread)
+        case .tabStrip:
+            if !bindings.tabs.isEmpty {
+                HostUITabStrip(
+                    tabs: bindings.tabs,
+                    selectedID: bindings.selectedTabID,
+                    onSelect: bindings.onSelectTab
+                )
+            }
+        case .select:
+            HostUISelect(
+                options: node.bind == "conversations" ? bindings.tabs : [],
+                selectedID: bindings.selectedTabID,
+                placeholder: node.configString["placeholder"] ?? "Choose",
+                onSelect: bindings.onSelectTab
+            )
+            .padding()
+        case .table:
+            HostUITable(rows: tableRows(from: node))
+                .padding()
         case .text:
             HostUIText(node.configString["text"] ?? "")
                 .padding()
@@ -148,12 +197,11 @@ public struct HostUINodeView: View {
         case .section:
             HostUISection(title: node.configString["title"]) {
                 ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
-                    // AnyView breaks the recursive opaque-return cycle for nested sections.
                     AnyView(nodeContent(child, isThread: isThread))
                 }
             }
             .padding(.horizontal)
-        case .optimisticSend, .inboundBanners, .pollRefresh, .replyPane, .tabStrip, .sidebar, .screen, .select, .table, .message:
+        case .optimisticSend, .inboundBanners, .pollRefresh, .replyPane, .sidebar, .screen, .message:
             EmptyView()
         case .none:
             EmptyView()
@@ -224,6 +272,11 @@ public struct HostUINodeView: View {
             .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
         }
         .buttonStyle(.plain)
+    }
+
+    private func tableRows(from node: HostUINode) -> [String] {
+        guard let rows = node.config?["rows"]?.arrayValue else { return [] }
+        return rows.compactMap(\.stringValue)
     }
 }
 

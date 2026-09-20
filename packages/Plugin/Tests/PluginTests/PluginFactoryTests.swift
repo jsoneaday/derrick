@@ -799,11 +799,30 @@ private actor MultiHopRecordingFactoryExecutor: PluginFactoryExecutor {
         let event = try JSONDecoder().decode(PluginHopEvent.self, from: input)
         runCount += 1
         if event.kind == .httpResults {
+            let root = try HostUILibraryStore.messagingInbox()
+            let rootObject = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(root))
+            let envelopes: [[String: Any]] = [
+                ["verb": "ui.present", "root": rootObject],
+                [
+                    "verb": "result.emit",
+                    "threads": [["vendor_thread_id": "C1", "title": "general"]],
+                    "messages": [[
+                        "vendor_thread_id": "C1",
+                        "vendor_message_id": "1",
+                        "direction": "inbound",
+                        "sender": "a",
+                        "body": "hi",
+                        "created_at": "1",
+                    ]],
+                    "sent_message": [
+                        "vendor_message_id": "1.0",
+                        "created_at": "1710000001.0",
+                    ],
+                ],
+            ]
             return PluginFactoryExecutionResult(
                 exitCode: 0,
-                stdout: Data(
-                    #"[{"verb":"result.emit","threads":[{"vendor_thread_id":"C1","title":"general"}],"messages":[{"vendor_thread_id":"C1","vendor_message_id":"1","direction":"inbound","sender":"a","body":"hi","created_at":"1"}],"sent_message":{"vendor_message_id":"1.0","created_at":"1710000001.0"}}]"#.utf8
-                )
+                stdout: try JSONSerialization.data(withJSONObject: envelopes)
             )
         }
         let op = event.params?["messaging_op"]?.stringValue ?? ""

@@ -51,6 +51,11 @@ public enum PluginJSON: Codable, Sendable, Hashable {
         return nil
     }
 
+    public var arrayValue: [PluginJSON]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
     public var boolValue: Bool? {
         if case .bool(let value) = self { return value }
         return nil

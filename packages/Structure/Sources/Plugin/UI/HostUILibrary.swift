@@ -114,7 +114,7 @@ public enum HostUILibraryStore: Sendable {
         try example(named: messagingInboxExample)
     }
 
-    /// Invisible host services always applied for message_exchange screens.
+    /// Invisible host services guests may declare. The renderer never injects these.
     public static let defaultMessagingServiceIDs: [String] = [
         "optimistic_send",
         "inbound_banners",
@@ -122,25 +122,9 @@ public enum HostUILibraryStore: Sendable {
         "reply_pane",
     ]
 
-    /// Merges the default messaging service pack onto `message_exchange` trees when omitted.
+    /// Leaves the tree as presented. Services run only when the guest declared them.
     public static func withDefaultMessagingServices(_ root: HostUINode) -> HostUINode {
-        var node = root
-        let holds = node.configString["holds"]
-            ?? (node.element == "screen" ? "arbitrary" : "")
-        guard node.element == "screen", holds == "message_exchange" else {
-            return node
-        }
-        var children = node.children ?? []
-        let present = Set(children.map(\.element))
-        for serviceID in defaultMessagingServiceIDs where !present.contains(serviceID) {
-            let bind = serviceID == "reply_pane" ? "selected_thread" : "selected_conversation"
-            children.insert(
-                HostUINode(element: serviceID, id: "svc-\(serviceID)", bind: bind),
-                at: 0
-            )
-        }
-        node.children = children
-        return node
+        root
     }
 
     public static func serviceIDs(in root: HostUINode) -> Set<String> {

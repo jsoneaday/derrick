@@ -161,6 +161,72 @@ public struct HostUISidebar<Content: View>: View {
     }
 }
 
+public struct HostUISelect: View {
+    private let options: [HostUITabItem]
+    private let selectedID: String?
+    private let placeholder: String
+    private let onSelect: (String) -> Void
+
+    public init(
+        options: [HostUITabItem],
+        selectedID: String?,
+        placeholder: String = "Choose",
+        onSelect: @escaping (String) -> Void
+    ) {
+        self.options = options
+        self.selectedID = selectedID
+        self.placeholder = placeholder
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
+        Menu {
+            ForEach(options) { option in
+                Button(option.title) {
+                    onSelect(option.id)
+                }
+            }
+        } label: {
+            HStack {
+                Text(options.first { $0.id == selectedID }?.title ?? placeholder)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+public struct HostUITable: View {
+    private let rows: [String]
+
+    public init(rows: [String]) {
+        self.rows = rows
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if rows.isEmpty {
+                Text("No rows")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Text(row)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
 public struct HostUISection<Content: View>: View {
     private let title: String?
     private let content: Content

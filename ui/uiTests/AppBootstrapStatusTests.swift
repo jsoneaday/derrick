@@ -139,6 +139,15 @@ import Testing
     }
 
     @MainActor
+    @Test func beginLoadingSessionShowsModalImmediately() {
+        let status = freshStatus()
+        #expect(status.beginLoadingSession())
+        #expect(status.isModalPresented)
+        status.markReady()
+        #expect(!status.isModalPresented)
+    }
+
+    @MainActor
     @Test func beginAndReadyToggleModal() {
         let status = freshStatus()
         status.beginLoadingSession()

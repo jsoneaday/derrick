@@ -121,8 +121,8 @@ public enum HostUIDisclosure: Sendable {
         var lines: [String] = [
             "Host UI catalog (ids only). Ask for an element schema before using unfamiliar config keys.",
             "Emit ui.present trees using only these element ids. The Swift host renders controls and runs host services.",
-            "Prefer the messaging_inbox example as the default base for connectors; adapt from it. Do not reimplement send, poll, banners, or reply chrome in guest code.",
-            "Elements with role=service are invisible host capabilities (optimistic_send, inbound_banners, poll_refresh, reply_pane). For holds=message_exchange the host always applies that service pack.",
+            "Prefer the messaging_inbox example as the default present tree; adapt from it. The host never substitutes a screen. Do not reimplement send, poll, banners, or reply chrome in guest code.",
+            "Elements with role=service are invisible host capabilities (optimistic_send, inbound_banners, poll_refresh, reply_pane). They run only when the present tree includes them.",
         ]
         let controls = elements.keys.sorted().filter { id in
             (elements[id] as? [String: Any])?["role"] as? String != "service"

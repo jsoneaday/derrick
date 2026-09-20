@@ -176,6 +176,7 @@ public struct ConnectorProtocolRules: Codable, Sendable, Hashable {
     public var liveHTTPResultsAccumulate: Bool
     public var directTestPollRequiresNonEmptyMessages: Bool
     public var directTestThreadsRequiresNonEmpty: Bool
+    public var directTestRequiresUIPresent: Bool
     public var runtimeEmptyMessagesOKIfVendorOK: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -185,6 +186,7 @@ public struct ConnectorProtocolRules: Codable, Sendable, Hashable {
         case liveHTTPResultsAccumulate = "live_http_results_accumulate"
         case directTestPollRequiresNonEmptyMessages = "direct_test_poll_requires_non_empty_messages"
         case directTestThreadsRequiresNonEmpty = "direct_test_threads_requires_non_empty"
+        case directTestRequiresUIPresent = "direct_test_requires_ui_present"
         case runtimeEmptyMessagesOKIfVendorOK = "runtime_empty_messages_ok_if_vendor_ok"
     }
 
@@ -198,6 +200,8 @@ public struct ConnectorProtocolRules: Codable, Sendable, Hashable {
             try container.decodeIfPresent(Bool.self, forKey: .directTestPollRequiresNonEmptyMessages) ?? true
         directTestThreadsRequiresNonEmpty =
             try container.decodeIfPresent(Bool.self, forKey: .directTestThreadsRequiresNonEmpty) ?? true
+        directTestRequiresUIPresent =
+            try container.decodeIfPresent(Bool.self, forKey: .directTestRequiresUIPresent) ?? true
         runtimeEmptyMessagesOKIfVendorOK =
             try container.decodeIfPresent(Bool.self, forKey: .runtimeEmptyMessagesOKIfVendorOK) ?? true
     }
@@ -210,6 +214,7 @@ public struct ConnectorProtocolRules: Codable, Sendable, Hashable {
         try container.encode(liveHTTPResultsAccumulate, forKey: .liveHTTPResultsAccumulate)
         try container.encode(directTestPollRequiresNonEmptyMessages, forKey: .directTestPollRequiresNonEmptyMessages)
         try container.encode(directTestThreadsRequiresNonEmpty, forKey: .directTestThreadsRequiresNonEmpty)
+        try container.encode(directTestRequiresUIPresent, forKey: .directTestRequiresUIPresent)
         try container.encode(runtimeEmptyMessagesOKIfVendorOK, forKey: .runtimeEmptyMessagesOKIfVendorOK)
     }
 }

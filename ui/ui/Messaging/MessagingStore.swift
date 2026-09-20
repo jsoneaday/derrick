@@ -101,12 +101,8 @@ final class MessagingStore: ObservableObject {
     var showJumpToLatest: Bool { session.showJumpToLatest }
     var showNewMessagesPill: Bool { session.showNewMessagesPill }
     var lastError: String? { session.lastError ?? catalog.lastError }
-    var hostUIRoot: HostUINode {
-        let base = recordedHostUIRoot
-            ?? (try? HostUILibraryStore.messagingInbox())
-            ?? HostUINode(element: "screen")
-        return HostUILibraryStore.withDefaultMessagingServices(base)
-    }
+    /// Recorded `ui.present` tree. The host never substitutes `messaging_inbox`.
+    var hostUIRoot: HostUINode? { recordedHostUIRoot }
     var selectedConnector: MessagingConnectorDTO? {
         guard let selectedPluginID else { return nil }
         return connectors.first { $0.pluginID == selectedPluginID }
@@ -245,7 +241,7 @@ final class MessagingStore: ObservableObject {
         }
         await session.openConnector(
             pluginID: pluginID,
-            autoOpenMostRecent: autoOpenMostRecent || hostUIRoot.opensFirstConversation
+            autoOpenMostRecent: autoOpenMostRecent || (hostUIRoot?.opensFirstConversation == true)
         )
         guard session.selectedPluginID == pluginID else { return false }
         publishForegroundPresence()

@@ -176,6 +176,8 @@ import Testing
         let summary = try HostUIDisclosure.catalogSummary()
         #expect(summary.contains("tab_strip"))
         #expect(summary.contains("button"))
+        #expect(summary.contains("never substitutes"))
+        #expect(!summary.contains("always applies"))
         #expect(!summary.contains("\"examples\""))
         let schema = try HostUIDisclosure.elementSchema(id: "button")
         #expect(schema.contains("button"))

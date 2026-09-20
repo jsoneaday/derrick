@@ -23,8 +23,16 @@ struct MessagingConversationView: View {
                     emptyConnectors
                 case .vendorConnector:
                     if presentsInbox {
-                        if store.isConnectorSyncing, store.tabs.isEmpty {
-                            discoveringThreads
+                        if store.hostUIRoot == nil {
+                            MessagingAwaitingHostUI(
+                                connectorName: store.selectedConnectorDisplayName,
+                                isSyncing: store.isConnectorSyncing,
+                                lastError: store.lastError,
+                                onRefresh: {
+                                    guard let pluginID = store.selectedPluginID else { return }
+                                    Task { await store.refreshConnector(pluginID: pluginID) }
+                                }
+                            )
                         } else {
                             hostUIConversation
                         }
@@ -306,6 +314,44 @@ struct MessagingConversationView: View {
                 .frame(maxWidth: 420)
             if let error = store.lastError {
                 Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+        }
+    }
+}
+
+/// Shown until this connector records a `ui.present` tree.
+private struct MessagingAwaitingHostUI: View {
+    var connectorName: String
+    var isSyncing: Bool
+    var lastError: String?
+    var onRefresh: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(connectorName)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+            if isSyncing {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(isSyncing
+                 ? "Opening this connector…"
+                 : "This connector hasn't shown a screen yet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            if !isSyncing {
+                Button(action: onRefresh) {
+                    Label("Try again", systemImage: "arrow.clockwise")
+                }
+            }
+            if let lastError, !lastError.isEmpty {
+                Text(lastError)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)

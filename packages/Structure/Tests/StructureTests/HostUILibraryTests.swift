@@ -31,7 +31,7 @@ import Testing
         #expect(root.opensFirstConversation)
     }
 
-    @Test func defaultMessagingServicesMergeOntoSlimPresent() {
+    @Test func defaultMessagingServicesDoNotInjectUndeclaredServices() {
         let slim = HostUINode(
             element: "screen",
             config: [
@@ -44,8 +44,9 @@ import Testing
         )
         let merged = HostUILibraryStore.withDefaultMessagingServices(slim)
         for id in HostUILibraryStore.defaultMessagingServiceIDs {
-            #expect(merged.contains(element: id))
+            #expect(merged.contains(element: id) == false)
         }
+        #expect(merged.contains(element: "tab_strip"))
     }
 
     @Test func bundledLibraryListsServiceElements() throws {
