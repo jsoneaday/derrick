@@ -833,12 +833,14 @@ struct ContentView: View {
     /// Full UI client bootstrap (DB, Docker prewarm, Agent/MCP mesh). MainActor for `@State`.
     @MainActor
     private func performClientBootstrap() async {
-            guard bootstrapStatus.beginLoadingSession(deferModal: true) || bootstrapStatus.isInitializing else {
+            guard bootstrapStatus.beginLoadingSession() || bootstrapStatus.isInitializing else {
                 if bootstrapStatus.phase == .ready {
                     await syncClientSessionAfterBootstrap()
                 }
                 return
             }
+            // Let the init modal paint before launchctl / Docker / SQLite occupy the main actor.
+            await Task.yield()
 
             // Job wakes persist to DB; results and offline HITL arrive via derrickd notifications.
             HITLLiveApprovalHandlers.wireAgentServiceClient()
@@ -918,8 +920,10 @@ struct ContentView: View {
     @MainActor
     private func connectLaunchDaemon() async throws -> ServiceHealthReport {
         bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
-        try? await JobServiceLoginAgent.ensureRegistered()
-        JobServiceLoginAgent.ensureHelperProcessRunning()
+        try? await Task.detached(priority: .userInitiated) {
+            try await JobServiceLoginAgent.ensureRegistered()
+            JobServiceLoginAgent.ensureHelperProcessRunning()
+        }.value
         return try await AgentServiceClient.shared.ensureUpAndHealth(retries: 4, verifyHealth: false)
     }
 
