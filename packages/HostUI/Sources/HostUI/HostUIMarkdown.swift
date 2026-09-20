@@ -24,7 +24,7 @@ public struct HostUIMarkdownText: View {
     private let fontSize: CGFloat
     private let maxIdealWidth: CGFloat
 
-    public init(_ text: String, font: Font = .system(size: 13), maxIdealWidth: CGFloat = 420) {
+    public init(_ text: String, font: Font = .system(size: 13), maxIdealWidth: CGFloat = HostUIMessagingLayout.maxBubbleWidth) {
         self.text = text
         // HostUI bubbles size via AppKit measurement; keep a numeric size.
         self.fontSize = 13
@@ -32,7 +32,7 @@ public struct HostUIMarkdownText: View {
         _ = font
     }
 
-    public init(_ text: String, fontSize: CGFloat, maxIdealWidth: CGFloat = 420) {
+    public init(_ text: String, fontSize: CGFloat, maxIdealWidth: CGFloat = HostUIMessagingLayout.maxBubbleWidth) {
         self.text = text
         self.fontSize = fontSize
         self.maxIdealWidth = maxIdealWidth
@@ -73,8 +73,8 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = false
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.required, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.required, for: .horizontal)
         textView.linkTextAttributes = [
             .foregroundColor: NSColor.linkColor,
             .underlineStyle: 0,
@@ -95,16 +95,11 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
         context: Context
     ) -> CGSize? {
         apply(to: nsView)
-        let idealUncapped = max(nsView.idealWidth(), 1)
-        let width: CGFloat
-        if idealUncapped <= maxIdealWidth {
-            // Short copy: hug ideal width so bubbles stay compact.
-            width = idealUncapped
-        } else if let proposed = proposal.width, proposed.isFinite, proposed > 1 {
-            width = min(proposed, maxIdealWidth)
-        } else {
-            width = maxIdealWidth
-        }
+        let proposed = proposal.width.flatMap { $0.isFinite && $0 > 1 ? $0 : nil }
+        let width = HostUIMessagingLayout.cappedBubbleWidth(
+            ideal: nsView.idealWidth(),
+            containerWidth: proposed
+        )
         let height = nsView.height(forWidth: width)
         return CGSize(width: width, height: height)
     }
@@ -146,7 +141,7 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
     }
 }
 
-private final class HostUIMeasuringTextView: NSTextView {
+final class HostUIMeasuringTextView: NSTextView {
     func height(forWidth width: CGFloat) -> CGFloat {
         guard let container = textContainer, let layoutManager else {
             return ceil(font?.boundingRectForFont.height ?? 16)

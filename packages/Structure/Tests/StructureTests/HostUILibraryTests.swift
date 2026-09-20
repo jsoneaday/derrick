@@ -26,6 +26,8 @@ import Testing
         #expect(root.contains(element: "sidebar"))
         #expect(root.contains(element: "optimistic_send"))
         #expect(root.first(element: "sidebar")?.configString["holds"] == "messages")
+        #expect(root.first(element: "sidebar")?.contains(element: "message_list") == true)
+        #expect(root.first(element: "sidebar")?.contains(element: "composer") == true)
         #expect(root.opensFirstConversation)
     }
 

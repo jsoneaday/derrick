@@ -9,7 +9,7 @@
       }
     },
     "sidebar": {
-      "description": "A side pane next to a screen. Config holds=messages shows a reply or detail thread. Config visible_when=reply_thread hides it until a parent message is opened.",
+      "description": "A side pane next to a screen. Config holds=messages is a reply thread. The host always paints that pane (title, messages, composer) from selected_thread; guest children are optional. Config visible_when=reply_thread hides it until a parent message is opened.",
       "config": {
         "holds": ["messages", "arbitrary"],
         "visible_when": ["reply_thread", "always"]
@@ -24,7 +24,7 @@
       "binds": ["selected_conversation", "selected_thread"]
     },
     "message": {
-      "description": "One message bubble: sender and body. Used inside message_list. Do not invent vendor-specific bubbles."
+      "description": "One message bubble: sender and body. Used inside message_list. Inbound and outbound share this chrome; direction only places the bubble. Do not invent vendor-specific bubbles."
     },
     "composer": {
       "description": "Text input plus send. Bind selected_conversation to post in the open room, or selected_thread to reply to a parent message.",

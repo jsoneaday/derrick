@@ -286,6 +286,8 @@ import Testing
         await session.openReplyThread(parentVendorMessageID: "171.1")
         #expect(session.isViewingReplyThread)
         #expect(session.tabs.map(\.title) == ["#general"])
+        #expect(session.replyThreadTitle == "a2")
+        #expect(session.replyThreadTitle != general.title)
         #expect(session.visibleMessages.map(\.body) == ["a2"])
         #expect(session.visibleReplyMessages.map(\.body) == ["a2"])
         #expect(session.replyThreadWarning == ConnectorReplyThreadAccessMessage.repliesDidNotLoad)
@@ -334,6 +336,7 @@ import Testing
         #expect(session.lastReplyPreviewByParentID["171.1"] == "hi this is a thread")
         await session.openReplyThread(parentVendorMessageID: "171.1")
         #expect(session.visibleReplyMessages.map(\.body) == ["a2", "hi this is a thread"])
+        #expect(session.replyThreadTitle == "a2")
         #expect(session.replyThreadWarning == nil)
     }
 

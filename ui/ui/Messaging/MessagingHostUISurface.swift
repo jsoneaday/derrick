@@ -41,7 +41,7 @@ struct MessagingHostUISurface: View {
             canSendChannel: store.canSendInSelectedThread,
             canSendThread: store.canSendInSelectedThread,
             isViewingReplyThread: store.isViewingReplyThread,
-            replyThreadTitle: store.selectedThread?.title ?? "Thread",
+            replyThreadTitle: store.replyThreadTitle,
             replyThreadWarning: store.replyThreadWarning,
             inboundBanner: store.inboundBanner,
             onSelectTab: { id in
@@ -116,20 +116,10 @@ struct MessagingHostUISurface: View {
             outbound: message.direction == .outbound,
             replyCount: message.replyCount,
             replyPreview: message.vendorMessageID.flatMap { id in
-                store.lastReplyPreviewByParentID[id].map(Self.collapsedChannelPreview)
+                store.lastReplyPreviewByParentID[id].map(HostUIMessagingLayout.collapsedReplyPreview)
             },
             showsReplyAction: showsReply && message.vendorMessageID != nil
         )
-    }
-
-    private static func collapsedChannelPreview(_ raw: String) -> String {
-        let oneLine = raw
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if oneLine.count <= 96 { return oneLine }
-        let idx = oneLine.index(oneLine.startIndex, offsetBy: 96)
-        return String(oneLine[..<idx]) + "…"
     }
 
     private var channelHeader: some View {

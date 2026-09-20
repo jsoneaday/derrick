@@ -156,7 +156,8 @@ public struct HostUISidebar<Content: View>: View {
     public var body: some View {
         content
             .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
-            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .clipped()
     }
 }
 

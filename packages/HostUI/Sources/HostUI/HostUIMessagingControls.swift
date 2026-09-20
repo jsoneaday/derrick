@@ -117,10 +117,6 @@ public struct HostUIMessage: View {
     private let row: HostUIMessageRow
     private let onOpenThread: (() -> Void)?
 
-    private let navy = Color(red: 0.176, green: 0.286, blue: 0.576)
-    /// Cream fill for outbound — matches host notification / prior MessagingBubble chrome.
-    private let outboundFill = Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0)
-
     public init(row: HostUIMessageRow, onOpenThread: (() -> Void)? = nil) {
         self.row = row
         self.onOpenThread = onOpenThread
@@ -128,45 +124,22 @@ public struct HostUIMessage: View {
 
     public var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            if row.outbound { Spacer(minLength: 80) }
+            if row.outbound { Spacer(minLength: HostUIMessagingLayout.oppositeGutter) }
             VStack(alignment: row.outbound ? .trailing : .leading, spacing: 4) {
                 if !row.sender.isEmpty {
                     Text(row.sender)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                messageBody
+                HostUIMessageBubble(bodyMarkdown: row.body)
                 if row.showsReplyAction, let onOpenThread {
                     replyAffordance(onOpenThread)
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
-            if !row.outbound { Spacer(minLength: 80) }
+            if !row.outbound { Spacer(minLength: HostUIMessagingLayout.oppositeGutter) }
         }
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var messageBody: some View {
-        HostUIMarkdownText(row.body, fontSize: 13)
-            .frame(maxWidth: 420, alignment: row.outbound ? .trailing : .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(row.outbound ? outboundFill : Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(
-                        navy.opacity(row.outbound ? 0.28 : 0.14),
-                        lineWidth: 1
-                    )
-            )
-            .frame(
-                maxWidth: .infinity,
-                alignment: row.outbound ? .trailing : .leading
-            )
     }
 
     @ViewBuilder
@@ -180,7 +153,7 @@ public struct HostUIMessage: View {
                         .font(.caption.weight(.semibold))
                     if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
                         // Plain one-line preview only — never expand the full thread body here.
-                        Text(Self.collapsedPreview(preview))
+                        Text(HostUIMessagingLayout.collapsedReplyPreview(preview))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -197,7 +170,7 @@ public struct HostUIMessage: View {
             )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
+        .foregroundStyle(row.replyCount > 0 ? HostUIMessagingLayout.navy : .primary.opacity(0.75))
         .fixedSize(horizontal: true, vertical: false)
     }
 
@@ -205,16 +178,6 @@ public struct HostUIMessage: View {
         if row.replyCount == 1 { return "1 reply" }
         if row.replyCount > 1 { return "\(row.replyCount) replies" }
         return "Reply in thread"
-    }
-
-    private static func collapsedPreview(_ raw: String) -> String {
-        let oneLine = raw
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if oneLine.count <= 96 { return oneLine }
-        let idx = oneLine.index(oneLine.startIndex, offsetBy: 96)
-        return String(oneLine[..<idx]) + "…"
     }
 }
 
@@ -260,9 +223,10 @@ public struct HostUIMessageList: View {
                         .onAppear { onNearBottomChange?(true) }
                         .onDisappear { onNearBottomChange?(false) }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, HostUIMessagingLayout.listPaddingX)
                 .padding(.vertical, 12)
             }
+            .frame(minHeight: 0)
             .onChange(of: rows.last?.id) { _, _ in
                 scrollToBottom(proxy)
             }
@@ -304,28 +268,30 @@ public struct HostUIComposer: View {
     }
 
     public var body: some View {
-        // Match main-chat promptComposer: white card, field on top, Send on the bottom bar.
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(placeholder)
                         .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 18)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                         .allowsHitTesting(false)
                 }
                 TextField("", text: $text, axis: .vertical)
                     .font(.system(size: 13))
                     .lineLimit(1...6)
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                    .padding(.bottom, 12)
+                    .scrollContentBackground(.hidden)
+                    .background(.clear)
                     .onSubmit(submitIfAllowed)
             }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 12)
+            .frame(minHeight: 76, alignment: .topLeading)
 
-            Divider()
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
 
             HStack(spacing: 12) {
                 Spacer(minLength: 0)
@@ -334,9 +300,6 @@ public struct HostUIComposer: View {
                         Image(systemName: isSending ? "hourglass" : "paperplane.fill")
                         Text(isSending ? "Sending…" : sendTitle)
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
                 }
                 .buttonStyle(HostUIPrimaryButtonStyle())
                 .disabled(!canSubmit)
@@ -344,11 +307,13 @@ public struct HostUIComposer: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
+            .background(Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0))
         }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private var canSubmit: Bool {
@@ -360,5 +325,110 @@ public struct HostUIComposer: View {
     private func submitIfAllowed() {
         guard canSubmit else { return }
         onSubmit()
+    }
+}
+
+#Preview("Messaging composer") {
+    HostUIComposerPreviewHost(initial: "")
+        .frame(width: 720)
+        .padding()
+        .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Messaging composer filled") {
+    HostUIComposerPreviewHost(initial: "hello from channel")
+        .frame(width: 720)
+        .padding()
+        .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Channel reply preview") {
+    HostUIMessage(
+        row: HostUIMessageRow(
+            id: "root",
+            sender: "derrick",
+            body: "hello",
+            outbound: true,
+            replyCount: 1,
+            replyPreview: """
+            This is a long thread reply that must stay one line in the channel.
+            Second paragraph must not appear as a channel message.
+            """,
+            showsReplyAction: true
+        ),
+        onOpenThread: {}
+    )
+    .padding()
+    .frame(width: 720)
+    .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Inbound vs outbound bubbles") {
+    VStack(alignment: .leading, spacing: 16) {
+        HostUIMessage(
+            row: HostUIMessageRow(
+                id: "in",
+                sender: "David Choi (jsoneaday)",
+                body: "$orchestrator today's news",
+                outbound: false,
+                showsReplyAction: true
+            ),
+            onOpenThread: {}
+        )
+        HostUIMessage(
+            row: HostUIMessageRow(
+                id: "out-long",
+                sender: "derrick",
+                body: "hi from derrick",
+                outbound: true,
+                showsReplyAction: true
+            ),
+            onOpenThread: {}
+        )
+        HostUIMessage(
+            row: HostUIMessageRow(
+                id: "out-short",
+                sender: "derrick",
+                body: "hi",
+                outbound: true,
+                showsReplyAction: true
+            ),
+            onOpenThread: {}
+        )
+    }
+    .padding()
+    .frame(width: 720)
+    .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Weather bubble in thread pane") {
+    HostUIMessage(
+        row: HostUIMessageRow(
+            id: "wx",
+            sender: "derrick",
+            body: """
+            [Derrick:orchestrator] Searching the web…
+
+            In **Northvale, NJ 07647**, Weather Underground reported **62°F** at **7:27 AM EDT on September 19, 2026**. Its listed daily temp **71°F / 63°F**.
+
+            [View current conditions on Weather Underground](https://www.wunderground.com)
+            """,
+            outbound: true
+        )
+    )
+    .padding(12)
+    .frame(width: 360, height: 420)
+    .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+private struct HostUIComposerPreviewHost: View {
+    @State private var text: String
+
+    init(initial: String = "") {
+        _text = State(initialValue: initial)
+    }
+
+    var body: some View {
+        HostUIComposer(text: $text, placeholder: "Message #general", onSubmit: {})
     }
 }

@@ -86,11 +86,13 @@ public struct HostUINodeView: View {
             HStack {
                 Text(bindings.replyThreadTitle)
                     .font(.headline)
+                    .lineLimit(1)
                 Spacer()
                 Button(action: bindings.onCloseReplyThread) {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Close thread")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -100,10 +102,19 @@ public struct HostUINodeView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ForEach(Array((sidebar.children ?? []).enumerated()), id: \.offset) { _, child in
-                nodeContent(child, isThread: true)
+            // Host owns reply chrome when holds=messages (default). Guest children
+            // are only used for arbitrary sidebars.
+            if sidebar.configString["holds"] == "arbitrary" {
+                ForEach(Array((sidebar.children ?? []).enumerated()), id: \.offset) { _, child in
+                    nodeContent(child, isThread: true)
+                }
+            } else {
+                messageList(bind: "selected_thread", isThread: true)
+                composer(bind: "selected_thread", isThread: true)
+                    .layoutPriority(1)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -170,6 +181,7 @@ public struct HostUINodeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minHeight: 0)
     }
 
     @ViewBuilder
@@ -206,5 +218,90 @@ public struct HostUINodeView: View {
             .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
         }
         .buttonStyle(.plain)
+    }
+}
+
+#Preview("Reply pane filled") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: false)
+        .frame(width: 1100, height: 720)
+}
+
+#Preview("Reply pane empty guest sidebar") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: true)
+        .frame(width: 1100, height: 720)
+}
+
+private struct HostUIInboxPreviewHost: View {
+    var emptyGuestSidebar: Bool
+    @State private var channelDraft = ""
+    @State private var threadDraft = ""
+
+    var body: some View {
+        HostUINodeView(node: root, bindings: bindings)
+            .background(Color(red: 248.0 / 255.0, green: 244.0 / 255.0, blue: 240.0 / 255.0))
+    }
+
+    private var root: HostUINode {
+        if emptyGuestSidebar {
+            return HostUINode(
+                element: "screen",
+                config: ["holds": .string("message_exchange")],
+                children: [
+                    HostUINode(element: "tab_strip", bind: "conversations"),
+                    HostUINode(element: "message_list", bind: "selected_conversation"),
+                    HostUINode(element: "composer", bind: "selected_conversation"),
+                    HostUINode(
+                        element: "sidebar",
+                        config: [
+                            "holds": .string("messages"),
+                            "visible_when": .string("reply_thread"),
+                        ]
+                    ),
+                ]
+            )
+        }
+        return (try? HostUILibraryStore.messagingInbox()) ?? HostUINode(element: "screen")
+    }
+
+    private var bindings: HostUINodeBindings {
+        HostUINodeBindings(
+            tabs: [HostUITabItem(id: "g", title: "general")],
+            selectedTabID: "g",
+            channelMessages: [
+                HostUIMessageRow(
+                    id: "p",
+                    sender: "David Choi (jsoneaday)",
+                    body: "$orchestrator weather in 07647",
+                    outbound: false,
+                    replyCount: 1,
+                    replyPreview: "Searching the web…",
+                    showsReplyAction: true
+                )
+            ],
+            threadMessages: [
+                HostUIMessageRow(
+                    id: "p",
+                    sender: "David Choi (jsoneaday)",
+                    body: "$orchestrator weather in 07647",
+                    outbound: false
+                ),
+                HostUIMessageRow(
+                    id: "r",
+                    sender: "derrick",
+                    body: """
+                    [Derrick:orchestrator] Searching the web…
+
+                    In **Northvale, NJ 07647**, Weather Underground reported **62°F** at **7:27 AM EDT on September 19, 2026**. Its listed daily temp **71°F / 63°F**.
+
+                    [View current conditions on Weather Underground](https://www.wunderground.com)
+                    """,
+                    outbound: true
+                )
+            ],
+            channelDraft: $channelDraft,
+            threadDraft: $threadDraft,
+            isViewingReplyThread: true,
+            replyThreadTitle: "$orchestrator weather in 07647"
+        )
     }
 }
