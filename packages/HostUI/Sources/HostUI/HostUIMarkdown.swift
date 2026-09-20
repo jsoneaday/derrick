@@ -66,6 +66,7 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
         textView.isRichText = true
         textView.drawsBackground = false
         textView.backgroundColor = .clear
+        textView.focusRingType = .none
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = false

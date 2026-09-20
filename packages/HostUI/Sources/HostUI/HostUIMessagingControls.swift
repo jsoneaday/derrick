@@ -137,31 +137,7 @@ public struct HostUIMessage: View {
                 }
                 messageBody
                 if row.showsReplyAction, let onOpenThread {
-                    Button(action: onOpenThread) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.caption.weight(.semibold))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(replyTitle)
-                                    .font(.caption.weight(.semibold))
-                                if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
-                                    HostUIMarkdownText(preview, fontSize: 11)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white)
-                                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
-                    .fixedSize(horizontal: true, vertical: false)
+                    replyAffordance(onOpenThread)
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
@@ -193,10 +169,52 @@ public struct HostUIMessage: View {
             )
     }
 
+    @ViewBuilder
+    private func replyAffordance(_ onOpenThread: @escaping () -> Void) -> some View {
+        Button(action: onOpenThread) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(replyTitle)
+                        .font(.caption.weight(.semibold))
+                    if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
+                        // Plain one-line preview only — never expand the full thread body here.
+                        Text(Self.collapsedPreview(preview))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(row.replyCount > 0 ? navy : .primary.opacity(0.75))
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private var replyTitle: String {
         if row.replyCount == 1 { return "1 reply" }
         if row.replyCount > 1 { return "\(row.replyCount) replies" }
         return "Reply in thread"
+    }
+
+    private static func collapsedPreview(_ raw: String) -> String {
+        let oneLine = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if oneLine.count <= 96 { return oneLine }
+        let idx = oneLine.index(oneLine.startIndex, offsetBy: 96)
+        return String(oneLine[..<idx]) + "…"
     }
 }
 
@@ -286,32 +304,50 @@ public struct HostUIComposer: View {
     }
 
     public var body: some View {
+        // Match main-chat promptComposer: white card, field on top, Send on the bottom bar.
         VStack(alignment: .leading, spacing: 0) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(1...6)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
-                .onSubmit(submitIfAllowed)
+            ZStack(alignment: .topLeading) {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(placeholder)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 18)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $text, axis: .vertical)
+                    .font(.system(size: 13))
+                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, 12)
+                    .onSubmit(submitIfAllowed)
+            }
 
             Divider()
 
-            HStack {
+            HStack(spacing: 12) {
                 Spacer(minLength: 0)
-                HostUIButton(
-                    isSending ? "Sending…" : sendTitle,
-                    systemImage: "paperplane.fill",
-                    disabled: !canSubmit,
-                    action: submitIfAllowed
-                )
+                Button(action: submitIfAllowed) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isSending ? "hourglass" : "paperplane.fill")
+                        Text(isSending ? "Sending…" : sendTitle)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(HostUIPrimaryButtonStyle())
+                .disabled(!canSubmit)
+                .opacity(canSubmit ? 1 : 0.45)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
         .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 24)
         .padding(.vertical, 12)
     }
 
