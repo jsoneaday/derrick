@@ -8,6 +8,7 @@
 import SwiftUI
 import LLMAgentClient
 import Structure
+import HostUI
 
 private final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
@@ -252,7 +253,7 @@ struct PromptCompletionCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 10) {
                         if completionStatus == .streaming {
-                            CompletionStatusView(status: statusMessage ?? "Thinking...", toolName: toolName)
+                            HostUICompletionStatus(status: statusMessage ?? "Thinking...", toolName: toolName)
                             if isActiveStreamingTurn {
                                 let thought = turn.thought.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if !thought.isEmpty {
@@ -265,7 +266,7 @@ struct PromptCompletionCard: View {
                                 }
                             }
                         } else if let statusString = completionStatus.displayString {
-                            CompletionStatusView(status: statusString, toolName: nil)
+                            HostUICompletionStatus(status: statusString, toolName: nil)
                         }
 
                         MarkdownResponseView(text: turn.response, allowsCSVExport: true)
@@ -315,48 +316,5 @@ struct PromptCompletionCard: View {
                 }
             }
         }
-    }
-}
-
-private struct CompletionStatusView: View {
-    let status: String
-    let toolName: String?
-    @State private var isVisible = false
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.4)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            let pulse = 0.35 + ((sin(t * 6) + 1) * 0.325) // 0.35...1.0
-
-            HStack(spacing: 8) {
-                Text("…")
-                    .font(.system(size: 15, weight: .semibold))
-                    .opacity(pulse)
-
-                ZStack(alignment: .leading) {
-                    Text(agentResponseStatusLabel(status: status) + (" \(toolName ?? "")"))
-                        .id(status)
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 3)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7)
-                                .stroke(.black.opacity(0.06), lineWidth: 1)
-                        )
-                        .transition(.opacity.combined(with: .offset(y: -3)))
-                }
-            }
-            .foregroundStyle(.secondary)
-            .opacity(isVisible ? 1 : 0)
-            .offset(y: isVisible ? 0 : 2)
-            .animation(.easeOut(duration: 0.18), value: status)
-            .animation(.easeOut(duration: 0.18), value: isVisible)
-            .onAppear {
-                isVisible = true
-            }
-        }
-        .padding(.top, 5)
-        .padding(.bottom, 6)
     }
 }
