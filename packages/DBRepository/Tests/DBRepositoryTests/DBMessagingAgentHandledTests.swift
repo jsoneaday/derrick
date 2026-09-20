@@ -106,6 +106,29 @@ final class DBMessagingAgentHandledTests: XCTestCase {
         XCTAssertTrue(retry)
     }
 
+    func testMessagingAgentWorkRoundTripAndClear() async throws {
+        let repository = try makeRepository()
+        _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        let work = MessagingAgentWorkInFlight(
+            pluginID: "slack-connection",
+            threadID: "thread-1",
+            parentVendorMessageID: "171.1",
+            profileHandle: AgentProfileHandle.orchestrator,
+            displayName: "Orchestrator"
+        )
+        try await repository.upsertMessagingAgentWork(work)
+        let listed = try await repository.listMessagingAgentWork(threadID: "thread-1")
+        XCTAssertEqual(listed, [work])
+        XCTAssertEqual(listed.first?.statusLabel, "Orchestrator is working")
+        try await repository.clearMessagingAgentWork(
+            pluginID: work.pluginID,
+            threadID: work.threadID,
+            parentVendorMessageID: work.parentVendorMessageID
+        )
+        let remaining = try await repository.listMessagingAgentWork(threadID: "thread-1")
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     private func makeRepository() throws -> DBRepository {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

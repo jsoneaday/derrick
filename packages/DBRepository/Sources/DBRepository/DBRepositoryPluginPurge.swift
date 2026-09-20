@@ -241,6 +241,13 @@ private extension DBRepository {
             """,
             on: handle
         )
+        try execute(
+            """
+            DELETE FROM messaging_agent_work
+            WHERE plugin_id = \(quoted(pluginID));
+            """,
+            on: handle
+        )
 
         result.removedMessagingConnectors = try scalarCount(
             """
@@ -364,6 +371,10 @@ private extension DBRepository {
         )
         ids.formUnion(try stringSet(
             "SELECT DISTINCT plugin_id FROM messaging_agent_handled;",
+            on: handle
+        ))
+        ids.formUnion(try stringSet(
+            "SELECT DISTINCT plugin_id FROM messaging_agent_work;",
             on: handle
         ))
         ids.formUnion(try stringSet(

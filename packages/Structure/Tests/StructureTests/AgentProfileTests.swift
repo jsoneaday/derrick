@@ -21,14 +21,42 @@ import Testing
         #expect(parsed.body == "")
     }
 
-    @Test func tokenParserFindsHandleAfterGreeting() {
+    @Test func tokenParserTalksToProfileAfterGreeting() {
         let parsed = AgentProfileTokenParser.parse(message: "hi $orchestrator how are you?")
         #expect(parsed.handle == "orchestrator")
-        #expect(parsed.body == "hi how are you?")
+        #expect(parsed.body == "how are you?")
 
         let handleOnlyGreeting = AgentProfileTokenParser.parse(message: "hi $orchestrator")
         #expect(handleOnlyGreeting.handle == "orchestrator")
-        #expect(handleOnlyGreeting.body == "hi")
+        #expect(handleOnlyGreeting.body == "")
+    }
+
+    @Test func tokenParserTalksToProfileAtStartOfSentence() {
+        let parsed = AgentProfileTokenParser.parse(
+            message: "Quick question. $orchestrator what's today's date?"
+        )
+        #expect(parsed.handle == "orchestrator")
+        #expect(parsed.body == "Quick question. what's today's date?")
+    }
+
+    @Test func tokenParserIgnoresMidClauseMention() {
+        let parsed = AgentProfileTokenParser.parse(
+            message: "it doesn't work? but $orchestrator told me it does work"
+        )
+        #expect(parsed.handle == nil)
+        #expect(parsed.body == "it doesn't work? but $orchestrator told me it does work")
+    }
+
+    @Test func tokenParserIgnoresHandleUsedAsSubject() {
+        let parsed = AgentProfileTokenParser.parse(message: "$orchestrator told me it does work")
+        #expect(parsed.handle == nil)
+        #expect(parsed.body == "$orchestrator told me it does work")
+    }
+
+    @Test func tokenParserTreatsCommaAsTalkTo() {
+        let parsed = AgentProfileTokenParser.parse(message: "$orchestrator, what's the date?")
+        #expect(parsed.handle == "orchestrator")
+        #expect(parsed.body == "what's the date?")
     }
 
     @Test func tokenParserIgnoresDollarAmounts() {

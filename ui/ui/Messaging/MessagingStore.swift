@@ -91,6 +91,10 @@ final class MessagingStore: ObservableObject {
     var visibleMessages: [MessagingMessageDTO] { session.visibleMessages }
     var visibleReplyMessages: [MessagingMessageDTO] { session.visibleReplyMessages }
     var lastReplyPreviewByParentID: [String: String] { session.lastReplyPreviewByParentID }
+
+    func agentWorkStatus(forParent parentID: String?) -> String? {
+        session.agentWorkStatus(forParent: parentID)
+    }
     var replyThreadWarning: String? { session.replyThreadWarning }
     var scrollToBottomToken: Int { session.scrollToBottomToken }
     var scrollAnchorID: String? { session.scrollAnchorID }

@@ -28,7 +28,7 @@ struct AgentProfileSettingsView: View {
             Text("Agent profiles")
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
 
-            Text("Profiles define how Derrick behaves when you message an agent from connectors. Start a message with $ and the profile’s short name, like $orchestrator. Replies are posted as [\(DerrickAppSupport.hostAppProductName):orchestrator].")
+            Text("Profiles define how Derrick behaves when you message an agent from connectors. Talk to a profile by putting $ and its short name at the start, like $orchestrator. Mentioning a short name later in a sentence does not switch profiles. Replies are posted as [\(DerrickAppSupport.hostAppProductName):orchestrator].")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +108,7 @@ struct AgentProfileSettingsView: View {
 
             profileField(
                 title: "Short name",
-                caption: "Put $ in front of this name in messages, like $orchestrator. Letters, numbers, and underscores only."
+                caption: "Talk to this profile with $ plus this name at the start of a message, like $orchestrator. Letters, numbers, and underscores only."
             ) {
                 TextField("reviewer", text: $draftHandle)
                     .textFieldStyle(.roundedBorder)

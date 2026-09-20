@@ -38,7 +38,7 @@ public struct MessagingThreadDTO: Codable, Sendable, Hashable, Identifiable {
     public var lastActivityAt: Date
     public var muted: Bool
     public var unreadCount: Int
-    /// When set, inbound @Derrick messages without `$handle` use this profile instead of orchestrator.
+    /// When set, inbound @Derrick messages without a talk-to `$shortName` use this profile instead of orchestrator.
     public var defaultAgentProfileHandle: String?
     public let createdAt: Date
 

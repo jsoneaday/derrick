@@ -16,6 +16,7 @@ You are an Apple Swift and SwiftUI expoert building a Desktop Agent Harness usin
 - Use GoF patterns and SOLID/protocol design. No monoliths.
 - Prefer Swift Package modules. Separate concerns.
 - Think in systems and code paths, not one-off patches.
+- Before writing or changing Swift or SwiftUI, read and follow the matching skills in `.cursor/skills/` (especially `swiftui-specialist` and `swiftui-whats-new-27`). Use them for layout, data flow, and API choice; do not skip them on UI work.
 - `packages/Structure` — architecture map: types, protocols, wire contracts (`AppLayerServices/`, `Policy/`, `Plugin/`, `Contract/`, …). Import `Structure` explicitly; packages do not re-export it.
 - `packages/Plugin` — plugin factory runtime, manifest resources (wire types live in Structure).
 

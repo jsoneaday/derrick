@@ -110,6 +110,12 @@ public struct HostUINodeView: View {
                 }
             } else {
                 messageList(bind: "selected_thread", isThread: true)
+                if let work = bindings.threadAgentWorkStatus, !work.isEmpty {
+                    HostUIAgentWorkIndicator(status: work)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 composer(bind: "selected_thread", isThread: true)
                     .layoutPriority(1)
             }

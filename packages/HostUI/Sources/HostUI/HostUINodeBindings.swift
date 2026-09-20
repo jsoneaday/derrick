@@ -29,6 +29,8 @@ public struct HostUINodeBindings {
     public var showNewMessagesPill: Bool
     public var onJumpToLatest: () -> Void
     public var scrollToBottomToken: Int
+    /// In-flight agent copy for the open reply pane. Nil when no turn has started.
+    public var threadAgentWorkStatus: String?
     /// Declared / default service ids active for this tree.
     public var activeServices: Set<String>
 
@@ -58,6 +60,7 @@ public struct HostUINodeBindings {
         showNewMessagesPill: Bool = false,
         onJumpToLatest: @escaping () -> Void = {},
         scrollToBottomToken: Int = 0,
+        threadAgentWorkStatus: String? = nil,
         activeServices: Set<String> = []
     ) {
         self.tabs = tabs
@@ -85,6 +88,7 @@ public struct HostUINodeBindings {
         self.showNewMessagesPill = showNewMessagesPill
         self.onJumpToLatest = onJumpToLatest
         self.scrollToBottomToken = scrollToBottomToken
+        self.threadAgentWorkStatus = threadAgentWorkStatus
         self.activeServices = activeServices
     }
 

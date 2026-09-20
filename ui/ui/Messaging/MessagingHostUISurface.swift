@@ -104,6 +104,9 @@ struct MessagingHostUISurface: View {
                 Task { await store.jumpToLatest() }
             },
             scrollToBottomToken: store.scrollToBottomToken,
+            threadAgentWorkStatus: store.agentWorkStatus(
+                forParent: store.selectedReplyParentVendorMessageID
+            ),
             activeServices: services
         )
     }
@@ -118,7 +121,8 @@ struct MessagingHostUISurface: View {
             replyPreview: message.vendorMessageID.flatMap { id in
                 store.lastReplyPreviewByParentID[id].map(HostUIMessagingLayout.collapsedReplyPreview)
             },
-            showsReplyAction: showsReply && message.vendorMessageID != nil
+            showsReplyAction: showsReply && message.vendorMessageID != nil,
+            agentWorkStatus: store.agentWorkStatus(forParent: message.vendorMessageID)
         )
     }
 

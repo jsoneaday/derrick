@@ -46,27 +46,104 @@ public enum AgentProfileHandle {
     }
 }
 
-/// Parses `$handle` anywhere in a message (token boundary), not only at the start.
+/// Parses a talk-to `$shortName` (addressing a profile), not a later mention of one.
+///
+/// Matches `$shortName` at the start of the message, after a short greeting, or at the
+/// start of a sentence. Ignores mid-clause references such as
+/// "but $orchestrator told me it does work".
 public enum AgentProfileTokenParser {
+    private static let greetingTokens: Set<String> = [
+        "hi", "hey", "hello", "yo", "ok", "okay", "please", "thanks", "thx", "howdy", "hiya",
+    ]
+
+    private static let narrativeVerbs: Set<String> = [
+        "told", "said", "asked", "thinks", "thought", "wants", "wanted", "needed",
+        "is", "was", "has", "had", "does", "did", "mentioned", "suggested", "claimed",
+        "promised", "replied", "answered",
+    ]
+
     public static func parse(message: String) -> (handle: String?, body: String) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let tokenRange = AgentProfileTokenHighlight.ranges(in: trimmed).first(where: {
-            trimmed[$0].hasPrefix("$")
-        }) else {
+        guard !trimmed.isEmpty else {
+            return (nil, "")
+        }
+        guard let match = firstTalkToMatch(in: trimmed) else {
             return (nil, trimmed)
         }
-        let token = String(trimmed[tokenRange])
-        let handle = AgentProfileHandle.normalize(String(token.dropFirst()))
-        var body = trimmed
-        body.removeSubrange(tokenRange)
-        let collapsed = body
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (handle, collapsed)
+        return (match.handle, match.body)
+    }
+
+    private struct TalkToMatch {
+        let handle: String
+        let body: String
+    }
+
+    private static func firstTalkToMatch(in message: String) -> TalkToMatch? {
+        for tokenRange in AgentProfileTokenHighlight.ranges(in: message) where message[tokenRange].hasPrefix("$") {
+            let token = String(message[tokenRange])
+            guard let handle = AgentProfileHandle.normalize(String(token.dropFirst())) else {
+                continue
+            }
+            let prefix = String(message[message.startIndex..<tokenRange.lowerBound])
+            var remainderIndex = tokenRange.upperBound
+            var addressingPunctuation = false
+            if remainderIndex < message.endIndex {
+                let next = message[remainderIndex]
+                if next == "," || next == ":" {
+                    addressingPunctuation = true
+                    remainderIndex = message.index(after: remainderIndex)
+                }
+            }
+            let suffix = String(message[remainderIndex...])
+            guard isTalkToPrefix(prefix) else { continue }
+            if !addressingPunctuation, isNarrativeReference(suffix: suffix) {
+                continue
+            }
+            return TalkToMatch(handle: handle, body: promptBody(prefix: prefix, suffix: suffix))
+        }
+        return nil
+    }
+
+    private static func isTalkToPrefix(_ prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if isGreetingOnly(trimmed) { return true }
+        guard let last = trimmed.last else { return false }
+        return last == "." || last == "!" || last == "?"
+    }
+
+    private static func isGreetingOnly(_ text: String) -> Bool {
+        let tokens = text
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ":" || $0 == "!" })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        return !tokens.isEmpty && tokens.allSatisfy { greetingTokens.contains($0) }
+    }
+
+    private static func isNarrativeReference(suffix: String) -> Bool {
+        let trimmed = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.split(whereSeparator: { $0.isWhitespace || $0 == "," }).first else {
+            return false
+        }
+        let word = first.trimmingCharacters(in: CharacterSet.punctuationCharacters).lowercased()
+        return narrativeVerbs.contains(word)
+    }
+
+    private static func promptBody(prefix: String, suffix: String) -> String {
+        let trimmedSuffix = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPrefix.isEmpty || isGreetingOnly(trimmedPrefix) {
+            return trimmedSuffix
+        }
+        if trimmedSuffix.isEmpty {
+            return trimmedPrefix
+        }
+        return "\(trimmedPrefix) \(trimmedSuffix)"
     }
 }
 
-/// Ranges of `$handle` tokens (and the profile name inside `[Derrick:handle]`) for UI highlighting.
+/// Ranges of `$shortName` tokens (and the profile name inside `[Derrick:handle]`) for UI highlighting.
 public enum AgentProfileTokenHighlight {
     public static func ranges(
         in text: String,
