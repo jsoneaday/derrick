@@ -3,77 +3,35 @@ import Structure
 import Testing
 
 @Suite struct ConnectorMentionRoutingTests {
-    @Test func mentionsSlackUserDetectsPlainAndLabeledMentions() {
-        #expect(ConnectorMentionParser.mentionsSlackUser(body: "hey <@U123> help", userID: "U123"))
-        #expect(ConnectorMentionParser.mentionsSlackUser(body: "hey <@U123|derrick> help", userID: "U123"))
-        #expect(ConnectorMentionParser.mentionsSlackUser(body: "hey <@U999> help", userID: "U123") == false)
-    }
-
-    @Test func stripSlackUserMentionRemovesToken() {
-        let stripped = ConnectorMentionParser.stripSlackUserMention(
-            body: "<@U123|derrick> $reviewer summarize this",
-            userID: "U123"
-        )
-        #expect(stripped == "$reviewer summarize this")
-    }
-
-    @Test func resolvePromptUsesProfileTokenAndDefault() {
+    @Test func resolvePromptUsesTalkToHandle() {
         let withProfile = ConnectorMentionParser.resolvePrompt(
-            body: "<@U123> $reviewer summarize",
-            botUserID: "U123"
+            body: "$reviewer summarize"
         )
         #expect(withProfile?.profileHandle == "reviewer")
         #expect(withProfile?.prompt == "summarize")
-
-        let defaultProfile = ConnectorMentionParser.resolvePrompt(
-            body: "<@U123> what is blocking release?",
-            botUserID: "U123"
-        )
-        #expect(defaultProfile?.profileHandle == AgentProfileHandle.orchestrator)
-        #expect(defaultProfile?.prompt == "what is blocking release?")
     }
 
-    @Test func resolvePromptRoutesBareProfileTokenWithoutBotMention() {
+    @Test func resolvePromptRoutesBareProfileToken() {
         let routed = ConnectorMentionParser.resolvePrompt(
-            body: "$orchestrator tell me about yourself",
-            botUserID: "U123"
+            body: "$orchestrator tell me about yourself"
         )
         #expect(routed?.profileHandle == AgentProfileHandle.orchestrator)
         #expect(routed?.prompt == "tell me about yourself")
-
-        let withoutBotIdentity = ConnectorMentionParser.resolvePrompt(
-            body: "$developer fix the build",
-            botUserID: ""
-        )
-        #expect(withoutBotIdentity?.profileHandle == "developer")
-        #expect(withoutBotIdentity?.prompt == "fix the build")
     }
 
     @Test func resolvePromptRoutesProfileTokenAfterGreeting() {
         let routed = ConnectorMentionParser.resolvePrompt(
-            body: "hi $orchestrator how are you?",
-            botUserID: "U123"
+            body: "hi $orchestrator how are you?"
         )
         #expect(routed?.profileHandle == AgentProfileHandle.orchestrator)
         #expect(routed?.prompt == "how are you?")
     }
 
-    @Test func resolvePromptIgnoresMidClauseProfileMentionWithoutBotMention() {
+    @Test func resolvePromptIgnoresMidClauseProfileMention() {
         let ignored = ConnectorMentionParser.resolvePrompt(
-            body: "it doesn't work? but $orchestrator told me it does work",
-            botUserID: "U123"
+            body: "it doesn't work? but $orchestrator told me it does work"
         )
         #expect(ignored == nil)
-    }
-
-    @Test func resolvePromptKeepsChannelDefaultWhenProfileIsOnlyMentioned() {
-        let resolved = ConnectorMentionParser.resolvePrompt(
-            body: "<@U123> it doesn't work? but $orchestrator told me it does work",
-            botUserID: "U123",
-            channelDefaultProfileHandle: "researcher"
-        )
-        #expect(resolved?.profileHandle == AgentProfileHandle.researcher)
-        #expect(resolved?.prompt == "it doesn't work? but $orchestrator told me it does work")
     }
 
     @Test func agentWorkStatusLabelUsesDisplayName() {
@@ -87,28 +45,24 @@ import Testing
         #expect(work.statusLabel == "Orchestrator is working")
     }
 
-    @Test func resolvePromptIgnoresPlainInboundWithoutMentionOrHandle() {
+    @Test func resolvePromptIgnoresPlainInboundWithoutHandle() {
         let ignored = ConnectorMentionParser.resolvePrompt(
-            body: "hello without mention",
-            botUserID: "U123"
+            body: "hello without mention"
         )
         #expect(ignored == nil)
     }
 
-    @Test func resolvePromptUsesChannelDefaultProfile() {
-        let resolved = ConnectorMentionParser.resolvePrompt(
+    @Test func resolvePromptDoesNotTreatVendorAtMentionAsTalkTo() {
+        let ignored = ConnectorMentionParser.resolvePrompt(
             body: "<@U123> what is blocking release?",
-            botUserID: "U123",
             channelDefaultProfileHandle: "researcher"
         )
-        #expect(resolved?.profileHandle == AgentProfileHandle.researcher)
-        #expect(resolved?.prompt == "what is blocking release?")
+        #expect(ignored == nil)
     }
 
     @Test func mentionOnlyPromptListsProfiles() {
         let prompt = ConnectorMentionParser.resolvePrompt(
-            body: "<@U123>",
-            botUserID: "U123",
+            body: "$orchestrator",
             profileCatalog: [
                 AgentProfileCatalogEntry(handle: "orchestrator", displayName: "Orchestrator"),
                 AgentProfileCatalogEntry(handle: "developer", displayName: "Developer"),
@@ -138,11 +92,6 @@ import Testing
         #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "plain inbound") == false)
     }
 
-    @Test func parseBotUserIDFromAuthTestPayload() {
-        let json = Data(#"{"ok":true,"user_id":"U07BOT","bot_id":"B07BOT"}"#.utf8)
-        #expect(SlackBotIdentityResolver.parseBotUserID(from: json) == "U07BOT")
-    }
-
     @Test func agentReplyThreadsUnderInboundRootWhenNoParent() {
         let inbound = "1710000002.000200"
         let parent = ConnectorMentionParser.agentReplyThreadParentVendorMessageID(
@@ -161,7 +110,6 @@ import Testing
     @Test func resolvePromptContinuesThreadProfileWithoutDollarToken() {
         let continued = ConnectorMentionParser.resolvePrompt(
             body: "tell me about yourself",
-            botUserID: "U123",
             continuationProfileHandle: AgentProfileHandle.developer
         )
         #expect(continued?.profileHandle == AgentProfileHandle.developer)
@@ -169,7 +117,6 @@ import Testing
 
         let switched = ConnectorMentionParser.resolvePrompt(
             body: "$developer tell me about yourself",
-            botUserID: "U123",
             continuationProfileHandle: AgentProfileHandle.orchestrator
         )
         #expect(switched?.profileHandle == AgentProfileHandle.developer)

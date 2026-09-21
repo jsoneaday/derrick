@@ -32,7 +32,7 @@ import Testing
 
     @Test func envelopeListValidationAcceptsJSONObjectBody() throws {
         let json = """
-        [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage","json":{"channel":"C1","text":"hi"}}]
+        [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://api.example/message.send","json":{"thread":"T1","text":"hi"}}]
         """
         try GuestContractValidation.validateEnvelopeListJSON(Data(json.utf8))
     }

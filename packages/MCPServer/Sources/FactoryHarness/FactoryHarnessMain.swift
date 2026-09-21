@@ -21,11 +21,26 @@ enum FactoryHarnessMain {
               !apiKey.isEmpty else {
             throw HarnessError.missingAPIKey
         }
+        guard let goalText = ProcessInfo.processInfo.environment["FACTORY_USER_GOAL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !goalText.isEmpty else {
+            throw HarnessError.missingUserGoal
+        }
 
-        let input = try SlackConnectorFactoryInput.make(pluginID: "slack-connector-1")
-        let goal = input.connectorBuildGoal(crawlSummary: SlackConnectorFactoryInput.defaultCrawlSummary)
+        let pluginID = ProcessInfo.processInfo.environment["FACTORY_PLUGIN_ID"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let crawl = ProcessInfo.processInfo.environment["FACTORY_CRAWL_SUMMARY"]
+        let input = PluginFactoryCreateInput.makeConnector(
+            vendor: .custom,
+            pluginID: pluginID,
+            auth: try ConnectorAuthDiscovery.botTokenFallback(crawlSummary: crawl),
+            customVendorName: "messaging",
+            scope: .fullSync,
+            userDescription: goalText
+        )
+        let goal = input.connectorBuildGoal(crawlSummary: crawl)
 
-        fputs("FactoryHarness: building slack full-sync connector…\n", stderr)
+        fputs("FactoryHarness: building connector…\n", stderr)
         let executor = GoPluginFactoryDockerExecutor(executor: DirectShellDocker.executor())
         let release = try await PluginFactorySession(
             configuration: PluginFactoryConfiguration(maxBuilderAttempts: 3)

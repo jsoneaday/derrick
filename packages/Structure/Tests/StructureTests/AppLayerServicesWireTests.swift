@@ -337,39 +337,25 @@ import Testing
 
     @Test func pluginSecretDevelopmentSourceReadsInlineEnvironment() {
         let resolved = PluginSecretDevelopmentSource.resolve(
-            pluginID: "slack-connection",
+            pluginID: "demo-connection",
             fieldID: "bot_token",
             environment: [
                 DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
-                "SLACK_BOT_KEY": "xoxb-dev-token",
+                "PLUGIN_DEMO_CONNECTION_BOT_TOKEN": "dev-token",
             ],
             bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
             currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
         )
-        #expect(resolved == "xoxb-dev-token")
+        #expect(resolved == "dev-token")
     }
 
-    @Test func pluginSecretDevelopmentSourceReadsSlackBotKeyForFactoryConnectorID() {
-        let resolved = PluginSecretDevelopmentSource.resolve(
-            pluginID: "slack-connector",
-            fieldID: "bot_token",
-            environment: [
-                DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
-                "SLACK_BOT_KEY": "xoxb-dev-token",
-            ],
-            bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
-            currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
-        )
-        #expect(resolved == "xoxb-dev-token")
-    }
-
-    @Test func pluginSecretDevelopmentSourceDoesNotApplySlackBotKeyToUnrelatedPlugin() {
+    @Test func pluginSecretDevelopmentSourceDoesNotApplyAnotherPluginsEnv() {
         let resolved = PluginSecretDevelopmentSource.resolve(
             pluginID: "weather-tool",
             fieldID: "bot_token",
             environment: [
                 DotEnvReader.secretModeKey: DotEnvReader.SecretSourceMode.dotenv.rawValue,
-                "SLACK_BOT_KEY": "xoxb-dev-token",
+                "PLUGIN_DEMO_CONNECTION_BOT_TOKEN": "dev-token",
             ],
             bundleURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
             currentDirectoryURL: URL(fileURLWithPath: "/tmp", isDirectory: true)
@@ -377,19 +363,16 @@ import Testing
         #expect(resolved == nil)
     }
 
-    @Test func slackConnectorFallsBackToBotTokenWhenManifestOmitsSecrets() {
+    @Test func omittedManifestSecretsStayEmpty() {
         let json = """
-        {"$schema":"https://example.invalid/agent-plugin.json","name":"slack-connector","version":"1.0.0",\
+        {"$schema":"https://example.invalid/agent-plugin.json","name":"demo-connector","version":"1.0.0",\
         "extensions":{"app.derrick":{"entrypoint":"./app.derrick/plugin.go","role":"connector","messaging_ops":["sync_threads"]}}}
         """
         let descriptors = PluginSecretField.resolvedDescriptors(
-            pluginID: "slack-connector",
+            pluginID: "demo-connector",
             fromManifestJSON: json
         )
-        #expect(descriptors.map(\.id) == ["bot_token"])
-        #expect(
-            PluginSecretField.resolvedDescriptors(pluginID: "weather-tool", fromManifestJSON: json).isEmpty
-        )
+        #expect(descriptors.isEmpty)
     }
 
     @Test func pluginSecretResolverIgnoresDotEnvWhenNotInDevelopmentMode() throws {
@@ -1596,15 +1579,17 @@ import Testing
         #expect(PluginFactoryCreateInput.ConnectorScope.wizardCases == [.fullSync])
     }
 
-    @Test func connectorWizardSelectsSlackOnly() {
+    @Test func connectorWizardListsEveryVendor() {
         #expect(
             PluginFactoryCreateInput.ConnectorVendor.allCases.filter(\.isSelectableInWizard)
-                == [.slack]
+                == PluginFactoryCreateInput.ConnectorVendor.allCases
         )
         #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("slack-connection"))
-        #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("Slack-Bot"))
-        #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("telegram-bot"))
-        #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("discord-connection"))
+        #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("telegram-bot"))
+        #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("discord-connection"))
+        #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("  "))
+        #expect(PluginFactoryCreateInput.ConnectorVendor.inferred(fromPluginID: "slackclone-connector-1") == .slackClone)
+        #expect(PluginFactoryCreateInput.ConnectorVendor.inferred(fromPluginID: "slack-connection") == .slack)
     }
 
     @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {
@@ -1621,7 +1606,7 @@ import Testing
         #expect(goal.contains("ui.present"))
         #expect(goal.contains("host UI catalog (summary)"))
         #expect(goal.contains("Host plugin id"))
-        #expect(goal.contains("conversations.list") || goal.contains("vendor slack"))
+        #expect(goal.contains("conversation.list"))
         #expect(!goal.contains("must sync and send messages"))
         #expect(!goal.contains("Post alerts to #general"))
         #expect(!goal.contains("User requirements:"))
@@ -1652,7 +1637,7 @@ import Testing
         )
         let goal = input.connectorBuildGoal(crawlSummary: nil)
         #expect(goal.localizedCaseInsensitiveContains("parent_vendor_message_id"))
-        #expect(goal.localizedCaseInsensitiveContains("conversations.replies"))
+        #expect(goal.localizedCaseInsensitiveContains("conversation.replies"))
         #expect(goal.localizedCaseInsensitiveContains("missing_scope"))
         #expect(goal.contains("must_not_call"))
         #expect(goal.contains("conversation.history"))
@@ -1840,7 +1825,7 @@ import Testing
     }
 
     @Test func pluginFactoryCreateInputRoundTripsHostAuthAndPluginID() throws {
-        let auth = try ConnectorAuthDiscovery.slackBotTokenFallback(crawlSummary: "Slack bot tokens.")
+        let auth = try ConnectorAuthDiscovery.botTokenFallback(crawlSummary: "Bot tokens.")
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
             pluginID: "slack-connector-2",
@@ -1851,7 +1836,7 @@ import Testing
         #expect(decoded.pluginID == "slack-connector-2")
         #expect(decoded.auth?.authScheme == .botToken)
         #expect(decoded.auth?.secrets.map(\.id) == ["bot_token"])
-        #expect(decoded.auth?.crawlSummary == "Slack bot tokens.")
+        #expect(decoded.auth?.crawlSummary == "Bot tokens.")
         let manifest = try #require(decoded.hostManifest)
         #expect(manifest.pluginID == "slack-connector-2")
         #expect(manifest.authScheme == .botToken)

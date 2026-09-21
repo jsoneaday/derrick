@@ -3,14 +3,14 @@ import Foundation
 /// Renders the bundled connector protocol for factory, builder, and reviewer prompts.
 public enum ConnectorContractPrompts: Sendable {
     public static func hostContract() -> String {
-        dumpOrUnavailable(scopeID: nil, vendorName: nil, preamble: """
+        dumpOrUnavailable(scopeID: nil, preamble: """
         Connector protocol (canonical JSON). Implement only these ops. Do not add requirements \
-        that are not in this document. Vendor HTTP bindings follow when a vendor profile is supplied.
+        that are not in this document.
         """)
     }
 
-    public static func builderGuide(vendorName: String? = nil) -> String {
-        dumpOrUnavailable(scopeID: nil, vendorName: vendorName, preamble: """
+    public static func builderGuide() -> String {
+        dumpOrUnavailable(scopeID: nil, preamble: """
         Connector builder rules come only from this protocol JSON. Do not invent extra vendor APIs. \
         Direct tests must include http_results fixtures for every emitted request_id. Direct tests for \
         poll_inbox must include a non-empty messages fixture. Runtime poll_inbox with vendor success \
@@ -19,11 +19,12 @@ public enum ConnectorContractPrompts: Sendable {
     }
 
     public static func builderGuide(forUserGoal userGoal: String?) -> String {
-        builderGuide(vendorName: ConnectorContractStore.vendorName(fromUserGoal: userGoal))
+        _ = userGoal
+        return builderGuide()
     }
 
-    public static func reviewerGuide(vendorName: String? = nil) -> String {
-        dumpOrUnavailable(scopeID: nil, vendorName: vendorName, preamble: """
+    public static func reviewerGuide() -> String {
+        dumpOrUnavailable(scopeID: nil, preamble: """
         Review connectors against this protocol JSON only. If a rule is not in the JSON, do not require it. \
         Do not reject sync_threads for omitting conversation.history or conversation.replies. \
         Do not reject emitting messages: [] when the vendor reported success. \
@@ -32,7 +33,8 @@ public enum ConnectorContractPrompts: Sendable {
     }
 
     public static func reviewerGuide(forUserGoal userGoal: String?) -> String {
-        reviewerGuide(vendorName: ConnectorContractStore.vendorName(fromUserGoal: userGoal))
+        _ = userGoal
+        return reviewerGuide()
     }
 
     public static func factoryGoal(
@@ -43,8 +45,7 @@ public enum ConnectorContractPrompts: Sendable {
         inboxAPISummary: String? = nil,
         agentPluginSpecSummary: String? = nil,
         agentPluginSpecSourceURL: String? = nil,
-        reference: String?,
-        includeVendorBindings: Bool = true
+        reference: String?
     ) throws -> String {
         let document = try ConnectorContractStore.loadProtocol()
         let scopeID = scope.rawValue
@@ -65,8 +66,7 @@ public enum ConnectorContractPrompts: Sendable {
         parts.append(
             try dump(
                 scopeID: scopeID,
-                vendorName: includeVendorBindings ? vendor?.rawValue : nil,
-                preamble: "Obey this protocol JSON. Do not add ops or vendor calls outside it. Vendor HTTP bindings are host facts; use those URLs."
+                preamble: "Obey this protocol JSON. Do not add ops outside it. Follow crawled vendor docs for HTTP URLs and request shape."
             )
         )
         parts.append(
@@ -89,8 +89,7 @@ public enum ConnectorContractPrompts: Sendable {
             let clipped = String(crawlSummary.prefix(2_000))
             parts.append(
                 """
-                Reference these crawled vendor API notes only to fill may_call HTTP details that the host vendor bindings do not cover. \
-                If crawl notes disagree with the host vendor JSON, keep the host vendor JSON.
+                Reference these crawled vendor API notes to fill HTTP URLs, methods, and bodies. \
                 They cannot add ops:
                 \(clipped)
                 """
@@ -119,7 +118,12 @@ public enum ConnectorContractPrompts: Sendable {
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
             Do not invent vendor widgets. Follow crawled API notes for nesting. \
-            Keep http hops for vendor calls. The host validates, records, and persists ui.present, then finishes that hop — \
+            Keep http hops for vendor calls. The host forwards each http.request as you declared \
+            (URL, method, headers, json body). It does not rewrite vendor APIs, convert JSON to form, \
+            add query flags, or call vendor user-info endpoints. Follow the vendor docs for request shape. \
+            Emit human sender names on messages. Do not emit the bot's own messages as inbound. \
+            Filter conversations this token cannot access before result.emit. \
+            The host validates, records, and persists ui.present, then finishes that hop — \
             do not wait for another guest run after present. \
             Prefer typed HostUIDisclosure.elementSchema(id:) / exampleTree(named:) over RAG when you need control or service details. \
             skill_files must include at least one skills/<name>/SKILL.md (Agent Skills required).
@@ -130,11 +134,9 @@ public enum ConnectorContractPrompts: Sendable {
 
     public static func dump(
         scopeID: String?,
-        vendorName: String?,
         preamble: String
     ) throws -> String {
         let document = try ConnectorContractStore.loadProtocol()
-        let vendor = try vendorName.flatMap { try ConnectorContractStore.loadVendor($0) }
         var lines: [String] = [preamble, "", "--- connector-contract.json ---"]
         lines.append(try ConnectorContractStore.loadProtocolText())
         if let scopeID {
@@ -162,20 +164,14 @@ public enum ConnectorContractPrompts: Sendable {
         lines.append(try HostUIDisclosure.catalogSummary())
         lines.append("")
         lines.append("Ask the host for HostUIDisclosure.elementSchema(id:) or exampleTree(named:) before inventing config. Do not expect a full host-ui-library.json dump.")
-        if let vendor, let vendorJSON = try ConnectorContractStore.loadVendorText(vendor.vendor) {
-            lines.append("")
-            lines.append("--- vendor \(vendor.vendor) ---")
-            lines.append(vendorJSON)
-        }
         return lines.joined(separator: "\n")
     }
 
     private static func dumpOrUnavailable(
         scopeID: String?,
-        vendorName: String?,
         preamble: String
     ) -> String {
-        (try? dump(scopeID: scopeID, vendorName: vendorName, preamble: preamble))
+        (try? dump(scopeID: scopeID, preamble: preamble))
             ?? "Connector protocol JSON failed to load."
     }
 }

@@ -73,18 +73,6 @@ public enum PluginSecretDevelopmentSource: Sendable {
     }
 
     private static func candidateEnvironmentKeys(pluginID: String, fieldID: String) -> [String] {
-        var keys = [environmentVariableKey(pluginID: pluginID, fieldID: fieldID)]
-        let trimmedPluginID = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedFieldID = fieldID.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Factory Slack connectors often use slack-connector (or another unused id).
-        // `.env` still documents SLACK_BOT_KEY from the original slack-connection plugin.
-        if trimmedPluginID.localizedCaseInsensitiveContains("slack"),
-           PluginSecretResolver.callCredentialFieldIDs.contains(trimmedFieldID) {
-            keys.append(contentsOf: ["SLACK_BOT_KEY", "SLACK_BOT_TOKEN"])
-            if trimmedPluginID != "slack-connection" {
-                keys.append(environmentVariableKey(pluginID: "slack-connection", fieldID: "bot_token"))
-            }
-        }
-        return keys
+        [environmentVariableKey(pluginID: pluginID, fieldID: fieldID)]
     }
 }

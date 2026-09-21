@@ -32,6 +32,8 @@ public enum PluginFactoryScopeHints: Sendable {
         guard text.contains("sync_threads") else { return false }
         let mentionsHistory = text.contains("conversations.history")
             || text.contains("conversations.replies")
+            || text.contains("conversation.history")
+            || text.contains("conversation.replies")
             || text.contains("channel history")
             || text.contains("reply thread")
         let complainsMissing = text.contains("never fetches")

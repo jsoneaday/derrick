@@ -11,6 +11,7 @@ You are an Apple Swift and SwiftUI expoert building a Desktop Agent Harness usin
 6. Deliver result.
 7. Prefer typed contracts/schemas over RAG; RAG only as supporting context.
 8. Never add plugins to source control. Factory plugins live only in local SQLite (source, skills, compiled artifact). Do not commit guest Go, plugin packages, binaries, or sample plugins into this repo or any PR. David may override; that is rare. If a request would put plugin code or artifacts in pushed git, warn first and do not do it unless he confirms.
+9. Host never implements vendor APIs. The factory guest (Go built from vendor docs) owns connect, send, and receive — including HTTP shape, display names, filtering, and the tests it submits while building. Host forwards `http.request` as declared, attaches secrets, and stores `result.emit`. Do not add Slack/Telegram/Discord/WhatsApp HTTP clients, form encoders, user lookups, bundled vendor JSON, or vendor live harnesses in this repo. Warn if a request would put vendor protocol code in the host.
 
 ## Architecture
 

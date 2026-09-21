@@ -57,15 +57,13 @@ public actor HostHTTPClient {
 
     public func perform(_ request: HostHTTPRequest, invokeID: String = "") async -> HostHTTPFetch {
         let trimmed = request.url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wire = SlackWebAPIFormEncoding.rewritten(request)
-        let wireURL = wire.url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let url = URL(string: wireURL), url.scheme != nil, url.host != nil else {
+        guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")
         }
         var currentURL = NewsSourceURL.canonicalFetchURL(url)
         var currentMethod = request.method
-        var currentBody = wire.body
-        let envelopeHeaders = wire.headers
+        var currentBody = request.httpBody
+        let envelopeHeaders = request.wireHeaders
         var visitedURLs = Set([url.absoluteString])
 
         for redirectIndex in 0...Self.maxRedirects {
@@ -93,10 +91,7 @@ public actor HostHTTPClient {
                 headers = PluginSSRFPolicy.stripResponseHeaders(headers)
 
                 guard Self.redirectStatuses.contains(status) else {
-                let body = VendorConversationMembershipFilter.sanitizedBody(
-                    urlString: currentURL.absoluteString,
-                    body: String(decoding: data.prefix(HostHTTPRequest.maxResponseBytes), as: UTF8.self)
-                )
+                let body = String(decoding: data.prefix(HostHTTPRequest.maxResponseBytes), as: UTF8.self)
                 return HostHTTPFetch(status: status, headers: headers, body: body, error: nil)
                 }
                 guard redirectIndex < Self.maxRedirects else {

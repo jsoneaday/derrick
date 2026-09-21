@@ -225,7 +225,7 @@ import CoreGraphics
 
         let discovery = ConnectorAuthDiscovery(
             authScheme: .botToken,
-            secrets: [PluginSecretField.slackBotToken],
+            secrets: [PluginSecretField.botToken],
             setupHint: "Slack apps authenticate with a bot token that can read and send messages.",
             crawlSummary: "Bot user OAuth tokens start with xoxb-."
         )

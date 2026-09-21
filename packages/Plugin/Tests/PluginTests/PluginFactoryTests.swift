@@ -364,9 +364,9 @@ import Testing
         let manifest = try AgentPluginManifest.decode(Data(draft.manifestJSON.utf8))
         #expect(manifest.isConnector)
         #expect(manifest.derrick?.role == .connector)
-        #expect(manifest.derrick?.secrets.map(\.id) == ["bot_token"])
-        #expect(manifest.derrick?.authScheme == .botToken)
-        #expect(draft.manifestJSON.contains("\"auth_scheme\":\"bot_token\""))
+        #expect(manifest.derrick?.secrets ?? [] == [])
+        #expect(manifest.derrick?.authScheme == nil)
+        #expect(!draft.manifestJSON.contains("\"auth_scheme\":\"bot_token\""))
         #expect(draft.manifestJSON.contains("\"messaging_ops\":[\"send_message\"]"))
     }
 
@@ -545,7 +545,7 @@ import Testing
         let input = PluginFactoryCreateInput.makeConnector(
             vendor: .slack,
             pluginID: "slack-connector-2",
-            auth: try ConnectorAuthDiscovery.slackBotTokenFallback(crawlSummary: "bot token")
+            auth: try ConnectorAuthDiscovery.botTokenFallback(crawlSummary: "bot token")
         )
 
         let release = try await PluginFactorySession().build(
@@ -768,7 +768,7 @@ private func connectorGuestGoSource() -> String {
             "verb": "http.request",
             "request_id": "send-1",
             "method": "POST",
-            "url": "https://slack.com/api/chat.postMessage",
+            "url": "https://api.example/message.send",
         }})
     }
     """
@@ -833,19 +833,19 @@ private actor MultiHopRecordingFactoryExecutor: PluginFactoryExecutor {
         if op == "sync_threads" {
             requestID = "sync-1"
             method = "GET"
-            url = "https://slack.com/api/conversations.list"
+            url = "https://api.example/conversation.list"
         } else if op == "poll_inbox", let parent, !parent.isEmpty {
             requestID = "replies-1"
             method = "GET"
-            url = "https://slack.com/api/conversations.replies?channel=C1&ts=1"
+            url = "https://api.example/conversation.replies?thread=T1"
         } else if op == "poll_inbox" {
             requestID = "poll-1"
             method = "GET"
-            url = "https://slack.com/api/conversations.history?channel=C1"
+            url = "https://api.example/conversation.history?thread=T1"
         } else {
             requestID = "send-1"
             method = "POST"
-            url = "https://slack.com/api/chat.postMessage"
+            url = "https://api.example/message.send"
         }
         return PluginFactoryExecutionResult(
             exitCode: 0,

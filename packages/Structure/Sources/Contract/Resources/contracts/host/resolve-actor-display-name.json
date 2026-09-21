@@ -1,0 +1,8 @@
+{
+  "id": "resolve-actor-display-name",
+  "version": 1,
+  "description": "The guest plugin emits human sender names on result.emit. The host never calls vendor HTTP or uses the plugin token to look up users. If the guest only has an opaque actor id, it may emit that id; the host stores it as-is.",
+  "guest_emit": {
+    "fields": ["sender"]
+  }
+}

@@ -219,26 +219,6 @@ public struct ConnectorProtocolRules: Codable, Sendable, Hashable {
     }
 }
 
-public struct ConnectorVendorProfile: Codable, Sendable, Hashable {
-    public var vendor: String
-    public var vendorOKField: String
-    public var membershipFlag: String?
-    public var paginationCursor: String?
-    public var calls: [String: ConnectorVendorCall]
-
-    enum CodingKeys: String, CodingKey {
-        case vendor, calls
-        case vendorOKField = "vendor_ok_field"
-        case membershipFlag = "membership_flag"
-        case paginationCursor = "pagination_cursor"
-    }
-}
-
-public struct ConnectorVendorCall: Codable, Sendable, Hashable {
-    public var method: String
-    public var url: String
-}
-
 public enum ConnectorContractError: Error, Equatable, LocalizedError, Sendable {
     case missingResource(String)
     case invalidJSON(String)

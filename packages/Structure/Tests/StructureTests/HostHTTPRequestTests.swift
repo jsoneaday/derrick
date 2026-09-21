@@ -17,21 +17,21 @@ import Testing
     @Test func guestJSONObjectDeserializesToHostHTTPRequest() throws {
         let envelopes = try PluginEnvelopeList.decode(
             Data(#"""
-            [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage","headers":{"Content-Type":"application/json"},"json":{"channel":"C07FGNJS31T","text":"hello"}}]
+            [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://api.example/message.send","headers":{"Content-Type":"application/json"},"json":{"thread":"T1","text":"hello"}}]
             """#.utf8)
         )
         let request = try HostHTTPRequest(envelope: envelopes[0])
         #expect(request.requestID == "send-1")
         #expect(request.method == "POST")
-        #expect(request.url == "https://slack.com/api/chat.postMessage")
+        #expect(request.url == "https://api.example/message.send")
         guard case .object(let object) = request.json else {
             Issue.record("Expected json object")
             return
         }
-        #expect(object["channel"]?.stringValue == "C07FGNJS31T")
+        #expect(object["thread"]?.stringValue == "T1")
         #expect(object["text"]?.stringValue == "hello")
         let body = String(decoding: try #require(request.httpBody), as: UTF8.self)
-        #expect(body == #"{"channel":"C07FGNJS31T","text":"hello"}"#)
+        #expect(body == #"{"text":"hello","thread":"T1"}"# || body == #"{"thread":"T1","text":"hello"}"#)
         #expect(request.wireHeaders["Content-Type"] == "application/json")
     }
 
@@ -47,53 +47,14 @@ import Testing
     @Test func pollHistoryJSONIsTheWireBody() throws {
         let envelopes = try PluginEnvelopeList.decode(
             Data(#"""
-            [{"verb":"http.request","request_id":"poll-1","method":"POST","url":"https://slack.com/api/conversations.history","json":{"channel":"C07FGNJS31T","oldest":"1757192222.409000"}}]
+            [{"verb":"http.request","request_id":"poll-1","method":"POST","url":"https://api.example/conversation.history","json":{"thread":"T1","oldest":"1757192222.409000"}}]
             """#.utf8)
         )
         let request = try #require(try HostHTTPRequest.all(in: envelopes).first)
         let body = String(decoding: try #require(request.httpBody), as: UTF8.self)
-        #expect(body.contains(#""channel":"C07FGNJS31T""#))
+        #expect(body.contains(#""thread":"T1""#))
         #expect(body.contains(#""oldest":"1757192222.409000""#))
         #expect(request.wireHeaders["Content-Type"] == "application/json")
-        let wire = SlackWebAPIFormEncoding.rewritten(request)
-        #expect(wire.headers["Content-Type"] == "application/x-www-form-urlencoded")
-        let form = String(decoding: try #require(wire.body), as: UTF8.self)
-        #expect(form.contains("channel=C07FGNJS31T"))
-        #expect(form.contains("oldest=1757192222.409000"))
-        #expect(form.contains("inclusive=true"))
-    }
-
-    @Test func slackReplyJSONIsSentAsFormFields() throws {
-        let envelopes = try PluginEnvelopeList.decode(
-            Data(#"""
-            [{"verb":"http.request","request_id":"replies-1","method":"POST","url":"https://slack.com/api/conversations.replies","json":{"channel":"C07FGNJS31T","ts":"1788797826.445789"}}]
-            """#.utf8)
-        )
-        let request = try #require(try HostHTTPRequest.all(in: envelopes).first)
-        let wire = SlackWebAPIFormEncoding.rewritten(request)
-        #expect(wire.headers["Content-Type"] == "application/x-www-form-urlencoded")
-        let form = String(decoding: try #require(wire.body), as: UTF8.self)
-        #expect(form == "channel=C07FGNJS31T&ts=1788797826.445789")
-    }
-
-    @Test func slackHistoryGETAddsInclusiveWhenOldestIsSet() {
-        let url = "https://slack.com/api/conversations.history?channel=C07FGNJS31T&limit=200&oldest=1788805364.385569"
-        let rewritten = SlackWebAPIFormEncoding.rewrittenURL(url)
-        #expect(rewritten.contains("inclusive=true"))
-        #expect(rewritten.contains("oldest=1788805364.385569"))
-    }
-
-    @Test func slackChatPostMessageStaysJSON() throws {
-        let envelopes = try PluginEnvelopeList.decode(
-            Data(#"""
-            [{"verb":"http.request","request_id":"send-1","method":"POST","url":"https://slack.com/api/chat.postMessage","headers":{"Content-Type":"application/json"},"json":{"channel":"C1","text":"hello"}}]
-            """#.utf8)
-        )
-        let request = try #require(try HostHTTPRequest.all(in: envelopes).first)
-        let wire = SlackWebAPIFormEncoding.rewritten(request)
-        #expect(wire.headers["Content-Type"] == "application/json")
-        let body = String(decoding: try #require(wire.body), as: UTF8.self)
-        #expect(body == #"{"channel":"C1","text":"hello"}"#)
     }
 
     @Test func resultEmitDoesNotDecodeAsHTTPRequest() throws {

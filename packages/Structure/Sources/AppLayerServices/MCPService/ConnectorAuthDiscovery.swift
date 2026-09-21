@@ -82,24 +82,13 @@ public struct ConnectorAuthDiscovery: Codable, Sendable, Hashable {
         ConnectorAuthPreference.preferringCallCredential(self)
     }
 
-    /// Slack bot token when the classifier or crawl is unavailable.
-    public static func slackBotTokenFallback(crawlSummary: String? = nil) throws -> ConnectorAuthDiscovery {
+    /// Token field when the classifier or crawl has not named secrets yet.
+    public static func botTokenFallback(crawlSummary: String? = nil) throws -> ConnectorAuthDiscovery {
         ConnectorAuthDiscovery(
             authScheme: .botToken,
-            secrets: [PluginSecretField.slackBotToken],
-            permissions: [
-                "channels:history",
-                "channels:read",
-                "chat:write",
-                "groups:history",
-                "groups:read",
-                "im:history",
-                "im:read",
-                "mpim:history",
-                "mpim:read",
-                "users:read",
-            ],
-            setupHint: ConnectorReplyThreadAccessMessage.slackSetupHint,
+            secrets: [PluginSecretField.botToken],
+            permissions: [],
+            setupHint: ConnectorReplyThreadAccessMessage.readMessagesSetupHint,
             crawlSummary: crawlSummary
         )
     }

@@ -144,8 +144,8 @@ struct PluginsWorkspaceView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if controller.skillDraft.inferredConnectorVendor == .slack {
-                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                if controller.skillDraft.plannedKind == .messagingConnector {
+                    Text(ConnectorReplyThreadAccessMessage.readMessagesSetupHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

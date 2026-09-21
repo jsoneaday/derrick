@@ -127,8 +127,8 @@ struct CredentialsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(fields.contains(where: { !$0.hasStoredValue }) ? Color.orange : Color.secondary)
             }
-            if group.pluginID.localizedCaseInsensitiveContains("slack") {
-                Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+            if group.isConnector {
+                Text(ConnectorReplyThreadAccessMessage.readMessagesSetupHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

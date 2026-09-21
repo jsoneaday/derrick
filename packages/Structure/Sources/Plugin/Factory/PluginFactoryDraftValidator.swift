@@ -352,9 +352,6 @@ public enum PluginFactoryDraftValidator: Sendable {
         userGoal: String?
     ) -> [String] {
         guard let document = try? ConnectorContractStore.loadProtocol() else { return [] }
-        let vendor = try? ConnectorContractStore.loadVendor(
-            ConnectorContractStore.vendorName(fromUserGoal: userGoal) ?? ""
-        )
         let scopeID = PluginFactoryScopeHints.scopeID(from: userGoal)
         let scope = scopeID.flatMap { try? document.scope(id: $0) }
         var findings: [String] = []
@@ -373,7 +370,7 @@ public enum PluginFactoryDraftValidator: Sendable {
                     forbidden.append(contentsOf: scope?.pollMustNotCall ?? [])
                 }
             }
-            let needles = ConnectorContractStore.urlNeedles(forCallIDs: forbidden, vendor: vendor)
+            let needles = ConnectorContractStore.urlNeedles(forCallIDs: forbidden)
             guard let envelopes = try? PluginEnvelopeList.decode(hopRun.hopResults[index].stdout) else {
                 continue
             }

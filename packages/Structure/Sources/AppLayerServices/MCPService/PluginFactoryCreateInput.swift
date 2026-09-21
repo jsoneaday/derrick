@@ -15,7 +15,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public static var wizardCases: [ConnectorScope] { [.fullSync] }
 
         public var wizardSubtitle: String {
-            "List conversations as tabs, including Slack reply threads, then send and receive."
+            "List conversations as tabs, including reply threads, then send and receive."
         }
 
         public var requiredMessagingOps: [String] {
@@ -40,6 +40,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
 
     public enum ConnectorVendor: String, Codable, Sendable, CaseIterable {
         case slack
+        case slackClone = "slackclone"
         case telegram
         case whatsapp
         case discord
@@ -48,6 +49,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public var displayName: String {
             switch self {
             case .slack: return "Slack"
+            case .slackClone: return "SlackClone"
             case .telegram: return "Telegram"
             case .whatsapp: return "WhatsApp"
             case .discord: return "Discord"
@@ -55,11 +57,21 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             }
         }
 
-        /// Slack is the only vendor the wizard will create until others are ready.
-        public var isSelectableInWizard: Bool { self == .slack }
+        public var isSelectableInWizard: Bool { true }
 
         public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
-            pluginID.localizedCaseInsensitiveContains("slack")
+            !pluginID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        /// Match a stored plugin id. Check SlackClone before Slack so `slackclone-…` is not treated as Slack.
+        public static func inferred(fromPluginID pluginID: String) -> ConnectorVendor {
+            let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if id.contains("slackclone") { return .slackClone }
+            if id.contains("slack") { return .slack }
+            if id.contains("telegram") { return .telegram }
+            if id.contains("whatsapp") { return .whatsapp }
+            if id.contains("discord") { return .discord }
+            return .custom
         }
     }
 
@@ -172,7 +184,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             scope: scope,
             description: userDescription,
             pluginID: resolvedID,
-            auth: auth ?? (try? ConnectorAuthDiscovery.slackBotTokenFallback()),
+            auth: auth ?? (try? ConnectorAuthDiscovery.botTokenFallback()),
             skillMarkdown: nil
         )
     }
@@ -306,8 +318,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 inboxAPISummary: inboxAPISummary,
                 agentPluginSpecSummary: agentPluginSpecSummary,
                 agentPluginSpecSourceURL: agentPluginSpecSourceURL,
-                reference: extra.joined(separator: "\n"),
-                includeVendorBindings: true
+                reference: extra.joined(separator: "\n")
             )
         } catch {
             return """

@@ -1,0 +1,14 @@
+---
+description: Vendor APIs belong in guest plugins, not the host
+alwaysApply: true
+---
+
+# Vendors live in the guest
+
+The factory builds Go from vendor docs. That guest owns how to connect, send, and receive (URLs, form vs JSON, display names, which conversations are visible). It also owns the tests it submits while building.
+
+The host must not implement Slack, Telegram, Discord, WhatsApp, or other vendor HTTP — no form encoders, users.info, auth.test, conversation-list filters, bundled `contracts/vendors/*.json`, or vendor live/E2E harnesses in this repo.
+
+Host work: forward `http.request` as declared, attach declared secrets as Bearer/Basic, persist `result.emit`, render HostUI.
+
+If David asks for host-side vendor protocol code, tests, or harnesses, warn first.

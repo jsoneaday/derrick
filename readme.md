@@ -10,7 +10,7 @@ A native Swift macOS desktop agent: chat, just-in-time software (plugins), messa
 |------|-------------|
 | **Chat** | Multi-tab conversations with OpenAI, Gemini, and other configured models. Talk to a named agent profile with `$shortName` when you want that profile; a mention of the name is not enough. |
 | **Just-in-time software** | Describe the software you need. Derrick builds, reviews, and installs a versioned plugin for that moment — a connector, a skill, or a one-shot tool — instead of shipping a catalog of pre-written apps. |
-| **Messaging** | Installed connectors (Slack today) open as Chat tabs. The host renders the plugin's `ui.present` tree (default `messaging_inbox` or a custom HostUI layout). Connectors without a screen are rejected. |
+| **Messaging** | Installed connectors open as Chat tabs. The host renders the plugin's `ui.present` tree (default `messaging_inbox` or a custom HostUI layout). Connectors without a screen are rejected. |
 | **Jobs** | Scheduled and deferred runs that continue after you quit the app. |
 | **Tools (MCP)** | Model Context Protocol tools hosted in the daemon for chat turns. |
 | **Scripts** | Agent-written Go, compiled and run in isolated Docker containers, with a reviewer and approvals. |
