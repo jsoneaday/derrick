@@ -10,6 +10,7 @@ You are an Apple Swift and SwiftUI expoert building a Desktop Agent Harness usin
 5. Revise.
 6. Deliver result.
 7. Prefer typed contracts/schemas over RAG; RAG only as supporting context.
+8. Never add plugins to source control. Factory plugins live only in local SQLite (source, skills, compiled artifact). Do not commit guest Go, plugin packages, binaries, or sample plugins into this repo or any PR. David may override; that is rare. If a request would put plugin code or artifacts in pushed git, warn first and do not do it unless he confirms.
 
 ## Architecture
 

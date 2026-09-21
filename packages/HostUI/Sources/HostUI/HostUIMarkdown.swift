@@ -19,6 +19,12 @@ public enum HostUIMarkdown {
     }
 }
 
+extension AttributedString {
+    public var containsLinks: Bool {
+        runs.contains { $0.link != nil }
+    }
+}
+
 public struct HostUIMarkdownText: View {
     private let text: String
     private let fontSize: CGFloat

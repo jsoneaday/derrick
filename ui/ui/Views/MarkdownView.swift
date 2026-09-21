@@ -1,4 +1,5 @@
 import AppKit
+import HostUI
 import SwiftUI
 
 enum MarkdownBlock: Identifiable {
@@ -374,9 +375,8 @@ struct MarkdownResponseView: View {
     }
 
     private func markdownText(_ text: String) -> some View {
-        let attributed = (try? AttributedString(markdown: text)) ?? AttributedString(text)
-        return SelectableLinkTextView(
-            attributedString: attributed,
+        SelectableLinkTextView(
+            attributedString: HostUIMarkdown.attributed(text),
             fontSize: 15,
             textColor: .labelColor,
             maxIdealWidth: 720

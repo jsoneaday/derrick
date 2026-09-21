@@ -28,43 +28,20 @@ public struct HostUIButton: View {
     }
 
     public var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                }
-                Text(title)
+        let label = HStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage)
             }
-            .font(.system(size: 13, weight: .medium))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            Text(title)
         }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.45 : 1)
-        .modifier(HostUIButtonChromeModifier(chrome: chrome))
-    }
-}
-
-private struct HostUIButtonChromeModifier: ViewModifier {
-    let chrome: HostUIButtonChrome
-
-    func body(content: Content) -> some View {
+        let button = Button(action: action) { label }
+            .disabled(disabled)
+            .opacity(disabled ? 0.45 : 1)
         switch chrome {
         case .primary:
-            content
-                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(nsColor: .labelColor).opacity(0.85))
-                )
+            button.buttonStyle(HostUIPrimaryButtonStyle())
         case .secondary:
-            content
-                .foregroundStyle(.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
-                )
+            button.buttonStyle(HostUISecondaryButtonStyle())
         }
     }
 }
@@ -85,50 +62,83 @@ public struct HostUIText: View {
     }
 }
 
+public enum HostUITextFieldChrome: String, Sendable, Hashable {
+    /// Bordered field for forms and catalog `text_field`.
+    case form
+    /// Borderless field inside composer chrome.
+    case plain
+}
+
 public struct HostUITextField: View {
     @Binding private var text: String
     private let placeholder: String
     private let axis: Axis?
+    private let chrome: HostUITextFieldChrome
 
-    public init(_ placeholder: String, text: Binding<String>, axis: Axis? = nil) {
+    public init(
+        _ placeholder: String,
+        text: Binding<String>,
+        axis: Axis? = nil,
+        chrome: HostUITextFieldChrome = .form
+    ) {
         self.placeholder = placeholder
         self._text = text
         self.axis = axis
+        self.chrome = chrome
     }
 
     /// Labeled form-style field used by composers and factory forms.
     public init(
         placeholder: String,
         text: Binding<String>,
-        axis: Axis? = nil
+        axis: Axis? = nil,
+        chrome: HostUITextFieldChrome = .form
     ) {
         self.placeholder = placeholder
         self._text = text
         self.axis = axis
+        self.chrome = chrome
     }
 
     public var body: some View {
-        Group {
-            if let axis {
-                TextField(placeholder, text: $text, axis: axis)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        field
+            .textFieldStyle(.plain)
+            .modifier(HostUITextFieldChromeModifier(chrome: chrome, axis: axis))
+    }
+
+    @ViewBuilder
+    private var field: some View {
+        if let axis {
+            TextField(placeholder, text: $text, axis: axis)
+                .lineLimit(1...6)
+        } else {
+            TextField(placeholder, text: $text)
+        }
+    }
+}
+
+private struct HostUITextFieldChromeModifier: ViewModifier {
+    let chrome: HostUITextFieldChrome
+    let axis: Axis?
+
+    func body(content: Content) -> some View {
+        switch chrome {
+        case .plain:
+            content
+                .font(.system(size: 13))
+                .scrollContentBackground(.hidden)
+                .background(.clear)
+        case .form:
+            content
+                .padding(.horizontal, axis == .vertical ? 14 : 12)
+                .padding(.vertical, axis == .vertical ? 12 : 8)
+                .background(
+                    RoundedRectangle(
+                        cornerRadius: axis == .vertical ? 14 : 10,
+                        style: .continuous
                     )
-            } else {
-                TextField(placeholder, text: $text)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
-            }
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                )
         }
     }
 }

@@ -1,0 +1,12 @@
+---
+description: Factory plugins must never be committed to the Derrick repo
+alwaysApply: true
+---
+
+# Plugins stay out of source control
+
+Just-in-time plugins are stored in local SQLite (`plugin_factory_releases`), not in git.
+
+Never add to this repo or a PR: guest Go, skill files, compiled plugin binaries, plugin packages, or “sample” plugins.
+
+David may override; that is rare. If a request would put plugin code or artifacts into pushed source, warn first and stop unless he confirms.

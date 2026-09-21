@@ -1,3 +1,4 @@
+import HostUI
 import Structure
 import SwiftUI
 
@@ -231,21 +232,21 @@ struct MessagingConversationView: View {
                 Text("Destination ID")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Destination ID", text: $channelID)
-                    .textFieldStyle(.roundedBorder)
+                HostUITextField("Destination ID", text: $channelID)
                     .focused($channelFocused)
             }
 
             if !store.canComposeSendOnly {
                 HStack {
                     Spacer()
-                    Button {
+                    HostUIButton(
+                        "Connect to channel",
+                        systemImage: "antenna.radiowaves.left.and.right",
+                        disabled: channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || store.isConnectorSyncing
+                    ) {
                         Task { await store.connectToChannel(channelID) }
-                    } label: {
-                        Label("Connect to channel", systemImage: "antenna.radiowaves.left.and.right")
                     }
-                    .buttonStyle(ModalPrimaryButtonStyle())
-                    .disabled(channelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isConnectorSyncing)
                 }
             }
 
@@ -253,27 +254,18 @@ struct MessagingConversationView: View {
                 Text("Message")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Message", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
+                HostUITextField("Message", text: $draft, axis: .vertical)
                     .focused($composerFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
             }
 
             HStack {
                 Spacer()
-                Button {
-                    submitChannelCompose()
-                } label: {
-                    Label(store.isSending ? "Sending…" : "Send message", systemImage: "paperplane.fill")
-                }
-                .buttonStyle(ModalPrimaryButtonStyle())
-                .disabled(!canSubmitChannelCompose)
+                HostUIButton(
+                    store.isSending ? "Sending…" : "Send message",
+                    systemImage: "paperplane.fill",
+                    disabled: !canSubmitChannelCompose,
+                    action: submitChannelCompose
+                )
             }
 
             if let error = store.lastError {

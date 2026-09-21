@@ -121,9 +121,3 @@ final class MeasuringLinkTextView: NSTextView {
         return max(ceil(used.width), 1)
     }
 }
-
-extension AttributedString {
-    var containsLinks: Bool {
-        runs.contains { $0.link != nil }
-    }
-}
