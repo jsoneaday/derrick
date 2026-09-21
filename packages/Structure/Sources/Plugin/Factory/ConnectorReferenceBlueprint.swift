@@ -30,7 +30,9 @@ public enum ConnectorReferenceBlueprint: Sendable {
             - If conversations.list returns ok false, emit title/summary with the vendor error; do not emit threads: []
             - Use conversations.history for channel poll_inbox; conversations.replies when params.parent_vendor_message_id or thread_ts is set
             - Channel history with oldest/since must set inclusive=true so the parent message (and its reply_count) is returned
+            - Send history and replies using the request shape Slack documents (query or form). The host will not convert JSON to form.
             - Use chat.postMessage for send_message (include thread_ts when sending a reply)
+            - Emit display names on messages; do not emit the bot's own messages as inbound
             """,
         ]
         parts.append(scope.slackTestFixtureGuide)

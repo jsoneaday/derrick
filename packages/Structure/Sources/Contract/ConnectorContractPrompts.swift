@@ -119,7 +119,12 @@ public enum ConnectorContractPrompts: Sendable {
             selection=conversations means the host opens the first conversation immediately — do not request an empty screen. \
             Do not add error or timeout widgets; the host shows those only after a later command fails. \
             Do not invent vendor widgets. Follow crawled API notes for nesting. \
-            Keep http hops for vendor calls. The host validates, records, and persists ui.present, then finishes that hop — \
+            Keep http hops for vendor calls. The host forwards each http.request as you declared \
+            (URL, method, headers, json body). It does not rewrite vendor APIs, convert JSON to form, \
+            add query flags, or call vendor user-info endpoints. Follow the vendor docs for request shape. \
+            Emit human sender names on messages. Do not emit the bot's own messages as inbound. \
+            Filter conversations this token cannot access before result.emit. \
+            The host validates, records, and persists ui.present, then finishes that hop — \
             do not wait for another guest run after present. \
             Prefer typed HostUIDisclosure.elementSchema(id:) / exampleTree(named:) over RAG when you need control or service details. \
             skill_files must include at least one skills/<name>/SKILL.md (Agent Skills required).

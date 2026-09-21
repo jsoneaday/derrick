@@ -99,7 +99,7 @@ public struct ConnectorAuthDiscovery: Codable, Sendable, Hashable {
                 "mpim:read",
                 "users:read",
             ],
-            setupHint: ConnectorReplyThreadAccessMessage.slackSetupHint,
+            setupHint: ConnectorReplyThreadAccessMessage.readMessagesSetupHint,
             crawlSummary: crawlSummary
         )
     }

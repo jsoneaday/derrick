@@ -595,7 +595,7 @@ import Testing
             )
             Issue.record("Expected missing_scope to fail the reply poll")
         } catch let error as ConnectorMessagingError {
-            #expect(error.localizedDescription == ConnectorReplyThreadAccessMessage.slackBlockedThread)
+            #expect(error.localizedDescription == ConnectorReplyThreadAccessMessage.readPermissionBlocked)
         } catch {
             Issue.record("Unexpected error \(error)")
         }

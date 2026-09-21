@@ -1,6 +1,5 @@
 import Foundation
 import DBRepository
-import DerrickBackend
 import MCP
 import MCPClient
 import MCPServer
@@ -36,8 +35,6 @@ actor MCPServiceToolHost {
         // Network host preflight runs in AgentService (reverse-XPC to UI) before callTool.
         await HostHTTPClient.shared.setAccessGate(BlacklistHTTPAccessGate(repository: repo))
         await HostHTTPClient.shared.setSecretAttacher(PluginDeclaredSecretAttacher())
-        await HostHTTPClient.shared.setRequestRewriter(SlackWebAPIFormEncoding())
-        await SlackVendorHost.install()
         let factorySettings = await MainActor.run {
             LLMModelSettings(repository: repo)
         }

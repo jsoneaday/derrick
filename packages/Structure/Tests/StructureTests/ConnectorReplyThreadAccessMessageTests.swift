@@ -2,11 +2,11 @@ import Testing
 @testable import Structure
 
 @Suite struct ConnectorReplyThreadAccessMessageTests {
-    @Test func mapsSlackMissingScopeToReadPermissionCopy() {
+    @Test func mapsMissingScopeToReadPermissionCopy() {
         let message = ConnectorReplyThreadAccessMessage.userFacing(
             fromVendorDetail: "Slack replies failed: missing_scope"
         )
-        #expect(message == ConnectorReplyThreadAccessMessage.slackBlockedThread)
+        #expect(message == ConnectorReplyThreadAccessMessage.readPermissionBlocked)
         #expect(message?.localizedCaseInsensitiveContains("missing_scope") != true)
     }
 

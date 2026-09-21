@@ -34,8 +34,6 @@ enum SlackConnectorBootstrapProbe {
 
         await HostHTTPClient.shared.setAccessGate(AllowAllHostHTTPAccessGate())
         await HostHTTPClient.shared.setSecretAttacher(HarnessSecretAttacher(pluginID: pluginID))
-        await HostHTTPClient.shared.setRequestRewriter(SlackWebAPIFormEncoding())
-        await SlackVendorHost.install()
 
         let summaries = try await repository.listPluginFactoryReleaseSummaries()
         guard let summary = summaries.first(where: { $0.pluginID == pluginID }) else {

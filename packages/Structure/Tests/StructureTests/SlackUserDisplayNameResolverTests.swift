@@ -13,8 +13,7 @@ import Testing
         )
     }
 
-    @Test func unresolvedOpaqueIdStaysUnchangedWithoutAdapter() async {
-        await VendorActorDirectory.shared.setDisplayNameResolver(nil)
+    @Test func hostDoesNotRewriteOpaqueIds() async {
         let sender = await MessagingSenderDisplayName.resolve(
             pluginID: "any",
             sender: "U07FKG8DV19"

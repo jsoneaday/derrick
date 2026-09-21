@@ -1,0 +1,16 @@
+---
+description: Vendor APIs belong in guest plugins, not the host
+alwaysApply: true
+---
+
+# Vendors live in the guest
+
+The factory builds Go from vendor docs. That guest owns how to connect, send, and receive (URLs, form vs JSON, display names, which conversations are visible).
+
+The host must not implement Slack, Telegram, Discord, WhatsApp, or other vendor HTTP — no form encoders, users.info, auth.test, or conversation-list filters in Structure, HostUI, or DerrickBackend.
+
+Host work: forward `http.request` as declared, attach secrets, persist `result.emit`, render HostUI.
+
+Allowed: `contracts/vendors/*.json` as builder input; Slack MCP harnesses as tests. Not allowed: host runtime that speaks a vendor.
+
+If David asks for host-side vendor protocol code, warn first.

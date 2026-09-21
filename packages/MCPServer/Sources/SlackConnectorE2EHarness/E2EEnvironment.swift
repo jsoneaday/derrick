@@ -66,8 +66,6 @@ struct E2EEnvironment {
 
         await HostHTTPClient.shared.setAccessGate(AllowAllHostHTTPAccessGate())
         await HostHTTPClient.shared.setSecretAttacher(HarnessSecretAttacher(pluginID: pluginID))
-        await HostHTTPClient.shared.setRequestRewriter(SlackWebAPIFormEncoding())
-        await SlackVendorHost.install()
 
         return E2EEnvironment(
             repository: repository,

@@ -145,7 +145,7 @@ struct PluginsWorkspaceView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if controller.skillDraft.inferredConnectorVendor == .slack {
-                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                    Text(ConnectorReplyThreadAccessMessage.readMessagesSetupHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

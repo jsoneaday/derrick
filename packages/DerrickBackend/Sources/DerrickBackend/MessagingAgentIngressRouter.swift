@@ -75,14 +75,6 @@ public enum MessagingAgentIngressRouter: Sendable {
         guard !body.isEmpty else { return nil }
         guard !ConnectorMentionParser.isAutomatedOutboundEcho(body: body) else { return nil }
 
-        let botUserID = await VendorActorDirectory.shared
-            .selfActorID(pluginID: row.thread.pluginID)
-            ?? ""
-        if !botUserID.isEmpty,
-           message.sender.trimmingCharacters(in: .whitespacesAndNewlines) == botUserID {
-            return nil
-        }
-
         guard let vendorMessageID = message.vendorMessageID?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !vendorMessageID.isEmpty
@@ -109,7 +101,6 @@ public enum MessagingAgentIngressRouter: Sendable {
 
         guard let resolved = ConnectorMentionParser.resolvePrompt(
             body: body,
-            botUserID: botUserID,
             continuationProfileHandle: continuation,
             channelDefaultProfileHandle: row.thread.defaultAgentProfileHandle,
             profileCatalog: (try? await profileCatalog(repository: repository)) ?? []

@@ -37,7 +37,7 @@ struct ConnectorCredentialForm: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if prompt == nil, pluginID.localizedCaseInsensitiveContains("slack") {
-                    Text(ConnectorReplyThreadAccessMessage.slackSetupHint)
+                    Text(ConnectorReplyThreadAccessMessage.readMessagesSetupHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -98,7 +98,7 @@ public enum ConnectorMentionParser: Sendable {
         return "[\(DerrickAppSupport.hostAppProductName):\(handle)]"
     }
 
-    /// Slack-style thread: reply under the inbound message, or stay in an existing thread.
+    /// Reply under the inbound message, or stay in an existing thread.
     public static func agentReplyThreadParentVendorMessageID(
         inboundVendorMessageID: String,
         existingParentVendorMessageID: String?
@@ -110,25 +110,6 @@ public enum ConnectorMentionParser: Sendable {
         return inboundVendorMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public static func mentionsSlackUser(body: String, userID: String) -> Bool {
-        let trimmedID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedID.isEmpty else { return false }
-        return body.contains("<@\(trimmedID)>")
-            || body.contains("<@\(trimmedID)|")
-    }
-
-    public static func stripSlackUserMention(body: String, userID: String) -> String {
-        let trimmedID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedID.isEmpty else { return body }
-        let pattern = #"<@\#(trimmedID)(?:\|[^>]+)?>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return body
-        }
-        let range = NSRange(body.startIndex..<body.endIndex, in: body)
-        let stripped = regex.stringByReplacingMatches(in: body, range: range, withTemplate: "")
-        return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     public static func isAutomatedOutboundEcho(body: String) -> Bool {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("[") else { return false }
@@ -138,17 +119,12 @@ public enum ConnectorMentionParser: Sendable {
 
     public static func resolvePrompt(
         body: String,
-        botUserID: String,
         continuationProfileHandle: String? = nil,
         channelDefaultProfileHandle: String? = nil,
         profileCatalog: [AgentProfileCatalogEntry] = []
     ) -> (profileHandle: String, prompt: String)? {
-        let mentioned = mentionsSlackUser(body: body, userID: botUserID)
-        let withoutMention = mentioned
-            ? stripSlackUserMention(body: body, userID: botUserID)
-            : body.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parsed = AgentProfileTokenParser.parse(message: withoutMention)
-        let channelDefault = channelDefaultProfileHandle.flatMap { AgentProfileHandle.normalize($0) }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = AgentProfileTokenParser.parse(message: trimmed)
         let continuation = AgentProfileHandle.normalize(continuationProfileHandle ?? "")
 
         let handle: String
@@ -156,13 +132,11 @@ public enum ConnectorMentionParser: Sendable {
         if let parsedHandle = parsed.handle {
             handle = parsedHandle
             promptSource = parsed.body
-        } else if mentioned {
-            handle = channelDefault ?? AgentProfileHandle.orchestrator
-            promptSource = parsed.body
         } else if let continuation {
             handle = continuation
-            promptSource = withoutMention
+            promptSource = trimmed
         } else {
+            _ = channelDefaultProfileHandle
             return nil
         }
 
