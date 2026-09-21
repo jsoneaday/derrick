@@ -2,13 +2,11 @@
 
 /// SHA-256 of connector protocol JSON and schemas. `swift test` fails when this is stale.
 public enum ConnectorContractFingerprint: Sendable {
-    public static let sha256 = "c97d1a11a2471371f9865d73e96b3bf07f92c5e2ede7a27ec15d66962dc14565"
+    public static let sha256 = "855eb78d05390b3b0f65b473a53ea07bd9f62508b664719304b41f09aea90f59"
     public static let sourceFiles: [String] = [
         "schemas/connector-contract.schema.json",
         "schemas/connector-params.schema.json",
         "schemas/connector-result-emit.schema.json",
-        "schemas/connector-vendor.schema.json",
         "contracts/connector-contract.json",
-        "contracts/vendors/slack.json",
     ]
 }

@@ -141,7 +141,7 @@ import Testing
 
         session.accessDiscovery = ConnectorAuthDiscovery(
             authScheme: .botToken,
-            secrets: [PluginSecretField.slackBotToken],
+            secrets: [PluginSecretField.botToken],
             setupHint: "Slack apps authenticate with a bot token that can read and send messages.",
             crawlSummary: "Bot tokens are created in the Slack API dashboard."
         )

@@ -22,11 +22,8 @@ import Testing
         #expect(document.rules.directTestRequiresUIPresent)
     }
 
-    @Test func slackVendorProfileBindsCallIDs() throws {
-        let slack = try ConnectorContractStore.loadVendor("slack")
-        #expect(slack?.calls["conversation.list"]?.method == "conversations.list")
-        #expect(slack?.calls["message.send"]?.method == "chat.postMessage")
-        #expect(try ConnectorContractStore.loadVendor("telegram") == nil)
+    @Test func protocolHasNoBundledVendorHTTPProfile() {
+        #expect(ConnectorContractFingerprint.sourceFiles.contains { $0.contains("vendors/") } == false)
     }
 
     @Test func resolveActorDisplayNameContractIsBundled() throws {
@@ -51,13 +48,11 @@ import Testing
         let emitText = try GuestContract.loadSchemaText(.connectorResultEmit)
         let hopText = try GuestContract.loadSchemaText(.hopEvent)
         let envelopeText = try GuestContract.loadSchemaText(.envelopeList)
-        let slackText = try #require(try ConnectorContractStore.loadVendorText("slack"))
         #expect(goal.contains(protocolText))
         #expect(goal.contains(paramsText))
         #expect(goal.contains(emitText))
         #expect(goal.contains(hopText))
         #expect(goal.contains(envelopeText))
-        #expect(goal.contains(slackText))
         #expect(goal.contains("--- \(GuestContract.Schema.connectorParams.rawValue) ---"))
         #expect(goal.contains("--- \(GuestContract.Schema.connectorResultEmit.rawValue) ---"))
         #expect(goal.contains("--- \(GuestContract.Schema.hopEvent.rawValue) ---"))
@@ -82,10 +77,10 @@ import Testing
         #expect(!goal.contains("Return go_source and test_input_json only"))
         #expect(ConnectorContractPrompts.reviewerGuide().contains("If a rule is not in the JSON"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- connector-contract.json ---"))
-        #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- vendor slack ---"))
+        #expect(!ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- vendor slack ---"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("host UI catalog (summary)"))
         #expect(!ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- host-ui-library.json ---"))
-        #expect(ConnectorContractPrompts.reviewerGuide(forUserGoal: goal).contains("--- vendor slack ---"))
+        #expect(!ConnectorContractPrompts.reviewerGuide(forUserGoal: goal).contains("--- vendor slack ---"))
         #expect(!ConnectorContractPrompts.builderGuide().contains("--- vendor slack ---"))
         #expect(ConnectorContractPrompts.builderGuide(forUserGoal: goal).contains("--- \(GuestContract.Schema.connectorParams.rawValue) ---"))
     }
@@ -128,7 +123,7 @@ import Testing
         try expectDirectTestFailure(
             containing: "must not call",
             hopRun: try legalSlackFullSyncHopRun(
-                syncURL: "https://slack.com/api/conversations.history?channel=C1"
+                syncURL: "https://api.example/conversation.history?thread=T1"
             )
         )
     }
@@ -137,7 +132,7 @@ import Testing
         try expectDirectTestFailure(
             containing: "must not call",
             hopRun: try legalSlackFullSyncHopRun(
-                channelPollURL: "https://slack.com/api/conversations.replies?channel=C1&ts=1"
+                channelPollURL: "https://api.example/conversation.replies?thread=T1"
             )
         )
     }
@@ -146,7 +141,7 @@ import Testing
         try expectDirectTestFailure(
             containing: "must not call",
             hopRun: try legalSlackFullSyncHopRun(
-                replyPollURL: "https://slack.com/api/conversations.history?channel=C1"
+                replyPollURL: "https://api.example/conversation.history?thread=T1"
             )
         )
     }
@@ -157,7 +152,7 @@ import Testing
             containing: "must not call",
             draft: slackFullSyncDraft(testInput: testInput),
             hopRun: try legalSlackFullSyncHopRun(
-                syncURL: "https://slack.com/api/conversations.history?channel=C1"
+                syncURL: "https://api.example/conversation.history?thread=T1"
             )
         )
     }
@@ -202,7 +197,7 @@ import Testing
     @Test func validatorRejectsUnknownHostUIPresentElement() throws {
         try expectDirectTestFailure(
             containing: "valid host UI",
-            hopRun: try legalSlackFullSyncHopRun(presentRootJSON: #"{"element":"slack_channel_list"}"#)
+            hopRun: try legalSlackFullSyncHopRun(presentRootJSON: #"{"element":"unknown_channel_list"}"#)
         )
     }
 
@@ -291,10 +286,10 @@ private func slackFullSyncTestInput(
 }
 
 private func legalSlackFullSyncHopRun(
-    syncURL: String = "https://slack.com/api/conversations.list",
-    channelPollURL: String = "https://slack.com/api/conversations.history?channel=C1",
-    replyPollURL: String = "https://slack.com/api/conversations.replies?channel=C1&ts=1",
-    sendURL: String = "https://slack.com/api/chat.postMessage",
+    syncURL: String = "https://api.example/conversation.list",
+    channelPollURL: String = "https://api.example/conversation.history?thread=T1",
+    replyPollURL: String = "https://api.example/conversation.replies?thread=T1",
+    sendURL: String = "https://api.example/message.send",
     threadsJSON: String = #"[{"vendor_thread_id":"C1","title":"general"}]"#,
     messagesJSON: String = #"[{"vendor_thread_id":"C1","vendor_message_id":"1","direction":"inbound","sender":"a","body":"hi","created_at":"1"}]"#,
     includePresent: Bool = true,

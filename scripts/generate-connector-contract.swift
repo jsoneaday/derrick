@@ -18,9 +18,7 @@ let sources: [(relative: String, url: URL)] = [
     "schemas/connector-contract.schema.json",
     "schemas/connector-params.schema.json",
     "schemas/connector-result-emit.schema.json",
-    "schemas/connector-vendor.schema.json",
     "contracts/connector-contract.json",
-    "contracts/vendors/slack.json",
 ].map { relative in
     (relative, resources.appendingPathComponent(relative))
 }
@@ -88,13 +86,6 @@ func validateGraph() throws {
         }
     }
 
-    let vendorSchema = try jsonObject(resources.appendingPathComponent("schemas/connector-vendor.schema.json"))
-    let slack = try jsonObject(resources.appendingPathComponent("contracts/vendors/slack.json"))
-    try requireKeys(slack, vendorSchema["required"] as? [String] ?? [], file: "vendors/slack.json")
-    let calls = slack["calls"] as? [String: Any] ?? [:]
-    if calls.isEmpty {
-        throw ScriptError("vendors/slack.json calls must not be empty.")
-    }
 }
 
 func fingerprint() throws -> String {

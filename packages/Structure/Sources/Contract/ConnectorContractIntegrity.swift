@@ -23,19 +23,6 @@ public enum ConnectorContractIntegrity: Sendable {
         try validateParamsCoverOps(contract: contractJSON, paramsSchema: paramsSchema)
         try validateEmitCoversOps(contract: contractJSON, emitSchema: emitSchema)
         try validateHostEnums(contract: contractJSON, paramsSchema: paramsSchema)
-
-        let slackData = try ConnectorContractStore.resourceData(
-            name: "slack.json",
-            subdirectory: "contracts/vendors"
-        )
-        let slackJSON: [String: Any]
-        do {
-            slackJSON = try JSONSchema.object(from: slackData, name: "vendors/slack.json")
-        } catch {
-            throw ConnectorContractError.invalidJSON("vendors/slack.json")
-        }
-        try validateAgainstSchema(slackJSON, schema: .connectorVendor)
-        try validateVendorCallIDs(contract: contractJSON, vendor: slackJSON)
     }
 
     private static func validateAgainstSchema(_ instance: Any, schema: GuestContract.Schema) throws {
@@ -142,43 +129,6 @@ public enum ConnectorContractIntegrity: Sendable {
         guard scopeIDs == hostScopes else {
             throw ConnectorContractError.integrityFailed(
                 "connector-contract.json scopes must match ConnectorScope."
-            )
-        }
-    }
-
-    private static func validateVendorCallIDs(
-        contract: [String: Any],
-        vendor: [String: Any]
-    ) throws {
-        let calls = Set(((vendor["calls"] as? [String: Any]) ?? [:]).keys)
-        var referenced: Set<String> = []
-        func collect(_ values: Any?) {
-            if let ids = values as? [String] {
-                referenced.formUnion(ids)
-            }
-        }
-        guard let ops = contract["ops"] as? [String: Any] else { return }
-        for raw in ops.values {
-            guard let spec = raw as? [String: Any] else { continue }
-            collect(spec["may_call"])
-            collect(spec["must_not_call"])
-            if let whenNoParent = spec["when_no_parent"] as? [String: Any] {
-                collect(whenNoParent["may_call"])
-            }
-            if let whenParent = spec["when_parent"] as? [String: Any] {
-                collect(whenParent["may_call"])
-            }
-        }
-        if let scopes = contract["scopes"] as? [String: Any] {
-            for raw in scopes.values {
-                guard let spec = raw as? [String: Any] else { continue }
-                collect(spec["poll_must_not_call"])
-            }
-        }
-        let missing = referenced.subtracting(calls)
-        if !missing.isEmpty {
-            throw ConnectorContractError.integrityFailed(
-                "Slack vendor profile is missing call ids: \(missing.sorted().joined(separator: ", "))."
             )
         }
     }

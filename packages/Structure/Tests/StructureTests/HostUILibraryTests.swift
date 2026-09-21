@@ -92,7 +92,7 @@ import Testing
 
     @Test func presentPayloadRejectsUnknownElement() {
         let payload: [String: PluginJSON] = [
-            "root": .object(["element": .string("slack_channel_list")]),
+            "root": .object(["element": .string("unknown_channel_list")]),
         ]
         #expect(throws: HostUILibraryError.self) {
             try HostUILibraryStore.node(fromPresentPayload: payload)

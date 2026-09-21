@@ -252,8 +252,7 @@ public enum PluginSkillDraftPlanner {
                 scope: .fullSync,
                 vendor: vendor,
                 crawlSummary: crawlSummary,
-                reference: extra.joined(separator: "\n"),
-                includeVendorBindings: true
+                reference: extra.joined(separator: "\n")
             )
         case .customCapability:
             return """
@@ -314,7 +313,7 @@ public enum PluginSkillDraftPlanner {
     private static func defaultExamples(for draft: PluginSkillDraft) -> [PluginSkillDraft.Example] {
         switch inferKind(from: draft) {
         case .messagingConnector:
-            let vendor = inferConnectorVendor(from: draft)?.displayName ?? "Slack"
+            let vendor = inferConnectorVendor(from: draft)?.displayName ?? "messaging"
             return [
                 PluginSkillDraft.Example(
                     userSays: "Show my \(vendor) channels",

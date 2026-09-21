@@ -215,12 +215,15 @@ private struct FindingWire: Decodable {
 
 public enum HarnessError: Error, CustomStringConvertible {
     case missingAPIKey
+    case missingUserGoal
     case invalidModelJSON(String)
 
     public var description: String {
         switch self {
         case .missingAPIKey:
             return "OPENAI_API_KEY is not set."
+        case .missingUserGoal:
+            return "FACTORY_USER_GOAL is not set."
         case .invalidModelJSON(let role):
             return "The \(role) returned invalid JSON."
         }

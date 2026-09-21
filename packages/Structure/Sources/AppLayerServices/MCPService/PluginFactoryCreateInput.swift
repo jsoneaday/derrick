@@ -15,7 +15,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public static var wizardCases: [ConnectorScope] { [.fullSync] }
 
         public var wizardSubtitle: String {
-            "List conversations as tabs, including Slack reply threads, then send and receive."
+            "List conversations as tabs, including reply threads, then send and receive."
         }
 
         public var requiredMessagingOps: [String] {
@@ -55,11 +55,10 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             }
         }
 
-        /// Slack is the only vendor the wizard will create until others are ready.
-        public var isSelectableInWizard: Bool { self == .slack }
+        public var isSelectableInWizard: Bool { true }
 
         public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
-            pluginID.localizedCaseInsensitiveContains("slack")
+            !pluginID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -172,7 +171,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
             scope: scope,
             description: userDescription,
             pluginID: resolvedID,
-            auth: auth ?? (try? ConnectorAuthDiscovery.slackBotTokenFallback()),
+            auth: auth ?? (try? ConnectorAuthDiscovery.botTokenFallback()),
             skillMarkdown: nil
         )
     }
@@ -306,8 +305,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                 inboxAPISummary: inboxAPISummary,
                 agentPluginSpecSummary: agentPluginSpecSummary,
                 agentPluginSpecSourceURL: agentPluginSpecSourceURL,
-                reference: extra.joined(separator: "\n"),
-                includeVendorBindings: true
+                reference: extra.joined(separator: "\n")
             )
         } catch {
             return """
