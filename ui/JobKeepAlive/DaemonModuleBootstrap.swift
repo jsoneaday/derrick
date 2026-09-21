@@ -6,6 +6,7 @@ import DBRepository
 /// Boots MCP / Agent / Jobs modules inside derrickd (in-process, no peer mesh).
 enum DaemonModuleBootstrap {
     static func startAllModules() async {
+        await SlackVendorHost.install()
         // Mark in-process mesh ready before scheduler claims work.
         JobServiceMeshState.shared.markInProcessReady()
         InProcessServiceBridges.messagingAgentRoute = { route in

@@ -33,6 +33,7 @@ public actor HostHTTPClient {
 
     private var accessGate: any HostHTTPAccessGate = AllowAllHostHTTPAccessGate()
     private var secretAttacher: (any HostHTTPSecretAttacher)?
+    private var requestRewriter: any HostHTTPRequestRewriting = PassthroughHTTPRequestRewriter()
     private let session: URLSession
 
     public init() {
@@ -55,9 +56,13 @@ public actor HostHTTPClient {
         secretAttacher = attacher
     }
 
+    public func setRequestRewriter(_ rewriter: any HostHTTPRequestRewriting) {
+        requestRewriter = rewriter
+    }
+
     public func perform(_ request: HostHTTPRequest, invokeID: String = "") async -> HostHTTPFetch {
         let trimmed = request.url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wire = SlackWebAPIFormEncoding.rewritten(request)
+        let wire = requestRewriter.rewritten(request)
         let wireURL = wire.url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = URL(string: wireURL), url.scheme != nil, url.host != nil else {
             return HostHTTPFetch(status: 0, headers: [:], body: "", error: "invalid_url")

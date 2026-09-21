@@ -1,0 +1,12 @@
+{
+  "id": "resolve-actor-display-name",
+  "version": 1,
+  "description": "Host maps opaque vendor actor ids to display names through a registered adapter. Structure must not call vendor HTTP or use the plugin token. Prefer sender_display_name on result.emit when the guest already has a name. Slack users.info is a DerrickBackend adapter, not a Structure type.",
+  "host": {
+    "input": ["plugin_id", "actor_id"],
+    "output": ["display_name"]
+  },
+  "guest_emit": {
+    "optional_fields": ["sender_display_name"]
+  }
+}

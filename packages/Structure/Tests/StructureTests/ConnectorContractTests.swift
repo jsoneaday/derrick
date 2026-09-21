@@ -29,6 +29,12 @@ import Testing
         #expect(try ConnectorContractStore.loadVendor("telegram") == nil)
     }
 
+    @Test func resolveActorDisplayNameContractIsBundled() throws {
+        let data = try ConnectorContractStore.loadHostContract("resolve-actor-display-name")
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["id"] as? String == "resolve-actor-display-name")
+    }
+
     @Test func fingerprintMatchesGeneratedFile() throws {
         #expect(try ConnectorContractStore.computeFingerprint() == ConnectorContractFingerprint.sha256)
         #expect(ConnectorContractFingerprint.sourceFiles == ConnectorContractStore.fingerprintSources)

@@ -138,11 +138,6 @@ import Testing
         #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "plain inbound") == false)
     }
 
-    @Test func parseBotUserIDFromAuthTestPayload() {
-        let json = Data(#"{"ok":true,"user_id":"U07BOT","bot_id":"B07BOT"}"#.utf8)
-        #expect(SlackBotIdentityResolver.parseBotUserID(from: json) == "U07BOT")
-    }
-
     @Test func agentReplyThreadsUnderInboundRootWhenNoParent() {
         let inbound = "1710000002.000200"
         let parent = ConnectorMentionParser.agentReplyThreadParentVendorMessageID(

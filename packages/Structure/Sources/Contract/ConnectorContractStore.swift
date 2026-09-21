@@ -44,6 +44,10 @@ public enum ConnectorContractStore: Sendable {
         return try utf8Text(Data(contentsOf: url))
     }
 
+    public static func loadHostContract(_ name: String) throws -> Data {
+        try resourceData(name: "\(name).json", subdirectory: "contracts/host")
+    }
+
     private static func utf8Text(_ data: Data) throws -> String {
         guard let text = String(data: data, encoding: .utf8) else {
             throw ConnectorContractError.invalidJSON(protocolResource)

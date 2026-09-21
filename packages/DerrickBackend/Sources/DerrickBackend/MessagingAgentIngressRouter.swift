@@ -75,8 +75,8 @@ public enum MessagingAgentIngressRouter: Sendable {
         guard !body.isEmpty else { return nil }
         guard !ConnectorMentionParser.isAutomatedOutboundEcho(body: body) else { return nil }
 
-        let botUserID = await SlackBotIdentityResolver.Cache.shared
-            .botUserID(pluginID: row.thread.pluginID)
+        let botUserID = await VendorActorDirectory.shared
+            .selfActorID(pluginID: row.thread.pluginID)
             ?? ""
         if !botUserID.isEmpty,
            message.sender.trimmingCharacters(in: .whitespacesAndNewlines) == botUserID {

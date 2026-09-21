@@ -1,4 +1,5 @@
 import Foundation
+import Structure
 
 /// Slack Web API read methods (`conversations.history`, `conversations.replies`).
 ///
@@ -6,25 +7,19 @@ import Foundation
 /// `inclusive`. Slack rejects JSON on those methods (`invalid_arguments`) and
 /// excludes the `oldest` timestamp unless `inclusive` is true, so parent
 /// `reply_count` never updates and nested replies are never fetched.
-public enum SlackWebAPIFormEncoding: Sendable {
-    public struct WireRequest: Equatable, Sendable {
-        public var url: String
-        public var headers: [String: String]
-        public var body: Data?
+public struct SlackWebAPIFormEncoding: HostHTTPRequestRewriting {
+    public init() {}
 
-        public init(url: String, headers: [String: String], body: Data?) {
-            self.url = url
-            self.headers = headers
-            self.body = body
-        }
+    public func rewritten(_ request: HostHTTPRequest) -> HostHTTPWireRequest {
+        Self.rewritten(request)
     }
 
-    public static func rewritten(_ request: HostHTTPRequest) -> WireRequest {
+    public static func rewritten(_ request: HostHTTPRequest) -> HostHTTPWireRequest {
         let url = rewrittenURL(request.url)
         guard shouldRewrite(url: request.url),
               let form = formBody(from: request.json)
         else {
-            return WireRequest(
+            return HostHTTPWireRequest(
                 url: url,
                 headers: request.wireHeaders,
                 body: request.httpBody
@@ -33,7 +28,7 @@ public enum SlackWebAPIFormEncoding: Sendable {
         var headers = request.wireHeaders
         headers = headers.filter { $0.key.caseInsensitiveCompare("Content-Type") != .orderedSame }
         headers["Content-Type"] = "application/x-www-form-urlencoded"
-        return WireRequest(url: url, headers: headers, body: form)
+        return HostHTTPWireRequest(url: url, headers: headers, body: form)
     }
 
     public static func shouldRewrite(url: String) -> Bool {
