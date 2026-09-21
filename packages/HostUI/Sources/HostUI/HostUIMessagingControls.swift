@@ -120,6 +120,7 @@ public struct HostUIMessageRow: Identifiable, Hashable, Sendable {
 public struct HostUIMessage: View {
     private let row: HostUIMessageRow
     private let onOpenThread: (() -> Void)?
+    @Environment(\.hostUIPaneWidth) private var paneWidth
 
     public init(row: HostUIMessageRow, onOpenThread: (() -> Void)? = nil) {
         self.row = row
@@ -127,8 +128,9 @@ public struct HostUIMessage: View {
     }
 
     public var body: some View {
+        let gutter = HostUIMessagingLayout.oppositeGutter(forPane: paneWidth)
         HStack(alignment: .top, spacing: 0) {
-            if row.outbound { Spacer(minLength: HostUIMessagingLayout.oppositeGutter) }
+            if row.outbound { Spacer(minLength: gutter) }
             VStack(alignment: row.outbound ? .trailing : .leading, spacing: 4) {
                 if !row.sender.isEmpty {
                     Text(row.sender)
@@ -144,7 +146,7 @@ public struct HostUIMessage: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: row.outbound ? .trailing : .leading)
-            if !row.outbound { Spacer(minLength: HostUIMessagingLayout.oppositeGutter) }
+            if !row.outbound { Spacer(minLength: gutter) }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -194,6 +196,7 @@ public struct HostUIMessageList: View {
     private let onNearBottomChange: ((Bool) -> Void)?
     private let onLoadOlder: (() -> Void)?
     private let scrollToBottomToken: Int
+    @Environment(\.hostUIPaneWidth) private var paneWidth
 
     public init(
         rows: [HostUIMessageRow],
@@ -230,7 +233,7 @@ public struct HostUIMessageList: View {
                         .onAppear { onNearBottomChange?(true) }
                         .onDisappear { onNearBottomChange?(false) }
                 }
-                .padding(.horizontal, HostUIMessagingLayout.listPaddingX)
+                .padding(.horizontal, HostUIMessagingLayout.listPaddingX(forPane: paneWidth))
                 .padding(.vertical, 12)
             }
             .frame(minHeight: 0)
@@ -257,6 +260,7 @@ public struct HostUIComposer: View {
     private let isSending: Bool
     private let canSend: Bool
     private let onSubmit: () -> Void
+    @Environment(\.hostUIPaneWidth) private var paneWidth
 
     public init(
         text: Binding<String>,
@@ -275,11 +279,13 @@ public struct HostUIComposer: View {
     }
 
     public var body: some View {
+        let chrome = HostUIMessagingLayout.composerPaddingX(forPane: paneWidth)
+        let inset = HostUIMessagingLayout.listPaddingX(forPane: paneWidth)
         VStack(alignment: .leading, spacing: 0) {
             HostUITextField(placeholder, text: $text, axis: .vertical, chrome: .plain)
                 .onSubmit(submitIfAllowed)
-                .padding(.horizontal, 18)
-                .padding(.top, 18)
+                .padding(.horizontal, chrome)
+                .padding(.top, chrome)
                 .padding(.bottom, 12)
                 .frame(minHeight: 76, alignment: .topLeading)
 
@@ -296,14 +302,14 @@ public struct HostUIComposer: View {
                     action: submitIfAllowed
                 )
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, chrome)
             .padding(.vertical, 12)
             .background(Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0))
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, inset)
         .padding(.vertical, 8)
     }
 
@@ -317,6 +323,27 @@ public struct HostUIComposer: View {
         guard canSubmit else { return }
         onSubmit()
     }
+}
+
+#Preview("Composer narrow") {
+    HostUIComposerPreviewHost(initial: "Message")
+        .frame(width: 520)
+        .padding()
+        .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Composer default") {
+    HostUIComposerPreviewHost(initial: "")
+        .frame(width: 720)
+        .padding()
+        .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
+}
+
+#Preview("Composer wide") {
+    HostUIComposerPreviewHost(initial: "hello from channel")
+        .frame(width: 1100)
+        .padding()
+        .background(Color(red: 245 / 255, green: 244 / 255, blue: 240 / 255))
 }
 
 #Preview("Messaging composer") {

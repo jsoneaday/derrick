@@ -14,10 +14,42 @@ public enum HostUIMessagingLayout {
     public static let maxBubbleFraction: CGFloat = 0.72
     /// Ceiling so a 5K channel does not become one full-width paragraph.
     public static let maxBubbleWidth: CGFloat = 520
-    /// Gutter opposite the bubble. Keep small so a reply pane can still wrap.
-    public static let oppositeGutter: CGFloat = 24
-    public static let listPaddingX: CGFloat = 12
+    /// Reply pane share of the HostUI screen. Not a 300/360/440 point lock.
+    public static let sidebarFraction: CGFloat = 0.34
+    public static let sidebarMinFraction: CGFloat = 0.26
+    public static let sidebarMaxFraction: CGFloat = 0.45
     public static let replyPreviewCharacterCap = 96
+
+    public static func sidebarWidth(forContainer width: CGFloat) -> CGFloat {
+        guard width.isFinite, width > 1 else { return 0 }
+        let proposed = width * sidebarFraction
+        let lower = width * sidebarMinFraction
+        let upper = width * sidebarMaxFraction
+        return min(max(proposed, lower), upper)
+    }
+
+    public static func oppositeGutter(forPane width: CGFloat) -> CGFloat {
+        scaled(width: width, fraction: 0.04, floor: 12, cap: 48, fallback: 24)
+    }
+
+    public static func listPaddingX(forPane width: CGFloat) -> CGFloat {
+        scaled(width: width, fraction: 0.018, floor: 8, cap: 20, fallback: 12)
+    }
+
+    public static func composerPaddingX(forPane width: CGFloat) -> CGFloat {
+        scaled(width: width, fraction: 0.025, floor: 12, cap: 22, fallback: 18)
+    }
+
+    private static func scaled(
+        width: CGFloat,
+        fraction: CGFloat,
+        floor: CGFloat,
+        cap: CGFloat,
+        fallback: CGFloat
+    ) -> CGFloat {
+        guard width.isFinite, width > 1 else { return fallback }
+        return min(max(width * fraction, floor), cap)
+    }
 
     public static func collapsedReplyPreview(_ raw: String) -> String {
         let oneLine = raw

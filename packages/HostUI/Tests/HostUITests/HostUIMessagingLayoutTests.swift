@@ -21,6 +21,22 @@ import Testing
         #expect(HostUIMessagingLayout.huggingWidth(for: long) == HostUIMessagingLayout.maxBubbleWidth)
     }
 
+    @Test func sidebarAndChromeScaleWithTheContainerNotPointLocks() {
+        let narrow = HostUIMessagingLayout.sidebarWidth(forContainer: 520)
+        let wide = HostUIMessagingLayout.sidebarWidth(forContainer: 1440)
+        #expect(narrow < wide)
+        #expect(abs(narrow - 520 * HostUIMessagingLayout.sidebarFraction) < 0.51)
+        #expect(abs(wide - 1440 * HostUIMessagingLayout.sidebarFraction) < 0.51)
+        #expect(narrow != 300)
+        #expect(wide != 440)
+
+        let narrowGutter = HostUIMessagingLayout.oppositeGutter(forPane: 280)
+        let wideGutter = HostUIMessagingLayout.oppositeGutter(forPane: 900)
+        #expect(narrowGutter < wideGutter)
+        #expect(HostUIMessagingLayout.listPaddingX(forPane: 280) <= HostUIMessagingLayout.listPaddingX(forPane: 900))
+        #expect(HostUIMessagingLayout.composerPaddingX(forPane: 520) <= HostUIMessagingLayout.composerPaddingX(forPane: 1100))
+    }
+
     @Test func replyPreviewIsOneLineAndCapped() {
         let preview = HostUIMessagingLayout.collapsedReplyPreview(
             "First paragraph.\n\nSecond paragraph that must not become a channel message."
