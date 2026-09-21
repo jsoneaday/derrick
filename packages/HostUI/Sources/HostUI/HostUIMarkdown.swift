@@ -25,30 +25,44 @@ extension AttributedString {
     }
 }
 
+/// How rendered markdown measures itself. Bubbles hug short copy. Documents fill the proposed width.
+public enum HostUIMarkdownSizing: Sendable {
+    case bubble
+    case document(maxIdealWidth: CGFloat)
+}
+
 public struct HostUIMarkdownText: View {
     private let text: String
     private let fontSize: CGFloat
-    private let maxIdealWidth: CGFloat
+    private let sizing: HostUIMarkdownSizing
 
     public init(_ text: String, font: Font = .system(size: 13), maxIdealWidth: CGFloat = HostUIMessagingLayout.maxBubbleWidth) {
         self.text = text
         // HostUI bubbles size via AppKit measurement; keep a numeric size.
         self.fontSize = 13
-        self.maxIdealWidth = maxIdealWidth
+        self.sizing = .bubble
         _ = font
+        _ = maxIdealWidth
     }
 
     public init(_ text: String, fontSize: CGFloat, maxIdealWidth: CGFloat = HostUIMessagingLayout.maxBubbleWidth) {
         self.text = text
         self.fontSize = fontSize
-        self.maxIdealWidth = maxIdealWidth
+        self.sizing = .bubble
+        _ = maxIdealWidth
+    }
+
+    public init(_ text: String, fontSize: CGFloat, sizing: HostUIMarkdownSizing) {
+        self.text = text
+        self.fontSize = fontSize
+        self.sizing = sizing
     }
 
     public var body: some View {
         HostUIMeasuringMarkdownText(
             attributedString: HostUIMarkdown.attributed(text),
             fontSize: fontSize,
-            maxIdealWidth: maxIdealWidth
+            sizing: sizing
         )
         .tint(Color(red: 0.176, green: 0.286, blue: 0.576))
     }
@@ -58,7 +72,7 @@ public struct HostUIMarkdownText: View {
 private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
     let attributedString: AttributedString
     var fontSize: CGFloat = 13
-    var maxIdealWidth: CGFloat = 420
+    var sizing: HostUIMarkdownSizing = .bubble
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -102,10 +116,7 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
     ) -> CGSize? {
         apply(to: nsView)
         let proposed = proposal.width.flatMap { $0.isFinite && $0 > 1 ? $0 : nil }
-        let width = HostUIMessagingLayout.cappedBubbleWidth(
-            ideal: nsView.idealWidth(),
-            containerWidth: proposed
-        )
+        let width = measuredWidth(ideal: nsView.idealWidth(), proposed: proposed)
         let height = nsView.height(forWidth: width)
         return CGSize(width: width, height: height)
     }
@@ -127,6 +138,18 @@ private struct HostUIMeasuringMarkdownText: NSViewRepresentable {
             textView.textStorage?.setAttributedString(next)
         } else if let storage = textView.textStorage, !storage.isEqual(to: next) {
             storage.setAttributedString(next)
+        }
+    }
+
+    private func measuredWidth(ideal: CGFloat, proposed: CGFloat?) -> CGFloat {
+        switch sizing {
+        case .bubble:
+            return HostUIMessagingLayout.cappedBubbleWidth(ideal: ideal, containerWidth: proposed)
+        case .document(let maxIdealWidth):
+            if let proposed {
+                return proposed
+            }
+            return min(max(ideal, 1), maxIdealWidth)
         }
     }
 

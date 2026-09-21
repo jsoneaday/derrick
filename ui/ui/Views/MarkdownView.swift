@@ -375,11 +375,10 @@ struct MarkdownResponseView: View {
     }
 
     private func markdownText(_ text: String) -> some View {
-        SelectableLinkTextView(
-            attributedString: HostUIMarkdown.attributed(text),
+        HostUIMarkdownText(
+            text,
             fontSize: 15,
-            textColor: .labelColor,
-            maxIdealWidth: 720
+            sizing: .document(maxIdealWidth: 720)
         )
     }
 
