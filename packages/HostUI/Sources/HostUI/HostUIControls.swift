@@ -165,10 +165,30 @@ public struct HostUISidebar<Content: View>: View {
 
     public var body: some View {
         content
-            .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
             .frame(maxHeight: .infinity, alignment: .top)
+            .containerRelativeFrame(.horizontal) { width, _ in
+                HostUIMessagingLayout.sidebarWidth(forContainer: width)
+            }
             .clipped()
     }
+}
+
+/// Publishes the pane width so gutters and padding track the channel or thread, not a point lock.
+struct HostUIPaneWidthReader<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            content()
+                .environment(\.hostUIPaneWidth, geo.size.width)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Width of the current HostUI channel or thread column.
+    @Entry var hostUIPaneWidth: CGFloat = 720
 }
 
 public struct HostUISelect: View {

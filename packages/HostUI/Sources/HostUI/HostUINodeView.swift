@@ -60,18 +60,21 @@ public struct HostUINodeView: View {
 
     @ViewBuilder
     private func genericStack(_ root: HostUINode) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(HostUIScreenLayout.visibleChildren(of: root).enumerated()), id: \.offset) { _, child in
-                if child.element == HostUIElementID.sidebar.rawValue {
-                    if shouldShowSidebar([child]) {
-                        HostUISidebar {
-                            sidebarColumn(child)
+        HostUIPaneWidthReader {
+            VStack(spacing: 0) {
+                ForEach(Array(HostUIScreenLayout.visibleChildren(of: root).enumerated()), id: \.offset) { _, child in
+                    if child.element == HostUIElementID.sidebar.rawValue {
+                        if shouldShowSidebar([child]) {
+                            HostUISidebar {
+                                sidebarColumn(child)
+                            }
                         }
+                    } else {
+                        nodeContent(child, isThread: false)
                     }
-                } else {
-                    nodeContent(child, isThread: false)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -102,17 +105,21 @@ public struct HostUINodeView: View {
 
     @ViewBuilder
     private func mainColumn(_ nodes: [HostUINode]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(nodes.enumerated()), id: \.offset) { _, child in
-                nodeContent(child, isThread: false)
+        HostUIPaneWidthReader {
+            VStack(spacing: 0) {
+                ForEach(Array(nodes.enumerated()), id: \.offset) { _, child in
+                    nodeContent(child, isThread: false)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
     private func sidebarColumn(_ sidebar: HostUINode) -> some View {
-        VStack(spacing: 0) {
+        HostUIPaneWidthReader {
+            VStack(spacing: 0) {
             HStack {
                 Text(bindings.replyThreadTitle)
                     .font(.headline)
@@ -151,6 +158,7 @@ public struct HostUINodeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
     }
 
     @ViewBuilder
@@ -280,6 +288,36 @@ public struct HostUINodeView: View {
     }
 }
 
+#Preview("Channel narrow") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: true, isViewingReplyThread: false)
+        .frame(width: 520, height: 640)
+}
+
+#Preview("Channel default") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: true, isViewingReplyThread: false)
+        .frame(width: 880, height: 720)
+}
+
+#Preview("Channel wide") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: true, isViewingReplyThread: false)
+        .frame(width: 1440, height: 800)
+}
+
+#Preview("Thread narrow") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: false)
+        .frame(width: 520, height: 640)
+}
+
+#Preview("Thread default") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: false)
+        .frame(width: 880, height: 720)
+}
+
+#Preview("Thread wide") {
+    HostUIInboxPreviewHost(emptyGuestSidebar: false)
+        .frame(width: 1440, height: 800)
+}
+
 #Preview("Reply pane filled") {
     HostUIInboxPreviewHost(emptyGuestSidebar: false)
         .frame(width: 1100, height: 720)
@@ -292,6 +330,7 @@ public struct HostUINodeView: View {
 
 private struct HostUIInboxPreviewHost: View {
     var emptyGuestSidebar: Bool
+    var isViewingReplyThread: Bool = true
     @State private var channelDraft = ""
     @State private var threadDraft = ""
 
@@ -359,7 +398,7 @@ private struct HostUIInboxPreviewHost: View {
             ],
             channelDraft: $channelDraft,
             threadDraft: $threadDraft,
-            isViewingReplyThread: true,
+            isViewingReplyThread: isViewingReplyThread,
             replyThreadTitle: "$orchestrator weather in 07647"
         )
     }
