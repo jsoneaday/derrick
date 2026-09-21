@@ -1,5 +1,4 @@
 import Foundation
-import MCPServer
 import Structure
 
 /// Attaches declared plugin Keychain secrets to host HTTP. Values never enter the guest.

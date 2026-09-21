@@ -1,5 +1,4 @@
 import Foundation
-import MCPServer
 import Structure
 
 public struct HarnessSecretAttacher: HostHTTPSecretAttacher {

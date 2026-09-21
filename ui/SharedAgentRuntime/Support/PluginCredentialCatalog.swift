@@ -1,4 +1,3 @@
-import DBRepository
 import Foundation
 import Plugin
 import Structure
@@ -6,14 +5,14 @@ import Structure
 enum PluginCredentialCatalog {
     static func secretDescriptors(
         pluginID: String,
-        repository: DBRepository
+        repository: any PluginFactoryManifestCatalog
     ) async -> [PluginSecretDescriptor] {
         let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
         let json = manifests.first(where: { $0.pluginID == pluginID })?.manifestJSON
         return PluginSecretField.resolvedDescriptors(pluginID: pluginID, fromManifestJSON: json)
     }
 
-    static func connectorPluginIDs(repository: DBRepository) async -> [String] {
+    static func connectorPluginIDs(repository: any PluginFactoryManifestCatalog) async -> [String] {
         let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
         return manifests.compactMap { row in
             AgentPluginManifest.isConnector(manifestJSON: row.manifestJSON) ? row.pluginID : nil
@@ -21,7 +20,7 @@ enum PluginCredentialCatalog {
         .sorted()
     }
 
-    static func pluginsWithSecrets(repository: DBRepository) async -> [PluginCredentialGroup] {
+    static func pluginsWithSecrets(repository: any PluginFactoryManifestCatalog) async -> [PluginCredentialGroup] {
         let manifests = (try? await repository.listLatestPluginFactoryManifests()) ?? []
         return manifests.compactMap { row -> PluginCredentialGroup? in
             let secrets = PluginSecretField.resolvedDescriptors(
@@ -41,23 +40,5 @@ enum PluginCredentialCatalog {
             }
             return lhs.pluginID < rhs.pluginID
         }
-    }
-}
-
-struct PluginCredentialGroup: Equatable, Identifiable {
-    let pluginID: String
-    let isConnector: Bool
-    let secrets: [PluginSecretDescriptor]
-
-    var id: String { pluginID }
-
-    var displayName: String {
-        pluginID
-            .split(separator: "-")
-            .map { part in
-                let lower = part.lowercased()
-                return lower.prefix(1).uppercased() + lower.dropFirst()
-            }
-            .joined(separator: " ")
     }
 }

@@ -131,7 +131,7 @@ public extension DBRepository {
         }
     }
 
-    func listLatestPluginFactoryManifests() throws -> [(pluginID: String, version: String, manifestJSON: String, reviewSummary: String)] {
+    func listLatestPluginFactoryManifests() throws -> [PluginFactoryManifestRecord] {
         try withDatabaseHandle { handle in
             let sql = """
             SELECT plugin_id, version, manifest_json, review_summary
@@ -148,7 +148,7 @@ public extension DBRepository {
                 throw Self.sqliteError(handle: handle, fallback: "Failed to prepare latest plugin factory manifests.")
             }
             defer { sqlite3_finalize(statement) }
-            var rows: [(pluginID: String, version: String, manifestJSON: String, reviewSummary: String)] = []
+            var rows: [PluginFactoryManifestRecord] = []
             while sqlite3_step(statement) == SQLITE_ROW {
                 guard
                     let id = sqlite3_column_text(statement, 0),
@@ -159,7 +159,7 @@ public extension DBRepository {
                     continue
                 }
                 rows.append(
-                    (
+                    PluginFactoryManifestRecord(
                         pluginID: String(cString: id),
                         version: String(cString: version),
                         manifestJSON: String(cString: manifest),
@@ -195,3 +195,5 @@ public extension DBRepository {
         try savePluginFactoryRelease(release)
     }
 }
+
+extension DBRepository: PluginFactoryManifestCatalog {}

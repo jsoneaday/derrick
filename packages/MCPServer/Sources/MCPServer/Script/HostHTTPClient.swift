@@ -21,10 +21,6 @@ public struct HostHTTPFetch: Sendable {
     }
 }
 
-public protocol HostHTTPSecretAttacher: Sendable {
-    func apply(url: URL) async -> (url: URL, headers: [String: String])
-}
-
 public actor HostHTTPClient {
     public static let shared = HostHTTPClient()
 
