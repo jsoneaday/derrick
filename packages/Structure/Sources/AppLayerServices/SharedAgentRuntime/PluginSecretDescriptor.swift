@@ -22,6 +22,31 @@ public struct PluginSecretDescriptor: Codable, Sendable, Hashable {
     }
 }
 
+/// Settings list row for a plugin that declared secrets. No secret values.
+public struct PluginCredentialGroup: Equatable, Identifiable, Sendable, Hashable {
+    public let pluginID: String
+    public let isConnector: Bool
+    public let secrets: [PluginSecretDescriptor]
+
+    public var id: String { pluginID }
+
+    public var displayName: String {
+        pluginID
+            .split(separator: "-")
+            .map { part in
+                let lower = part.lowercased()
+                return lower.prefix(1).uppercased() + lower.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    public init(pluginID: String, isConnector: Bool, secrets: [PluginSecretDescriptor]) {
+        self.pluginID = pluginID
+        self.isConnector = isConnector
+        self.secrets = secrets
+    }
+}
+
 /// Reverse-XPC / approval tool name for collecting plugin Keychain secrets.
 public enum PluginCredentialPrompt {
     public static let toolName = "plugin.credentials"

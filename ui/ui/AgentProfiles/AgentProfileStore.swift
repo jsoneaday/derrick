@@ -1,5 +1,4 @@
 import Combine
-import DBRepository
 import Foundation
 import LLMAgentClient
 import Structure
@@ -11,7 +10,7 @@ final class AgentProfileStore: ObservableObject {
     @Published private(set) var profiles: [AgentProfile] = []
     @Published private(set) var lastError: String?
 
-    private var repository: DBRepository?
+    private var repository: (any AgentProfileCatalog)?
 
     var enabledProfiles: [AgentProfile] {
         profiles.filter(\.isEnabled)
@@ -22,7 +21,7 @@ final class AgentProfileStore: ObservableObject {
             ?? enabledProfiles.first
     }
 
-    func configure(repository: DBRepository) async {
+    func configure(repository: any AgentProfileCatalog) async {
         self.repository = repository
         await reload()
     }
@@ -84,7 +83,7 @@ final class AgentProfileStore: ObservableObject {
         await reload()
     }
 
-    private func ensureBuiltins(repository: DBRepository) async throws {
+    private func ensureBuiltins(repository: any AgentProfileCatalog) async throws {
         for profile in try AgentProfileBuiltinFactory.all() {
             try await repository.upsertAgentProfile(profile)
         }

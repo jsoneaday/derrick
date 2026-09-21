@@ -28,6 +28,11 @@ public protocol HostHTTPAccessGate: Sendable {
     func authorize(url: URL, invokeID: String) async -> HostHTTPAccessDecision
 }
 
+/// Injected into `HostHTTPClient`. Attaches Keychain secrets without exposing values to the guest.
+public protocol HostHTTPSecretAttacher: Sendable {
+    func apply(url: URL) async -> (url: URL, headers: [String: String])
+}
+
 public enum HostHTTPAccessDecision: Sendable, Equatable {
     case allow
     case deny(String)

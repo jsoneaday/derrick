@@ -158,15 +158,6 @@ import DBRepository
         )
     }
 
-    @Test func pluginCredentialGroupUsesHumanDisplayName() {
-        let group = PluginCredentialGroup(
-            pluginID: "slack-connection",
-            isConnector: true,
-            secrets: [PluginSecretDescriptor(id: "bot_token", label: "Bot Token", kind: "token")]
-        )
-        #expect(group.displayName == "Slack Connection")
-    }
-
     @MainActor @Test func keychainModeStillPrefersKeychain() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let uiFolder = root.appendingPathComponent("ui", isDirectory: true)

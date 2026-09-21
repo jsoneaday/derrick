@@ -138,3 +138,5 @@ public extension DBRepository {
         )
     }
 }
+
+extension DBRepository: AgentProfileCatalog {}
