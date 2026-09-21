@@ -17,6 +17,14 @@ import Testing
         #expect(draft.examples.count >= 1)
     }
 
+    @Test func unnamedMessagingGoalGuessesSlackClone() {
+        var draft = PluginSkillDraft(goal: "Send and receive messages from Messaging")
+        PluginSkillDraftPlanner.applyGoal(draft.goal, to: &draft, existingPluginIDs: [])
+        #expect(draft.plannedKind == .messagingConnector)
+        #expect(draft.inferredConnectorVendor == .slackClone)
+        #expect(draft.pluginName.hasPrefix("slackclone-connector"))
+    }
+
     @Test func infersCustomCapabilityFromGenericGoal() {
         var draft = PluginSkillDraft(goal: "Summarize my clipboard when I ask")
         PluginSkillDraftPlanner.applyGoal(draft.goal, to: &draft, existingPluginIDs: [])

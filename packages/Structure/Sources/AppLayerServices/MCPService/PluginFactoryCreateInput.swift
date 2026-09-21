@@ -40,6 +40,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
 
     public enum ConnectorVendor: String, Codable, Sendable, CaseIterable {
         case slack
+        case slackClone = "slackclone"
         case telegram
         case whatsapp
         case discord
@@ -48,6 +49,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         public var displayName: String {
             switch self {
             case .slack: return "Slack"
+            case .slackClone: return "SlackClone"
             case .telegram: return "Telegram"
             case .whatsapp: return "WhatsApp"
             case .discord: return "Discord"
@@ -59,6 +61,17 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
 
         public static func isEnabledMessagingPluginID(_ pluginID: String) -> Bool {
             !pluginID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        /// Match a stored plugin id. Check SlackClone before Slack so `slackclone-…` is not treated as Slack.
+        public static func inferred(fromPluginID pluginID: String) -> ConnectorVendor {
+            let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if id.contains("slackclone") { return .slackClone }
+            if id.contains("slack") { return .slack }
+            if id.contains("telegram") { return .telegram }
+            if id.contains("whatsapp") { return .whatsapp }
+            if id.contains("discord") { return .discord }
+            return .custom
         }
     }
 

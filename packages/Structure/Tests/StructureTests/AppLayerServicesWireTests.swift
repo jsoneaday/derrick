@@ -1588,6 +1588,8 @@ import Testing
         #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("telegram-bot"))
         #expect(PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("discord-connection"))
         #expect(!PluginFactoryCreateInput.ConnectorVendor.isEnabledMessagingPluginID("  "))
+        #expect(PluginFactoryCreateInput.ConnectorVendor.inferred(fromPluginID: "slackclone-connector-1") == .slackClone)
+        #expect(PluginFactoryCreateInput.ConnectorVendor.inferred(fromPluginID: "slack-connection") == .slack)
     }
 
     @Test func connectorBuildGoalUsesScopeAndReferenceBlueprint() {

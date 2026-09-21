@@ -407,8 +407,7 @@ final class PluginCreationController: ObservableObject {
         let isConnector = release.manifestJSON.contains("\"role\":\"connector\"")
             || release.manifestJSON.contains("\"role\": \"connector\"")
         if isConnector {
-            let vendor: PluginFactoryCreateInput.ConnectorVendor =
-                release.pluginID.localizedCaseInsensitiveContains("slack") ? .slack : .custom
+            let vendor = PluginFactoryCreateInput.ConnectorVendor.inferred(fromPluginID: release.pluginID)
             return PluginFactoryCreateInput.makeConnector(
                 vendor: vendor,
                 pluginID: release.pluginID,

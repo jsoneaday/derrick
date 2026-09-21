@@ -155,11 +155,12 @@ public enum PluginSkillDraftPlanner {
         from draft: PluginSkillDraft
     ) -> PluginFactoryCreateInput.ConnectorVendor? {
         let text = combinedText(draft)
+        if text.contains("slackclone") { return .slackClone }
         if text.contains("slack") { return .slack }
         if text.contains("telegram") { return .telegram }
         if text.contains("whatsapp") { return .whatsapp }
         if text.contains("discord") { return .discord }
-        if inferKind(from: draft) == .messagingConnector { return .slack }
+        if inferKind(from: draft) == .messagingConnector { return .slackClone }
         return nil
     }
 
@@ -278,7 +279,7 @@ public enum PluginSkillDraftPlanner {
     }
 
     private static func looksLikeMessaging(_ text: String) -> Bool {
-        ["slack", "telegram", "whatsapp", "discord", "messaging", "channel", "inbox", "dm", "chat app"]
+        ["slackclone", "slack", "telegram", "whatsapp", "discord", "messaging", "channel", "inbox", "dm", "chat app"]
             .contains { text.contains($0) }
     }
 
@@ -288,7 +289,7 @@ public enum PluginSkillDraftPlanner {
             if let vendor = inferConnectorVendor(from: draft) {
                 return ConnectorPluginNaming.defaultPluginID(vendor: vendor, existingIDs: existingIDs)
             }
-            return ConnectorPluginNaming.defaultPluginID(vendor: .slack, existingIDs: existingIDs)
+            return ConnectorPluginNaming.defaultPluginID(vendor: .slackClone, existingIDs: existingIDs)
         case .customCapability:
             let words = draft.goal
                 .lowercased()

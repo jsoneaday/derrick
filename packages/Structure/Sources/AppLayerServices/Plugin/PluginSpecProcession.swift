@@ -655,7 +655,8 @@ enum PluginSpecClassifier {
     }
 
     private static func isKnownMessagingVendor(_ lowered: String) -> Bool {
-        lowered.contains("slack")
+        lowered.contains("slackclone")
+            || lowered.contains("slack")
             || lowered.contains("telegram")
             || lowered.contains("whatsapp")
             || lowered.contains("discord")
