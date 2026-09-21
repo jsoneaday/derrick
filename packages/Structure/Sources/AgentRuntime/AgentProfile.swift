@@ -143,7 +143,7 @@ public enum AgentProfileTokenParser {
     }
 }
 
-/// Ranges of `$shortName` tokens (and the profile name inside `[Derrick:handle]`) for UI highlighting.
+/// Ranges of `$shortName` tokens and the full `[Derrick:handle]` sender prefix for UI highlighting.
 public enum AgentProfileTokenHighlight {
     public static func ranges(
         in text: String,
@@ -197,7 +197,8 @@ public enum AgentProfileTokenHighlight {
             guard let close = text[handleStart...].firstIndex(of: "]") else { break }
             let handle = String(text[handleStart..<close])
             if isHighlightableHandle(handle) {
-                ranges.append(handleStart..<close)
+                let tokenEnd = text.index(after: close)
+                ranges.append(prefix.lowerBound..<tokenEnd)
             }
             searchFrom = close
             if searchFrom < text.endIndex {

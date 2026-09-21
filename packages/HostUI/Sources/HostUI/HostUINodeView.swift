@@ -121,7 +121,7 @@ public struct HostUINodeView: View {
         HostUIPaneWidthReader {
             VStack(spacing: 0) {
             HStack {
-                Text(bindings.replyThreadTitle)
+                HostUIProfileTokenText(bindings.replyThreadTitle, base: .primary)
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
