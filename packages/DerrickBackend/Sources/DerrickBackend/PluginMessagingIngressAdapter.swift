@@ -205,7 +205,7 @@ public final class PluginMessagingIngressAdapter: MessagingIngressAdapter, @unch
         }
     }
 
-    /// Channel history does not include nested replies. Slack also excludes the
+    /// Channel history does not include nested replies. Some vendors also exclude the
     /// `oldest` cursor message unless `inclusive` is set, so stored `reply_count`
     /// can stay stale after the first reply. Re-poll threaded parents, newest first.
     private func replyParentsNeedingSync(

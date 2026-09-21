@@ -6,7 +6,6 @@ import DBRepository
 
 @main
 struct uiApp: App {
-    @StateObject private var logStore = LogStore()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// Captured at process start so Scene content cannot race AppDelegate.
@@ -46,7 +45,6 @@ struct uiApp: App {
                     .accessibilityHidden(true)
             } else {
                 ContentView()
-                    .environmentObject(logStore)
                     .preferredColorScheme(.light)
                     .background(DerrickMainWindowRegistrar())
             }

@@ -37,7 +37,7 @@ final class MessagingSessionStore: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var isMessagingWorkspace = false
 
-    /// Local outbound rows shown before Slack ack / poll. Never persisted.
+    /// Local outbound rows shown before the connector acks the send. Never persisted.
     private var pendingOutboundIDs: Set<String> = []
     private var pendingOutboundByID: [String: MessagingMessageDTO] = [:]
 
@@ -60,7 +60,7 @@ final class MessagingSessionStore: ObservableObject {
         return agentWorkInFlight.first { $0.parentVendorMessageID == parentID }?.statusLabel
     }
 
-    /// Reply pane label. Never the Slack channel (`selectedThread.title`).
+    /// Reply pane label. Never the connector conversation title (`selectedThread.title`).
     var replyThreadTitle: String {
         guard let parentID = selectedReplyParentVendorMessageID else { return "Thread" }
         let body = visibleReplyMessages.first(where: { $0.vendorMessageID == parentID })?.body
@@ -299,7 +299,7 @@ final class MessagingSessionStore: ObservableObject {
               persisted.parentVendorMessageID == pending.parentVendorMessageID,
               abs(persisted.createdAt.timeIntervalSince(pending.createdAt)) < 180
         else { return false }
-        // DB pending rows use pending:<uuid> until Slack acks; still twins of UI optimistic rows.
+        // DB pending rows use pending:<uuid> until the connector acks; still twins of UI optimistic rows.
         return true
     }
 
