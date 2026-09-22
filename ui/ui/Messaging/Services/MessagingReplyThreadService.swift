@@ -18,7 +18,7 @@ enum MessagingReplyThreadService {
         publishPresence()
         MessagingPollRefreshService.requestPoll()
         guard let pluginID, let thread else { return }
-        // Paint from DB first; Slack poll catches peer replies without blocking the pane.
+        // Paint from DB first; the connector poll catches peer replies without blocking the pane.
         Task {
             do {
                 try await connectorRuntime.pollConversation(

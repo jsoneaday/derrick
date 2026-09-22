@@ -70,11 +70,11 @@ public enum MessagingMessageDirection: String, Codable, Sendable, Hashable {
     case outbound
 }
 
-/// Which messages to load for a conversation tab vs a nested Slack-style reply thread.
+/// Which messages to load for a conversation tab vs a nested reply thread.
 public enum MessagingMessageListFilter: Sendable, Hashable {
     /// Channel/DM feed: messages that are not replies.
     case channelRoots
-    /// Root vendor message plus its replies (Slack `thread_ts`).
+    /// Root vendor message plus its replies (`parentVendorMessageID`).
     case replyThread(parentVendorMessageID: String)
 }
 
@@ -86,9 +86,9 @@ public struct MessagingMessageDTO: Codable, Sendable, Hashable, Identifiable {
     public let sender: String
     public let body: String
     public let createdAt: Date
-    /// Slack `thread_ts` when this row is a reply. Nil for channel-root messages.
+    /// Vendor parent id when this row is a reply. Nil for conversation-root messages.
     public var parentVendorMessageID: String?
-    /// Vendor-reported reply count on a root message (Slack `reply_count`).
+    /// Vendor-reported reply count on a root message.
     public var replyCount: Int
 
     public init(

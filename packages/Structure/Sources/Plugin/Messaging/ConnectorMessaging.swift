@@ -99,7 +99,7 @@ public struct ConnectorMessagingResult: Sendable, Hashable {
     }
 }
 
-/// Incremental poll cursors as unix seconds with Slack-style 6 fractional digits.
+/// Incremental poll cursors as unix seconds with 6 fractional digits.
 public enum ConnectorPollCursor: Sendable {
     public static func unixSeconds(_ date: Date) -> String {
         String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), date.timeIntervalSince1970)

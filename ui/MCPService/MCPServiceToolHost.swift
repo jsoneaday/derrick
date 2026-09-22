@@ -361,29 +361,6 @@ actor MCPServiceToolHost {
         return false
     }
 
-    private func legacyExecutionContext(from request: MCPToolCallRequest) -> ExecutionContextWire? {
-        let active = request.pluginFactoryCreationActive
-            || MCPServiceCallContext.shared.pluginFactoryCreationActive
-            || TurnProcessContext.effectivePluginFactoryCreationActive
-        guard active else { return nil }
-        switch request.principal {
-        case .agent(let sessionID, let agentID):
-            return ExecutionContextWire(
-                sessionID: sessionID,
-                principal: request.principal,
-                agentID: agentID,
-                capabilities: [.syncWebCrawl, .hostReviewRetry]
-            )
-        default:
-            return ExecutionContextWire(
-                sessionID: "legacy-mcp",
-                principal: request.principal,
-                agentID: "legacy",
-                capabilities: [.syncWebCrawl, .hostReviewRetry]
-            )
-        }
-    }
-
     private static func skillIndex(from repo: DBRepository) async throws -> [PluginSkillDisclosure.IndexEntry] {
         let summaries = try await repo.listPluginFactoryReleaseSummaries()
         var latestByPlugin: [String: PluginFactoryReleaseSummary] = [:]

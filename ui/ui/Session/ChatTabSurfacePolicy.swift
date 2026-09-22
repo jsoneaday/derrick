@@ -10,7 +10,7 @@ enum ChatTabSurfacePolicy: Sendable {
         case needsHumanChoice
     }
 
-    /// Slice 1 fallback when no spec Present exists yet.
+    /// Bind from whether this tab is a messaging connector when no present tree exists yet.
     static func bind(isMessagingConnector: Bool) -> Binding {
         if isMessagingConnector {
             return .decided(.thread)

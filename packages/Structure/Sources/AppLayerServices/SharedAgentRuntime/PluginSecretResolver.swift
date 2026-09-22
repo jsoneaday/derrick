@@ -3,8 +3,8 @@ import Foundation
 /// Resolves declared plugin secrets from Keychain, with a development `.env` escape hatch.
 public enum PluginSecretResolver: Sendable {
     /// Field ids the host and daemon accept as an HTTP call credential.
-    /// Create-time auth preference may store `api_token` when docs look OAuth-only;
-    /// Slack runtime historically looked only for `bot_token`.
+    /// Create-time auth preference may store `api_token` when docs look OAuth-only.
+    /// Older call sites looked only for `bot_token`.
     public static let callCredentialFieldIDs: [String] = [
         "bot_token",
         "token",

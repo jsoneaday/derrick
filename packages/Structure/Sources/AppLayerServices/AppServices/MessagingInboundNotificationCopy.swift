@@ -2,7 +2,7 @@ import Foundation
 
 /// User-facing notification text for inbound connector messages.
 public enum MessagingInboundNotificationCopy: Sendable {
-    /// Slack-style opaque actor IDs (member, bot, channel, group) are not human-readable.
+    /// Opaque vendor actor IDs (member, bot, channel, group) are not human-readable.
     public static func isOpaqueVendorActorID(_ sender: String) -> Bool {
         let trimmed = sender.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8, let first = trimmed.first else { return false }
