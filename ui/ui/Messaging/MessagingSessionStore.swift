@@ -36,6 +36,8 @@ final class MessagingSessionStore: ObservableObject {
     @Published var showNewMessagesPill = false
     @Published private(set) var lastError: String?
     @Published private(set) var isMessagingWorkspace = false
+    private let readOnActivateWork = CoalescedMainActorWork()
+    private let replyCloseReloadWork = CoalescedMainActorWork()
 
     /// Local outbound rows shown before Slack ack / poll. Never persisted.
     private var pendingOutboundIDs: Set<String> = []
@@ -92,7 +94,9 @@ final class MessagingSessionStore: ObservableObject {
         let becameActive = active && !isMessagingWorkspace
         isMessagingWorkspace = active
         if becameActive {
-            Task { await markVisibleConversationRead() }
+            readOnActivateWork.schedule { [weak self] in
+                await self?.markVisibleConversationRead()
+            }
         }
     }
 
@@ -141,7 +145,9 @@ final class MessagingSessionStore: ObservableObject {
         selectedReplyParentVendorMessageID = nil
         visibleReplyMessages = []
         replyThreadWarning = nil
-        Task { await loadNewestWindow() }
+        replyCloseReloadWork.schedule { [weak self] in
+            await self?.loadNewestWindow()
+        }
     }
 
     func toggleMuteSelectedThread() async {

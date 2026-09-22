@@ -35,6 +35,8 @@ final class MessagingStore: ObservableObject {
     private var hostUIPresentObserver: DerrickDarwinNotifyObserver?
     let inboundBannerService = MessagingInboundBannerService()
     private var connectorCommandGeneration = 0
+    private let inboundRefreshWork = CoalescedMainActorWork()
+    private let hostUIRefreshWork = CoalescedMainActorWork()
 
     init() {
         catalog = MessagingCatalogStore()
@@ -53,7 +55,9 @@ final class MessagingStore: ObservableObject {
             localName: DerrickMessagingInboundSignal.localNotificationName
         ) { [weak self] in
             Task { @MainActor in
-                await self?.refreshFromDaemonInbound()
+                self?.inboundRefreshWork.schedule {
+                    await self?.refreshFromDaemonInbound()
+                }
             }
         }
         inboundObserver?.start()
@@ -62,7 +66,11 @@ final class MessagingStore: ObservableObject {
             localName: HostUIPresentWake.localNotificationName
         ) { [weak self] in
             let pluginID = HostUIPresentWake.takePendingPluginID()
-            Task { await self?.refreshHostUIRoot(matching: pluginID) }
+            Task { @MainActor in
+                self?.hostUIRefreshWork.schedule {
+                    await self?.refreshHostUIRoot(matching: pluginID)
+                }
+            }
         }
         hostUIPresentObserver?.start()
         NotificationCenter.default.publisher(for: PluginFactoryDeletionSignal.didDeletePluginNotification)
@@ -71,7 +79,9 @@ final class MessagingStore: ObservableObject {
                 let pluginID = note.userInfo?[PluginFactoryDeletionSignal.pluginIDKey] as? String
                 let fullyRemoved = note.userInfo?[PluginFactoryDeletionSignal.fullyRemovedKey] as? Bool ?? false
                 guard fullyRemoved, let pluginID else { return }
-                Task { await self?.refreshHostUIRoot(matching: pluginID) }
+                self?.hostUIRefreshWork.schedule {
+                    await self?.refreshHostUIRoot(matching: pluginID)
+                }
             }
             .store(in: &cancellables)
     }

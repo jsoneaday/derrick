@@ -157,16 +157,19 @@ public struct HostUIMessage: View {
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(row.replyCount > 0 ? HostUIMessagingLayout.navy : .primary.opacity(0.75))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(replyTitle)
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(row.replyCount > 0 ? HostUIMessagingLayout.navy : .primary.opacity(0.75))
                     if row.replyCount > 0, let preview = row.replyPreview, !preview.isEmpty {
-                        // Plain one-line preview only — never expand the full thread body here.
-                        Text(HostUIMessagingLayout.collapsedReplyPreview(preview))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        HostUIProfileTokenText(
+                            HostUIMessagingLayout.collapsedReplyPreview(preview),
+                            base: .secondary
+                        )
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     }
                 }
             }
@@ -179,7 +182,6 @@ public struct HostUIMessage: View {
             )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(row.replyCount > 0 ? HostUIMessagingLayout.navy : .primary.opacity(0.75))
         .fixedSize(horizontal: true, vertical: false)
     }
 

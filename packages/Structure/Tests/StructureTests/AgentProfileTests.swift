@@ -106,7 +106,7 @@ import Testing
 
         let outbound = "[Derrick:developer] Fixed the build."
         let outboundTokens = AgentProfileTokenHighlight.ranges(in: outbound).map { String(outbound[$0]) }
-        #expect(outboundTokens == ["developer"])
+        #expect(outboundTokens == ["[Derrick:developer]"])
 
         let ignored = AgentProfileTokenHighlight.ranges(in: "price is $100")
         #expect(ignored.isEmpty)
