@@ -143,16 +143,19 @@ public enum AgentProfileTokenParser {
     }
 }
 
-/// Ranges of `$shortName` tokens and the full `[Derrick:handle]` sender prefix for UI highlighting.
+/// Ranges of `$shortName` tokens and the full `[Derrick:$handle]` sender prefix for UI highlighting.
 public enum AgentProfileTokenHighlight {
     public static func ranges(
         in text: String,
         productName: String = DerrickAppSupport.hostAppProductName
     ) -> [Range<String.Index>] {
-        var found: [Range<String.Index>] = []
-        found.append(contentsOf: dollarHandleRanges(in: text))
-        found.append(contentsOf: productPrefixedHandleRanges(in: text, productName: productName))
-        return found.sorted { $0.lowerBound < $1.lowerBound }
+        let prefixed = productPrefixedHandleRanges(in: text, productName: productName)
+        let dollars = dollarHandleRanges(in: text).filter { dollar in
+            !prefixed.contains { prefix in
+                prefix.lowerBound <= dollar.lowerBound && dollar.upperBound <= prefix.upperBound
+            }
+        }
+        return (dollars + prefixed).sorted { $0.lowerBound < $1.lowerBound }
     }
 
     public static func nsRanges(
@@ -195,7 +198,10 @@ public enum AgentProfileTokenHighlight {
               let prefix = text.range(of: needle, range: searchFrom..<text.endIndex) {
             let handleStart = prefix.upperBound
             guard let close = text[handleStart...].firstIndex(of: "]") else { break }
-            let handle = String(text[handleStart..<close])
+            var handle = String(text[handleStart..<close])
+            if handle.hasPrefix("$") {
+                handle = String(handle.dropFirst())
+            }
             if isHighlightableHandle(handle) {
                 let tokenEnd = text.index(after: close)
                 ranges.append(prefix.lowerBound..<tokenEnd)

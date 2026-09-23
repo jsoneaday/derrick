@@ -930,6 +930,38 @@ import Testing
         )
     }
 
+    @Test func daemonRegistrationReleasesServiceManagementBeforeSessionInstall() throws {
+        let repair = DerrickDaemonHygiene.registrationSteps(
+            sessionJobLoaded: false,
+            sessionProgramStale: true,
+            serviceManagementOwnsMachEndpoint: true
+        )
+        #expect(repair == [
+            .unregisterServiceManagement,
+            .bootoutLaunchdJobs,
+            .installSessionAgent,
+        ])
+        let unregister = try #require(repair.firstIndex(of: .unregisterServiceManagement))
+        let install = try #require(repair.firstIndex(of: .installSessionAgent))
+        #expect(unregister < install)
+        #expect(!repair.contains(.kickstartSessionAgent))
+
+        #expect(
+            DerrickDaemonHygiene.registrationSteps(
+                sessionJobLoaded: false,
+                sessionProgramStale: false,
+                serviceManagementOwnsMachEndpoint: false
+            ) == [.bootoutLaunchdJobs, .installSessionAgent]
+        )
+        #expect(
+            DerrickDaemonHygiene.registrationSteps(
+                sessionJobLoaded: true,
+                sessionProgramStale: false,
+                serviceManagementOwnsMachEndpoint: true
+            ) == [.kickstartSessionAgent]
+        )
+    }
+
     @Test func derrickDaemonHygieneEvictsDuplicateExpectedDaemons() {
         let expected = "/tmp/Derrick.app/Contents/Library/LoginItems/JobKeepAlive.app/Contents/MacOS/JobKeepAlive"
         let evict = DerrickDaemonHygiene.duplicateExpectedDaemonPIDsToEvict(

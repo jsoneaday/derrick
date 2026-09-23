@@ -77,16 +77,17 @@ import Testing
             "Done.",
             profileHandle: AgentProfileHandle.orchestrator
         )
-        #expect(formatted == "[Derrick:orchestrator] Done.")
+        #expect(formatted == "[Derrick:$orchestrator] Done.")
 
         let developer = MessagingAgentOutboundFormatter.formatReply(
             "Fixed the build.",
             profileHandle: AgentProfileHandle.developer
         )
-        #expect(developer == "[Derrick:developer] Fixed the build.")
+        #expect(developer == "[Derrick:$developer] Fixed the build.")
     }
 
     @Test func automatedOutboundEchoDetectsProfilePrefixedReplies() {
+        #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "[Derrick:$orchestrator] hello"))
         #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "[Derrick:orchestrator] hello"))
         #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "[Derrick] hello"))
         #expect(ConnectorMentionParser.isAutomatedOutboundEcho(body: "plain inbound") == false)
@@ -153,6 +154,10 @@ import Testing
                 in: messages,
                 excludingVendorMessageID: "4"
             ) == AgentProfileHandle.developer
+        )
+        #expect(
+            ConnectorMentionParser.profileHandle(inMessageBody: "[Derrick:$developer] hi")
+                == AgentProfileHandle.developer
         )
         #expect(
             ConnectorMentionParser.profileHandle(inMessageBody: "[Derrick:developer] hi")

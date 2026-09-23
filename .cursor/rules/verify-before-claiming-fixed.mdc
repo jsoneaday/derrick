@@ -1,0 +1,13 @@
+---
+description: Prove a fix with the failing path before saying it works
+alwaysApply: true
+---
+
+# Verify before claiming a fix
+
+Do not treat a code change as fixed because it compiles or because the new logic looks right.
+
+- Read the live logs or the failing output first.
+- Add or run a test that fails on the broken behavior and passes after the change.
+- Run that test. If the bug is in a running app, build the checkout that actually launches and exercise that path.
+- Say what was verified and what was not.

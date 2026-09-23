@@ -104,9 +104,13 @@ import Testing
         let inboundTokens = AgentProfileTokenHighlight.ranges(in: inbound).map { String(inbound[$0]) }
         #expect(inboundTokens == ["$orchestrator"])
 
-        let outbound = "[Derrick:developer] Fixed the build."
+        let outbound = "[Derrick:$developer] Fixed the build."
         let outboundTokens = AgentProfileTokenHighlight.ranges(in: outbound).map { String(outbound[$0]) }
-        #expect(outboundTokens == ["[Derrick:developer]"])
+        #expect(outboundTokens == ["[Derrick:$developer]"])
+
+        let legacy = "[Derrick:developer] Fixed the build."
+        let legacyTokens = AgentProfileTokenHighlight.ranges(in: legacy).map { String(legacy[$0]) }
+        #expect(legacyTokens == ["[Derrick:developer]"])
 
         let ignored = AgentProfileTokenHighlight.ranges(in: "price is $100")
         #expect(ignored.isEmpty)
