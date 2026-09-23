@@ -95,7 +95,7 @@ public enum ConnectorMentionParser: Sendable {
         if handle.isEmpty {
             return botReplyPrefix
         }
-        return "[\(DerrickAppSupport.hostAppProductName):\(handle)]"
+        return "[\(DerrickAppSupport.hostAppProductName):$\(handle)]"
     }
 
     /// Reply under the inbound message, or stay in an existing thread.
@@ -160,7 +160,11 @@ public enum ConnectorMentionParser: Sendable {
         else {
             return nil
         }
-        return AgentProfileHandle.normalize(String(trimmed[prefix.endIndex..<close]))
+        var handle = String(trimmed[prefix.endIndex..<close])
+        if handle.hasPrefix("$") {
+            handle = String(handle.dropFirst())
+        }
+        return AgentProfileHandle.normalize(handle)
     }
 
     /// Newest prior talk-to `$shortName` or `[Derrick:handle]` in a thread.

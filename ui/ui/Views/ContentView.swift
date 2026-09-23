@@ -920,7 +920,7 @@ struct ContentView: View {
     @MainActor
     private func connectLaunchDaemon() async throws -> ServiceHealthReport {
         bootstrapStatus.update(phase: .connectingHelper, message: "Connecting to Derrick daemon…")
-        try? await Task.detached(priority: .userInitiated) {
+        try await Task.detached(priority: .userInitiated) {
             try await JobServiceLoginAgent.ensureRegistered()
             JobServiceLoginAgent.ensureHelperProcessRunning()
         }.value

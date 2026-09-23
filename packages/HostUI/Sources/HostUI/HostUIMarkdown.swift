@@ -4,8 +4,8 @@ import SwiftUI
 
 /// Shared markdown + `$profile` token coloring for HostUI message bodies.
 public enum HostUIMarkdown {
-    /// Dark green for `$handle` and `[Derrick:handle]`. Darker than system green on white bubbles.
-    public static let profileTokenColor = Color(red: 0.0, green: 0.42, blue: 0.18)
+    /// Medium green for `$handle` and `[Derrick:$handle]` on white bubbles.
+    public static let profileTokenColor = Color(red: 0.18, green: 0.62, blue: 0.32)
 
     public static func attributed(_ text: String) -> AttributedString {
         var options = AttributedString.MarkdownParsingOptions()
@@ -16,7 +16,7 @@ public enum HostUIMarkdown {
         return attributed
     }
 
-    /// Paints `$handle` and `[Derrick:handle]` on already-rendered text. Later copies of the same token are included.
+    /// Paints `$handle` and `[Derrick:$handle]` on already-rendered text. Later copies of the same token are included.
     public static func colorProfileTokens(_ attributed: inout AttributedString) {
         let source = String(attributed.characters)
         var search = attributed.startIndex
@@ -29,7 +29,7 @@ public enum HostUIMarkdown {
     }
 }
 
-/// Plain text with `$handle` and `[Derrick:handle]` in `HostUIMarkdown.profileTokenColor`.
+/// Plain text with `$handle` and `[Derrick:$handle]` in `HostUIMarkdown.profileTokenColor`.
 public struct HostUIProfileTokenText: View {
     private let text: String
     private let base: Color

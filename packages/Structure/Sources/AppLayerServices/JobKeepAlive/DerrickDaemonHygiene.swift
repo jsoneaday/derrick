@@ -111,6 +111,37 @@ public enum DerrickDaemonHygiene: Sendable {
         return evictedAny || !hasHealthyExpectedDaemon
     }
 
+    /// Ordered startup actions for the session LaunchAgent.
+    ///
+    /// The Service Management job and the session job both claim
+    /// `VUSK4B2YKQ.derrick.shared.daemon`. A crash-looping Service Management job
+    /// keeps that port with `active = 0`. Registering it again before the session
+    /// agent is installed puts the port back in that state.
+    public enum DaemonRegistrationStep: String, Equatable, Sendable {
+        case unregisterServiceManagement
+        case bootoutLaunchdJobs
+        case installSessionAgent
+        case kickstartSessionAgent
+    }
+
+    public static func registrationSteps(
+        sessionJobLoaded: Bool,
+        sessionProgramStale: Bool,
+        serviceManagementOwnsMachEndpoint: Bool
+    ) -> [DaemonRegistrationStep] {
+        let sessionNeedsRepair = !sessionJobLoaded || sessionProgramStale
+        guard sessionNeedsRepair else {
+            return [.kickstartSessionAgent]
+        }
+        var steps: [DaemonRegistrationStep] = []
+        if serviceManagementOwnsMachEndpoint {
+            steps.append(.unregisterServiceManagement)
+        }
+        steps.append(.bootoutLaunchdJobs)
+        steps.append(.installSessionAgent)
+        return steps
+    }
+
     /// Extra processes of the expected binary steal the Mach service and lock SQLite.
     /// Keep the newest; evict the rest.
     public static func duplicateExpectedDaemonPIDsToEvict(

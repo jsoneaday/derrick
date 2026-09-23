@@ -427,7 +427,7 @@ public struct HostUIComposer: View {
             id: "wx",
             sender: "derrick",
             body: """
-            [Derrick:orchestrator] Searching the web…
+            [Derrick:$orchestrator] Searching the web…
 
             In **Northvale, NJ 07647**, Weather Underground reported **62°F** at **7:27 AM EDT on September 19, 2026**. Its listed daily temp **71°F / 63°F**.
 
