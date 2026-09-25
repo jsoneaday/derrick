@@ -11,6 +11,7 @@ struct AgentProfileSettingsView: View {
     @State private var selectedProfileID: String?
     @State private var draftDisplayName = ""
     @State private var draftHandle = ""
+    @State private var draftAlias = ""
     @State private var draftInstructions = ""
     @State private var draftModel: LLMModelChoice = .defaultHelperModel
     @State private var draftThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
@@ -18,6 +19,14 @@ struct AgentProfileSettingsView: View {
     @State private var draftEnabled = true
     @State private var draftCapabilities = AgentProfileCapabilities()
     @State private var editorError: String?
+    @State private var saveBanner: SaveBanner?
+    @ObservedObject private var plugins = PluginFactoryListStore.shared
+
+    private struct SaveBanner: Equatable {
+        let id: UUID
+        let text: String
+        let kind: InAppNotificationKind
+    }
 
     private var selectedProfile: AgentProfile? {
         guard let selectedProfileID else { return nil }
@@ -25,15 +34,51 @@ struct AgentProfileSettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            editorPage
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            header
+            HStack(alignment: .top, spacing: 20) {
+                profileList
+                    .frame(width: 240)
+                ScrollView {
+                    if selectedProfile != nil {
+                        editor
+                    } else {
+                        Text("Select a profile to edit.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            if let editorError {
+                Text(editorError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0))
+        .overlay(alignment: .top) {
+            if let saveBanner {
+                InAppNotificationToast(text: saveBanner.text, kind: saveBanner.kind) {
+                    self.saveBanner = nil
+                }
+                .padding(.top, 12)
+            }
+        }
+        .onAppear {
+            syncSelection()
+        }
+        .onChange(of: store.profiles) { _, _ in
+            syncSelection()
+        }
+        .onChange(of: selectedProfileID) { _, _ in
+            loadDraftFromSelection()
+        }
     }
 
-    private var editorPage: some View {
-        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Profiles")
                     .font(.system(size: 26, weight: .semibold, design: .rounded))
@@ -44,84 +89,58 @@ struct AgentProfileSettingsView: View {
                     Label("New", systemImage: "plus")
                 }
             }
-
-            Text("A profile is who answers. In chat or a connector, start a message with $ and its short name, like $orchestrator. Mentioning a short name later in a sentence does not switch profiles.")
+            Text("A profile is who answers. In chat or a connector, start a message with $ and its alias, like $orchestrator. Mentioning an alias later in a sentence does not switch profiles.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Profiles")
-                        .font(.headline)
-                    List(selection: $selectedProfileID) {
-                        ForEach(store.profiles) { profile in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(profile.displayName)
-                                    Text("$" + profile.handle)
-                                        .font(.caption)
-                                        .foregroundStyle(AgentProfileTokenColor.darkGreen)
-                                }
-                                Spacer(minLength: 0)
-                                if !profile.isEnabled {
-                                    Text("Off")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Button {
-                                    selectedProfileID = profile.id
-                                } label: {
-                                    Image(systemName: "pencil")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Edit")
-                                Button {
-                                    duplicate(profile)
-                                } label: {
-                                    Image(systemName: "plus.square.on.square")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Duplicate")
-                            }
-                            .tag(profile.id as String?)
+    private var profileList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Profiles")
+                .font(.headline)
+            List(selection: $selectedProfileID) {
+                ForEach(store.profiles) { profile in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.displayName)
+                            Text("$" + (profile.alias ?? profile.handle))
+                                .font(.caption)
+                                .foregroundStyle(AgentProfileTokenColor.darkGreen)
                         }
-                    }
-                    .frame(minHeight: 180)
-
-                    if let selectedProfile, !selectedProfile.isBuiltin {
-                        Button("Delete", role: .destructive) {
-                            Task { await deleteSelected() }
+                        Spacer(minLength: 0)
+                        if !profile.isEnabled {
+                            Text("Off")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
+                        Button {
+                            selectedProfileID = profile.id
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Edit")
+                        Button {
+                            duplicate(profile)
+                        } label: {
+                            Image(systemName: "plus.square.on.square")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Duplicate")
                     }
-                }
-                .frame(width: 240)
-
-                if selectedProfile != nil {
-                    editor
-                } else {
-                    Text("Select a profile to edit.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .tag(profile.id)
                 }
             }
+            .listStyle(.sidebar)
+            .frame(maxHeight: .infinity)
 
-            if let editorError {
-                Text(editorError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+            if let selectedProfile, !selectedProfile.isBuiltin {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteSelected() }
+                }
             }
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .onAppear {
-            syncSelection()
-        }
-        .onChange(of: store.profiles) { _, _ in
-            syncSelection()
-        }
-        .onChange(of: selectedProfileID) { _, _ in
-            loadDraftFromSelection()
         }
     }
 
@@ -134,12 +153,11 @@ struct AgentProfileSettingsView: View {
             }
 
             profileField(
-                title: "Short name",
-                caption: "Talk to this profile with $ plus this name at the start of a message, like $orchestrator. Letters, numbers, and underscores only."
+                title: "Alias",
+                caption: "Optional short address. If this is orc, $orc reaches this profile. $\(selectedProfile?.handle ?? "orchestrator") still works. Letters, numbers, and underscores only."
             ) {
-                TextField("reviewer", text: $draftHandle)
+                TextField("", text: $draftAlias)
                     .textFieldStyle(.roundedBorder)
-                    .disabled(selectedProfile?.isBuiltin == true)
             }
 
             profileField(
@@ -190,7 +208,10 @@ struct AgentProfileSettingsView: View {
                 }
             }
 
-            profileField(title: "RAG") {
+            profileField(
+                title: "RAG",
+                caption: "Default retrieval instructions are the built-in session memory guide: when to use tools, and not to invent live facts from model memory."
+            ) {
                 Toggle("Use default retrieval instructions", isOn: $draftRAG.useDefaultInstructions)
                 if !draftRAG.useDefaultInstructions {
                     TextEditor(text: Binding(
@@ -214,49 +235,84 @@ struct AgentProfileSettingsView: View {
 
             profileField(title: "Subagents") {
                 Toggle("Can be called as a subagent", isOn: $draftCapabilities.allowsSubagent)
-                Text("Profiles this one may call")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                ForEach(store.profiles.filter { $0.handle != draftHandle }) { other in
-                    Toggle(other.displayName, isOn: Binding(
-                        get: { draftCapabilities.allowedSubagentHandles.contains(other.handle) },
-                        set: { isOn in
-                            if isOn {
-                                if !draftCapabilities.allowedSubagentHandles.contains(other.handle) {
-                                    draftCapabilities.allowedSubagentHandles.append(other.handle)
-                                }
-                            } else {
-                                draftCapabilities.allowedSubagentHandles.removeAll { $0 == other.handle }
-                            }
+                    .onChange(of: draftCapabilities.allowsSubagent) { _, isSubagent in
+                        if isSubagent {
+                            draftCapabilities.allowedSubagentHandles = []
                         }
-                    ))
-                }
-                Stepper(
-                    "At once: \(draftCapabilities.maxSimultaneousSubagents)",
-                    value: $draftCapabilities.maxSimultaneousSubagents,
-                    in: 1...8
-                )
-            }
-
-            Toggle("Can schedule jobs", isOn: $draftCapabilities.allowsScheduling)
-
-            profileField(title: "Plugins") {
-                Toggle("All installed plugins", isOn: $draftCapabilities.allowsAllPlugins)
-                if !draftCapabilities.allowsAllPlugins {
-                    ForEach(PluginFactoryListStore.shared.pluginIDs, id: \.self) { pluginID in
-                        Toggle(pluginID, isOn: Binding(
-                            get: { draftCapabilities.allowedPluginIDs.contains(pluginID) },
+                    }
+                if draftCapabilities.allowsSubagent {
+                    Text("Subagents cannot call their own subagents.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Profiles this one may call")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    ForEach(store.profiles.filter { $0.handle != draftHandle && $0.capabilities.allowsSubagent }) { other in
+                        Toggle(other.displayName, isOn: Binding(
+                            get: { draftCapabilities.allowedSubagentHandles.contains(other.handle) },
                             set: { isOn in
                                 if isOn {
-                                    if !draftCapabilities.allowedPluginIDs.contains(pluginID) {
-                                        draftCapabilities.allowedPluginIDs.append(pluginID)
+                                    if !draftCapabilities.allowedSubagentHandles.contains(other.handle) {
+                                        draftCapabilities.allowedSubagentHandles.append(other.handle)
                                     }
                                 } else {
-                                    draftCapabilities.allowedPluginIDs.removeAll { $0 == pluginID }
+                                    draftCapabilities.allowedSubagentHandles.removeAll { $0 == other.handle }
                                 }
                             }
                         ))
                     }
+                    Stepper(
+                        "At once: \(draftCapabilities.maxSimultaneousSubagents)",
+                        value: $draftCapabilities.maxSimultaneousSubagents,
+                        in: 1...8
+                    )
+                }
+            }
+
+            profileField(title: "Job scheduling") {
+                Toggle("Can schedule jobs", isOn: $draftCapabilities.allowsScheduling)
+            }
+
+            profileField(title: "Plugins") {
+                Toggle("All plugins", isOn: Binding(
+                    get: { draftCapabilities.allowsAllPlugins },
+                    set: { isOn in
+                        draftCapabilities.allowsAllPlugins = isOn
+                        if isOn {
+                            draftCapabilities.allowedPluginIDs = plugins.pluginIDs
+                        }
+                    }
+                ))
+                if plugins.pluginIDs.isEmpty {
+                    Text("No plugins installed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(plugins.pluginIDs, id: \.self) { pluginID in
+                    Toggle(pluginID, isOn: Binding(
+                        get: {
+                            draftCapabilities.allowsAllPlugins
+                                || draftCapabilities.allowedPluginIDs.contains(pluginID)
+                        },
+                        set: { isOn in
+                            if draftCapabilities.allowsAllPlugins {
+                                draftCapabilities.allowedPluginIDs = plugins.pluginIDs
+                                draftCapabilities.allowsAllPlugins = false
+                            }
+                            if isOn {
+                                if !draftCapabilities.allowedPluginIDs.contains(pluginID) {
+                                    draftCapabilities.allowedPluginIDs.append(pluginID)
+                                }
+                            } else {
+                                draftCapabilities.allowedPluginIDs.removeAll { $0 == pluginID }
+                            }
+                            if Set(draftCapabilities.allowedPluginIDs) == Set(plugins.pluginIDs),
+                               !plugins.pluginIDs.isEmpty {
+                                draftCapabilities.allowsAllPlugins = true
+                            }
+                        }
+                    ))
                 }
             }
 
@@ -268,6 +324,7 @@ struct AgentProfileSettingsView: View {
                 Button("Save profile") {
                     Task { await saveDraft() }
                 }
+                .buttonStyle(ModalPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -294,10 +351,9 @@ struct AgentProfileSettingsView: View {
     }
 
     private func syncSelection() {
-        if selectedProfileID == nil {
-            selectedProfileID = store.profiles.first?.id
-        } else if store.profiles.contains(where: { $0.id == selectedProfileID }) == false {
-            selectedProfileID = store.profiles.first?.id
+        let ids = store.profiles.map(\.id)
+        if selectedProfileID == nil || !ids.contains(selectedProfileID ?? "") {
+            selectedProfileID = ids.first
         }
         loadDraftFromSelection()
     }
@@ -306,6 +362,7 @@ struct AgentProfileSettingsView: View {
         guard let profile = selectedProfile else { return }
         draftDisplayName = profile.displayName
         draftHandle = profile.handle
+        draftAlias = profile.alias ?? ""
         draftInstructions = profile.instructions
         draftModel = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON)) ?? .defaultHelperModel
         draftThinking = profile.thinkingJSON.flatMap {
@@ -338,19 +395,77 @@ struct AgentProfileSettingsView: View {
     private func saveDraft() async {
         guard var profile = selectedProfile else { return }
         editorError = nil
-        profile.displayName = draftDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile.handle = draftHandle.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile.instructions = draftInstructions
+        let displayName = draftDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alias = draftAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instructions = draftInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let message = validationError(displayName: displayName, alias: alias, instructions: instructions, profileID: profile.id) {
+            editorError = message
+            presentSaveBanner(message, kind: .failure)
+            return
+        }
+        profile.displayName = displayName
+        profile.handle = draftHandle
+        profile.alias = alias.isEmpty ? nil : alias
+        profile.instructions = instructions
         profile.modelJSON = (try? JSONEncoder().encode(draftModel)) ?? profile.modelJSON
         profile.thinkingJSON = try? JSONEncoder().encode(draftThinking)
         profile.rag = draftRAG
-        profile.capabilities = draftCapabilities
+        var capabilities = draftCapabilities
+        if capabilities.allowsSubagent {
+            capabilities.allowedSubagentHandles = []
+        }
+        profile.capabilities = capabilities
+        draftCapabilities = capabilities
         profile.isEnabled = draftEnabled
         do {
             let saved = try await store.upsert(profile)
             selectedProfileID = saved.id
+            presentSaveBanner("Profile saved.", kind: .success)
         } catch {
             editorError = error.localizedDescription
+            presentSaveBanner(error.localizedDescription, kind: .failure)
+        }
+    }
+
+    private func validationError(
+        displayName: String,
+        alias: String,
+        instructions: String,
+        profileID: String
+    ) -> String? {
+        if displayName.isEmpty {
+            return "Display name is required."
+        }
+        let displayKey = displayName.lowercased()
+        if store.profiles.contains(where: {
+            $0.id != profileID && $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == displayKey
+        }) {
+            return "Display name is already used."
+        }
+        if !alias.isEmpty {
+            guard let normalized = AgentProfileHandle.normalize(alias) else {
+                return "Alias must use letters, numbers, and underscores."
+            }
+            if store.profiles.contains(where: {
+                $0.id != profileID && ($0.handle == normalized || $0.alias == normalized)
+            }) {
+                return "Alias is already used."
+            }
+        }
+        if instructions.isEmpty {
+            return "agents.md cannot be empty."
+        }
+        return nil
+    }
+
+    private func presentSaveBanner(_ text: String, kind: InAppNotificationKind) {
+        let banner = SaveBanner(id: UUID(), text: text, kind: kind)
+        saveBanner = banner
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if saveBanner?.id == banner.id {
+                saveBanner = nil
+            }
         }
     }
 

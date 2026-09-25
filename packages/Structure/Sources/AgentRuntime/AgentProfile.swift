@@ -309,6 +309,8 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public var displayName: String
     public var handle: String
+    /// Extra address. `$orc` reaches the same profile as `$orchestrator` when this is `orc`.
+    public var alias: String?
     public var instructions: String
     public var modelJSON: Data
     public var thinkingJSON: Data?
@@ -324,6 +326,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         id: String = UUID().uuidString,
         displayName: String,
         handle: String,
+        alias: String? = nil,
         instructions: String,
         modelJSON: Data,
         thinkingJSON: Data? = nil,
@@ -338,6 +341,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         self.id = id
         self.displayName = displayName
         self.handle = handle
+        self.alias = alias
         self.instructions = instructions
         self.modelJSON = modelJSON
         self.thinkingJSON = thinkingJSON

@@ -24,6 +24,13 @@ final class DBAgentProfileTests: XCTestCase {
         let loaded = try await repository.agentProfile(handle: "reviewer")
         XCTAssertEqual(loaded?.displayName, "Reviewer")
 
+        var aliased = profile
+        aliased.alias = "orc"
+        try await repository.upsertAgentProfile(aliased)
+        let byAlias = try await repository.agentProfile(handle: "orc")
+        XCTAssertEqual(byAlias?.handle, "reviewer")
+        XCTAssertEqual(byAlias?.alias, "orc")
+
         let builtin = AgentProfile.orchestratorDefault(modelJSON: Data(#"{"openai":"gpt-5.6-luna"}"#.utf8))
         try await repository.upsertAgentProfile(builtin)
         try await repository.deleteAgentProfile(id: builtin.id)

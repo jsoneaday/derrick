@@ -89,28 +89,31 @@ enum ProfileDelegateRunner {
             helperReviewerModelJSONProvider: { nil }
         )
 
-        let stream = await ConversationModel.makePolicyStream(
-            prompt: task,
-            apiKey: apiKey,
-            model: model,
-            thinking: thinking,
-            sessionKey: delegateSessionKey,
-            memoryCoordinator: memoryCoordinator,
-            policyStore: policyStore,
-            mcpClient: delegateToolClient,
-            ragInstructions: userRagBase,
-            mcpToolInstructions: mcpToolInstructions,
-            responseSchema: responseSchema,
-            interceptor: interceptor,
-            approvalPresenter: nil,
-            retrievalLimit: retrievalLimit
-        )
-
-        var completeText = ""
-        for try await chunk in stream {
-            if chunk.status == .complete {
-                completeText += chunk.chunk ?? ""
+        let subagentCapabilities = AgentProfileCapabilities(allowsSubagent: true, allowedSubagentHandles: [])
+        let completeText = try await TurnProcessContext.$activeProfileCapabilities.withValue(subagentCapabilities) {
+            let stream = await ConversationModel.makePolicyStream(
+                prompt: task,
+                apiKey: apiKey,
+                model: model,
+                thinking: thinking,
+                sessionKey: delegateSessionKey,
+                memoryCoordinator: memoryCoordinator,
+                policyStore: policyStore,
+                mcpClient: delegateToolClient,
+                ragInstructions: userRagBase,
+                mcpToolInstructions: mcpToolInstructions,
+                responseSchema: responseSchema,
+                interceptor: interceptor,
+                approvalPresenter: nil,
+                retrievalLimit: retrievalLimit
+            )
+            var text = ""
+            for try await chunk in stream {
+                if chunk.status == .complete {
+                    text += chunk.chunk ?? ""
+                }
             }
+            return text
         }
         let trimmed = completeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

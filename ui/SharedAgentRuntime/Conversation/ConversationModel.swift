@@ -106,6 +106,16 @@ final class ConversationModel {
             let normalized = AgentProfileHandle.normalize(
                 handle.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "$", with: "")
             ) ?? handle.lowercased()
+            guard !capabilities.allowsSubagent else {
+                throw NSError(
+                    domain: "AgentProfileDelegate",
+                    code: 403,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Subagents cannot call their own subagents."
+                    ]
+                )
+            }
             guard capabilities.allowedSubagentHandles.contains(normalized) else {
                 throw NSError(
                     domain: "AgentProfileDelegate",

@@ -2,7 +2,7 @@ import Foundation
 import Structure
 
 public enum DatabaseSchema {
-    public static let latestVersion = 12
+    public static let latestVersion = 13
 
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
@@ -47,6 +47,8 @@ public enum DatabaseSchema {
             return "messaging_agent_work"
         case 12:
             return "agent_profile_capabilities"
+        case 13:
+            return "agent_profile_alias"
         default:
             return "unknown"
         }
