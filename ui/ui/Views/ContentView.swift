@@ -405,6 +405,13 @@ struct ContentView: View {
                     DebugLogsView(repository: repository)
                 case .pluginsList:
                     PluginPackageBrowserView(controller: pluginPackageBrowser)
+                case .profiles:
+                    if let helperModelSettings {
+                        AgentProfileSettingsView(
+                            helperModelSettings: helperModelSettings,
+                            modelThinkingSettings: modelThinkingSettings ?? LLMModelThinkingSettings(repository: helperModelSettings.settingsRepository)
+                        )
+                    }
                 case .chats:
                     ChatTabBarView(store: chatSessions, filter: .chats)
                     chatsMainContent
@@ -449,7 +456,7 @@ struct ContentView: View {
                 requestPromptFocusIfNeeded()
             case .pluginsCreate:
                 requestPromptFocusIfNeeded()
-            case .pluginsList, .debugLogs:
+            case .pluginsList, .profiles, .debugLogs:
                 break
             }
         }
@@ -1318,7 +1325,7 @@ struct ContentView: View {
             promptFocusToken += 1
         case .pluginsCreate:
             promptFocusToken += 1
-        case .pluginsList, .debugLogs:
+        case .pluginsList, .profiles, .debugLogs:
             break
         }
     }

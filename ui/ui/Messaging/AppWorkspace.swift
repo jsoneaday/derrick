@@ -6,13 +6,15 @@ enum AppWorkspace: Equatable {
     case pluginsCreate
     /// Installed Agent Plugin package browser.
     case pluginsList
+    /// Profile list and editor.
+    case profiles
     case debugLogs
 
     var isPluginsSection: Bool {
         switch self {
         case .pluginsCreate, .pluginsList:
             return true
-        case .chats, .debugLogs:
+        case .chats, .profiles, .debugLogs:
             return false
         }
     }

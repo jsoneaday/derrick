@@ -16,6 +16,7 @@ struct AgentProfileSettingsView: View {
     @State private var draftThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
     @State private var draftRAG = AgentProfileRAGConfig.default
     @State private var draftEnabled = true
+    @State private var draftCapabilities = AgentProfileCapabilities()
     @State private var editorError: String?
 
     private var selectedProfile: AgentProfile? {
@@ -24,11 +25,27 @@ struct AgentProfileSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
-            Text("Agent profiles")
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
+        ScrollView {
+            editorPage
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(red: 248.0 / 255.0, green: 248.0 / 255.0, blue: 246.0 / 255.0))
+    }
 
-            Text("Profiles define how Derrick behaves when you message an agent from connectors. Talk to a profile by putting $ and its short name at the start, like $orchestrator. Mentioning a short name later in a sentence does not switch profiles. Replies are posted as [\(DerrickAppSupport.hostAppProductName):orchestrator].")
+    private var editorPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            HStack {
+                Text("Profiles")
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                Spacer()
+                Button {
+                    addProfile()
+                } label: {
+                    Label("New", systemImage: "plus")
+                }
+            }
+
+            Text("A profile is who answers. In chat or a connector, start a message with $ and its short name, like $orchestrator. Mentioning a short name later in a sentence does not switch profiles.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -52,20 +69,29 @@ struct AgentProfileSettingsView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
+                                Button {
+                                    selectedProfileID = profile.id
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit")
+                                Button {
+                                    duplicate(profile)
+                                } label: {
+                                    Image(systemName: "plus.square.on.square")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Duplicate")
                             }
                             .tag(profile.id as String?)
                         }
                     }
-                    .frame(minHeight: 180, maxHeight: 260)
+                    .frame(minHeight: 180)
 
-                    HStack {
-                        Button("Add profile") {
-                            addProfile()
-                        }
-                        if let selectedProfile, !selectedProfile.isBuiltin {
-                            Button("Delete", role: .destructive) {
-                                Task { await deleteSelected() }
-                            }
+                    if let selectedProfile, !selectedProfile.isBuiltin {
+                        Button("Delete", role: .destructive) {
+                            Task { await deleteSelected() }
                         }
                     }
                 }
@@ -86,6 +112,7 @@ struct AgentProfileSettingsView: View {
                     .foregroundStyle(.red)
             }
         }
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             syncSelection()
@@ -115,7 +142,10 @@ struct AgentProfileSettingsView: View {
                     .disabled(selectedProfile?.isBuiltin == true)
             }
 
-            profileField(title: "Instructions") {
+            profileField(
+                title: "agents.md",
+                caption: "What this profile is for. This text is its instructions."
+            ) {
                 TextEditor(text: $draftInstructions)
                     .font(.body)
                     .frame(minHeight: 120)
@@ -182,6 +212,54 @@ struct AgentProfileSettingsView: View {
                 )
             }
 
+            profileField(title: "Subagents") {
+                Toggle("Can be called as a subagent", isOn: $draftCapabilities.allowsSubagent)
+                Text("Profiles this one may call")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                ForEach(store.profiles.filter { $0.handle != draftHandle }) { other in
+                    Toggle(other.displayName, isOn: Binding(
+                        get: { draftCapabilities.allowedSubagentHandles.contains(other.handle) },
+                        set: { isOn in
+                            if isOn {
+                                if !draftCapabilities.allowedSubagentHandles.contains(other.handle) {
+                                    draftCapabilities.allowedSubagentHandles.append(other.handle)
+                                }
+                            } else {
+                                draftCapabilities.allowedSubagentHandles.removeAll { $0 == other.handle }
+                            }
+                        }
+                    ))
+                }
+                Stepper(
+                    "At once: \(draftCapabilities.maxSimultaneousSubagents)",
+                    value: $draftCapabilities.maxSimultaneousSubagents,
+                    in: 1...8
+                )
+            }
+
+            Toggle("Can schedule jobs", isOn: $draftCapabilities.allowsScheduling)
+
+            profileField(title: "Plugins") {
+                Toggle("All installed plugins", isOn: $draftCapabilities.allowsAllPlugins)
+                if !draftCapabilities.allowsAllPlugins {
+                    ForEach(PluginFactoryListStore.shared.pluginIDs, id: \.self) { pluginID in
+                        Toggle(pluginID, isOn: Binding(
+                            get: { draftCapabilities.allowedPluginIDs.contains(pluginID) },
+                            set: { isOn in
+                                if isOn {
+                                    if !draftCapabilities.allowedPluginIDs.contains(pluginID) {
+                                        draftCapabilities.allowedPluginIDs.append(pluginID)
+                                    }
+                                } else {
+                                    draftCapabilities.allowedPluginIDs.removeAll { $0 == pluginID }
+                                }
+                            }
+                        ))
+                    }
+                }
+            }
+
             Toggle("Enabled", isOn: $draftEnabled)
                 .disabled(selectedProfile?.handle == AgentProfileHandle.orchestrator)
 
@@ -234,6 +312,7 @@ struct AgentProfileSettingsView: View {
             try? JSONDecoder().decode(ModelThinkingOption.self, from: $0)
         } ?? draftModel.defaultThinkingOption
         draftRAG = profile.rag
+        draftCapabilities = profile.capabilities
         draftEnabled = profile.isEnabled
         editorError = nil
     }
@@ -265,6 +344,7 @@ struct AgentProfileSettingsView: View {
         profile.modelJSON = (try? JSONEncoder().encode(draftModel)) ?? profile.modelJSON
         profile.thinkingJSON = try? JSONEncoder().encode(draftThinking)
         profile.rag = draftRAG
+        profile.capabilities = draftCapabilities
         profile.isEnabled = draftEnabled
         do {
             let saved = try await store.upsert(profile)
@@ -272,6 +352,40 @@ struct AgentProfileSettingsView: View {
         } catch {
             editorError = error.localizedDescription
         }
+    }
+
+    private func duplicate(_ profile: AgentProfile) {
+        var copy = profile
+        copy = AgentProfile(
+            displayName: "Copy of \(profile.displayName)",
+            handle: uniqueHandle(basedOn: profile.handle),
+            instructions: profile.instructions,
+            modelJSON: profile.modelJSON,
+            thinkingJSON: profile.thinkingJSON,
+            rag: profile.rag,
+            capabilities: profile.capabilities,
+            isEnabled: profile.isEnabled,
+            isBuiltin: false
+        )
+        Task {
+            do {
+                let saved = try await store.upsert(copy)
+                selectedProfileID = saved.id
+            } catch {
+                editorError = error.localizedDescription
+            }
+        }
+    }
+
+    private func uniqueHandle(basedOn handle: String) -> String {
+        var candidate = "\(handle)_copy"
+        var suffix = 2
+        let taken = Set(store.profiles.map(\.handle))
+        while taken.contains(candidate) {
+            candidate = "\(handle)_copy_\(suffix)"
+            suffix += 1
+        }
+        return candidate
     }
 
     private func deleteSelected() async {

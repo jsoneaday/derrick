@@ -1,5 +1,79 @@
 import Foundation
 
+/// What a profile is allowed to do beyond its instructions and model.
+public struct AgentProfileCapabilities: Codable, Sendable, Hashable {
+    public var allowsSubagent: Bool
+    public var allowedSubagentHandles: [String]
+    public var maxSimultaneousSubagents: Int
+    public var allowsScheduling: Bool
+    /// When true, every installed plugin is available. Otherwise only `allowedPluginIDs`.
+    public var allowsAllPlugins: Bool
+    public var allowedPluginIDs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case allowsSubagent
+        case allowedSubagentHandles
+        case maxSimultaneousSubagents
+        case allowsScheduling
+        case allowsAllPlugins
+        case allowedPluginIDs
+    }
+
+    public init(
+        allowsSubagent: Bool = false,
+        allowedSubagentHandles: [String] = [],
+        maxSimultaneousSubagents: Int = 1,
+        allowsScheduling: Bool = false,
+        allowsAllPlugins: Bool = true,
+        allowedPluginIDs: [String] = []
+    ) {
+        self.allowsSubagent = allowsSubagent
+        self.allowedSubagentHandles = allowedSubagentHandles
+        self.maxSimultaneousSubagents = min(max(maxSimultaneousSubagents, 1), 8)
+        self.allowsScheduling = allowsScheduling
+        self.allowsAllPlugins = allowsAllPlugins
+        self.allowedPluginIDs = allowedPluginIDs
+    }
+
+    public static let specialist = AgentProfileCapabilities(allowsSubagent: true)
+
+    public static func orchestratorDefault() -> AgentProfileCapabilities {
+        AgentProfileCapabilities(
+            allowsSubagent: false,
+            allowedSubagentHandles: AgentProfileHandle.delegateTargets,
+            maxSimultaneousSubagents: 3,
+            allowsScheduling: true,
+            allowsAllPlugins: true
+        )
+    }
+
+    public func allowsPlugin(_ pluginID: String) -> Bool {
+        if allowsAllPlugins { return true }
+        return allowedPluginIDs.contains(pluginID)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        allowsSubagent = try container.decodeIfPresent(Bool.self, forKey: .allowsSubagent) ?? false
+        allowedSubagentHandles = try container.decodeIfPresent([String].self, forKey: .allowedSubagentHandles) ?? []
+        let limit = try container.decodeIfPresent(Int.self, forKey: .maxSimultaneousSubagents) ?? 1
+        maxSimultaneousSubagents = min(max(limit, 1), 8)
+        allowsScheduling = try container.decodeIfPresent(Bool.self, forKey: .allowsScheduling) ?? false
+        allowsAllPlugins = try container.decodeIfPresent(Bool.self, forKey: .allowsAllPlugins) ?? true
+        allowedPluginIDs = try container.decodeIfPresent([String].self, forKey: .allowedPluginIDs) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(allowsSubagent, forKey: .allowsSubagent)
+        try container.encode(allowedSubagentHandles, forKey: .allowedSubagentHandles)
+        try container.encode(maxSimultaneousSubagents, forKey: .maxSimultaneousSubagents)
+        try container.encode(allowsScheduling, forKey: .allowsScheduling)
+        try container.encode(allowsAllPlugins, forKey: .allowsAllPlugins)
+        try container.encode(allowedPluginIDs, forKey: .allowedPluginIDs)
+    }
+}
+
 public struct AgentProfileRAGConfig: Codable, Sendable, Hashable {
     public var useDefaultInstructions: Bool
     public var customInstructions: String?
@@ -239,6 +313,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     public var modelJSON: Data
     public var thinkingJSON: Data?
     public var rag: AgentProfileRAGConfig
+    public var capabilities: AgentProfileCapabilities
     public var isEnabled: Bool
     public var isBuiltin: Bool
     public var sortOrder: Int
@@ -253,6 +328,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         modelJSON: Data,
         thinkingJSON: Data? = nil,
         rag: AgentProfileRAGConfig = .default,
+        capabilities: AgentProfileCapabilities = AgentProfileCapabilities(),
         isEnabled: Bool = true,
         isBuiltin: Bool = false,
         sortOrder: Int = 0,
@@ -266,6 +342,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         self.modelJSON = modelJSON
         self.thinkingJSON = thinkingJSON
         self.rag = rag
+        self.capabilities = capabilities
         self.isEnabled = isEnabled
         self.isBuiltin = isBuiltin
         self.sortOrder = sortOrder
@@ -309,6 +386,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .orchestratorDefault(),
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 0
@@ -330,6 +408,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 1
@@ -350,6 +429,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 2
@@ -371,6 +451,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 3
@@ -394,6 +475,7 @@ public struct AgentProfileTurnContext: Codable, Sendable, Hashable {
     public let modelJSON: Data
     public let thinkingJSON: Data?
     public let rag: AgentProfileRAGConfig
+    public let capabilities: AgentProfileCapabilities
 
     public init(profile: AgentProfile) {
         handle = profile.handle
@@ -402,5 +484,6 @@ public struct AgentProfileTurnContext: Codable, Sendable, Hashable {
         modelJSON = profile.modelJSON
         thinkingJSON = profile.thinkingJSON
         rag = profile.rag
+        capabilities = profile.capabilities
     }
 }
