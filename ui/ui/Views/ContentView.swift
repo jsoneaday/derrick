@@ -8,7 +8,6 @@ import Plugin
 import PolicyUserInteraction
 import Structure
 private let bottomPromptFontSize = CGFloat(11)
-private let bottomPromptIconSize = CGFloat(10)
 
 struct ChatTurn: Identifiable, Hashable {
     let id: UUID
@@ -18,6 +17,8 @@ struct ChatTurn: Identifiable, Hashable {
     var thought: String
     var status: AgentResponseStatus?
     var toolName: String?
+    var profileHandle: String?
+    var profileDisplayName: String?
 
     init(
         id: UUID = UUID(),
@@ -26,7 +27,9 @@ struct ChatTurn: Identifiable, Hashable {
         response: String = "",
         thought: String = "",
         status: AgentResponseStatus? = nil,
-        toolName: String? = nil
+        toolName: String? = nil,
+        profileHandle: String? = nil,
+        profileDisplayName: String? = nil
     ) {
         self.id = id
         self.prompt = prompt
@@ -35,6 +38,8 @@ struct ChatTurn: Identifiable, Hashable {
         self.thought = thought
         self.status = status
         self.toolName = toolName
+        self.profileHandle = profileHandle
+        self.profileDisplayName = profileDisplayName
     }
 
     /// Thinking is the current plan snapshot. Progress tool chunks append to
@@ -267,9 +272,6 @@ struct ContentView: View {
     @State private var apiKeyDraft = ""
     @State private var shouldResumeAfterSavingKey = false
     @State private var selectedProvider: LLMProviderChoice = .openai
-    @State private var selectedModel: LLMModelChoice = .openai(.gpt56Luna)
-    @State private var selectedThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
-    @State private var selectedProfileHandle: String = AgentProfileHandle.orchestrator
     @State private var helperModelSettings: LLMModelSettings?
     @State private var modelThinkingSettings: LLMModelThinkingSettings?
     @State private var promptFocusToken = 0
@@ -289,7 +291,8 @@ struct ContentView: View {
     }
 
     private var currentHelperAPIKey: String? {
-        LLMProviderCredentialGate.resolveAPIKey(for: selectedProvider, resolver: secretResolver)
+        let provider = helperModelSettings?.pluginSafetyReviewerModel.provider ?? selectedProvider
+        return LLMProviderCredentialGate.resolveAPIKey(for: provider, resolver: secretResolver)
     }
 
     private var currentHelperReviewerModelJSON: String? {
@@ -301,7 +304,6 @@ struct ContentView: View {
 
     private var canSendPrompt: Bool {
         sessionReady
-            && hasAPIKey(for: selectedProvider)
             && !chatSessions.isSelectedTabStreaming
             && (
                 !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -321,7 +323,6 @@ struct ContentView: View {
         guard !hasAPIKey(for: selectedProvider) else { return }
         guard let provider = configuredProviders.first else { return }
         selectedProvider = provider
-        selectedModel = provider.defaultModel
     }
 
     private func refreshProviderCredentialUI() {
@@ -343,22 +344,6 @@ struct ContentView: View {
         sessionReady
             && !isActiveTabStreaming
             && pendingAttachments.count < ChatFileAttachmentPolicy.maximumFileCount
-    }
-
-    private var visibleThinkingOptions: [ModelThinkingOption] {
-        selectedModel.thinkingOptions
-    }
-
-    private func syncSelectedThinkingForModel() {
-        if let settings = modelThinkingSettings {
-            selectedThinking = settings.thinking(for: selectedModel)
-        } else {
-            selectedThinking = selectedModel.defaultThinkingOption
-        }
-    }
-
-    private var visibleModels: [LLMModelChoice] {
-        selectedProvider.models
     }
 
     private var activeTurns: [ChatTurn] {
@@ -796,20 +781,6 @@ struct ContentView: View {
                 await self.performClientBootstrap()
             }
         }
-        .onChange(of: selectedProvider) { _, newProvider in
-            if selectedModel.provider != newProvider {
-                selectedModel = newProvider.defaultModel
-            }
-        }
-        .onChange(of: selectedModel) { _, newModel in
-            if selectedProvider != newModel.provider {
-                selectedProvider = newModel.provider
-            }
-            syncSelectedThinkingForModel()
-        }
-        .onChange(of: selectedThinking) { _, newThinking in
-            modelThinkingSettings?.setThinking(newThinking, for: selectedModel)
-        }
         .background(WindowConfigurator())
     }
 
@@ -985,7 +956,6 @@ struct ContentView: View {
         let thinkingSettings = LLMModelThinkingSettings(repository: repo)
         await thinkingSettings.loadSettings()
         modelThinkingSettings = thinkingSettings
-        syncSelectedThinkingForModel()
         return repo
     }
 
@@ -1078,14 +1048,16 @@ struct ContentView: View {
                                 if isPluginCreator {
                                     PluginCreatorIntroHeader()
                                 }
-                                ForEach(turns) { turn in
+                                ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+                                    let previousHandle = index > 0 ? turns[index - 1].profileHandle : nil
                                     PromptCompletionCard(
                                         turn: turn,
                                         isStreaming: isStreaming,
                                         isActiveStreamingTurn: isStreaming && turn.id == turns.last?.id,
                                         completionStatus: completionStatus(for: turn),
                                         statusMessage: streamingStatusMessage(for: turn),
-                                        toolName: turn.toolName
+                                        toolName: turn.toolName,
+                                        showsProfileHeader: turn.profileHandle != nil && turn.profileHandle != previousHandle
                                     ) {
                                         copyTurn(turn)
                                     }
@@ -1264,104 +1236,6 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Menu {
-                        Picker("Profile", selection: $selectedProfileHandle) {
-                            ForEach(agentProfiles.enabledProfiles, id: \.handle) { profile in
-                                Text(profile.displayName).tag(profile.handle)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: bottomPromptIconSize, weight: .medium))
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            Text(agentProfiles.profile(handle: selectedProfileHandle)?.displayName ?? "Profile")
-                                .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(Color(nsColor: .labelColor))
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(isActiveTabStreaming)
-
-                    Menu {
-                        Picker("Provider", selection: $selectedProvider) {
-                            ForEach(LLMProviderChoice.allCases) { provider in
-                                Text(provider.displayName)
-                                    .tag(provider)
-                                    .disabled(!hasAPIKey(for: provider))
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: bottomPromptIconSize, weight: .medium))
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            Text(selectedProvider.displayName)
-                                .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(
-                                    hasAPIKey(for: selectedProvider)
-                                        ? Color(nsColor: .labelColor)
-                                        : Color(nsColor: .tertiaryLabelColor)
-                                )
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(isActiveTabStreaming || configuredProviders.isEmpty)
-
-                    Menu {
-                        Picker("Model", selection: $selectedModel) {
-                            ForEach(visibleModels) { model in
-                                Text(model.displayName).tag(model)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: bottomPromptIconSize, weight: .medium))
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            Text(selectedModel.displayName)
-                                .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(
-                                    hasAPIKey(for: selectedProvider)
-                                        ? Color(nsColor: .labelColor)
-                                        : Color(nsColor: .tertiaryLabelColor)
-                                )
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(isActiveTabStreaming || !hasAPIKey(for: selectedProvider))
-
-                    Menu {
-                        Picker("Thinking", selection: $selectedThinking) {
-                            ForEach(visibleThinkingOptions) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: bottomPromptIconSize, weight: .medium))
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            Text(selectedThinking.displayName)
-                                .font(.system(size: bottomPromptFontSize))
-                                .foregroundStyle(
-                                    hasAPIKey(for: selectedProvider)
-                                        ? Color(nsColor: .labelColor)
-                                        : Color(nsColor: .tertiaryLabelColor)
-                                )
-                        }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(isActiveTabStreaming || !hasAPIKey(for: selectedProvider))
-
                     Button {
                         if isActiveTabStreaming {
                             chatSessions.cancelSelectedTabStream()
@@ -1525,9 +1399,16 @@ struct ContentView: View {
     }
 
     private func startStreaming() {
-        guard canSendPrompt, hasAPIKey(for: selectedProvider) else { return }
+        guard canSendPrompt else { return }
 
         let currentPrompt = prompt
+        let provider = providerForPrompt(currentPrompt)
+        guard hasAPIKey(for: provider) else {
+            selectedProvider = provider
+            isPresentingAPIKeyPrompt = true
+            return
+        }
+
         prompt = ""
         promptFocusToken += 1
 
@@ -1541,13 +1422,22 @@ struct ContentView: View {
 
             chatSessions.sendPrompt(
                 currentPrompt,
-                apiKey: resolveAPIKey() ?? "",
-                profileHandle: selectedProfileHandle,
+                apiKey: LLMProviderCredentialGate.resolveAPIKey(for: provider, resolver: secretResolver) ?? "",
                 reviewerModelJSON: currentHelperReviewerModelJSON
             ) { message in
                 errorMessage = message
             }
         }
+    }
+
+    /// The profile named by `$handle` in the message owns the model. With no `$handle`, that is `$orchestrator`.
+    private func providerForPrompt(_ prompt: String) -> LLMProviderChoice {
+        guard let resolved = agentProfiles.resolveProfile(explicitHandle: nil, message: prompt) else {
+            return .openai
+        }
+        let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: resolved.profile.modelJSON))
+            ?? .defaultHelperModel
+        return model.provider
     }
 
     /// Chat menu never hosts Create — leave any plugin-creator selection for a real chat.
@@ -1712,10 +1602,6 @@ struct ContentView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-    }
-
-    private func resolveAPIKey() -> String? {
-        LLMProviderCredentialGate.resolveAPIKey(for: selectedModel.provider, resolver: secretResolver)
     }
 
     @ViewBuilder

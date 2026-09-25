@@ -205,6 +205,7 @@ struct PromptCompletionCard: View {
     let completionStatus: CompletionStatus
     let statusMessage: String?
     let toolName: String?
+    let showsProfileHeader: Bool
     let onCopy: () -> Void
     @State private var isCompletionVisible = false
 
@@ -215,6 +216,7 @@ struct PromptCompletionCard: View {
         completionStatus: CompletionStatus,
         statusMessage: String? = nil,
         toolName: String? = nil,
+        showsProfileHeader: Bool = false,
         onCopy: @escaping () -> Void
     ) {
         self.turn = turn
@@ -223,6 +225,7 @@ struct PromptCompletionCard: View {
         self.completionStatus = completionStatus
         self.statusMessage = statusMessage
         self.toolName = toolName
+        self.showsProfileHeader = showsProfileHeader
         self.onCopy = onCopy
     }
 
@@ -251,6 +254,11 @@ struct PromptCompletionCard: View {
 
             if isCompletionVisible || !turn.response.isEmpty || isActiveStreamingTurn {
                 VStack(alignment: .leading, spacing: 8) {
+                    if showsProfileHeader, let name = turn.profileDisplayName, !name.isEmpty {
+                        Text(name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AgentProfileTokenColor.darkGreen)
+                    }
                     VStack(alignment: .leading, spacing: 10) {
                         if completionStatus == .streaming {
                             HostUICompletionStatus(status: statusMessage ?? "Thinking...", toolName: toolName)

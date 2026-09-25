@@ -105,7 +105,7 @@ enum ProfileDelegateRunnerError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidTarget(let handle):
-            return "Profile \(handle) cannot be delegated to. Use developer, researcher, or general."
+            return "Profile \(handle) cannot be delegated to. Use developer, researcher, or generalist."
         case .profileUnavailable(let handle):
             return "Profile \(handle) is not available."
         case .emptyResponse:

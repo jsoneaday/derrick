@@ -25,12 +25,12 @@ public enum AgentProfileHandle {
     public static let orchestrator = "orchestrator"
     public static let developer = "developer"
     public static let researcher = "researcher"
-    public static let general = "general"
+    public static let generalist = "generalist"
 
-    public static let allBuiltins = [orchestrator, developer, researcher, general]
+    public static let allBuiltins = [orchestrator, developer, researcher, generalist]
 
     /// Profiles the orchestrator may delegate to via `agent_profile_delegate`.
-    public static let delegateTargets = [developer, researcher, general]
+    public static let delegateTargets = [developer, researcher, generalist]
 
     public static func normalize(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -299,9 +299,9 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             When another profile fits better, delegate with `agent_profile_delegate`:
             - `developer` — code, debugging, implementation, technical execution
             - `researcher` — research, summarization, synthesis from sources
-            - `general` — everyday workhorse tasks when no specialist fits
+            - `generalist` — everyday workhorse tasks when no specialist fits
 
-            Use `general` when unsure which specialist fits. Summarize delegated outcomes in plain \
+            Use `generalist` when unsure which specialist fits. Summarize delegated outcomes in plain \
             language and report blockers early.
 
             Stay concise unless the user asks for detail.
@@ -356,13 +356,13 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
-    public static func generalDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
+    public static func generalistDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
         AgentProfile(
             id: "builtin-general",
-            displayName: "General",
-            handle: AgentProfileHandle.general,
+            displayName: "Generalist",
+            handle: AgentProfileHandle.generalist,
             instructions: """
-            You are Derrick's General profile — the workhorse for everyday tasks: writing, planning, \
+            You are Derrick's Generalist profile — the workhorse for everyday tasks: writing, planning, \
             brainstorming, mixed requests, and anything that does not need a specialist. Be practical, \
             direct, and helpful.
 
@@ -382,7 +382,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             orchestratorDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
             developerDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
             researcherDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
-            generalDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
+            generalistDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
         ]
     }
 }

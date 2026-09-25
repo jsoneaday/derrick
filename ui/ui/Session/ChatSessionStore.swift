@@ -660,7 +660,6 @@ final class ChatSessionStore: ObservableObject {
     func sendPrompt(
         _ prompt: String,
         apiKey: String,
-        profileHandle: String,
         reviewerModelJSON: String? = nil,
         onError: @escaping (String) -> Void
     ) {
@@ -690,10 +689,10 @@ final class ChatSessionStore: ObservableObject {
         }
 
         guard let resolved = AgentProfileStore.shared.resolveProfile(
-            explicitHandle: profileHandle,
+            explicitHandle: nil,
             message: trimmed
         ) else {
-            onError("Choose a profile and enter a message.")
+            onError("Enter a message. Start with $ and a profile name, like $orchestrator, to choose who answers.")
             return
         }
         let profile = resolved.profile
@@ -706,7 +705,13 @@ final class ChatSessionStore: ObservableObject {
 
         tabs[tabIndex].pendingAttachments = []
         tabs[tabIndex].turns.append(
-            ChatTurn(prompt: trimmed, attachments: attachments, response: "")
+            ChatTurn(
+                prompt: trimmed,
+                attachments: attachments,
+                response: "",
+                profileHandle: profile.handle,
+                profileDisplayName: profile.displayName
+            )
         )
         tabs[tabIndex].isStreaming = true
         updateTitleIfNeeded(

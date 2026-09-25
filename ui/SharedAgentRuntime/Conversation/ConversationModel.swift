@@ -376,8 +376,8 @@ final class ConversationModel {
 
     private static let profileDelegateToolInstructions = """
     14. Profile delegation (orchestrator only; when listed in the catalog):
-       1. `agent_profile_delegate` — args `profile_handle` (developer, researcher, or general; no $) and `task` (concrete instructions). Blocks until the profile finishes; use the returned text in your next step.
-       2. Prefer `researcher` for research and summarization, `developer` for code, and `general` when no specialist fits.
+       1. `agent_profile_delegate` — args `profile_handle` (developer, researcher, or generalist; no $) and `task` (concrete instructions). Blocks until the profile finishes; use the returned text in your next step.
+       2. Prefer `researcher` for research and summarization, `developer` for code, and `generalist` when no specialist fits.
        3. Delegated profiles do not talk to the user directly; synthesize their result into your `assistant_response`.
     """
 
