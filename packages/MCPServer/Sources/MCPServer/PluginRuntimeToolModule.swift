@@ -42,7 +42,8 @@ public enum PluginRuntimeToolModule {
     }
 
     public static func makeSkillRegistration(
-        loadRelease: @escaping @Sendable (String) async throws -> PluginFactoryRelease?
+        activate: @escaping @Sendable (_ pluginID: String, _ skill: String) async throws -> String?,
+        reference: @escaping @Sendable (_ pluginID: String, _ path: String) async throws -> (path: String, body: String)?
     ) -> MCPToolRegistration {
         MCPToolRegistration(
             tool: .pluginSkill,
@@ -82,13 +83,6 @@ public enum PluginRuntimeToolModule {
                     message: "plugin_id is required."
                 ).encodedJSON()
             }
-            guard let release = try await loadRelease(pluginID) else {
-                return try failure(
-                    stage: .validation,
-                    code: "plugin_not_found",
-                    message: "No approved plugin named \(pluginID)."
-                ).encodedJSON()
-            }
             switch action {
             case "activate":
                 let skill = arguments["skill"]?.stringValue?
@@ -100,10 +94,7 @@ public enum PluginRuntimeToolModule {
                         message: "skill is required for action=activate."
                     ).encodedJSON()
                 }
-                guard let body = PluginSkillDisclosure.activate(
-                    skillFiles: release.skillFiles,
-                    skillNameOrPath: skill
-                ) else {
+                guard let body = try await activate(pluginID, skill) else {
                     return try failure(
                         stage: .validation,
                         code: "skill_not_found",
@@ -123,14 +114,8 @@ public enum PluginRuntimeToolModule {
                         message: "path is required for action=reference."
                     ).encodedJSON()
                 }
-                guard let hit = PluginSkillDisclosure.reference(
-                    skillFiles: release.skillFiles,
-                    requested: path
-                ) else {
-                    let available = PluginSkillDisclosure.referencePaths(skillFiles: release.skillFiles)
-                    let hint = available.isEmpty
-                        ? "No references shipped for /\(pluginID)."
-                        : "Available: \(available.joined(separator: ", "))"
+                guard let hit = try await reference(pluginID, path) else {
+                    let hint = "No reference matching that path on /\(pluginID)."
                     return try failure(
                         stage: .validation,
                         code: "reference_not_found",

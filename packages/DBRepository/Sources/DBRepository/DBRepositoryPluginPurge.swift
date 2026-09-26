@@ -173,6 +173,20 @@ private extension DBRepository {
         if beforeCount > 0 {
             try execute(
                 """
+                DELETE FROM plugin_skill_references
+                WHERE plugin_id = \(quoted(pluginID))\(versionClause);
+                """,
+                on: handle
+            )
+            try execute(
+                """
+                DELETE FROM plugin_skills
+                WHERE plugin_id = \(quoted(pluginID))\(versionClause);
+                """,
+                on: handle
+            )
+            try execute(
+                """
                 DELETE FROM plugin_factory_releases
                 WHERE plugin_id = \(quoted(pluginID))\(versionClause);
                 """,

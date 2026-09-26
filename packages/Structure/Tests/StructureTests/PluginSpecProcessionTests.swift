@@ -248,6 +248,30 @@ import Testing
         #expect(question.contains(PluginAccessAskPolicy.genericQuestion) == false)
     }
 
+    @Test func accessAskSkipsANavDumpFromAnyDocsPage() {
+        let nav = "Docs Home Changelog TutorialsSuccess!My AppsDiscard ChangesSave ChangesUsing ProductEnterprisePricingSupportGuidesMarket"
+        let dumped = ConnectorAuthDiscovery(
+            authScheme: .botToken,
+            secrets: [],
+            crawlSummary: nav
+        )
+        let hidden = PluginAccessAskPolicy.question(
+            fromDocs: dumped,
+            documentationURL: "https://docs.example.com/auth"
+        )
+        #expect(hidden.contains("TutorialsSuccess") == false)
+        #expect(hidden.contains("credential those docs describe"))
+        #expect(hidden.contains("[Read the setup docs]"))
+
+        let prose = ConnectorAuthDiscovery(
+            authScheme: .apiKey,
+            secrets: [],
+            crawlSummary: "Create a token in the developer dashboard and send it on each request."
+        )
+        let shown = PluginAccessAskPolicy.question(fromDocs: prose, documentationURL: nil)
+        #expect(shown.contains("developer dashboard"))
+    }
+
     @Test func accessAskPrefersACallTokenOverOAuthClientCredentials() throws {
         let oauthInstall = ConnectorAuthDiscovery(
             authScheme: .oauth,

@@ -1,0 +1,12 @@
+---
+description: Create Derrick git worktrees inside derrick_project
+alwaysApply: true
+---
+
+# Worktree location
+
+Create every Derrick git worktree inside `/Users/davidchoi/Work/derrick_project`, next to the main checkout.
+
+Example: `/Users/davidchoi/Work/derrick_project/derrick-plugin-skills`.
+
+Do not create worktrees in `/Users/davidchoi/Work`.

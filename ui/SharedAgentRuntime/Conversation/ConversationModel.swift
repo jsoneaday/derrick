@@ -568,26 +568,10 @@ final class ConversationModel {
         capabilities: AgentProfileCapabilities?
     ) async -> String {
         do {
-            let summaries = try await repository.listPluginFactoryReleaseSummaries()
-            var latestByPlugin: [String: PluginFactoryReleaseSummary] = [:]
-            for summary in summaries {
-                if latestByPlugin[summary.pluginID] == nil {
-                    latestByPlugin[summary.pluginID] = summary
-                }
-            }
-            var entries: [PluginSkillDisclosure.IndexEntry] = []
-            for summary in latestByPlugin.values.sorted(by: { $0.pluginID < $1.pluginID }) {
-                guard let release = try await repository.pluginFactoryRelease(
-                    pluginID: summary.pluginID,
-                    version: summary.version
-                ) else { continue }
-                let indexed = PluginSkillDisclosure.index(from: release)
-                if let capabilities {
-                    entries.append(contentsOf: indexed.filter { capabilities.allowsPlugin($0.pluginID) })
-                } else {
-                    entries.append(contentsOf: indexed)
-                }
-            }
+            let indexed = try await repository.listPluginSkillIndex()
+            let entries = capabilities.map { caps in
+                indexed.filter { caps.allowsPlugin($0.pluginID) }
+            } ?? indexed
             return PluginSkillDisclosure.indexPromptBlock(entries: entries)
         } catch {
             return ""

@@ -784,6 +784,7 @@ struct ContentView: View {
                 return
             }
             policyEventPresenter.start()
+            ModelProviderLimitCenter.shared.runModal = pluginCreationController
             await bootstrapStatus.runClientBootstrap {
                 await self.performClientBootstrap()
             }

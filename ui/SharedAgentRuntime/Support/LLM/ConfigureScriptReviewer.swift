@@ -68,9 +68,12 @@ actor ConfiguredScriptReviewer: ScriptReviewer {
             }
             await MainActor.run {
                 debugLog("Default helper reviewer also failed; denying review.")
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
-                )
+                let failure = LLMFailureClassifier.classify(error, provider: selectedModel.provider)
+                if case .outOfCredits = failure {
+                    ModelProviderLimitCenter.shared.report(raw: error.localizedDescription)
+                } else {
+                    LLMFailureReporter.shared.report(failure)
+                }
             }
             throw error
         }

@@ -772,7 +772,11 @@ final class ChatSessionStore: ObservableObject {
                 if !Task.isCancelled {
                     onError(error.localizedDescription)
                     let failure = LLMFailureClassifier.classify(error, provider: model.provider)
-                    LLMFailureReporter.shared.report(failure)
+                    if case .outOfCredits = failure {
+                        ModelProviderLimitCenter.shared.report(raw: error.localizedDescription)
+                    } else {
+                        LLMFailureReporter.shared.report(failure)
+                    }
                 }
             }
         }
