@@ -8,11 +8,13 @@ public extension DBRepository {
         let ragJSON = String(data: ragData, encoding: .utf8) ?? "{}"
         let modelJSON = String(data: profile.modelJSON, encoding: .utf8) ?? "{}"
         let thinkingJSON = profile.thinkingJSON.flatMap { String(data: $0, encoding: .utf8) }
+        let capabilitiesData = (try? JSONEncoder().encode(profile.capabilities)) ?? Data("{}".utf8)
+        let capabilitiesJSON = String(data: capabilitiesData, encoding: .utf8) ?? "{}"
         try withDatabaseHandle { handle in
             try Self.execute("""
             INSERT INTO agent_profiles (
                 id, display_name, handle, instructions, model_json, thinking_json, rag_json,
-                is_enabled, is_builtin, sort_order, created_at, updated_at
+                is_enabled, is_builtin, sort_order, created_at, updated_at, capabilities_json, alias
             ) VALUES (
                 \(quoted(profile.id)),
                 \(quoted(profile.displayName)),
@@ -25,7 +27,9 @@ public extension DBRepository {
                 \(profile.isBuiltin ? 1 : 0),
                 \(profile.sortOrder),
                 \(quoted(Self.iso8601Formatter().string(from: profile.createdAt))),
-                \(quoted(Self.iso8601Formatter().string(from: profile.updatedAt)))
+                \(quoted(Self.iso8601Formatter().string(from: profile.updatedAt))),
+                \(quoted(capabilitiesJSON)),
+                \(sqlValue(profile.alias))
             )
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
@@ -37,7 +41,9 @@ public extension DBRepository {
                 is_enabled = excluded.is_enabled,
                 is_builtin = excluded.is_builtin,
                 sort_order = excluded.sort_order,
-                updated_at = excluded.updated_at;
+                updated_at = excluded.updated_at,
+                capabilities_json = excluded.capabilities_json,
+                alias = excluded.alias;
             """, on: handle)
         }
     }
@@ -46,7 +52,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let sql = """
             SELECT id, display_name, handle, instructions, model_json, thinking_json, rag_json,
-                   is_enabled, is_builtin, sort_order, created_at, updated_at
+                   is_enabled, is_builtin, sort_order, created_at, updated_at, capabilities_json, alias
             FROM agent_profiles
             ORDER BY sort_order ASC, display_name ASC;
             """
@@ -67,7 +73,7 @@ public extension DBRepository {
         try withDatabaseHandle { handle in
             let sql = """
             SELECT id, display_name, handle, instructions, model_json, thinking_json, rag_json,
-                   is_enabled, is_builtin, sort_order, created_at, updated_at
+                   is_enabled, is_builtin, sort_order, created_at, updated_at, capabilities_json, alias
             FROM agent_profiles
             WHERE id = \(quoted(id))
             LIMIT 1;
@@ -84,12 +90,19 @@ public extension DBRepository {
 
     func agentProfile(handle: String) throws -> AgentProfile? {
         let normalized = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return try withDatabaseHandle { dbHandle in
+        if let match = try agentProfile(matching: "handle = \(quoted(normalized))") {
+            return match
+        }
+        return try agentProfile(matching: "alias = \(quoted(normalized))")
+    }
+
+    private func agentProfile(matching predicate: String) throws -> AgentProfile? {
+        try withDatabaseHandle { dbHandle in
             let sql = """
             SELECT id, display_name, handle, instructions, model_json, thinking_json, rag_json,
-                   is_enabled, is_builtin, sort_order, created_at, updated_at
+                   is_enabled, is_builtin, sort_order, created_at, updated_at, capabilities_json, alias
             FROM agent_profiles
-            WHERE handle = \(quoted(normalized))
+            WHERE \(predicate)
             LIMIT 1;
             """
             var statement: OpaquePointer?
@@ -122,14 +135,19 @@ public extension DBRepository {
             AgentProfileRAGConfig.self,
             from: Data(text(6).utf8)
         )) ?? .default
+        let capabilities = optionalText(12).flatMap {
+            try? JSONDecoder().decode(AgentProfileCapabilities.self, from: Data($0.utf8))
+        } ?? AgentProfileCapabilities()
         return AgentProfile(
             id: text(0),
             displayName: text(1),
             handle: text(2),
+            alias: optionalText(13).flatMap { AgentProfileHandle.normalize($0) },
             instructions: text(3),
             modelJSON: Data(text(4).utf8),
             thinkingJSON: optionalText(5).map { Data($0.utf8) },
             rag: rag,
+            capabilities: capabilities,
             isEnabled: sqlite3_column_int(statement, 7) != 0,
             isBuiltin: sqlite3_column_int(statement, 8) != 0,
             sortOrder: Int(sqlite3_column_int(statement, 9)),

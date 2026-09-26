@@ -31,6 +31,9 @@ public enum TurnProcessContext {
     /// Active agent profile handle for the current user-facing turn (orchestrator-only tools).
     @TaskLocal public static var activeProfileHandle: String?
 
+    /// Capabilities of the profile answering the current user-facing turn.
+    @TaskLocal public static var activeProfileCapabilities: AgentProfileCapabilities?
+
     /// Active `/create-plugin` or `/edit-plugin` factory turn.
     @TaskLocal public static var pluginFactoryCreationActive: Bool = false
 

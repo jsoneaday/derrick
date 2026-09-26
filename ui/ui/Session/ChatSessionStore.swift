@@ -660,7 +660,6 @@ final class ChatSessionStore: ObservableObject {
     func sendPrompt(
         _ prompt: String,
         apiKey: String,
-        profileHandle: String,
         reviewerModelJSON: String? = nil,
         onError: @escaping (String) -> Void
     ) {
@@ -690,14 +689,19 @@ final class ChatSessionStore: ObservableObject {
         }
 
         guard let resolved = AgentProfileStore.shared.resolveProfile(
-            explicitHandle: profileHandle,
+            explicitHandle: nil,
             message: trimmed
         ) else {
-            onError("Choose a profile and enter a message.")
+            onError("Enter a message. Start with $ and a profile name, like $orchestrator, to choose who answers.")
             return
         }
         let profile = resolved.profile
         let profilePrompt = resolved.prompt
+        if let pluginID = Self.slashPluginID(from: trimmed),
+           !profile.capabilities.allowsPlugin(pluginID) {
+            onError("\(profile.displayName) is not allowed to use /\(pluginID).")
+            return
+        }
         let model = (try? JSONDecoder().decode(LLMModelChoice.self, from: profile.modelJSON))
             ?? .defaultHelperModel
         let thinking = profile.thinkingJSON.flatMap {
@@ -706,7 +710,13 @@ final class ChatSessionStore: ObservableObject {
 
         tabs[tabIndex].pendingAttachments = []
         tabs[tabIndex].turns.append(
-            ChatTurn(prompt: trimmed, attachments: attachments, response: "")
+            ChatTurn(
+                prompt: trimmed,
+                attachments: attachments,
+                response: "",
+                profileHandle: profile.handle,
+                profileDisplayName: profile.displayName
+            )
         )
         tabs[tabIndex].isStreaming = true
         updateTitleIfNeeded(
@@ -918,5 +928,14 @@ final class ChatSessionStore: ObservableObject {
         let source = collapsed.isEmpty ? (attachments.first?.originalFilename ?? "Chat") : collapsed
         if source.count <= 48 { return source }
         return String(source.prefix(48)) + "…"
+    }
+
+    private static func slashPluginID(from prompt: String) -> String? {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return nil }
+        let token = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? trimmed
+        let pluginID = String(token.dropFirst())
+        guard !pluginID.isEmpty, !pluginID.contains("/") else { return nil }
+        return pluginID
     }
 }

@@ -1,5 +1,79 @@
 import Foundation
 
+/// What a profile is allowed to do beyond its instructions and model.
+public struct AgentProfileCapabilities: Codable, Sendable, Hashable {
+    public var allowsSubagent: Bool
+    public var allowedSubagentHandles: [String]
+    public var maxSimultaneousSubagents: Int
+    public var allowsScheduling: Bool
+    /// When true, every installed plugin is available. Otherwise only `allowedPluginIDs`.
+    public var allowsAllPlugins: Bool
+    public var allowedPluginIDs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case allowsSubagent
+        case allowedSubagentHandles
+        case maxSimultaneousSubagents
+        case allowsScheduling
+        case allowsAllPlugins
+        case allowedPluginIDs
+    }
+
+    public init(
+        allowsSubagent: Bool = false,
+        allowedSubagentHandles: [String] = [],
+        maxSimultaneousSubagents: Int = 1,
+        allowsScheduling: Bool = false,
+        allowsAllPlugins: Bool = true,
+        allowedPluginIDs: [String] = []
+    ) {
+        self.allowsSubagent = allowsSubagent
+        self.allowedSubagentHandles = allowedSubagentHandles
+        self.maxSimultaneousSubagents = min(max(maxSimultaneousSubagents, 1), 8)
+        self.allowsScheduling = allowsScheduling
+        self.allowsAllPlugins = allowsAllPlugins
+        self.allowedPluginIDs = allowedPluginIDs
+    }
+
+    public static let specialist = AgentProfileCapabilities(allowsSubagent: true)
+
+    public static func orchestratorDefault() -> AgentProfileCapabilities {
+        AgentProfileCapabilities(
+            allowsSubagent: false,
+            allowedSubagentHandles: AgentProfileHandle.delegateTargets,
+            maxSimultaneousSubagents: 3,
+            allowsScheduling: true,
+            allowsAllPlugins: true
+        )
+    }
+
+    public func allowsPlugin(_ pluginID: String) -> Bool {
+        if allowsAllPlugins { return true }
+        return allowedPluginIDs.contains(pluginID)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        allowsSubagent = try container.decodeIfPresent(Bool.self, forKey: .allowsSubagent) ?? false
+        allowedSubagentHandles = try container.decodeIfPresent([String].self, forKey: .allowedSubagentHandles) ?? []
+        let limit = try container.decodeIfPresent(Int.self, forKey: .maxSimultaneousSubagents) ?? 1
+        maxSimultaneousSubagents = min(max(limit, 1), 8)
+        allowsScheduling = try container.decodeIfPresent(Bool.self, forKey: .allowsScheduling) ?? false
+        allowsAllPlugins = try container.decodeIfPresent(Bool.self, forKey: .allowsAllPlugins) ?? true
+        allowedPluginIDs = try container.decodeIfPresent([String].self, forKey: .allowedPluginIDs) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(allowsSubagent, forKey: .allowsSubagent)
+        try container.encode(allowedSubagentHandles, forKey: .allowedSubagentHandles)
+        try container.encode(maxSimultaneousSubagents, forKey: .maxSimultaneousSubagents)
+        try container.encode(allowsScheduling, forKey: .allowsScheduling)
+        try container.encode(allowsAllPlugins, forKey: .allowsAllPlugins)
+        try container.encode(allowedPluginIDs, forKey: .allowedPluginIDs)
+    }
+}
+
 public struct AgentProfileRAGConfig: Codable, Sendable, Hashable {
     public var useDefaultInstructions: Bool
     public var customInstructions: String?
@@ -25,12 +99,12 @@ public enum AgentProfileHandle {
     public static let orchestrator = "orchestrator"
     public static let developer = "developer"
     public static let researcher = "researcher"
-    public static let general = "general"
+    public static let generalist = "generalist"
 
-    public static let allBuiltins = [orchestrator, developer, researcher, general]
+    public static let allBuiltins = [orchestrator, developer, researcher, generalist]
 
     /// Profiles the orchestrator may delegate to via `agent_profile_delegate`.
-    public static let delegateTargets = [developer, researcher, general]
+    public static let delegateTargets = [developer, researcher, generalist]
 
     public static func normalize(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -235,10 +309,13 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public var displayName: String
     public var handle: String
+    /// Extra address. `$orc` reaches the same profile as `$orchestrator` when this is `orc`.
+    public var alias: String?
     public var instructions: String
     public var modelJSON: Data
     public var thinkingJSON: Data?
     public var rag: AgentProfileRAGConfig
+    public var capabilities: AgentProfileCapabilities
     public var isEnabled: Bool
     public var isBuiltin: Bool
     public var sortOrder: Int
@@ -249,10 +326,12 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         id: String = UUID().uuidString,
         displayName: String,
         handle: String,
+        alias: String? = nil,
         instructions: String,
         modelJSON: Data,
         thinkingJSON: Data? = nil,
         rag: AgentProfileRAGConfig = .default,
+        capabilities: AgentProfileCapabilities = AgentProfileCapabilities(),
         isEnabled: Bool = true,
         isBuiltin: Bool = false,
         sortOrder: Int = 0,
@@ -262,10 +341,12 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
         self.id = id
         self.displayName = displayName
         self.handle = handle
+        self.alias = alias
         self.instructions = instructions
         self.modelJSON = modelJSON
         self.thinkingJSON = thinkingJSON
         self.rag = rag
+        self.capabilities = capabilities
         self.isEnabled = isEnabled
         self.isBuiltin = isBuiltin
         self.sortOrder = sortOrder
@@ -299,9 +380,9 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             When another profile fits better, delegate with `agent_profile_delegate`:
             - `developer` — code, debugging, implementation, technical execution
             - `researcher` — research, summarization, synthesis from sources
-            - `general` — everyday workhorse tasks when no specialist fits
+            - `generalist` — everyday workhorse tasks when no specialist fits
 
-            Use `general` when unsure which specialist fits. Summarize delegated outcomes in plain \
+            Use `generalist` when unsure which specialist fits. Summarize delegated outcomes in plain \
             language and report blockers early.
 
             Stay concise unless the user asks for detail.
@@ -309,6 +390,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .orchestratorDefault(),
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 0
@@ -330,6 +412,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 1
@@ -350,19 +433,20 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 2
         )
     }
 
-    public static func generalDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
+    public static func generalistDefault(modelJSON: Data, thinkingJSON: Data? = nil) -> AgentProfile {
         AgentProfile(
             id: "builtin-general",
-            displayName: "General",
-            handle: AgentProfileHandle.general,
+            displayName: "Generalist",
+            handle: AgentProfileHandle.generalist,
             instructions: """
-            You are Derrick's General profile — the workhorse for everyday tasks: writing, planning, \
+            You are Derrick's Generalist profile — the workhorse for everyday tasks: writing, planning, \
             brainstorming, mixed requests, and anything that does not need a specialist. Be practical, \
             direct, and helpful.
 
@@ -371,6 +455,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             modelJSON: modelJSON,
             thinkingJSON: thinkingJSON,
             rag: .default,
+            capabilities: .specialist,
             isEnabled: true,
             isBuiltin: true,
             sortOrder: 3
@@ -382,7 +467,7 @@ public struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
             orchestratorDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
             developerDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
             researcherDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
-            generalDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
+            generalistDefault(modelJSON: modelJSON, thinkingJSON: thinkingJSON),
         ]
     }
 }
@@ -394,6 +479,7 @@ public struct AgentProfileTurnContext: Codable, Sendable, Hashable {
     public let modelJSON: Data
     public let thinkingJSON: Data?
     public let rag: AgentProfileRAGConfig
+    public let capabilities: AgentProfileCapabilities
 
     public init(profile: AgentProfile) {
         handle = profile.handle
@@ -402,5 +488,6 @@ public struct AgentProfileTurnContext: Codable, Sendable, Hashable {
         modelJSON = profile.modelJSON
         thinkingJSON = profile.thinkingJSON
         rag = profile.rag
+        capabilities = profile.capabilities
     }
 }

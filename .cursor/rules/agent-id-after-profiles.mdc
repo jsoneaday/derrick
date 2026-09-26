@@ -1,0 +1,13 @@
+---
+description: After profiles, discuss what an agent is and what agentID means
+alwaysApply: true
+---
+
+# Agent versus profile
+
+Profiles work comes first. After that page and its capability rules are in place, stop and discuss this before changing orchestration code.
+
+- What an agent is in the profile setup.
+- What `agentID` refers to: a profile, a turn, a spawned worker, or something else.
+
+Do not rename or reinterpret `agentID` until that discussion happens.

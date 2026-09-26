@@ -72,7 +72,7 @@ public enum AgentProfileHelpFormatter: Sendable {
             "- $\(entry.handle) (\(entry.displayName))"
         }
         let profileList = lines.isEmpty
-            ? "- $orchestrator (Orchestrator)\n- $developer (Developer)\n- $researcher (Researcher)\n- $general (General)"
+            ? "- $orchestrator (Orchestrator)\n- $developer (Developer)\n- $researcher (Researcher)\n- $generalist (Generalist)"
             : lines.joined(separator: "\n")
         return """
         The user mentioned Derrick without a specific request. Briefly list the available agent profiles:

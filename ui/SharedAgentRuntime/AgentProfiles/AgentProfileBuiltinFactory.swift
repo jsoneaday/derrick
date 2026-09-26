@@ -12,7 +12,7 @@ public enum AgentProfileBuiltinFactory {
             AgentProfile.orchestratorDefault(modelJSON: solHigh.modelJSON, thinkingJSON: solHigh.thinkingJSON),
             AgentProfile.developerDefault(modelJSON: terraHigh.modelJSON, thinkingJSON: terraHigh.thinkingJSON),
             AgentProfile.researcherDefault(modelJSON: terraHigh.modelJSON, thinkingJSON: terraHigh.thinkingJSON),
-            AgentProfile.generalDefault(modelJSON: lunaHigh.modelJSON, thinkingJSON: lunaHigh.thinkingJSON),
+            AgentProfile.generalistDefault(modelJSON: lunaHigh.modelJSON, thinkingJSON: lunaHigh.thinkingJSON),
         ]
     }
 

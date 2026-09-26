@@ -48,6 +48,17 @@ struct SidebarView: View {
 
                 SidebarActionRow(
                     row: SidebarRow(
+                        id: SidebarPrimaryActions.profiles.id,
+                        icon: SidebarPrimaryActions.profiles.icon,
+                        title: SidebarPrimaryActions.profiles.title,
+                        isProminent: workspace == .profiles
+                    )
+                ) {
+                    workspace = .profiles
+                }
+
+                SidebarActionRow(
+                    row: SidebarRow(
                         id: "chats",
                         icon: "message.fill",
                         title: "Chat",
@@ -290,6 +301,7 @@ enum SidebarPrimaryActions {
     static let plugins = SidebarRow(id: "plugins", icon: "puzzlepiece.extension.fill", title: "Plugins")
     static let pluginsCreate = SidebarRow(id: "plugins-create", icon: "plus.square", title: "Create")
     static let pluginsList = SidebarRow(id: "plugins-list", icon: "list.bullet", title: "List")
+    static let profiles = SidebarRow(id: "profiles", icon: "person.2.fill", title: "Profiles")
     /// Kept for older tests / settings that still refer to the former single Plugins row.
     static let newPlugin = plugins
 }

@@ -88,14 +88,28 @@ import Testing
         #expect(profiles.map(\.handle).contains(AgentProfileHandle.orchestrator))
         #expect(profiles.map(\.handle).contains(AgentProfileHandle.developer))
         #expect(profiles.map(\.handle).contains(AgentProfileHandle.researcher))
-        #expect(profiles.map(\.handle).contains(AgentProfileHandle.general))
+        #expect(profiles.map(\.handle).contains(AgentProfileHandle.generalist))
+    }
+
+    @Test func emptyCapabilitiesJSONUsesDefaults() throws {
+        let decoded = try JSONDecoder().decode(AgentProfileCapabilities.self, from: Data("{}".utf8))
+        #expect(decoded.allowsSubagent == false)
+        #expect(decoded.allowsAllPlugins)
+        #expect(decoded.allowsPlugin("slack-connector-1"))
+        var limited = AgentProfileCapabilities(allowsAllPlugins: false, allowedPluginIDs: ["news"])
+        #expect(limited.allowsPlugin("news"))
+        #expect(!limited.allowsPlugin("slack-connector-1"))
+        let orchestrator = AgentProfileCapabilities.orchestratorDefault()
+        #expect(orchestrator.allowsScheduling)
+        #expect(orchestrator.allowedSubagentHandles.contains(AgentProfileHandle.generalist))
+        #expect(AgentProfileCapabilities.specialist.allowsSubagent)
     }
 
     @Test func delegateTargetsExcludeOrchestrator() {
         #expect(AgentProfileHandle.delegateTargets == [
             AgentProfileHandle.developer,
             AgentProfileHandle.researcher,
-            AgentProfileHandle.general,
+            AgentProfileHandle.generalist,
         ])
     }
 

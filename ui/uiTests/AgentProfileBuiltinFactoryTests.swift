@@ -12,17 +12,17 @@ import Testing
         let orchestrator = profiles.first { $0.handle == "orchestrator" }!
         let developer = profiles.first { $0.handle == "developer" }!
         let researcher = profiles.first { $0.handle == "researcher" }!
-        let general = profiles.first { $0.handle == "general" }!
+        let generalist = profiles.first { $0.handle == "generalist" }!
 
         let orchestratorModel = try JSONDecoder().decode(LLMModelChoice.self, from: orchestrator.modelJSON)
         let developerModel = try JSONDecoder().decode(LLMModelChoice.self, from: developer.modelJSON)
         let researcherModel = try JSONDecoder().decode(LLMModelChoice.self, from: researcher.modelJSON)
-        let generalModel = try JSONDecoder().decode(LLMModelChoice.self, from: general.modelJSON)
+        let generalistModel = try JSONDecoder().decode(LLMModelChoice.self, from: generalist.modelJSON)
 
         #expect(orchestratorModel.id == "openai:gpt-5.6-sol")
         #expect(developerModel.id == "openai:gpt-5.6-terra")
         #expect(researcherModel.id == "openai:gpt-5.6-terra")
-        #expect(generalModel.id == "openai:gpt-5.6-luna")
+        #expect(generalistModel.id == "openai:gpt-5.6-luna")
 
         let orchestratorThinking = try JSONDecoder().decode(
             ModelThinkingOption.self,

@@ -102,17 +102,37 @@ final class ConversationModel {
         )
 
         let profileDelegateHandler: @Sendable (String, String) async throws -> String = { handle, task in
-            guard TurnProcessContext.activeProfileHandle == AgentProfileHandle.orchestrator else {
+            let capabilities = TurnProcessContext.activeProfileCapabilities ?? AgentProfileCapabilities()
+            let normalized = AgentProfileHandle.normalize(
+                handle.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "$", with: "")
+            ) ?? handle.lowercased()
+            guard !capabilities.allowsSubagent else {
                 throw NSError(
                     domain: "AgentProfileDelegate",
                     code: 403,
                     userInfo: [
                         NSLocalizedDescriptionKey:
-                            "agent_profile_delegate is only available to the orchestrator profile."
+                            "Subagents cannot call their own subagents."
                     ]
                 )
             }
-            return try await ProfileDelegateRunner.run(
+            guard capabilities.allowedSubagentHandles.contains(normalized) else {
+                throw NSError(
+                    domain: "AgentProfileDelegate",
+                    code: 403,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "This profile cannot delegate to \(normalized)."
+                    ]
+                )
+            }
+            let caller = TurnProcessContext.activeProfileHandle ?? "profile"
+            try await ProfileSubagentGate.shared.begin(
+                caller: caller,
+                limit: capabilities.maxSimultaneousSubagents
+            )
+            do {
+                let result = try await ProfileDelegateRunner.run(
                 profileHandle: handle,
                 task: task,
                 sessionKey: sessionKey,
@@ -124,7 +144,13 @@ final class ConversationModel {
                 mcpToolInstructions: mcpToolInstructions,
                 responseSchema: Self.defaultResponseSchema,
                 interceptor: interceptor
-            )
+                )
+                await ProfileSubagentGate.shared.end(caller: caller)
+                return result
+            } catch {
+                await ProfileSubagentGate.shared.end(caller: caller)
+                throw error
+            }
         }
 
         let agentsHost = try await makeAgentsOrchestrationHost(
@@ -273,7 +299,10 @@ final class ConversationModel {
         let effectiveThinking: ModelThinkingOption?
         let userRagBase: String
         let retrievalLimit: Int
-        let skillIndexBlock = await Self.skillIndexPromptBlock(repository: repository)
+        let skillIndexBlock = await Self.skillIndexPromptBlock(
+            repository: repository,
+            capabilities: profileContext?.capabilities
+        )
         if let profileContext {
             effectiveModel = (try? JSONDecoder().decode(LLMModelChoice.self, from: profileContext.modelJSON)) ?? model
             effectiveThinking = profileContext.thinkingJSON.flatMap {
@@ -330,16 +359,17 @@ final class ConversationModel {
         }
 
         let effectiveMcpToolInstructions: String
-        if profileContext?.handle == AgentProfileHandle.orchestrator {
+        if let handles = profileContext?.capabilities.allowedSubagentHandles, !handles.isEmpty {
             effectiveMcpToolInstructions = [
                 mcpToolInstructions,
-                Self.profileDelegateToolInstructions,
+                Self.profileDelegateToolInstructions(allowedHandles: handles),
             ].joined(separator: "\n\n")
         } else {
             effectiveMcpToolInstructions = mcpToolInstructions
         }
 
         try await TurnProcessContext.$activeProfileHandle.withValue(profileContext?.handle) {
+        try await TurnProcessContext.$activeProfileCapabilities.withValue(profileContext?.capabilities) {
         try await orchestrator.withWorkerRunner(workerRunner) {
             try await orchestrator.deliverUserMessage(prompt) { envelope in
                 try await AgentCallContext.$caller.withValue(orchestrator.userFacingRef) {
@@ -372,14 +402,32 @@ final class ConversationModel {
             }
         }
         }
+        }
     }
 
-    private static let profileDelegateToolInstructions = """
-    14. Profile delegation (orchestrator only; when listed in the catalog):
-       1. `agent_profile_delegate` — args `profile_handle` (developer, researcher, or general; no $) and `task` (concrete instructions). Blocks until the profile finishes; use the returned text in your next step.
-       2. Prefer `researcher` for research and summarization, `developer` for code, and `general` when no specialist fits.
-       3. Delegated profiles do not talk to the user directly; synthesize their result into your `assistant_response`.
-    """
+    nonisolated private static func requireSchedulingAllowed() throws {
+        guard let capabilities = TurnProcessContext.activeProfileCapabilities else { return }
+        guard capabilities.allowsScheduling else {
+            throw NSError(
+                domain: "AgentProfileSchedule",
+                code: 403,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "This profile is immediate-mode only and cannot schedule jobs."
+                ]
+            )
+        }
+    }
+
+    private static func profileDelegateToolInstructions(allowedHandles: [String]) -> String {
+        let names = allowedHandles.joined(separator: ", ")
+        return """
+        14. Profile delegation (only the profiles listed here):
+           1. `agent_profile_delegate` — args `profile_handle` (\(names); no $) and `task` (concrete instructions). Blocks until the profile finishes; use the returned text in your next step.
+           2. Prefer `researcher` for research and summarization, `developer` for code, and `generalist` when no specialist fits.
+           3. Delegated profiles do not talk to the user directly; synthesize their result into your `assistant_response`.
+        """
+    }
 
     private func collectPluginCredentialsIfNeeded(
         pluginID: String,
@@ -515,7 +563,10 @@ final class ConversationModel {
     }
 
     /// Cheap skill routing index for system prompts (progressive disclosure layer 1).
-    private static func skillIndexPromptBlock(repository: DBRepository) async -> String {
+    private static func skillIndexPromptBlock(
+        repository: DBRepository,
+        capabilities: AgentProfileCapabilities?
+    ) async -> String {
         do {
             let summaries = try await repository.listPluginFactoryReleaseSummaries()
             var latestByPlugin: [String: PluginFactoryReleaseSummary] = [:]
@@ -530,7 +581,12 @@ final class ConversationModel {
                     pluginID: summary.pluginID,
                     version: summary.version
                 ) else { continue }
-                entries.append(contentsOf: PluginSkillDisclosure.index(from: release))
+                let indexed = PluginSkillDisclosure.index(from: release)
+                if let capabilities {
+                    entries.append(contentsOf: indexed.filter { capabilities.allowsPlugin($0.pluginID) })
+                } else {
+                    entries.append(contentsOf: indexed)
+                }
             }
             return PluginSkillDisclosure.indexPromptBlock(entries: entries)
         } catch {
@@ -737,6 +793,7 @@ final class ConversationModel {
         description: String?
     ) async throws -> String {
         debugLog("[jobs_create] begin tool=\(toolName) run_after=\(runAfterSeconds.map(String.init) ?? "nil")")
+        try requireSchedulingAllowed()
         let runAt = runAtString.flatMap { JobOrderBuilder.parseRunAtString($0) }
         let input = JobCreateOrderInput(
             runAfterSeconds: runAfterSeconds,
@@ -788,6 +845,7 @@ final class ConversationModel {
         wakePrompt: String?
     ) async throws -> String {
         debugLog("[jobs_schedule_create] begin name=\(name) recurrence=\(recurrence)")
+        try requireSchedulingAllowed()
         let kind: JobRecurrenceKind
         switch recurrence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "interval": kind = .interval

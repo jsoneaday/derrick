@@ -15,7 +15,7 @@ public enum AgentProfileDelegateToolModule {
                     "profile_handle": .object([
                         "type": .string("string"),
                         "description": .string(
-                            "Target profile handle without $: developer, researcher, or general."
+                            "Target profile handle without $: developer, researcher, or generalist."
                         )
                     ]),
                     "task": .object([

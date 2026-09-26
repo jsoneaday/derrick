@@ -40,6 +40,7 @@ final class AgentProfileStore: ObservableObject {
     func profile(handle: String) -> AgentProfile? {
         let normalized = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return enabledProfiles.first { $0.handle == normalized }
+            ?? enabledProfiles.first { $0.alias == normalized }
     }
 
     func resolveProfile(
@@ -69,6 +70,14 @@ final class AgentProfileStore: ObservableObject {
         } else {
             throw AgentProfileStoreError.invalidHandle
         }
+        if let rawAlias = next.alias?.trimmingCharacters(in: .whitespacesAndNewlines), !rawAlias.isEmpty {
+            guard let alias = AgentProfileHandle.normalize(rawAlias) else {
+                throw AgentProfileStoreError.invalidHandle
+            }
+            next.alias = alias
+        } else {
+            next.alias = nil
+        }
         next.updatedAt = .now
         try await repository.upsertAgentProfile(next)
         await reload()
@@ -85,7 +94,11 @@ final class AgentProfileStore: ObservableObject {
 
     private func ensureBuiltins(repository: any AgentProfileCatalog) async throws {
         for profile in try AgentProfileBuiltinFactory.all() {
-            try await repository.upsertAgentProfile(profile)
+            var next = profile
+            if let existing = try await repository.agentProfile(id: profile.id) {
+                next.alias = existing.alias
+            }
+            try await repository.upsertAgentProfile(next)
         }
     }
 }
