@@ -46,7 +46,7 @@ enum LLMProviderChoice: String, CaseIterable, Identifiable, Codable, Sendable {
         case .google:
             return .gemini(.gemini37Flash)
         case .openai:
-            return .openai(.gpt56Luna)
+            return .openai(.gpt6Luna)
         }
     }
 }
@@ -64,14 +64,17 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
         .openai(.gpt55),
         .openai(.gpt56Luna),
         .openai(.gpt56Terra),
-        .openai(.gpt56Sol)
+        .openai(.gpt56Sol),
+        .openai(.gpt6Luna),
+        .openai(.gpt6Sol),
+        .openai(.gpt6Astra)
     ]
 
     /// Default for summarizer, script reviewer, secondary agents, and conversation UI preselection.
-    static let defaultHelperModel: LLMModelChoice = .openai(.gpt56Luna)
+    static let defaultHelperModel: LLMModelChoice = .openai(.gpt6Luna)
 
-    /// Default plugin factory builder: stronger reasoning than the helper default.
-    static let defaultPluginBuilderModel: LLMModelChoice = .openai(.gpt56Terra)
+    /// Default plugin factory builder. Same model as the helper, at medium thinking.
+    static let defaultPluginBuilderModel: LLMModelChoice = .openai(.gpt6Luna)
 
     var id: String {
         switch self {

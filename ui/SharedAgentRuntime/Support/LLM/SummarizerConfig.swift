@@ -52,7 +52,7 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
                 )
                 let failure = LLMFailureClassifier.classify(error, provider: selectedModel.provider)
                 if case .outOfCredits = failure {
-                    ModelProviderLimitCenter.shared.report(raw: error.localizedDescription)
+                    ModelProviderLimitRouting.report(raw: error.localizedDescription)
                 } else {
                     LLMFailureReporter.shared.report(failure)
                 }

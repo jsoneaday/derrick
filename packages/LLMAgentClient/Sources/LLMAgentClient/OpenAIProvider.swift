@@ -9,17 +9,31 @@ public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
     case gpt56Sol = "gpt-5.6-sol"
     case gpt56Terra = "gpt-5.6-terra"
     case gpt56Luna = "gpt-5.6-luna"
+    /// GPT-6 capability tiers.
+    case gpt6Luna = "gpt-6-luna"
+    case gpt6Sol = "gpt-6-sol"
+    case gpt6Astra = "gpt-6-astra"
 
     public var id: AgentModelID {
         .init(provider: "openai", name: rawValue)
     }
 
     public var maxSupportedContextTokens: Int {
-        400_000
+        switch self {
+        case .gpt6Luna, .gpt6Sol, .gpt6Astra:
+            return 1_050_000
+        default:
+            return 400_000
+        }
     }
 
     public var maxIdealContextTokens: Int {
-        200_000
+        switch self {
+        case .gpt6Luna, .gpt6Sol, .gpt6Astra:
+            return 272_000
+        default:
+            return 200_000
+        }
     }
 
     /// Approximate list prices (USD / 1M tokens). Update when OpenAI changes rates.
@@ -37,6 +51,20 @@ public enum OpenAIModel: String, CaseIterable, Codable, Sendable, AgentModel {
             return ModelTokenPricing(inputUSDPer1MTokens: 1.25, outputUSDPer1MTokens: 10.00)
         case .gpt56Sol:
             return ModelTokenPricing(inputUSDPer1MTokens: 2.50, outputUSDPer1MTokens: 15.00)
+        case .gpt6Luna:
+            return ModelTokenPricing(inputUSDPer1MTokens: 0.10, outputUSDPer1MTokens: 0.50)
+        case .gpt6Sol:
+            return ModelTokenPricing(inputUSDPer1MTokens: 2.00, outputUSDPer1MTokens: 10.00)
+        case .gpt6Astra:
+            return ModelTokenPricing(inputUSDPer1MTokens: 10.00, outputUSDPer1MTokens: 50.00)
+        }
+    }
+
+    /// These models reject a caller-supplied temperature and use their own default.
+    public var requestSupport: ModelRequestSupport {
+        switch self {
+        case .gpt54Mini, .gpt54, .gpt55, .gpt56Sol, .gpt56Terra, .gpt56Luna, .gpt6Luna, .gpt6Sol, .gpt6Astra:
+            return ModelRequestSupport(temperature: false)
         }
     }
 }
@@ -60,12 +88,13 @@ public struct OpenAIProvider: AgentProvider {
                     urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let allowed = request.constrained(to: model)
                     urlRequest.httpBody = try encode(OpenAIStreamRequest(
                         model: model.rawValue,
-                        messages: request.messages,
-                        temperature: request.temperature,
-                        responseSchema: request.responseSchema,
-                        thinking: request.thinking
+                        messages: allowed.messages,
+                        temperature: allowed.temperature,
+                        responseSchema: allowed.responseSchema,
+                        thinking: allowed.thinking
                     ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
@@ -128,13 +157,7 @@ struct OpenAIStreamRequest: Encodable {
         self.messages = messages.map(OpenAIMessage.init)
         self.stream = true
         self.streamOptions = OpenAIStreamOptions(includeUsage: true)
-
-        // OpenAI's reasoning-class models (GPT-5 series) lock temperature internally and reject manual settings with HTTP 400.
-        if model.contains("gpt-5") {
-            self.temperature = nil
-        } else {
-            self.temperature = temperature
-        }
+        self.temperature = temperature
 
         if case .openAIReasoningEffort(let effort) = thinking?.wire {
             self.reasoningEffort = effort

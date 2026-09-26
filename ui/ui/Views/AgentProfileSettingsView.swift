@@ -14,7 +14,7 @@ struct AgentProfileSettingsView: View {
     @State private var draftAlias = ""
     @State private var draftInstructions = ""
     @State private var draftModel: LLMModelChoice = .defaultHelperModel
-    @State private var draftThinking: ModelThinkingOption = OpenAIModel.gpt56Luna.defaultThinkingOption
+    @State private var draftThinking: ModelThinkingOption = OpenAIModel.gpt6Luna.defaultThinkingOption
     @State private var draftRAG = AgentProfileRAGConfig.default
     @State private var draftEnabled = true
     @State private var draftCapabilities = AgentProfileCapabilities()

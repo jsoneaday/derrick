@@ -45,6 +45,32 @@ public enum PluginAccessAskPolicy: Sendable {
         return "Derrick looked at \(link) but could not use it as API setup docs. Paste the page that explains how apps authenticate (a token, key, or login)."
     }
 
+    public static func isGuidanceRequest(_ text: String) -> Bool {
+        let lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return false }
+        if lowered.contains("?") { return true }
+        let phrases = [
+            "how ", "how do", "where ", "what ", "why ", "which ",
+            "help me", "walk me", "guide me", "show me",
+            "i don't know", "i dont know", "not sure", "don't understand", "dont understand",
+        ]
+        return phrases.contains { lowered.hasPrefix($0) || lowered.contains($0) }
+    }
+
+    /// Stay on the access step. Point at the setup page without naming a vendor.
+    public static func guidanceReply(documentationURL: String?) -> String {
+        var lines = [
+            "You do not have to read the whole document. Derrick can walk you through creating the credential.",
+        ]
+        if let documentationURL, !documentationURL.isEmpty {
+            lines.append("[Open the setup docs](\(documentationURL))")
+        }
+        lines.append(
+            "On that page, create the token or key it asks for. When you have it, say yes. Derrick will ask you to enter it here. It stays on this Mac."
+        )
+        return lines.joined(separator: "\n\n")
+    }
+
     public static func isDocsSearchRequest(_ text: String) -> Bool {
         if parseHTTPURL(text) != nil { return false }
         let lowered = text.lowercased()

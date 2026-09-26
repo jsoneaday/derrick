@@ -19,6 +19,11 @@ struct uiApp: App {
             JobResultPanelSession.isPanelOnlyLaunch = true
             JobResultPanelSession.allowsTermination = false
         }
+        ModelProviderLimitRouting.handler = { raw in
+            Task { @MainActor in
+                ModelProviderLimitCenter.shared.report(raw: raw)
+            }
+        }
         RuntimeLog.shared.addUISinkOnce { message in
             Task {
                 await ServiceLogRecorder.shared.record(

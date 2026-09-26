@@ -114,9 +114,9 @@ import Testing
         var tampered = release.packageFiles()
         tampered["app.derrick/plugin.go"] = Data("changed".utf8)
         #expect(!PluginFactoryRelease.verifyIntegrity(files: tampered, expected: release.contentHash))
-        #expect(await executor.draftRunCount == 1)
+        #expect(await executor.draftRunCount == 0)
         #expect(await executor.packageCount == 1)
-        #expect(await executor.packagedRunCount == 1)
+        #expect(await executor.packagedRunCount == 0)
         #expect(await reviewer.callCount == 1)
     }
 
@@ -143,41 +143,25 @@ import Testing
         }
     }
 
-    @Test func invalidDraftOutputStopsBeforeReview() async throws {
-        let executor = RecordingFactoryExecutor(
-            draftResult: PluginFactoryExecutionResult(
-                exitCode: 0,
-                stdout: Data(#"{"not":"an array"}"#.utf8)
-            )
+    @Test func codeReviewRunsBeforeAnyExecution() async throws {
+        let executor = RecordingFactoryExecutor()
+        let reviewer = RecordingFactoryReviewer(
+            result: PluginFactoryReview(approved: false, summary: "source is not safe")
         )
-        let reviewer = RecordingFactoryReviewer(result: PluginFactoryReview(approved: true, summary: "safe"))
-
         do {
             _ = try await PluginFactory().build(
                 draft: PluginFactoryDraft(
                     manifestJSON: manifestJSON(),
-                    guestSource: """
-                    package main
-
-                    import (
-                        "encoding/json"
-                        "os"
-                    )
-
-                    func main() {
-                        _ = json.NewDecoder(os.Stdin).Decode(&map[string]any{})
-                        os.Stdout.WriteString("not a plugin envelope")
-                    }
-                    """,
-                    testInput: Data(#"{"kind":"manual"}"#.utf8)
+                    guestSource: guestGoSource()
                 ),
                 executor: executor,
                 reviewer: reviewer
             )
-            Issue.record("Expected invalid output")
+            Issue.record("Expected review rejection")
         } catch let error as PluginFactoryError {
-            #expect(error.localizedDescription.contains("invalid plugin output"))
-            #expect(await reviewer.callCount == 0)
+            #expect(error == .reviewRejected(summary: "source is not safe", findings: []))
+            #expect(await executor.draftRunCount == 0)
+            #expect(await executor.packageCount == 0)
         }
     }
 
@@ -201,11 +185,10 @@ import Testing
         )
 
         #expect(release.pluginID == "weather-tool")
-        #expect(await executor.draftRunCount == 2)
+        #expect(await executor.draftRunCount == 0)
         #expect(await executor.packageCount == 1)
         let requests = await builder.requests
-        #expect(requests.count == 2)
-        #expect(requests[1].feedback?.contains("compile error") == true)
+        #expect(requests.count == 1)
         #expect(await reviewer.callCount == 1)
     }
 
@@ -238,7 +221,7 @@ import Testing
 
         #expect(release.pluginID == "weather-tool")
         #expect(await reviewer.callCount == 2)
-        #expect(await executor.draftRunCount == 2)
+        #expect(await executor.draftRunCount == 0)
         #expect(await executor.packageCount == 1)
         let requests = await builder.requests
         #expect(requests.count == 2)
@@ -265,7 +248,7 @@ import Testing
         } catch let error as PluginFactoryError {
             #expect(error == .reviewRejected(summary: "The draft remains unsafe.", findings: []))
             #expect(await reviewer.callCount == 3)
-            #expect(await executor.draftRunCount == 3)
+            #expect(await executor.draftRunCount == 0)
             #expect(await executor.packageCount == 0)
             #expect(await builder.requests.count == 3)
         }
@@ -438,11 +421,8 @@ import Testing
             """
             {"hops":[
               {"kind":"manual","params":{"messaging_op":"sync_threads"}},
-              {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
               {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123"}},
-              {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
-              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}},
-              {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}}
             ]}
             """.utf8
         )
@@ -463,13 +443,9 @@ import Testing
                 """
                 {"hops":[
                   {"kind":"manual","params":{"messaging_op":"sync_threads"}},
-                  {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
                   {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123"}},
-                  {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
                   {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C123","parent_vendor_message_id":"171.1"}},
-                  {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
-                  {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}},
-                  {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+                  {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C123","text":"hello"}}
                 ]}
                 """.utf8
             ),
@@ -488,16 +464,9 @@ import Testing
             """
             {"hops":[
               {"kind":"manual","params":{"messaging_op":"sync_threads"}},
-              {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
               {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1"}},
-              {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
               {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1","parent_vendor_message_id":"1"}},
-              {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
-              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
-              {"kind":"http_results","http_results":[
-                {"request_id":"send-1","status":200,"body":"{\\"ok\\":true,\\"ts\\":\\"1.0\\"}"},
-                {"request_id":"auth-1","status":401,"body":"{\\"ok\\":false,\\"error\\":\\"invalid_auth\\"}"}
-              ],"params":{"messaging_op":"send_message"}}
+              {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}}
             ]}
             """.utf8
         )
@@ -711,13 +680,9 @@ private func validConnectorTestInput() -> Data {
         """
         {"hops":[
           {"kind":"manual","params":{"messaging_op":"sync_threads"}},
-          {"kind":"http_results","http_results":[{"request_id":"sync-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"sync_threads"}},
           {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1"}},
-          {"kind":"http_results","http_results":[{"request_id":"poll-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
           {"kind":"manual","params":{"messaging_op":"poll_inbox","vendor_thread_id":"C1","parent_vendor_message_id":"1"}},
-          {"kind":"http_results","http_results":[{"request_id":"replies-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"poll_inbox"}},
-          {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}},
-          {"kind":"http_results","http_results":[{"request_id":"send-1","status":200,"body":"{\\"ok\\":true}"}],"params":{"messaging_op":"send_message"}}
+          {"kind":"message_in_room","params":{"messaging_op":"send_message","vendor_thread_id":"C1","text":"hi"}}
         ]}
         """.utf8
     )

@@ -5,14 +5,13 @@ import Structure
 /// Built-in agent profiles with product-default models and thinking levels.
 public enum AgentProfileBuiltinFactory {
     public static func all() throws -> [AgentProfile] {
-        let solHigh = try wire(model: .openai(.gpt56Sol), thinkingID: "high")
-        let terraHigh = try wire(model: .openai(.gpt56Terra), thinkingID: "high")
-        let lunaHigh = try wire(model: .openai(.gpt56Luna), thinkingID: "high")
+        let lunaMedium = try wire(model: .openai(.gpt6Luna), thinkingID: "medium")
+        let lunaHigh = try wire(model: .openai(.gpt6Luna), thinkingID: "high")
         return [
-            AgentProfile.orchestratorDefault(modelJSON: solHigh.modelJSON, thinkingJSON: solHigh.thinkingJSON),
-            AgentProfile.developerDefault(modelJSON: terraHigh.modelJSON, thinkingJSON: terraHigh.thinkingJSON),
-            AgentProfile.researcherDefault(modelJSON: terraHigh.modelJSON, thinkingJSON: terraHigh.thinkingJSON),
-            AgentProfile.generalistDefault(modelJSON: lunaHigh.modelJSON, thinkingJSON: lunaHigh.thinkingJSON),
+            AgentProfile.orchestratorDefault(modelJSON: lunaHigh.modelJSON, thinkingJSON: lunaHigh.thinkingJSON),
+            AgentProfile.developerDefault(modelJSON: lunaMedium.modelJSON, thinkingJSON: lunaMedium.thinkingJSON),
+            AgentProfile.researcherDefault(modelJSON: lunaMedium.modelJSON, thinkingJSON: lunaMedium.thinkingJSON),
+            AgentProfile.generalistDefault(modelJSON: lunaMedium.modelJSON, thinkingJSON: lunaMedium.thinkingJSON),
         ]
     }
 

@@ -17,7 +17,7 @@ public struct OpenAIScriptReviewer: ScriptReviewer {
 
     public init(
         apiKey: String,
-        model: OpenAIModel = .gpt56Luna,
+        model: OpenAIModel = .gpt6Luna,
         systemPrompt: String = ReviewerSystemPrompt
     ) {
         self.name = "openai-\(model.rawValue)"
@@ -28,7 +28,7 @@ public struct OpenAIScriptReviewer: ScriptReviewer {
 
     public static func fromEnvironment(
         variable: String = "OPENAI_API_KEY",
-        model: OpenAIModel = .gpt56Luna
+        model: OpenAIModel = .gpt6Luna
     ) -> OpenAIScriptReviewer? {
         guard let apiKey = ProcessInfo.processInfo.environment[variable], !apiKey.isEmpty else {
             return nil

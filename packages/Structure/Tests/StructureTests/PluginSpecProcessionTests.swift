@@ -248,6 +248,22 @@ import Testing
         #expect(question.contains(PluginAccessAskPolicy.genericQuestion) == false)
     }
 
+    @Test func accessAskAnswersAnOutOfBandQuestionWithoutLeavingTheStep() {
+        var session = PluginSpecSession()
+        session.draft.claimedOutcome = "Connect to a chat service"
+        session.draft.connect = PluginConnectBinding(klass: .messagingInbox, detail: "a chat service")
+        session.draft.documentationURL = "https://docs.example.com/auth"
+        session.ask = .slot(.access)
+        let turn = PluginSpecProcession.advance(
+            session: &session,
+            utterance: "How do I create the key? I don't know what it is."
+        )
+        #expect(session.ask == .slot(.access))
+        #expect(turn.reply.contains("https://docs.example.com/auth"))
+        #expect(turn.reply.contains("say yes"))
+        #expect(turn.isComplete == false)
+    }
+
     @Test func accessAskSkipsANavDumpFromAnyDocsPage() {
         let nav = "Docs Home Changelog TutorialsSuccess!My AppsDiscard ChangesSave ChangesUsing ProductEnterprisePricingSupportGuidesMarket"
         let dumped = ConnectorAuthDiscovery(
@@ -581,6 +597,9 @@ import Testing
             pluginID: "slack-connector-1"
         )
         #expect(input.pluginID == "slack-connector-1")
+        #expect(input.description.contains("Unacceptable when: must not post without asking"))
+        #expect(input.connectorBuildGoal(crawlSummary: nil).contains("Unacceptable when: must not post without asking"))
+        #expect(input.connectorBuildGoal(crawlSummary: nil).contains("live, not a fixture"))
         #expect(input.auth?.authScheme.isSupportedInWizard == true)
         #expect(input.auth?.secrets.map(\.id) == ["bot_token"])
         #expect(

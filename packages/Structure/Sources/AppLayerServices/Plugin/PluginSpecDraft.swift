@@ -145,6 +145,7 @@ public struct PluginSpecDraft: Sendable, Hashable, Codable {
             work.map { "Work: \($0.rawValue)" },
             returnClass.map { "Return: \($0.rawValue)" },
             present.map { "Present: \($0.rawValue)" },
+            wrongness.map { "Unacceptable when: \($0)" },
         ].compactMap { $0 }
         return PluginSkillDraft(
             goal: outcome,

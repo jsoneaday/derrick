@@ -58,7 +58,8 @@ public struct PluginFactorySession: Sendable {
                     hostManifest: hostManifest
                 )
             } catch {
-                if ModelProviderLimit.matches(error.localizedDescription) {
+                if ModelProviderLimit.matches(error.localizedDescription)
+                    || Self.isProviderHTTPFailure(error.localizedDescription) {
                     throw error
                 }
                 let wrapped = PluginFactoryError.invalidSource(error.localizedDescription)
@@ -83,6 +84,14 @@ public struct PluginFactorySession: Sendable {
             }
         }
         throw lastError ?? PluginFactoryError.invalidSource("Factory stopped without a result.")
+    }
+
+    /// Model HTTP failures are not a bad Go draft. Retrying them repeats the same refusal.
+    private static func isProviderHTTPFailure(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("http 4") || lower.contains("http 5")
+            || lower.contains("invalid_request_error")
+            || lower.contains("unsupported_value")
     }
 
     private static func builderFeedback(from error: PluginFactoryError, userGoal: String) -> String {
@@ -137,71 +146,30 @@ public struct PluginFactory: Sendable {
         try validateSource(draft.guestSource)
         try PluginFactoryDraftValidator.validateStructure(draft: draft, manifest: manifest)
 
-        let hopRun: PluginFactoryHopTestRun
-        do {
-            await logger("[plugin_factory] direct_test_started")
-            hopRun = try await PluginFactoryHopTestRunner.run(
-                source: draft.guestSource,
-                testInput: draft.testInput,
-                executor: executor
-            )
-        } catch {
-            await logger("[plugin_factory] direct_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.directRunFailed(error.localizedDescription)
-        }
-        let direct = hopRun.final
-        let reviewRun = hopRun.aggregatedDirectRun
-        await logger(
-            "[plugin_factory] direct_test exit=\(direct.exitCode) " +
-            "stdout_chars=\(reviewRun.stdout.count) stderr_chars=\(direct.stderr.count)"
+        let codeReviewInput = PluginFactoryExecutionResult(
+            exitCode: 0,
+            stdout: Data("CODE_REVIEW\nTests have not been run. Review the source and the test plan only.".utf8)
         )
-        guard direct.exitCode == 0 else {
-            await logger("[plugin_factory] direct_test rejected=\(pluginFactoryLogValue(outputSummary(direct)))")
-            throw PluginFactoryError.directRunFailed(outputSummary(direct))
-        }
-        do {
-            try validateOutput(direct.stdout)
-            try PluginFactoryDraftValidator.validateDirectTest(
-                draft: draft,
-                manifest: manifest,
-                hopRun: hopRun
-            )
-        } catch let error as PluginFactoryError {
-            switch error {
-            case .draftValidationFailed:
-                await logger(
-                    "[plugin_factory] draft_validation failed=\(pluginFactoryLogValue(error.localizedDescription))"
-                )
-                throw error
-            default:
-                await logger("[plugin_factory] direct_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
-                throw error
-            }
-        } catch {
-            await logger("[plugin_factory] direct_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.invalidDirectOutput(error.localizedDescription)
-        }
-
-        let review: PluginFactoryReview
+        let codeReview: PluginFactoryReview
         do {
             await logger("[plugin_factory] review_started")
-            review = try await reviewer.review(draft: draft, directRun: reviewRun)
+            codeReview = try await reviewer.review(draft: draft, directRun: codeReviewInput)
         } catch {
             await logger("[plugin_factory] review failed=\(pluginFactoryLogValue(error.localizedDescription))")
             throw error
         }
         await logger(
-            "[plugin_factory] review decision=\(review.decision.rawValue) " +
-            "finding_count=\(review.findings.count) summary=\(pluginFactoryLogValue(review.summary))"
+            "[plugin_factory] review decision=\(codeReview.decision.rawValue) " +
+            "finding_count=\(codeReview.findings.count) summary=\(pluginFactoryLogValue(codeReview.summary))"
         )
-        guard review.approved else {
-            let findingMessages = review.findings.map(\.message)
+        guard codeReview.approved else {
+            let findingMessages = codeReview.findings.map(\.message)
             let detail = findingMessages.isEmpty
-                ? review.summary
-                : "\(review.summary) \(findingMessages.joined(separator: " "))"
+                ? codeReview.summary
+                : "\(codeReview.summary) \(findingMessages.joined(separator: " "))"
             await logger("[plugin_factory] review rejected=\(pluginFactoryLogValue(detail))")
             throw PluginFactoryError.reviewRejected(
-                summary: review.summary,
+                summary: codeReview.summary,
                 findings: findingMessages
             )
         }
@@ -220,48 +188,60 @@ public struct PluginFactory: Sendable {
             throw PluginFactoryError.packageFailed("Guest source artifact is empty.")
         }
 
-        let packagedRun: PluginFactoryHopTestRun
-        do {
-            await logger("[plugin_factory] packaged_test_started")
-            packagedRun = try await PluginFactoryHopTestRunner.run(
-                artifact: artifact,
-                testInput: draft.testInput,
-                executor: executor
-            )
-        } catch {
-            await logger("[plugin_factory] packaged_test failed=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.packagedRunFailed(error.localizedDescription)
-        }
-        let packaged = packagedRun.final
-        await logger(
-            "[plugin_factory] packaged_test exit=\(packaged.exitCode) " +
-            "stdout_chars=\(packaged.stdout.count) stderr_chars=\(packaged.stderr.count)"
-        )
-        guard packaged.exitCode == 0 else {
-            await logger("[plugin_factory] packaged_test rejected=\(pluginFactoryLogValue(outputSummary(packaged)))")
-            throw PluginFactoryError.packagedRunFailed(outputSummary(packaged))
-        }
-        do {
-            try validateOutput(packaged.stdout)
-            try PluginFactoryDraftValidator.validateDirectTest(
-                draft: draft,
-                manifest: manifest,
-                hopRun: packagedRun
-            )
-        } catch let error as PluginFactoryError {
-            switch error {
-            case .draftValidationFailed:
-                await logger(
-                    "[plugin_factory] packaged_validation failed=\(pluginFactoryLogValue(error.localizedDescription))"
+        let review: PluginFactoryReview
+        if let liveExecutor = executor as? any PluginFactoryLiveAcceptanceExecutor {
+            await logger("[plugin_factory] live_acceptance_started")
+            let live: PluginFactoryHopTestRun
+            do {
+                live = try await liveExecutor.runLiveAcceptance(
+                    artifact: artifact,
+                    testInput: draft.testInput
                 )
-                throw error
-            default:
-                await logger("[plugin_factory] packaged_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
+            } catch {
+                await logger("[plugin_factory] live_acceptance failed=\(pluginFactoryLogValue(error.localizedDescription))")
+                throw PluginFactoryError.directRunFailed(error.localizedDescription)
+            }
+            let transcript = live.aggregatedDirectRun
+            let ops = PluginFactoryValidationExpectations.messagingOps(fromManifestJSON: draft.manifestJSON)
+            let stdout = String(decoding: transcript.stdout, as: UTF8.self)
+            if let problem = PluginLiveAcceptance.problem(
+                testInput: draft.testInput,
+                stdout: stdout,
+                stderr: String(decoding: transcript.stderr, as: UTF8.self),
+                exitCode: transcript.exitCode,
+                messagingOps: ops
+            ) {
+                await logger("[plugin_factory] live_acceptance failed=\(pluginFactoryLogValue(problem))")
+                throw PluginFactoryError.directRunFailed(problem)
+            }
+            await logger(
+                "[plugin_factory] live_acceptance exit=\(transcript.exitCode) stdout_chars=\(transcript.stdout.count)"
+            )
+            let liveInput = PluginFactoryExecutionResult(
+                exitCode: 0,
+                stdout: Data("LIVE_TEST\n\(stdout)".utf8),
+                stderr: transcript.stderr
+            )
+            do {
+                await logger("[plugin_factory] review_started")
+                review = try await reviewer.review(draft: draft, directRun: liveInput)
+            } catch {
+                await logger("[plugin_factory] review failed=\(pluginFactoryLogValue(error.localizedDescription))")
                 throw error
             }
-        } catch {
-            await logger("[plugin_factory] packaged_output invalid=\(pluginFactoryLogValue(error.localizedDescription))")
-            throw PluginFactoryError.invalidPackagedOutput(error.localizedDescription)
+            guard review.approved else {
+                let findingMessages = review.findings.map(\.message)
+                let detail = findingMessages.isEmpty
+                    ? review.summary
+                    : "\(review.summary) \(findingMessages.joined(separator: " "))"
+                await logger("[plugin_factory] review rejected=\(pluginFactoryLogValue(detail))")
+                throw PluginFactoryError.reviewRejected(
+                    summary: review.summary,
+                    findings: findingMessages
+                )
+            }
+        } else {
+            review = codeReview
         }
 
         let guestPath = PluginFactoryRuntime.guestSourcePackagePath(

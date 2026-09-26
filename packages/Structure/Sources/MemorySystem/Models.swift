@@ -209,7 +209,10 @@ public extension MemoryBudget {
         .init(provider: "gemini", name: "gemini-3.7-flash"): 50_000,
         .init(provider: "openai", name: "gpt-5.6-luna"): 25_000,
         .init(provider: "openai", name: "gpt-5.6-terra"): 50_000,
-        .init(provider: "openai", name: "gpt-5.6-sol"): 50_000
+        .init(provider: "openai", name: "gpt-5.6-sol"): 50_000,
+        .init(provider: "openai", name: "gpt-6-luna"): 25_000,
+        .init(provider: "openai", name: "gpt-6-sol"): 50_000,
+        .init(provider: "openai", name: "gpt-6-astra"): 50_000
     ]
 
     static func maxTokenCount(forProvider provider: String, modelName: String) -> Int {

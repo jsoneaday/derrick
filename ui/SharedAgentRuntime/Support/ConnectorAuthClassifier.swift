@@ -71,7 +71,7 @@ enum ConnectorAuthClassifier {
         guard let json,
               let wire = try? HelperModelWire.decodeJSON(json)
         else {
-            return .openai(.gpt56Luna)
+            return .openai(.gpt6Luna)
         }
         switch wire.provider {
         case LLMProviderChoice.openai.rawValue:
@@ -81,7 +81,7 @@ enum ConnectorAuthClassifier {
         default:
             break
         }
-        return .openai(.gpt56Luna)
+        return .openai(.gpt6Luna)
     }
 
     private static func thinkingID(_ json: String?) -> String? {

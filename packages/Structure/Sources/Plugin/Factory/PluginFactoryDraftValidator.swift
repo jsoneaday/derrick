@@ -94,19 +94,14 @@ public enum PluginFactoryDraftValidator: Sendable {
             )
         }
 
-        if script.hops.count < 2 {
+        if script.hops.contains(where: { $0.kind == .httpResults || $0.httpResults?.isEmpty == false }) {
             findings.append(
-                "Connector test_input_json must use a hops array with an initial messaging hop and an http_results hop."
+                "test_input_json must not include http_results. The host runs each hop live."
             )
         }
 
         if script.hops.first?.params?["messaging_op"]?.stringValue?.isEmpty != false {
             findings.append("Connector test_input_json must set params.messaging_op on the first hop.")
-        }
-
-        let fixtureCount = script.hops.reduce(0) { $0 + ($1.httpResults?.count ?? 0) }
-        if fixtureCount == 0 {
-            findings.append("Connector test_input_json must include http_results fixtures for vendor HTTP replay.")
         }
 
         let testedOps = messagingOpsExercised(in: script)

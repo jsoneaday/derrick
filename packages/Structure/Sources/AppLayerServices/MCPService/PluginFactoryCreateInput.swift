@@ -304,6 +304,10 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                     extra.append("Host permission labels: \(auth.permissions.joined(separator: ", "))")
                 }
             }
+            // Scope owns the blueprint. Only pass the failure oracle from the user/spec.
+            if description.contains("Unacceptable when:") {
+                extra.append("User-confirmed behavior:\n\(description)")
+            }
             if let skillMarkdown, !skillMarkdown.isEmpty {
                 extra.append("SKILL.md draft:\n\(skillMarkdown)")
             }
@@ -336,6 +340,7 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
         var lines = [
             "Create an Agent Plugin capability.",
             description,
+            PluginAcceptanceDirections.builderText(forUserGoal: description),
         ]
         if let agentPluginSpecSummary, !agentPluginSpecSummary.isEmpty {
             lines.append(

@@ -305,7 +305,8 @@ actor ConfiguredPluginSafetyReviewer: PluginFactoryReviewer {
 
     private static func reviewerSystemPrompt(for userGoal: String?) -> String {
         """
-    Review the user's goal, manifest, test_input_json, exact Go source, and direct test output.
+        Review the user's goal, manifest, test plan, and exact Go source.
+        \(PluginAcceptanceDirections.reviewerText(forUserGoal: userGoal))
     \(ScriptExecContractPrompts.pluginFactoryReviewerGuide())
     \(ConnectorContractPrompts.reviewerGuide(forUserGoal: userGoal))
     """
@@ -455,14 +456,18 @@ func collectFactoryModelStream(
     timeoutNanoseconds: UInt64 = LLMHTTPTimeouts.resourceNanoseconds,
     onFirstText: (@Sendable () async -> Void)? = nil
 ) async throws -> (text: String, usage: AgentTokenUsage?) {
+    // Detached so the deadline is not queued behind the builder actor. A stream
+    // that keeps the actor busy otherwise never reaches the timer, and the
+    // create dialog stays on the last progress line.
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(String, AgentTokenUsage?), Error>) in
         let reply = FactoryModelReplyOnce(continuation)
-        let worker = Task {
+        let worker = Task.detached {
             do {
-                reply.resume(
-                    returning: try await collectFactoryAgentStream(stream, onFirstText: onFirstText)
-                )
+                let result = try await collectFactoryAgentStream(stream, onFirstText: onFirstText)
+                reply.finish()
+                reply.resume(returning: result)
             } catch {
+                reply.finish()
                 if LLMHTTPTimeouts.isTimeout(error) {
                     reply.resume(throwing: PluginFactoryModelError.timedOut(role))
                 } else {
@@ -470,7 +475,7 @@ func collectFactoryModelStream(
                 }
             }
         }
-        Task {
+        let timer = Task.detached {
             do {
                 try await Task.sleep(nanoseconds: timeoutNanoseconds)
             } catch {
@@ -479,6 +484,7 @@ func collectFactoryModelStream(
             worker.cancel()
             reply.resume(throwing: PluginFactoryModelError.timedOut(role))
         }
+        reply.onFinish = { timer.cancel() }
     }
 }
 
@@ -490,6 +496,7 @@ private func collectFactoryAgentStream(
     var usage: AgentTokenUsage?
     var didSignalFirstText = false
     for try await event in stream {
+        try Task.checkCancellation()
         switch event {
         case .text(let chunk):
             text += chunk
@@ -507,12 +514,22 @@ private func collectFactoryAgentStream(
 private final class FactoryModelReplyOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<(String, AgentTokenUsage?), Error>?
+    var onFinish: (@Sendable () -> Void)?
 
     init(_ continuation: CheckedContinuation<(String, AgentTokenUsage?), Error>) {
         self.continuation = continuation
     }
 
+    func finish() {
+        lock.lock()
+        let onFinish = self.onFinish
+        self.onFinish = nil
+        lock.unlock()
+        onFinish?()
+    }
+
     func resume(returning result: (String, AgentTokenUsage?)) {
+        finish()
         lock.lock()
         let continuation = self.continuation
         self.continuation = nil
@@ -521,6 +538,7 @@ private final class FactoryModelReplyOnce: @unchecked Sendable {
     }
 
     func resume(throwing error: Error) {
+        finish()
         lock.lock()
         let continuation = self.continuation
         self.continuation = nil
