@@ -15,6 +15,7 @@ let package = Package(
         .package(path: "../DBRepository"),
         .package(path: "../DockerRunnerXPC"),
         .package(path: "../Plugin"),
+        .package(path: "../PolicyRuntime"),
     ],
     targets: [
         .target(
@@ -24,6 +25,7 @@ let package = Package(
                 "DBRepository",
                 "DockerRunnerXPC",
                 "Plugin",
+                "PolicyRuntime",
             ],
             path: "Sources/DerrickBackend",
             swiftSettings: [
@@ -32,7 +34,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DerrickBackendTests",
-            dependencies: ["DerrickBackend", "DBRepository", "Plugin", "Structure"],
+            dependencies: ["DerrickBackend", "DBRepository", "Plugin", "Structure", "PolicyRuntime"],
             path: "Tests/DerrickBackendTests",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency")

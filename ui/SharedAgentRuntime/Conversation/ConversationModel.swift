@@ -970,7 +970,7 @@ final class ConversationModel {
                 outcomeJSON: #"{"action":"allow"}"#,
                 priority: 1
             )
-        } + [
+        } + DefaultGuardrailPolicySeeds.workflowStartRules(applicationName: applicationName) + [
             PolicyRule(
                 applicationName: applicationName,
                 name: "allow-default-assistant-chunks",

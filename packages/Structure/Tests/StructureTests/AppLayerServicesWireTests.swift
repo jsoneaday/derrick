@@ -1413,37 +1413,17 @@ import Testing
         #expect(fromMinutes.containerRunMaxTTLMinutes == 12)
     }
 
-    @Test func effectorAdmissionAllowsWorkflowCrawl() {
+    @Test func effectorAdmissionParseContextJSON() throws {
         let context = ExecutionContextWire(
-            sessionID: "s1",
-            principal: .agent(sessionID: "s1", agentID: "a1"),
-            workflow: WorkflowContextWire(workflowID: "w1", kind: .pluginFactoryCreate),
-            capabilities: [.syncWebCrawl, .hostReviewRetry]
+            sessionID: "s",
+            principal: .ui,
+            capabilities: [.syncWebCrawl]
         )
-        #expect(
-            EffectorAdmissionPolicy.allowsSyncWebCrawl(
-                context: context,
-                principal: .agent(sessionID: "s1", agentID: "a1")
-            )
-        )
-    }
-
-    @Test func effectorAdmissionAllowsLiveChatWithoutContext() {
-        #expect(
-            EffectorAdmissionPolicy.allowsSyncWebCrawl(
-                context: nil,
-                principal: .agent(sessionID: "s1", agentID: "a1")
-            )
-        )
-    }
-
-    @Test func effectorAdmissionAllowsJobsWithoutContext() {
-        #expect(
-            EffectorAdmissionPolicy.allowsSyncWebCrawl(
-                context: nil,
-                principal: .job(jobID: "j1")
-            )
-        )
+        let json = try context.encodedJSON()
+        let parsed = EffectorAdmissionPolicy.parseContextJSON(json)
+        #expect(parsed?.capabilities.contains(.syncWebCrawl) == true)
+        #expect(EffectorAdmissionPolicy.parseContextJSON(nil) == nil)
+        #expect(EffectorAdmissionPolicy.parseContextJSON("  ") == nil)
     }
 
     @Test func executionContextWireRoundTrip() throws {

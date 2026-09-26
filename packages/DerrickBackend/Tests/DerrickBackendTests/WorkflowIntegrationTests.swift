@@ -123,65 +123,69 @@ import Testing
         )
         let repository = DBRepository(configuration: configuration)
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
+        try await DefaultGuardrailPolicySeeds.seedWorkflowStartRulesIfNeeded(
+            store: repository,
+            applicationName: "ui"
+        )
 
         let previousMCP = InProcessServiceBridges.mcpCallTool
         defer { InProcessServiceBridges.mcpCallTool = previousMCP }
 
-        InProcessServiceBridges.mcpCallTool = { request in
-            switch request.toolName {
-            case "web.crawl":
-                let pages: String
-                if request.argumentsJSON.contains("agent-plugins.org") {
-                    pages = #"{"pages":[{"url":"https://agent-plugins.org/specification","title":"Spec","text":"plugin.json and skills/SKILL.md are required."}]}"#
-                } else {
-                    pages = #"{"pages":[{"url":"https://api.slack.com/docs","title":"Slack","text":"auth"}]}"#
+        // Hold the first run in `running` until after the second start (dedupe only matches running).
+        actor ReleaseGate {
+            private var released = false
+            private var waiters: [CheckedContinuation<Void, Never>] = []
+
+            func wait() async {
+                if released { return }
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    waiters.append(c)
                 }
-                let outcome = try ToolExecutionOutcome.completed(
-                    output: ToolExecutionOutcome.Output(format: .json, value: pages)
-                ).encodedJSON()
-                return MCPToolCallResultDTO(
-                    requestID: request.requestID,
-                    ok: true,
-                    isError: false,
-                    text: outcome
-                )
-            case "plugin_factory_build":
-                let receipt = """
-                {"plugin_id":"slack-connector","version":"1.0.0","content_hash":"abc","review_summary":"ok","secrets":[]}
-                """
-                let outcome = try ToolExecutionOutcome.completed(
-                    output: ToolExecutionOutcome.Output(format: .json, value: receipt)
-                ).encodedJSON()
-                return MCPToolCallResultDTO(
-                    requestID: request.requestID,
-                    ok: true,
-                    isError: false,
-                    text: outcome
-                )
-            default:
-                return MCPToolCallResultDTO(
-                    requestID: request.requestID,
-                    ok: false,
-                    isError: true,
-                    text: "",
-                    message: "unexpected tool \(request.toolName)"
-                )
+            }
+
+            func release() {
+                released = true
+                for waiter in waiters {
+                    waiter.resume()
+                }
+                waiters.removeAll()
             }
         }
+        let gate = ReleaseGate()
 
+        InProcessServiceBridges.mcpCallTool = { request in
+            await gate.wait()
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: "held for dedupe test"
+            )
+        }
+
+        let inputJSON = try PluginFactoryCreateInput.makeConnector(
+            vendor: .slack,
+            scope: .fullSync,
+            userDescription: "Post alerts."
+        ).encodedJSON()
         let request = WorkflowStartRequest(
             kind: .pluginFactoryCreate,
-            sessionID: "session-1",
+            sessionID: "session-dedupe",
             agentID: "ui",
-            inputJSON: "slack connector",
-            principal: .agent(sessionID: "session-1", agentID: "ui")
+            inputJSON: inputJSON,
+            principal: .agent(sessionID: "session-dedupe", agentID: "ui")
         )
         let provider: @Sendable () async throws -> DBRepository = { repository }
         let first = try await WorkflowRuntimeEngine.shared.startWorkflow(request, repositoryProvider: provider)
+        // Give the run task a turn to reach the gated MCP call while still running.
+        try await Task.sleep(nanoseconds: 50_000_000)
         let second = try await WorkflowRuntimeEngine.shared.startWorkflow(request, repositoryProvider: provider)
         #expect(first.deduplicated == false)
         #expect(second.deduplicated == true)
         #expect(first.workflowID == second.workflowID)
+
+        await gate.release()
 
         var status = WorkflowRunStatus.running
         for _ in 0..<50 {

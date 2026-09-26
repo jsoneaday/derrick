@@ -99,7 +99,7 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 - **`Structure/Guardrail`** — control plane umbrella. Policy decides; HITL and workflows enforce.
 - Persisted rules in SQLite (`Guardrail/Policy`, `packages/PolicyRuntime`) produce `GuardrailDecision`.
 - **`PolicyInterceptor`** / **`ToolRequestInterceptor`** (MemorySystem) — pipeline hooks that apply those decisions.
-- Workflow starts are admitted by Guardrail (`WorkflowAdmissionPolicy`) before the runtime runs them.
+- Workflow starts and MCP tools are admitted by Policy rules (`workflow_start` / `tool_invocation`); thin adapters apply allow / deny / confirmHITL / redact.
 
 ### Messaging
 

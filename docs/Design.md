@@ -11,9 +11,14 @@ This application is Protocol first. All major features must have a Protocol and 
 ## Guardrail
 Guardrail is Derrick's control plane in Structure (`Sources/Guardrail`).
 
-- **Policy decides** allow / deny / confirm HITL / require workflow / redact (`GuardrailDecision`).
-- **HITL** and **workflows** are enforcement shapes for those decisions.
-- **Plugins** propose capabilities; they do not authorize control outcomes.
-- Workflow starts are admitted by `WorkflowAdmissionPolicy` inside `WorkflowRuntimeEngine` (UI proposes; Guardrail authorizes).
-- Effector admission (for example sync `web.crawl`) uses the same decision vocabulary and is enforced in MCPService before the tool runs.
-- `WorkflowKind.pluginFactoryEdit` is reserved for future plugin editability and is denied until enabled.
+Flow:
+
+1. **Guardrail** — logical container
+2. **Policy engine** — store-backed rules decide allow / deny / confirm HITL / require workflow / redact
+3. **Enforcement** — those decisions gate workflow starts, MCP effector/tool calls, HITL confirmations, and content redaction (e.g. PII)
+
+- Workflow starts: `StoreBackedWorkflowAdmissionPolicy` (`workflow_start` scope) → `WorkflowAdmissionPolicy.apply` in `WorkflowRuntimeEngine` (allow / deny / confirmHITL then resume or cancel).
+- MCP tools/effectors: `StoreBackedToolGovernancePolicy` (`tool_invocation`) in the chat pipeline and again in MCPService before the tool runs.
+- Content: same engine via `StoreBackedCompletionContentPolicy`.
+- `WorkflowKind.pluginFactoryEdit` is denied by a Policy rule until editability ships.
+- Plugins propose work; they do not authorize control outcomes.

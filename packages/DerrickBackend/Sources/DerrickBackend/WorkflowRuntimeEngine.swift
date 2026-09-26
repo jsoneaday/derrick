@@ -1,5 +1,6 @@
 import DBRepository
 import Foundation
+import PolicyRuntime
 import Structure
 
 /// Durable workflow coordinator (Process Manager) running inside derrickd.
@@ -15,8 +16,23 @@ public actor WorkflowRuntimeEngine {
         _ request: WorkflowStartRequest,
         repositoryProvider: @escaping @Sendable () async throws -> DBRepository
     ) async throws -> WorkflowHandleDTO {
-        try WorkflowAdmissionPolicy.admitOrThrow(request)
         let repo = try await repositoryProvider()
+        try await DefaultGuardrailPolicySeeds.seedWorkflowStartRulesIfNeeded(
+            store: repo,
+            applicationName: DerrickAppSupport.defaultApplicationName
+        )
+        let decision = try await StoreBackedWorkflowAdmissionPolicy(
+            store: repo,
+            applicationName: DerrickAppSupport.defaultApplicationName
+        ).evaluate(request)
+        try await WorkflowAdmissionPolicy.apply(decision) {
+            guard case .confirmHITL(let hitl) = decision else { return true }
+            return await awaitWorkflowStartHITL(
+                request: request,
+                repository: repo,
+                hitl: hitl
+            )
+        }
         let idempotencyKey = WorkflowRuntimeIdempotency.key(
             sessionID: request.sessionID,
             kind: request.kind,
@@ -336,5 +352,58 @@ public actor WorkflowRuntimeEngine {
             stage: "workflow",
             message: message
         )
+    }
+
+    private static let workflowHITLPollNanoseconds: UInt64 = 1_000_000_000
+    private static let workflowHITLTimeoutNanoseconds: UInt64 = 15 * 60 * 1_000_000_000
+
+    /// Present HITL for a workflow_start confirm decision; returns true when approved.
+    private func awaitWorkflowStartHITL(
+        request: WorkflowStartRequest,
+        repository: DBRepository,
+        hitl: GuardrailHITLRequest
+    ) async -> Bool {
+        let approvalID = UUID().uuidString
+        let requiredJSON = (try? JSONEncoder().encode(hitl.requiredFields))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let isJob: Bool = {
+            if case .job = request.principal { return true }
+            return false
+        }()
+        let row = PendingHITLApprovalRow(
+            id: approvalID,
+            turnID: request.turnID ?? request.sessionID,
+            sessionID: request.sessionID,
+            toolName: "workflow_start:\(request.kind.rawValue)",
+            argumentsJSON: request.inputJSON,
+            requiredFieldsJSON: requiredJSON,
+            isJobContext: isJob
+        )
+        do {
+            try await repository.insertPendingHITLApproval(row)
+        } catch {
+            fputs("[workflow] HITL persist failed: \(error.localizedDescription)\n", stderr)
+            return false
+        }
+        DerrickHITLNotificationSignal.postPoll()
+
+        let deadline = Date().addingTimeInterval(
+            Double(Self.workflowHITLTimeoutNanoseconds) / 1_000_000_000
+        )
+        while Date() < deadline {
+            if Task.isCancelled { return false }
+            if let decision = try? await repository.fetchPendingHITLApproval(id: approvalID),
+               decision.status != .pending {
+                return decision.status == .approved
+            }
+            try? await Task.sleep(nanoseconds: Self.workflowHITLPollNanoseconds)
+        }
+        try? await repository.resolveHITLApproval(
+            id: approvalID,
+            status: .timeout,
+            editedArgumentsJSON: nil,
+            actor: "system-timeout"
+        )
+        return false
     }
 }

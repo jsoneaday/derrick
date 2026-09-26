@@ -5,6 +5,7 @@ import MCPClient
 import MCPServer
 import MemorySystem
 import Plugin
+import PolicyRuntime
 import Structure
 
 /// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, `web.search`, factory
@@ -301,30 +302,57 @@ actor MCPServiceToolHost {
             HostHTTPCallContext.shared.clear()
         }
 
-        if toolName == "web.crawl" {
-            let context = EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)
-            switch EffectorAdmissionPolicy.syncWebCrawlDecision(
-                context: context,
-                principal: request.principal
-            ) {
-            case .allow:
-                break
-            case .deny(let reason):
-                await MCPServiceStore.shared.log(
-                    level: .error,
-                    message: "web.crawl denied by Guardrail: \(reason)",
-                    code: "tool_denied",
-                    detailJSON: #"{"requestID":"\#(request.requestID)"}"#
-                )
-                return MCPToolCallResultDTO(
-                    requestID: request.requestID,
-                    ok: false,
-                    isError: true,
-                    text: "",
-                    message: reason
-                )
-            case .confirmHITL, .requireWorkflow, .redactContent, .redactArgument:
-                let message = "web.crawl returned an unsupported Guardrail decision."
+        // Policy decides effector/tool admission (same engine as chat). Apply allow / deny /
+        // confirmHITL / redact before the tool runs.
+        let policyRepo = try await MCPServiceStore.shared.sharedRepository()
+        let toolPolicy = StoreBackedToolGovernancePolicy(
+            store: policyRepo,
+            applicationName: DerrickAppSupport.defaultApplicationName
+        )
+        let sessionIDForPolicy: String = {
+            if case .agent(let sessionID, _) = request.principal { return sessionID }
+            if case .job(let jobID) = request.principal { return jobID }
+            return "mcp-service"
+        }()
+        var argumentsJSON = request.argumentsJSON
+        let decision = try await toolPolicy.evaluateToolInvocation(
+            ToolInvocationEvent(
+                sessionID: sessionIDForPolicy,
+                toolName: toolName,
+                argumentsJSON: argumentsJSON
+            )
+        )
+        switch decision {
+        case .allow:
+            break
+        case .deny(let reason):
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "tool denied by Policy tool=\(toolName): \(reason)",
+                code: "tool_denied",
+                detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+            )
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: reason
+            )
+        case .confirmHITL(let hitl):
+            let approved = await awaitMCPToolHITL(
+                sessionID: sessionIDForPolicy,
+                toolName: toolName,
+                argumentsJSON: argumentsJSON,
+                hitl: hitl,
+                principal: request.principal,
+                repository: policyRepo
+            )
+            switch approved {
+            case .approved(let edited, _):
+                argumentsJSON = edited
+            case .cancelled(let actor):
+                let message = "Tool \(toolName) was not approved\(actor.map { " by \($0)" } ?? "")."
                 return MCPToolCallResultDTO(
                     requestID: request.requestID,
                     ok: false,
@@ -333,13 +361,29 @@ actor MCPServiceToolHost {
                     message: message
                 )
             }
+        case .redactArgument(let key, let pattern, let replacement):
+            argumentsJSON = redactToolArgumentJSON(
+                argumentsJSON,
+                key: key,
+                pattern: pattern,
+                replacement: replacement
+            )
+        case .requireWorkflow, .redactContent:
+            let message = "Tool \(toolName) returned an unsupported Policy decision."
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: message
+            )
         }
 
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
         // `{}` is a valid empty object for tools with no required args.
         let args: [String: Value]
         do {
-            args = try parseToolArgumentsObject(request.argumentsJSON)
+            args = try parseToolArgumentsObject(argumentsJSON)
         } catch {
             await MCPServiceStore.shared.log(
                 level: .error,
@@ -412,6 +456,92 @@ actor MCPServiceToolHost {
     private static func skillIndex(from repo: DBRepository) async throws -> [PluginSkillDisclosure.IndexEntry] {
         try await repo.listPluginSkillIndex()
     }
+
+    private static let toolHITLPollNanoseconds: UInt64 = 1_000_000_000
+    private static let toolHITLTimeoutNanoseconds: UInt64 = 15 * 60 * 1_000_000_000
+
+    private func awaitMCPToolHITL(
+        sessionID: String,
+        toolName: String,
+        argumentsJSON: String,
+        hitl: GuardrailHITLRequest,
+        principal: ServicePrincipal,
+        repository: DBRepository
+    ) async -> ApprovalConfirmationDecision {
+        let approvalID = UUID().uuidString
+        let requiredJSON = (try? JSONEncoder().encode(hitl.requiredFields))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let isJob = isJobPrincipal(principal)
+        let row = PendingHITLApprovalRow(
+            id: approvalID,
+            turnID: sessionID,
+            sessionID: sessionID,
+            toolName: toolName,
+            argumentsJSON: argumentsJSON,
+            requiredFieldsJSON: requiredJSON,
+            isJobContext: isJob
+        )
+        do {
+            try await repository.insertPendingHITLApproval(row)
+        } catch {
+            fputs("[MCPService] HITL persist failed: \(error.localizedDescription)\n", stderr)
+            return .cancelled(actor: "system-persist-failed")
+        }
+        DerrickHITLNotificationSignal.postPoll()
+
+        let deadline = Date().addingTimeInterval(
+            Double(Self.toolHITLTimeoutNanoseconds) / 1_000_000_000
+        )
+        while Date() < deadline {
+            if Task.isCancelled {
+                return .cancelled(actor: "system-cancelled")
+            }
+            if let decision = try? await repository.fetchPendingHITLApproval(id: approvalID),
+               decision.status != .pending {
+                switch decision.status {
+                case .approved:
+                    let args = decision.editedArgumentsJSON?.isEmpty == false
+                        ? decision.editedArgumentsJSON!
+                        : argumentsJSON
+                    return .approved(editedArgumentsJSON: args, actor: decision.actor)
+                case .cancelled, .timeout, .pending:
+                    return .cancelled(actor: decision.actor ?? decision.status.rawValue)
+                }
+            }
+            try? await Task.sleep(nanoseconds: Self.toolHITLPollNanoseconds)
+        }
+        try? await repository.resolveHITLApproval(
+            id: approvalID,
+            status: .timeout,
+            editedArgumentsJSON: nil,
+            actor: "system-timeout"
+        )
+        return .cancelled(actor: "system-timeout")
+    }
+}
+
+private func redactToolArgumentJSON(
+    _ json: String,
+    key: String,
+    pattern: String,
+    replacement: String
+) -> String {
+    guard let data = json.data(using: .utf8),
+          var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return json
+    }
+    if let stringValue = object[key] as? String {
+        object[key] = stringValue.replacingOccurrences(
+            of: pattern,
+            with: replacement,
+            options: .regularExpression
+        )
+    }
+    guard let redacted = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+          let redactedString = String(data: redacted, encoding: .utf8) else {
+        return json
+    }
+    return redactedString
 }
 
 private func pluginFactoryFailureDetail(for error: Error) -> String {
