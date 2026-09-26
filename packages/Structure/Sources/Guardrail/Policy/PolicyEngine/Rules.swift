@@ -7,7 +7,7 @@ public struct AllowToolNamesRule: ToolPolicyRule {
         self.toolNames = Set(toolNames)
     }
 
-    public func evaluate(_ request: PolicyRequest) -> PolicyDecision? {
+    public func evaluate(_ request: PolicyRequest) -> GuardrailDecision? {
         toolNames.contains(request.call.name) ? .allow : nil
     }
 }
@@ -21,7 +21,7 @@ public struct DenyToolNamesRule: ToolPolicyRule {
         self.reason = reason
     }
 
-    public func evaluate(_ request: PolicyRequest) -> PolicyDecision? {
+    public func evaluate(_ request: PolicyRequest) -> GuardrailDecision? {
         toolNames.contains(request.call.name) ? .deny(reason: reason) : nil
     }
 }
@@ -29,17 +29,16 @@ public struct DenyToolNamesRule: ToolPolicyRule {
 public struct ConfirmMutationRule: ToolPolicyRule {
     public init() {}
 
-    public func evaluate(_ request: PolicyRequest) -> PolicyDecision? {
+    public func evaluate(_ request: PolicyRequest) -> GuardrailDecision? {
         guard request.call.effects.contains(.changesState) || request.call.effects.contains(.externalSideEffects) else {
             return nil
         }
 
-        return .confirm(
-            PolicyConfirmationRequest(
+        return .confirmHITL(
+            GuardrailHITLRequest(
+                requiredFields: ["user_approval"],
                 title: "Confirm action",
-                message: "This tool call can change state or trigger side effects. Confirm before proceeding.",
-                call: request.call,
-                context: request.context
+                message: "This tool call can change state or trigger side effects. Confirm before proceeding."
             )
         )
     }

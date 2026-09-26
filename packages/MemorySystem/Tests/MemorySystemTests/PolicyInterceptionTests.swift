@@ -150,14 +150,14 @@ struct MockResponseContentPolicy: PolicyEvaluator {
         if shouldDeny {
             return .deny(reason: denyReason)
         }
-        return shouldAllow ? .allow : .confirm(requiredFields: [])
+        return shouldAllow ? .allow : .confirmHITL(GuardrailHITLRequest(requiredFields: []))
     }
 
     func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome {
         if shouldDeny {
             return .deny(reason: denyReason)
         }
-        return shouldAllow ? .allow : .confirm(requiredFields: [])
+        return shouldAllow ? .allow : .confirmHITL(GuardrailHITLRequest(requiredFields: []))
     }
 }
 

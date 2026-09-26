@@ -103,7 +103,7 @@ struct MockToolGovernancePolicy: ToolGovernancePolicy {
         if shouldDeny {
             return .deny(reason: denyReason)
         }
-        return shouldAllow ? .allow : .confirm(requiredFields: ["approval"])
+        return shouldAllow ? .allow : .confirmHITL(GuardrailHITLRequest(requiredFields: ["approval"]))
     }
 }
 
@@ -157,7 +157,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_defaultInterceptor_redacts_arguments() async throws {
         struct RedactingPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                return .redact(argumentKey: "password", pattern: ".+", replacement: "[REDACTED]")
+                return .redactArgument(argumentKey: "password", pattern: ".+", replacement: "[REDACTED]")
             }
         }
 
@@ -199,7 +199,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_confirm_outcome_preserves_tool_name() async throws {
         struct ConfirmingPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                return .confirm(requiredFields: ["user_consent"])
+                return .confirmHITL(GuardrailHITLRequest(requiredFields: ["user_consent"]))
             }
         }
 
@@ -218,7 +218,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_evaluateToolInvocation_returns_confirm_with_requiredFields() async throws {
         struct ConfirmingPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                .confirm(requiredFields: ["user_consent", "ticket_id"])
+                .confirmHITL(GuardrailHITLRequest(requiredFields: ["user_consent", "ticket_id"]))
             }
         }
 
@@ -314,7 +314,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_interceptAndRun_confirm_approved_then_proceed() async throws {
         struct ConfirmPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                .confirm(requiredFields: ["user_approval"])
+                .confirmHITL(GuardrailHITLRequest(requiredFields: ["user_approval"]))
             }
         }
 
@@ -352,7 +352,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_interceptAndRun_confirm_cancelled_throws_without_proceed() async throws {
         struct ConfirmPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                .confirm(requiredFields: ["user_approval"])
+                .confirmHITL(GuardrailHITLRequest(requiredFields: ["user_approval"]))
             }
         }
 
@@ -384,7 +384,7 @@ final class ToolRequestInterceptorTests: XCTestCase {
     func test_interceptAndRun_redact_then_proceed_with_redacted_event() async throws {
         struct RedactPolicy: ToolGovernancePolicy {
             func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-                .redact(argumentKey: "token", pattern: ".+", replacement: "[REDACTED]")
+                .redactArgument(argumentKey: "token", pattern: ".+", replacement: "[REDACTED]")
             }
         }
 

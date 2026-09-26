@@ -159,7 +159,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 chunkCount: 1
             )
         )
-        XCTAssertEqual(outcome, .confirm(requiredFields: ["review"]))
+        XCTAssertEqual(outcome, .confirmHITL(GuardrailHITLRequest(requiredFields: ["review"])))
     }
 
     func test_completionPolicy_skipsDisabledRule() async throws {
@@ -227,7 +227,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 argumentsJSON: #"{"code":"print(1)"}"#
             )
         )
-        XCTAssertEqual(withCode, .confirm(requiredFields: ["review"]))
+        XCTAssertEqual(withCode, .confirmHITL(GuardrailHITLRequest(requiredFields: ["review"])))
 
         let withoutCode = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
@@ -355,7 +355,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 argumentsJSON: #"{"code":"x"}"#
             )
         )
-        XCTAssertEqual(offlineScript, .confirm(requiredFields: ["offline_ok"]))
+        XCTAssertEqual(offlineScript, .confirmHITL(GuardrailHITLRequest(requiredFields: ["offline_ok"])))
 
         let networkedScript = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(
@@ -396,7 +396,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         let sessionTool = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(sessionID: "s1", toolName: "session_memory_search", argumentsJSON: "{}")
         )
-        XCTAssertEqual(sessionTool, .confirm(requiredFields: ["ok"]))
+        XCTAssertEqual(sessionTool, .confirmHITL(GuardrailHITLRequest(requiredFields: ["ok"])))
 
         let otherTool = try await policy.evaluateToolInvocation(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
@@ -432,7 +432,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 chunkCount: 1
             )
         )
-        XCTAssertEqual(ssn, .confirm(requiredFields: ["review"]))
+        XCTAssertEqual(ssn, .confirmHITL(GuardrailHITLRequest(requiredFields: ["review"])))
 
         let plain = try await policy.evaluateAssistantCompletion(
             AssistantCompletionEvent(

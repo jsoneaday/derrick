@@ -1,15 +1,9 @@
 import Foundation
 
-public enum PolicyDecisionOutcome: Equatable, Sendable {
-    case allow
-    case deny(reason: String)
-    case confirm(requiredFields: [String])
-    case redact(pattern: String, replacement: String)
-}
-
+/// Content Policy evaluator. Returns the canonical `GuardrailDecision`.
 public protocol PolicyEvaluator: Sendable {
-    func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome
-    func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome
+    func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> GuardrailDecision
+    func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> GuardrailDecision
 }
 
 /// Result of content policy interception (preserves deny reasons for UI).
@@ -24,3 +18,7 @@ public protocol PolicyInterceptor: Sendable {
     func interceptAssistantChunk(_ event: AssistantChunkEvent) async throws -> AssistantContentInterceptResult
     func interceptAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> AssistantContentInterceptResult
 }
+
+/// Historical alias — prefer `GuardrailDecision`.
+@available(*, deprecated, renamed: "GuardrailDecision")
+public typealias PolicyDecisionOutcome = GuardrailDecision

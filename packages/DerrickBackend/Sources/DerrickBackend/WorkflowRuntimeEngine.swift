@@ -15,6 +15,7 @@ public actor WorkflowRuntimeEngine {
         _ request: WorkflowStartRequest,
         repositoryProvider: @escaping @Sendable () async throws -> DBRepository
     ) async throws -> WorkflowHandleDTO {
+        try WorkflowAdmissionPolicy.admitOrThrow(request)
         let repo = try await repositoryProvider()
         let idempotencyKey = WorkflowRuntimeIdempotency.key(
             sessionID: request.sessionID,

@@ -157,7 +157,7 @@ public struct ToolRule: ToolPolicyRule {
         Self(matcher: matcher, outcome: .confirm(title: title, message: message))
     }
 
-    public func evaluate(_ request: PolicyRequest) -> PolicyDecision? {
+    public func evaluate(_ request: PolicyRequest) -> GuardrailDecision? {
         guard matcher.matches(request.call) else {
             return nil
         }
@@ -168,7 +168,13 @@ public struct ToolRule: ToolPolicyRule {
         case .deny(let reason):
             return .deny(reason: reason)
         case .confirm(let title, let message):
-            return .confirm(.init(title: title, message: message, call: request.call, context: request.context))
+            return .confirmHITL(
+                GuardrailHITLRequest(
+                    requiredFields: ["user_approval"],
+                    title: title,
+                    message: message
+                )
+            )
         }
     }
 }

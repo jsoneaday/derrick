@@ -1,7 +1,20 @@
 import Foundation
 
-/// MCP effector admission from signed `ExecutionContextWire` (not process-local flags).
+/// MCP effector admission under Guardrail. Policy vocabulary: allow or deny.
+///
+/// Effectors are MCP-hosted side-effect tools (`web.crawl`, `script_exec`, …).
+/// Admission belongs to Guardrail/Policy, not to plugins.
 public enum EffectorAdmissionPolicy: Sendable {
+    public static func syncWebCrawlDecision(
+        context: ExecutionContextWire?,
+        principal: ServicePrincipal
+    ) -> GuardrailDecision {
+        if allowsSyncWebCrawl(context: context, principal: principal) {
+            return .allow
+        }
+        return .deny(reason: "Sync web crawl is not admitted for this execution context.")
+    }
+
     public static func allowsSyncWebCrawl(
         context: ExecutionContextWire?,
         principal: ServicePrincipal

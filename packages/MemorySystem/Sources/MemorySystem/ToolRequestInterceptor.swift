@@ -19,9 +19,9 @@ public struct DefaultToolRequestInterceptor: ToolRequestInterceptor {
             return .allow(event)
         case .deny(let reason):
             return .deny(reason: reason)
-        case .confirm(let requiredFields):
-            return .confirm(event, requiredFields: requiredFields)
-        case .redact(let key, let pattern, let replacement):
+        case .confirmHITL(let hitl):
+            return .confirm(event, requiredFields: hitl.requiredFields)
+        case .redactArgument(let key, let pattern, let replacement):
             guard let parsedArgs = try? JSONSerialization.jsonObject(with: event.argumentsJSON.data(using: .utf8) ?? Data(), options: []) as? [String: Any] else {
                 return .allow(event)
             }
@@ -48,6 +48,8 @@ public struct DefaultToolRequestInterceptor: ToolRequestInterceptor {
                     timestamp: event.timestamp
                 )
             )
+        case .requireWorkflow, .redactContent:
+            return .deny(reason: "Tool policy returned an unsupported control decision.")
         }
     }
 

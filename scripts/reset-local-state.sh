@@ -2,23 +2,32 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_GROUP="$HOME/Library/Group Containers/VUSK4B2YKQ.derrick.shared"
+
+# Same search order as DerrickAppSupport.preferredDatabaseParentDirectories().
+DB_ROOTS=(
+  "$HOME/Library/Group Containers/VUSK4B2YKQ.derrick.shared"
+  "$HOME/Library/Containers/derrick.ui/Data/Library/Application Support"
+  "$HOME/Library/Application Support"
+)
 
 echo "==> Quit Derrick before resetting local state."
 echo "==> This removes all local SQLite data (chats, plugins, messaging, credentials in DB)."
 echo "==> Keychain plugin secrets are not removed."
 
 removed_dbs=0
-if [[ -d "$APP_GROUP" ]]; then
+for root in "${DB_ROOTS[@]}"; do
+  if [[ ! -d "$root" ]]; then
+    continue
+  fi
   while IFS= read -r db; do
     rm -f "$db" "${db}-wal" "${db}-shm"
     echo "removed $(basename "$db") at ${db%/*}"
     removed_dbs=$((removed_dbs + 1))
-  done < <(find "$APP_GROUP" -name 'derrick.sqlite3' 2>/dev/null)
-fi
+  done < <(find "$root" -name 'derrick.sqlite3' 2>/dev/null)
+done
 
 if [[ "$removed_dbs" -eq 0 ]]; then
-  echo "no derrick.sqlite3 files found under $APP_GROUP"
+  echo "no derrick.sqlite3 files found under preferred database roots"
 fi
 
 if command -v docker >/dev/null 2>&1; then
@@ -44,5 +53,5 @@ else
 fi
 
 echo
-echo "Done. Reopen Derrick from $ROOT (go-workers) to recreate an empty database."
+echo "Done. Reopen Derrick from $ROOT to recreate an empty database."
 echo "Policy rules seed automatically on first UI launch."

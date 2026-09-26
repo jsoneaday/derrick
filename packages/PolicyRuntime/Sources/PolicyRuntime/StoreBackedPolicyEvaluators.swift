@@ -12,7 +12,7 @@ public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {
         self.applicationName = applicationName
     }
 
-    public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
+    public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> GuardrailDecision {
         let rules = try await loadRules(scopes: ["tool_invocation", "tool_call"])
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
@@ -66,7 +66,7 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
         self.applicationName = applicationName
     }
 
-    public func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome {
+    public func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> GuardrailDecision {
         let rules = try await loadRules(scopes: ["assistant_chunk"])
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
@@ -89,7 +89,7 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
         return .deny(reason: Self.noMatchingRuleReason)
     }
 
-    public func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome {
+    public func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> GuardrailDecision {
         let rules = try await loadRules(scopes: ["assistant_completion_content", "assistant_completion"])
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
@@ -415,30 +415,38 @@ private struct OutcomeRule: Decodable {
         case replacement
     }
 
-    var toolOutcome: ToolGovernanceOutcome {
+    var toolOutcome: GuardrailDecision {
         switch action.lowercased() {
         case "deny":
             return .deny(reason: reason ?? "Tool invocation denied by policy.")
         case "confirm":
-            return .confirm(requiredFields: requiredFields ?? ["user_approval"])
+            return .confirmHITL(
+                GuardrailHITLRequest(requiredFields: requiredFields ?? ["user_approval"])
+            )
         case "allow":
             return .allow
         case "redact":
             guard let argumentKey, let pattern else {
                 return .deny(reason: "Invalid redact outcome for tool rule (missing argument_key/pattern).")
             }
-            return .redact(argumentKey: argumentKey, pattern: pattern, replacement: replacement ?? "[REDACTED]")
+            return .redactArgument(
+                argumentKey: argumentKey,
+                pattern: pattern,
+                replacement: replacement ?? "[REDACTED]"
+            )
         default:
             return .deny(reason: "Unknown tool policy action '\(action)'; denying by default.")
         }
     }
 
-    func contentOutcome(fallbackPattern: String?) -> PolicyDecisionOutcome {
+    func contentOutcome(fallbackPattern: String?) -> GuardrailDecision {
         switch action.lowercased() {
         case "deny":
             return .deny(reason: reason ?? "Assistant content denied by policy.")
         case "confirm":
-            return .confirm(requiredFields: requiredFields ?? ["review_confirmation"])
+            return .confirmHITL(
+                GuardrailHITLRequest(requiredFields: requiredFields ?? ["review_confirmation"])
+            )
         case "allow":
             return .allow
         case "redact":
@@ -446,12 +454,13 @@ private struct OutcomeRule: Decodable {
             guard let patternToUse else {
                 return .deny(reason: "Invalid redact outcome for content rule (missing pattern).")
             }
-            return .redact(pattern: patternToUse, replacement: replacement ?? "[REDACTED]")
+            return .redactContent(pattern: patternToUse, replacement: replacement ?? "[REDACTED]")
         default:
             return .deny(reason: "Unknown content policy action '\(action)'; denying by default.")
         }
     }
 }
+
 
 private func parseJSONObject(from json: String) -> [String: Any] {
     guard let data = json.data(using: .utf8),

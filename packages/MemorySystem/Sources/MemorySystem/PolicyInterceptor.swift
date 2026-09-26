@@ -17,14 +17,14 @@ public struct DefaultPolicyInterceptor: PolicyInterceptor {
             return .allowed(event.content)
         case .deny(let reason):
             return .denied(reason: reason)
-        case .redact(let pattern, let replacement):
+        case .redactContent(let pattern, let replacement):
             let redacted = event.content.replacingOccurrences(
                 of: pattern,
                 with: replacement,
                 options: .regularExpression
             )
             return .allowed(redacted)
-        case .confirm:
+        case .confirmHITL, .requireWorkflow, .redactArgument:
             // Streaming chunks: never modal mid-token. Completion path enforces confirm.
             return .allowed(event.content)
         }
@@ -39,15 +39,17 @@ public struct DefaultPolicyInterceptor: PolicyInterceptor {
             return .allowed(event.fullCompletion)
         case .deny(let reason):
             return .denied(reason: reason)
-        case .redact(let pattern, let replacement):
+        case .redactContent(let pattern, let replacement):
             let redacted = event.fullCompletion.replacingOccurrences(
                 of: pattern,
                 with: replacement,
                 options: .regularExpression
             )
             return .allowed(redacted)
-        case .confirm(let requiredFields):
-            return .confirm(content: event.fullCompletion, requiredFields: requiredFields)
+        case .confirmHITL(let hitl):
+            return .confirm(content: event.fullCompletion, requiredFields: hitl.requiredFields)
+        case .requireWorkflow, .redactArgument:
+            return .denied(reason: "Content policy returned an unsupported control decision.")
         }
     }
 }

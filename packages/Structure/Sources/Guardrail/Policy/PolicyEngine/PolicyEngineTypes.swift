@@ -71,16 +71,15 @@ public struct PolicyConfirmationRequest: Hashable, Sendable {
         self.call = call
         self.context = context
     }
+
+    public var guardrailHITL: GuardrailHITLRequest {
+        GuardrailHITLRequest(self)
+    }
 }
 
-public enum PolicyDecision: Hashable, Sendable {
-    case allow
-    case deny(reason: String)
-    case confirm(PolicyConfirmationRequest)
-}
-
+/// In-memory tool rules used by `PolicyEngine`. Prefer store-backed `PolicyRule` for production.
 public protocol ToolPolicyRule: Sendable {
-    func evaluate(_ request: PolicyRequest) -> PolicyDecision?
+    func evaluate(_ request: PolicyRequest) -> GuardrailDecision?
 }
 
 public protocol PolicyConfirmationPresenting: Sendable {
@@ -92,6 +91,8 @@ public enum PolicyError: Error, Sendable, Equatable {
     case cancelled
 }
 
+/// In-memory rule list that produces `GuardrailDecision`. Production chat uses store-backed evaluators;
+/// this engine shares the same decision vocabulary.
 public struct PolicyEngine: Sendable {
     public let rules: [any ToolPolicyRule]
 
@@ -99,19 +100,18 @@ public struct PolicyEngine: Sendable {
         self.rules = rules
     }
 
-    public func decision(for request: PolicyRequest) -> PolicyDecision {
+    public func decision(for request: PolicyRequest) -> GuardrailDecision {
         for rule in rules {
             if let decision = rule.evaluate(request) {
                 return decision
             }
         }
 
-        return .confirm(
-            PolicyConfirmationRequest(
+        return .confirmHITL(
+            GuardrailHITLRequest(
+                requiredFields: ["user_approval"],
                 title: "Confirm tool call",
-                message: "This tool may change state or trigger side effects.",
-                call: request.call,
-                context: request.context
+                message: "This tool may change state or trigger side effects."
             )
         )
     }

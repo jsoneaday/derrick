@@ -10,6 +10,7 @@ public enum AppLayerFeature: String, CaseIterable, Sendable {
     case scriptReview
     case mcpToolCatalog
     case conversationMCPBridge
+    case guardrail
 }
 
 public struct AppLayerFeatureContract: Sendable, Hashable {
@@ -77,6 +78,19 @@ public enum AppLayerFeatureCatalog {
             structureTypeNames: ["AllowedMCPTool"],
             persistenceMayBeSQLite: false,
             uiMustNotImportMCPServer: false
+        ),
+        AppLayerFeatureContract(
+            feature: .guardrail,
+            structureTypeNames: [
+                "GuardrailDecision",
+                "PolicyEvaluator",
+                "ToolGovernancePolicy",
+                "WorkflowKind",
+                "WorkflowAdmissionPolicy",
+                "PendingHITLApprovalRow",
+            ],
+            persistenceMayBeSQLite: true,
+            uiMustNotImportMCPServer: true
         ),
     ]
 

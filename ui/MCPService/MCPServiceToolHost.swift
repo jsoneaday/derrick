@@ -301,6 +301,40 @@ actor MCPServiceToolHost {
             HostHTTPCallContext.shared.clear()
         }
 
+        if toolName == "web.crawl" {
+            let context = EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)
+            switch EffectorAdmissionPolicy.syncWebCrawlDecision(
+                context: context,
+                principal: request.principal
+            ) {
+            case .allow:
+                break
+            case .deny(let reason):
+                await MCPServiceStore.shared.log(
+                    level: .error,
+                    message: "web.crawl denied by Guardrail: \(reason)",
+                    code: "tool_denied",
+                    detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+                )
+                return MCPToolCallResultDTO(
+                    requestID: request.requestID,
+                    ok: false,
+                    isError: true,
+                    text: "",
+                    message: reason
+                )
+            case .confirmHITL, .requireWorkflow, .redactContent, .redactArgument:
+                let message = "web.crawl returned an unsupported Guardrail decision."
+                return MCPToolCallResultDTO(
+                    requestID: request.requestID,
+                    ok: false,
+                    isError: true,
+                    text: "",
+                    message: message
+                )
+            }
+        }
+
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
         // `{}` is a valid empty object for tools with no required args.
         let args: [String: Value]
