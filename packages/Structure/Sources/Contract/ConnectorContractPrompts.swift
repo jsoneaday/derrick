@@ -28,7 +28,9 @@ public enum ConnectorContractPrompts: Sendable {
         Review connectors against this protocol JSON only. If a rule is not in the JSON, do not require it. \
         Do not reject sync_threads for omitting conversation.history or conversation.replies. \
         Do not reject emitting messages: [] when the vendor reported success. \
-        Reject empty messages as success only when the vendor reported failure.
+        Reject empty messages as success only when the vendor reported failure. \
+        The direct test output is a live acceptance run. Reject it when that run failed or matches what the user called unacceptable. \
+        test_input_json fixtures are not evidence.
         """)
     }
 
@@ -69,10 +71,11 @@ public enum ConnectorContractPrompts: Sendable {
                 preamble: "Obey this protocol JSON. Do not add ops outside it. Follow crawled vendor docs for HTTP URLs and request shape."
             )
         )
+        parts.append(PluginAcceptanceDirections.builderText(forUserGoal: "Scope id: \(scopeID) sync_threads"))
         parts.append(
             """
-            test_input_json must include a hops array with http_results fixtures that exercise every messaging_op you implement \
-            (\(scopeSpec.ops.joined(separator: ", "))) through to result.emit.
+            test_input_json must include a hops array. Each messaging op starts as its own hop with params.messaging_op and no http_results. \
+            The host runs that hop live. Ops: \(scopeSpec.ops.joined(separator: ", ")).
             """
         )
         parts.append(

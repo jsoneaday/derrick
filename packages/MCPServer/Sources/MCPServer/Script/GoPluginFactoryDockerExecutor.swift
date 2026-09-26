@@ -3,7 +3,7 @@ import Plugin
 import Structure
 
 /// Production adapter for the Go plugin factory.
-public struct GoPluginFactoryDockerExecutor: PluginFactoryExecutor, PluginFactoryCompiledGuestExecutor, Sendable {
+public struct GoPluginFactoryDockerExecutor: PluginFactoryExecutor, PluginFactoryCompiledGuestExecutor, PluginFactoryLiveAcceptanceExecutor, Sendable {
     private let runtime: GoGuestDockerExecutor
 
     public var image: String { runtime.image }
@@ -46,6 +46,42 @@ public struct GoPluginFactoryDockerExecutor: PluginFactoryExecutor, PluginFactor
 
             return PluginFactoryHopTestRun(final: lastResult, hopResults: hopResults)
         }
+    }
+
+    public func runLiveAcceptance(
+        artifact: Data,
+        testInput: Data
+    ) async throws -> PluginFactoryHopTestRun {
+        let script = try PluginFactoryTestScript.parse(testInput)
+        let liveHops = script.hops.filter { $0.kind != .httpResults && $0.httpResults?.isEmpty != false }
+        if liveHops.isEmpty {
+            let result = PluginFactoryExecutionResult(
+                exitCode: 1,
+                stderr: Data(
+                    "Live acceptance needs a hop that is not a fixture http_results body.".utf8
+                )
+            )
+            return PluginFactoryHopTestRun(final: result, hopResults: [result])
+        }
+        var hopResults: [PluginFactoryExecutionResult] = []
+        var lastResult = PluginFactoryExecutionResult(exitCode: 1)
+        var threadID: String?
+        for hop in liveHops {
+            let live = PluginLiveAcceptance.prepared(hop, discoveredThreadID: threadID)
+            let input = try live.encodeValidated()
+            let result = try await PluginHostHopDispatcher.run(initialInput: input) { hopInput in
+                try await self.runtime.runArtifact(artifact: artifact, input: hopInput)
+            }
+            hopResults.append(result)
+            lastResult = result
+            if threadID == nil {
+                threadID = PluginLiveAcceptance.firstThreadID(
+                    in: String(decoding: result.stdout, as: UTF8.self)
+                )
+            }
+            guard result.exitCode == 0 else { break }
+        }
+        return PluginFactoryHopTestRun(final: lastResult, hopResults: hopResults)
     }
 
     public func packageGuestSource(source: String) async throws -> Data {

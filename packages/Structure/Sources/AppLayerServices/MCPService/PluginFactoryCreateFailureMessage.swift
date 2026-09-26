@@ -28,6 +28,10 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             )
         }
 
+        if alreadyExplained(trimmed) {
+            return PluginFactoryCreateFailurePresentation(summary: trimmed, technicalDetail: nil)
+        }
+
         if ModelProviderLimit.matches(trimmed) {
             return PluginFactoryCreateFailurePresentation(
                 summary: ModelProviderLimit.summary,
@@ -35,135 +39,33 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             )
         }
 
-        if WorkerImageFailureDisplay.isWorkerImageIssue(trimmed) {
-            return PluginFactoryCreateFailurePresentation(
-                summary: """
-                The connector was not saved. Derrick’s web tools were not ready. \
-                Keep Docker Desktop open and try again.
-                """,
-                technicalDetail: trimmed
-            )
-        }
-
-        if isModelTimeout(trimmed) {
-            let reviewer = trimmed.lowercased().contains("safety reviewer")
-            return PluginFactoryCreateFailurePresentation(
-                summary: reviewer
-                    ? """
-                    The connector was not saved. The safety reviewer did not finish in time. Try again.
-                    """
-                    : """
-                    The connector was not saved. The plugin builder did not finish in time. \
-                    High thinking can take several minutes — try again.
-                    """,
-                technicalDetail: trimmed
-            )
-        }
-
-        if isReviewRejection(trimmed) || isTechnicalReviewerDetail(trimmed) {
-            return PluginFactoryCreateFailurePresentation(
-                summary: """
-                The connector was not saved. Derrick built a draft but the safety review could not approve it \
-                after several attempts. Try again.
-                """,
-                technicalDetail: trimmed
-            )
-        }
-
-        if isDraftValidationDetail(trimmed) || isFactoryDidNotSaveDetail(trimmed) {
-            return PluginFactoryCreateFailurePresentation(
-                summary: """
-                The connector was not saved. Derrick could not finish building it after several attempts. \
-                Try again.
-                """,
-                technicalDetail: trimmed
-            )
-        }
-
-        if isTechnicalFactoryDetail(trimmed) {
-            return PluginFactoryCreateFailurePresentation(
-                summary: """
-                The connector was not saved. Derrick could not finish building it. Try again.
-                """,
-                technicalDetail: trimmed
-            )
-        }
-
+        let nature = excerpt(trimmed)
+        let unchanged = nature == collapse(trimmed)
         return PluginFactoryCreateFailurePresentation(
-            summary: alreadyExplained(trimmed)
-                ? trimmed
-                : "The connector was not saved. \(trimmed)",
-            technicalDetail: nil
+            summary: "The connector was not saved. \(nature)",
+            technicalDetail: unchanged ? nil : trimmed
         )
+    }
+
+    private static let excerptLimit = 360
+
+    /// A readable slice of the actual error. Every failure keeps its own reason.
+    private static func excerpt(_ raw: String) -> String {
+        let collapsed = collapse(raw)
+        guard collapsed.count > excerptLimit else { return collapsed }
+        let end = collapsed.index(collapsed.startIndex, offsetBy: excerptLimit)
+        let head = collapsed[..<end]
+        if let space = head.lastIndex(of: " "), space > head.startIndex {
+            return String(head[..<space]) + "…"
+        }
+        return String(head) + "…"
+    }
+
+    private static func collapse(_ raw: String) -> String {
+        raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     private static func alreadyExplained(_ message: String) -> Bool {
         message.hasPrefix("The connector was not saved.")
-    }
-
-    private static func isModelTimeout(_ message: String) -> Bool {
-        LLMHTTPTimeouts.isTimeoutDescription(message)
-    }
-
-    private static func isFactoryDidNotSaveDetail(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        return lower.contains("did not return a saved connector")
-            || lower.contains("plugin factory could not finish")
-    }
-
-    private static func isTechnicalFactoryDetail(_ message: String) -> Bool {
-        if message.count > 160 { return true }
-        let prefixes = [
-            "Invalid Agent Plugin manifest",
-            "Invalid Go guest source",
-            "Go draft test failed",
-            "Plugin review rejected",
-            "Draft validation failed:",
-        ]
-        return prefixes.contains(where: { message.hasPrefix($0) })
-    }
-
-    private static func isDraftValidationDetail(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        if lower.hasPrefix("draft validation failed:") { return true }
-        let indicators = [
-            "sort http_results",
-            "test_input_json must",
-            "http_results must include",
-            "messaging_ops must declare",
-            "messaging_op ",
-            "deterministic draft validation",
-            "connector test_input_json must",
-            "direct test must",
-        ]
-        return indicators.contains(where: { lower.contains($0) })
-    }
-
-    private static func isReviewRejection(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        let indicators = [
-            "direct test output",
-            "safety review",
-            "approval requires",
-            "review rejected",
-            "does not cover",
-            "test evidence",
-            "vendor operations",
-            "thread replies",
-        ]
-        return indicators.contains(where: { lower.contains($0) })
-    }
-
-    private static func isTechnicalReviewerDetail(_ message: String) -> Bool {
-        if message.contains(";") && message.count > 120 { return true }
-        let prefixes = [
-            "The plugin source",
-            "The direct test output",
-            "The source uses",
-            "The source reads",
-            "The source appears",
-            "The connector synchronizes",
-        ]
-        return prefixes.contains(where: { message.hasPrefix($0) })
     }
 }

@@ -57,7 +57,7 @@ struct MCPServiceScriptReviewer: ScriptReviewer {
         }
     }
 
-    private static let defaultModel: ReviewerModel = .openai(.gpt56Luna)
+    private static let defaultModel: ReviewerModel = .openai(.gpt6Luna)
     private static let secondaryDefault: ReviewerModel = .gemini(.gemini25FlashLite)
 
     private func resolveSelectedModel() -> ReviewerModel {

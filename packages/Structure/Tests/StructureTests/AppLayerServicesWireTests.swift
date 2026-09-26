@@ -1527,6 +1527,22 @@ import Testing
         )
     }
 
+    @Test func pluginFactoryCreateFailureMessageIncludesTheError() {
+        let raw = """
+        Invalid Go guest source: HTTP 400: {"error":{"message":"Unsupported value: 'temperature' does not support 0 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}
+        """
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("The connector was not saved."))
+        #expect(presentation.summary.contains("temperature"))
+        #expect(presentation.summary.contains("Only the default (1) value is supported."))
+        #expect(presentation.summary.contains("could not finish building") == false)
+        #expect(presentation.technicalDetail == nil)
+        let docker = "Docker daemon is not running."
+        let dockerPresentation = PluginFactoryCreateFailureMessage.presentation(docker)
+        #expect(dockerPresentation.summary.contains(docker))
+        #expect(dockerPresentation.technicalDetail == nil)
+    }
+
     @Test func pluginFactoryCreateFailureMessageExplainsProviderLimitOnce() {
         let raw = """
         Invalid Go guest source: HTTP 429: {"error":{"code":"project_spend_limit_exceeded","message":"Your project has reached its configured enforced spend limit."}}
@@ -1541,53 +1557,49 @@ import Testing
     @Test func pluginFactoryCreateFailureMessageExplainsWebTools() {
         let raw = "The worker image derrick-worker:go-v1 does not match the version shipped with Derrick. Rebuild or reinstall product images."
         let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
-        #expect(presentation.summary.contains("web tools were not ready"))
-        #expect(presentation.technicalDetail == raw)
+        #expect(presentation.summary.contains("derrick-worker:go-v1"))
+        #expect(presentation.technicalDetail == nil)
     }
 
     @Test func pluginFactoryCreateFailureMessageExplainsBuilderTimeout() {
         let presentation = PluginFactoryCreateFailureMessage.presentation("The request timed out.")
-        #expect(presentation.summary.contains("plugin builder did not finish in time"))
-        #expect(presentation.summary.contains("several minutes"))
-        #expect(presentation.technicalDetail == "The request timed out.")
+        #expect(presentation.summary.contains("The request timed out."))
+        #expect(presentation.technicalDetail == nil)
     }
 
     @Test func pluginFactoryCreateFailureMessageExplainsReviewerTimeout() {
         let presentation = PluginFactoryCreateFailureMessage.presentation(
             "The plugin safety reviewer model timed out."
         )
-        #expect(presentation.summary.contains("safety reviewer did not finish in time"))
-        #expect(presentation.technicalDetail?.contains("safety reviewer") == true)
+        #expect(presentation.summary.contains("The plugin safety reviewer model timed out."))
+        #expect(presentation.technicalDetail == nil)
     }
 
-    @Test func pluginFactoryCreateFailureMessageSanitizesReviewDetail() {
+    @Test func pluginFactoryCreateFailureMessageIncludesReviewDetail() {
         let raw = """
         The source appears to use the guest runtime envelope, stable de-duplication, channel-specific identifiers, and paginated Slack requests, but the supplied direct test does not cover the connector's required receive/sync operations.
         """
         let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
         #expect(presentation.summary.contains("was not saved"))
-        #expect(!presentation.summary.contains("guest runtime envelope"))
-        #expect(presentation.summary.contains("safety review"))
-        #expect(!presentation.summary.contains("Send only"))
-        #expect(!presentation.summary.contains("Full sync"))
-        #expect(presentation.technicalDetail == raw)
+        #expect(presentation.summary.contains("guest runtime envelope"))
+        #expect(presentation.summary.contains("receive/sync operations"))
     }
 
-    @Test func pluginFactoryCreateFailureMessageSanitizesDraftValidationDetail() {
+    @Test func pluginFactoryCreateFailureMessageIncludesDraftValidationDetail() {
         let raw = """
         Sort http_results by request_id and de-duplicate before lookup. Do not return the first matching entry from an unsorted loop.
         """
         let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
         #expect(presentation.summary.contains("was not saved"))
-        #expect(!presentation.summary.contains("http_results"))
-        #expect(presentation.technicalDetail == raw)
+        #expect(presentation.summary.contains("http_results"))
+        #expect(presentation.technicalDetail == nil)
     }
 
     @Test func pluginFactoryCreateFailureMessageExplainsMissingSavedConnector() {
         let raw = "Plugin factory did not return a saved connector."
         let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
-        #expect(presentation.summary.contains("was not saved"))
-        #expect(presentation.technicalDetail == raw)
+        #expect(presentation.summary.contains("did not return a saved connector"))
+        #expect(presentation.technicalDetail == nil)
     }
 
     @Test func connectorManifestMessagingOpsDetectSendOnlyScope() {

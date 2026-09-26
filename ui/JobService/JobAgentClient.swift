@@ -8,7 +8,7 @@ import Structure
 final class JobAgentClient: @unchecked Sendable {
     static let shared = JobAgentClient()
 
-    static let defaultModelJSON = Data(#"{"openai":{"_0":"gpt-5.6-luna"}}"#.utf8)
+    static let defaultModelJSON = Data(#"{"openai":{"_0":"gpt-6-luna"}}"#.utf8)
 
     private let lock = NSLock()
     private var connection: NSXPCConnection?

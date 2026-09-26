@@ -35,6 +35,10 @@ extension OpenAIModel {
             efforts = [.none, .low, .medium, .high, .xhigh]
         case .gpt56Sol:
             efforts = [.none, .low, .medium, .high, .xhigh, .max]
+        case .gpt6Luna, .gpt6Sol:
+            efforts = [.none, .low, .medium, .high, .xhigh, .max]
+        case .gpt6Astra:
+            efforts = [.low, .medium, .high, .xhigh, .max]
         }
         return efforts.map { effort in
             ModelThinkingOption(
@@ -48,6 +52,10 @@ extension OpenAIModel {
     public var defaultThinkingOption: ModelThinkingOption {
         thinkingOptions.first { $0.id == ReasoningEffort.medium.rawValue }
             ?? thinkingOptions[0]
+    }
+
+    public func acceptsThinking(_ option: ModelThinkingOption) -> Bool {
+        thinkingOptions.contains { $0.id == option.id && $0.wire == option.wire }
     }
 }
 
@@ -93,6 +101,10 @@ extension GeminiModel {
         case .gemini37Flash:
             return thinkingOptions.first { $0.id == ThinkingLevel.medium.rawValue } ?? thinkingOptions[0]
         }
+    }
+
+    public func acceptsThinking(_ option: ModelThinkingOption) -> Bool {
+        thinkingOptions.contains { $0.id == option.id && $0.wire == option.wire }
     }
 
     private static func levelOptions(_ levels: [ThinkingLevel]) -> [ModelThinkingOption] {

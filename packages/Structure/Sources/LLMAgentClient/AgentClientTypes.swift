@@ -333,12 +333,35 @@ public struct AgentModelID: Hashable, Codable, Sendable {
     }
 }
 
+/// Request fields a model accepts. The provider sends only these.
+public struct ModelRequestSupport: Hashable, Codable, Sendable, Equatable {
+    public let temperature: Bool
+
+    public init(temperature: Bool) {
+        self.temperature = temperature
+    }
+}
+
 public protocol AgentModel: Hashable, Codable, Sendable {
     var id: AgentModelID { get }
     var maxSupportedContextTokens: Int { get }
     var maxIdealContextTokens: Int { get }
     /// List prices for estimated USD (not billed by the chat API).
     var tokenPricing: ModelTokenPricing { get }
+    var requestSupport: ModelRequestSupport { get }
+    func acceptsThinking(_ option: ModelThinkingOption) -> Bool
+}
+
+extension AgentRequest {
+    /// Drops fields this model does not accept so a caller cannot send them.
+    public func constrained<Model: AgentModel>(to model: Model) -> AgentRequest {
+        AgentRequest(
+            messages: messages,
+            temperature: model.requestSupport.temperature ? temperature : nil,
+            responseSchema: responseSchema,
+            thinking: thinking.flatMap { model.acceptsThinking($0) ? $0 : nil }
+        )
+    }
 }
 
 /// Provider list prices used only to *estimate* USD from token counts.

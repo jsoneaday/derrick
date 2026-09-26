@@ -597,6 +597,9 @@ import Testing
             pluginID: "slack-connector-1"
         )
         #expect(input.pluginID == "slack-connector-1")
+        #expect(input.description.contains("Unacceptable when: must not post without asking"))
+        #expect(input.connectorBuildGoal(crawlSummary: nil).contains("Unacceptable when: must not post without asking"))
+        #expect(input.connectorBuildGoal(crawlSummary: nil).contains("live, not a fixture"))
         #expect(input.auth?.authScheme.isSupportedInWizard == true)
         #expect(input.auth?.secrets.map(\.id) == ["bot_token"])
         #expect(

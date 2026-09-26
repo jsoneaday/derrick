@@ -35,6 +35,13 @@ public enum GeminiModel: String, CaseIterable, Codable, Sendable, AgentModel {
             return ModelTokenPricing(inputUSDPer1MTokens: 1.50, outputUSDPer1MTokens: 7.50)
         }
     }
+
+    public var requestSupport: ModelRequestSupport {
+        switch self {
+        case .gemini25FlashLite, .gemini31FlashLite, .gemini37Flash:
+            return ModelRequestSupport(temperature: true)
+        }
+    }
 }
 
 public struct GeminiProvider: AgentProvider {
@@ -59,10 +66,11 @@ public struct GeminiProvider: AgentProvider {
                     urlRequest.httpMethod = "POST"
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let allowed = request.constrained(to: model)
                     urlRequest.httpBody = try encode(GeminiStreamRequest(
-                        messages: request.messages,
-                        temperature: request.temperature,
-                        thinking: request.thinking
+                        messages: allowed.messages,
+                        temperature: allowed.temperature,
+                        thinking: allowed.thinking
                     ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)
@@ -105,11 +113,12 @@ public struct GeminiProvider: AgentProvider {
                     urlRequest.httpMethod = "POST"
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let allowed = request.constrained(to: model)
                     urlRequest.httpBody = try encode(GeminiJSONStreamRequest(
-                        messages: request.messages,
-                        temperature: request.temperature,
-                        responseSchema: responseSchema,
-                        thinking: request.thinking
+                        messages: allowed.messages,
+                        temperature: allowed.temperature,
+                        responseSchema: responseSchema ?? allowed.responseSchema,
+                        thinking: allowed.thinking
                     ))
 
                     let (bytes, response) = try await transport.bytes(for: urlRequest)

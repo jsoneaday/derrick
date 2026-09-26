@@ -593,6 +593,11 @@ public protocol PluginFactoryCompiledGuestExecutor: PluginFactoryExecutor {
     func runGuestSourceHops(source: String, testInput: Data) async throws -> PluginFactoryHopTestRun
 }
 
+/// Runs the guest's own http.request hops against the network. Fixture bodies are not replayed.
+public protocol PluginFactoryLiveAcceptanceExecutor: PluginFactoryExecutor {
+    func runLiveAcceptance(artifact: Data, testInput: Data) async throws -> PluginFactoryHopTestRun
+}
+
 public enum PluginReviewDecision: String, Sendable, Hashable {
     case approved
     case rejected

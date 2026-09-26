@@ -9,6 +9,6 @@ The factory builds Go from vendor docs. That guest owns how to connect, send, an
 
 The host must not implement Slack, Telegram, Discord, WhatsApp, or other vendor HTTP — no form encoders, users.info, auth.test, conversation-list filters, bundled `contracts/vendors/*.json`, or vendor live/E2E harnesses in this repo.
 
-Host work: forward `http.request` as declared, attach declared secrets as Bearer/Basic, persist `result.emit`, render HostUI.
+Do not add code of any kind, for any reason, to fix a vendor-specific cause. That includes host code, contract text, prompts, and hand-edits to one installed guest (error codes, scopes, ids, query flags, display names). If an override is needed, David will say so explicitly. Otherwise do not do it.
 
-If David asks for host-side vendor protocol code, tests, or harnesses, warn first.
+Host work: forward `http.request` as declared, attach declared secrets as Bearer/Basic, persist `result.emit`, render HostUI. A live acceptance test performs those same forwards. It must not know which vendor it is calling.

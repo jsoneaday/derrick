@@ -7,7 +7,9 @@ import Testing
 struct ModelTests {
     @Test func openAIModelIdentifier() {
         #expect(OpenAIModel.gpt56Luna.id.provider == "openai")
-        #expect(OpenAIModel.gpt56Luna.id.rawValue == "gpt-5.6-luna")
+        #expect(OpenAIModel.gpt6Luna.id.rawValue == "gpt-6-luna")
+        #expect(OpenAIModel.gpt6Sol.id.rawValue == "gpt-6-sol")
+        #expect(OpenAIModel.gpt6Astra.id.rawValue == "gpt-6-astra")
     }
 
     @Test func geminiModelIdentifier() {
@@ -187,18 +189,59 @@ struct ModelTests {
     }
 
     @Test func openAIReasoningEffortSerialization() throws {
-        let request = OpenAIStreamRequest(
-            model: "gpt-5.6-sol",
+        let model = OpenAIModel.gpt56Sol
+        let allowed = AgentRequest(
             messages: [.init(role: .user, content: "hello")],
             temperature: 0.1,
-            responseSchema: nil,
-            thinking: OpenAIModel.gpt56Sol.thinkingOptions.first { $0.id == "high" }
+            thinking: model.thinkingOptions.first { $0.id == "high" }
+        ).constrained(to: model)
+        let request = OpenAIStreamRequest(
+            model: model.rawValue,
+            messages: allowed.messages,
+            temperature: allowed.temperature,
+            responseSchema: allowed.responseSchema,
+            thinking: allowed.thinking
         )
 
         let data = try JSONEncoder().encode(request)
         let jsonString = String(decoding: data, as: UTF8.self)
         #expect(jsonString.contains("reasoning_effort"))
         #expect(jsonString.contains("high"))
+        #expect(jsonString.contains("temperature") == false)
+    }
+
+    @Test func providerSendsOnlyFieldsTheModelAccepts() throws {
+        let model = OpenAIModel.gpt6Astra
+        #expect(model.requestSupport.temperature == false)
+        let unsupported = ModelThinkingOption(
+            id: "none",
+            displayName: "None",
+            wire: .openAIReasoningEffort("none")
+        )
+        let allowed = AgentRequest(
+            messages: [.init(role: .user, content: "hello")],
+            temperature: 0,
+            thinking: unsupported
+        ).constrained(to: model)
+        #expect(allowed.temperature == nil)
+        #expect(allowed.thinking == nil)
+        let encoded = OpenAIStreamRequest(
+            model: model.rawValue,
+            messages: allowed.messages,
+            temperature: allowed.temperature,
+            responseSchema: nil,
+            thinking: allowed.thinking
+        )
+        let json = String(decoding: try JSONEncoder().encode(encoded), as: UTF8.self)
+        #expect(!json.contains("temperature"))
+        #expect(!json.contains("reasoning_effort"))
+
+        let gemini = AgentRequest(
+            messages: [.init(role: .user, content: "hello")],
+            temperature: 0
+        ).constrained(to: GeminiModel.gemini37Flash)
+        #expect(GeminiModel.gemini37Flash.requestSupport.temperature)
+        #expect(gemini.temperature == 0)
     }
 
     @Test func geminiThinkingBudgetSerialization() throws {

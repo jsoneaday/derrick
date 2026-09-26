@@ -44,7 +44,7 @@ final class PluginCreationController: ObservableObject {
         ("skill", "Package skills"),
         ("factory", "Build guest program"),
         ("review", "Safety review"),
-        ("trial", "Trial run"),
+        ("tests", "Run tests"),
     ]
 
     @Published private(set) var phase: Phase = .idle
@@ -550,13 +550,13 @@ final class PluginCreationController: ObservableObject {
             markProgressCompleted("docs")
             markProgressCompleted("skill")
             setProgressStep("factory", status: .failed)
-        case "trial":
+        case "tests":
             markProgressCompleted("credentials")
             markProgressCompleted("spec")
             markProgressCompleted("docs")
             markProgressCompleted("skill")
             markProgressCompleted("factory")
-            setProgressStep("trial", status: .failed)
+            setProgressStep("tests", status: .failed)
         case "review":
             markProgressCompleted("credentials")
             markProgressCompleted("spec")
@@ -591,13 +591,14 @@ final class PluginCreationController: ObservableObject {
                 markProgressCompleted("docs")
                 markProgressCompleted("skill")
                 markProgressActive("factory")
-            case "trial":
+            case "tests":
                 markProgressCompleted("credentials")
                 markProgressCompleted("spec")
                 markProgressCompleted("docs")
                 markProgressCompleted("skill")
                 markProgressCompleted("factory")
-                markProgressActive("trial")
+                markProgressCompleted("review")
+                markProgressActive("tests")
             case "review":
                 markProgressCompleted("credentials")
                 markProgressCompleted("spec")
@@ -612,7 +613,7 @@ final class PluginCreationController: ObservableObject {
                 markProgressCompleted("skill")
                 markProgressCompleted("factory")
                 markProgressCompleted("review")
-                markProgressCompleted("trial")
+                markProgressCompleted("tests")
             default:
                 break
             }
@@ -625,10 +626,14 @@ final class PluginCreationController: ObservableObject {
                 markProgressCompleted("skill")
                 markProgressActive("factory")
             }
+            if message.contains("live_acceptance_started") {
+                markProgressCompleted("factory")
+                markProgressCompleted("review")
+                markProgressActive("tests")
+            }
             if message.contains("review decision=approved") {
                 markProgressCompleted("factory")
                 markProgressCompleted("review")
-                markProgressActive("trial")
             }
             if message.contains("review decision=rejected") || message.contains("review rejected=") {
                 markProgressCompleted("factory")
@@ -664,7 +669,7 @@ final class PluginCreationController: ObservableObject {
                     markProgressCompleted("skill")
                     markProgressCompleted("factory")
                     markProgressCompleted("review")
-                    markProgressCompleted("trial")
+                    markProgressCompleted("tests")
                     await PluginFactoryListStore.shared.reload()
                     if let saved = parseSuccessResult(result.resultJSON) {
                         phase = .succeeded(pluginID: saved.pluginID, outcome: .plugin)

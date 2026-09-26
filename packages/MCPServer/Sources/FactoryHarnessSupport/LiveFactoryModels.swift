@@ -6,7 +6,7 @@ import Structure
 
 public actor LiveFactoryBuilder: PluginFactoryBuilder {
     private let apiKey: String
-    private let model: OpenAIModel = .gpt56Luna
+    private let model: OpenAIModel = .gpt6Luna
 
     public init(apiKey: String) {
         self.apiKey = apiKey
@@ -104,7 +104,7 @@ public actor LiveFactoryBuilder: PluginFactoryBuilder {
 
 public actor LiveFactoryReviewer: PluginFactoryReviewer {
     private let apiKey: String
-    private let model: OpenAIModel = .gpt56Luna
+    private let model: OpenAIModel = .gpt6Luna
 
     public init(apiKey: String) {
         self.apiKey = apiKey
