@@ -80,6 +80,18 @@ final class PluginCreationController: ObservableObject {
         }
     }
 
+    /// The create modal is already up. Show the spend limit there instead of a second modal.
+    func injectProviderLimit(raw: String) -> Bool {
+        guard showsFactoryChrome else { return false }
+        phase = .failed(
+            step: .build,
+            message: ModelProviderLimit.summary,
+            technicalDetail: raw
+        )
+        cancelPolling()
+        return true
+    }
+
     var canContinueFromGoal: Bool {
         !skillDraft.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -687,6 +699,10 @@ final class PluginCreationController: ObservableObject {
                     let stage = result.events.last(where: { $0.kind == "log" })?.stage
                     markProgressFailed(fromStage: stage)
                     let raw = result.errorMessage ?? "Plugin creation failed."
+                    if ModelProviderLimit.matches(raw) {
+                        _ = injectProviderLimit(raw: raw)
+                        return
+                    }
                     let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
                     phase = .failed(
                         step: PluginFactoryCreateInput.failureStep(forStage: stage),

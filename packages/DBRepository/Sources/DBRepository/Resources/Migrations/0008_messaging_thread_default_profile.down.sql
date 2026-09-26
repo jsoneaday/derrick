@@ -1,1 +1,0 @@
-ALTER TABLE messaging_threads DROP COLUMN default_agent_profile_handle;

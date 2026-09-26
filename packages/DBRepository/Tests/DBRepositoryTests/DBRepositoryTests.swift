@@ -89,8 +89,8 @@ final class DBRepositoryTests: XCTestCase {
         try await repository.savePluginFactoryRelease(release)
         let url = await repository.databaseURL
 
-        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret", to: 4)
-        XCTAssertEqual(try schemaVersion(at: url), 4)
+        _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
+        XCTAssertEqual(try schemaVersion(at: url), DatabaseSchema.latestVersion)
         XCTAssertFalse(try tableExists(named: "news_readers", at: url))
 
         _ = try await repository.migrateSessionMemory(username: "app-user", password: "app-secret")
@@ -177,7 +177,10 @@ final class DBRepositoryTests: XCTestCase {
     func testApprovedPluginFactoryReleasePersistsAndVerifies() async throws {
         let repository = try makeRepository()
         _ = try await repository.createEmptyDatabaseIfNeeded(username: "app-user", password: "app-secret")
-        let skillFiles = ["skills/weather/SKILL.md": "# Weather"]
+        let skillFiles = [
+            "skills/weather/SKILL.md": "---\nname: weather\ndescription: Forecasts\n---\n# Weather",
+            "skills/weather/references/api.md": "# API",
+        ]
         let release = makeGoFactoryRelease(
             pluginID: "weather-tool",
             manifestName: "weather-tool",
@@ -193,6 +196,22 @@ final class DBRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded?.contentHash, release.contentHash)
         XCTAssertEqual(loaded?.skillFiles, skillFiles)
         XCTAssertTrue(loaded?.verifyIntegrity() == true)
+        let body = try await repository.pluginSkillBody(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            skill: "weather"
+        )
+        XCTAssertEqual(body, skillFiles["skills/weather/SKILL.md"])
+        let reference = try await repository.pluginSkillReference(
+            pluginID: "weather-tool",
+            version: "1.0.0",
+            requested: "references/api.md"
+        )
+        XCTAssertEqual(reference?.path, "skills/weather/references/api.md")
+        XCTAssertEqual(reference?.body, "# API")
+        let index = try await repository.listPluginSkillIndex()
+        XCTAssertEqual(index.map(\.skillName), ["weather"])
+        XCTAssertEqual(index.first?.description, "Forecasts")
     }
 
     func testReplacePluginFactoryReleaseUpdatesSameVersion() async throws {

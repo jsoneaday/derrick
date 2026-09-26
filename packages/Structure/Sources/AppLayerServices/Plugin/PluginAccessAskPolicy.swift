@@ -132,8 +132,20 @@ public enum PluginAccessAskPolicy: Sendable {
         if let documentationURL, !documentationURL.isEmpty {
             lines.append("[Read the setup docs](\(documentationURL))")
         }
-        lines.append("If you already have that, say yes. If you still need to create it, say so.")
+        lines.append(credentialReplyPrompt(discovery))
         return lines.joined(separator: "\n\n")
+    }
+
+    /// Yes/no close. Names the credential when the docs identified one.
+    private static func credentialReplyPrompt(_ discovery: ConnectorAuthDiscovery) -> String {
+        let labels = discovery.secrets.map(\.label).filter { !$0.isEmpty }
+        if labels.count == 1 {
+            return "If you already have that \(labels[0].lowercased()), say yes. If you still need to create it, say so."
+        }
+        if labels.count > 1 {
+            return "If you already have those, say yes. If you still need to create them, say so."
+        }
+        return "If you already have the credential those docs describe, say yes. If you still need to create it, say so."
     }
 
     private static func neededSecretSentence(_ discovery: ConnectorAuthDiscovery) -> String? {
@@ -150,10 +162,10 @@ public enum PluginAccessAskPolicy: Sendable {
     }
 
     private static func docsDetail(_ discovery: ConnectorAuthDiscovery) -> String? {
-        if let hint = discovery.setupHint, !hint.isEmpty {
+        if let hint = discovery.setupHint, isReadableProse(hint) {
             return hint
         }
-        if let crawl = discovery.crawlSummary, !crawl.isEmpty {
+        if let crawl = discovery.crawlSummary, isReadableProse(crawl) {
             return clip(crawl, limit: summaryCharacterLimit)
         }
         let labels = discovery.secrets.map(\.label).filter { !$0.isEmpty }
@@ -239,6 +251,23 @@ public enum PluginAccessAskPolicy: Sendable {
             return "a"
         }
         return "aeiou".contains(first) ? "an" : "a"
+    }
+
+    /// Page extracts often glue navigation labels together. Those are not a question.
+    static func isReadableProse(_ text: String) -> Bool {
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard collapsed.count >= 12 else { return false }
+        let spaces = collapsed.filter { $0 == " " }.count
+        if spaces == 0 || spaces * 12 < collapsed.count { return false }
+        let chars = Array(collapsed)
+        var jammed = 0
+        for index in 1..<chars.count where chars[index - 1].isLowercase && chars[index].isUppercase {
+            jammed += 1
+        }
+        return jammed < 3
     }
 
     private static func clip(_ text: String, limit: Int) -> String {

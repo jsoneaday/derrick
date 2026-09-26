@@ -23,6 +23,15 @@ public enum PluginSkillDisclosure: Sendable {
         }
     }
 
+    /// Name and description for a `SKILL.md` path. Reference paths return nil.
+    public static func catalogFields(path: String, body: String) -> (name: String?, description: String?) {
+        guard PluginFactorySkillFile.isSkillMarkdownPath(path) else { return (nil, nil) }
+        let front = SkillFrontmatter.parse(body)
+        let directory = path.split(separator: "/").dropFirst().first.map(String.init) ?? ""
+        let name = front.name ?? directory
+        return (name.isEmpty ? nil : name, front.description)
+    }
+
     /// Cheap routing index: skill name + description only.
     public static func index(from release: PluginFactoryRelease) -> [IndexEntry] {
         release.skillFiles.keys

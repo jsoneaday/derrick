@@ -28,6 +28,13 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
             )
         }
 
+        if ModelProviderLimit.matches(trimmed) {
+            return PluginFactoryCreateFailurePresentation(
+                summary: ModelProviderLimit.summary,
+                technicalDetail: trimmed
+            )
+        }
+
         if WorkerImageFailureDisplay.isWorkerImageIssue(trimmed) {
             return PluginFactoryCreateFailurePresentation(
                 summary: """
@@ -83,9 +90,15 @@ public enum PluginFactoryCreateFailureMessage: Sendable {
         }
 
         return PluginFactoryCreateFailurePresentation(
-            summary: "The connector was not saved. \(trimmed)",
+            summary: alreadyExplained(trimmed)
+                ? trimmed
+                : "The connector was not saved. \(trimmed)",
             technicalDetail: nil
         )
+    }
+
+    private static func alreadyExplained(_ message: String) -> Bool {
+        message.hasPrefix("The connector was not saved.")
     }
 
     private static func isModelTimeout(_ message: String) -> Bool {

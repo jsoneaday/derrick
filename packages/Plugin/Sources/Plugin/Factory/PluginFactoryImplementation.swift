@@ -58,6 +58,9 @@ public struct PluginFactorySession: Sendable {
                     hostManifest: hostManifest
                 )
             } catch {
+                if ModelProviderLimit.matches(error.localizedDescription) {
+                    throw error
+                }
                 let wrapped = PluginFactoryError.invalidSource(error.localizedDescription)
                 lastError = wrapped
                 await logger(

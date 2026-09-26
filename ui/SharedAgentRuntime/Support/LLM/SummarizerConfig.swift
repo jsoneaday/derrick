@@ -50,9 +50,12 @@ actor ConfiguredMemorySummarizer: MemorySummarizer {
                 debugLog(
                     "Helper summarizer model \(selectedModel.helperDisplayName) failed: \(error.localizedDescription)"
                 )
-                LLMFailureReporter.shared.report(
-                    LLMFailureClassifier.classify(error, provider: selectedModel.provider)
-                )
+                let failure = LLMFailureClassifier.classify(error, provider: selectedModel.provider)
+                if case .outOfCredits = failure {
+                    ModelProviderLimitCenter.shared.report(raw: error.localizedDescription)
+                } else {
+                    LLMFailureReporter.shared.report(failure)
+                }
             }
             return try await fallback.summarize(pair)
         }

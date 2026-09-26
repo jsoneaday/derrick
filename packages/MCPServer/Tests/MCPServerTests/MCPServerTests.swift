@@ -1091,9 +1091,22 @@ import WebCrawler
         )
         let bridge = try await MCPLocalBridge.make { server in
             await server.register(
-                PluginRuntimeToolModule.makeSkillRegistration { pluginID in
-                    pluginID == release.pluginID ? release : nil
-                }
+                PluginRuntimeToolModule.makeSkillRegistration(
+                    activate: { pluginID, skill in
+                        guard pluginID == release.pluginID else { return nil }
+                        return PluginSkillDisclosure.activate(
+                            skillFiles: release.skillFiles,
+                            skillNameOrPath: skill
+                        )
+                    },
+                    reference: { pluginID, path in
+                        guard pluginID == release.pluginID else { return nil }
+                        return PluginSkillDisclosure.reference(
+                            skillFiles: release.skillFiles,
+                            requested: path
+                        )
+                    }
+                )
             )
         }
 

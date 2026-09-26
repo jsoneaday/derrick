@@ -1527,6 +1527,17 @@ import Testing
         )
     }
 
+    @Test func pluginFactoryCreateFailureMessageExplainsProviderLimitOnce() {
+        let raw = """
+        Invalid Go guest source: HTTP 429: {"error":{"code":"project_spend_limit_exceeded","message":"Your project has reached its configured enforced spend limit."}}
+        """
+        let presentation = PluginFactoryCreateFailureMessage.presentation(raw)
+        #expect(presentation.summary.contains("spend or rate limit"))
+        #expect(presentation.summary.contains("Invalid Go guest source") == false)
+        let again = PluginFactoryCreateFailureMessage.presentation(presentation.summary)
+        #expect(again.summary == presentation.summary)
+    }
+
     @Test func pluginFactoryCreateFailureMessageExplainsWebTools() {
         let raw = "The worker image derrick-worker:go-v1 does not match the version shipped with Derrick. Rebuild or reinstall product images."
         let presentation = PluginFactoryCreateFailureMessage.presentation(raw)

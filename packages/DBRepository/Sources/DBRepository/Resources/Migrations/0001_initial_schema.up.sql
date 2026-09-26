@@ -332,17 +332,79 @@ CREATE TABLE IF NOT EXISTS plugin_factory_releases (
     runtime_json TEXT NOT NULL,
     guest_source TEXT NOT NULL,
     artifact_base64 TEXT NOT NULL,
-    skill_files_json TEXT NOT NULL DEFAULT '{}',
     review_summary TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (plugin_id, version),
     UNIQUE (content_hash)
 );
 
+CREATE TABLE IF NOT EXISTS plugin_skills (
+    plugin_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    path TEXT NOT NULL,
+    skill_name TEXT NOT NULL,
+    skill_description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, version, path)
+);
+
+CREATE TABLE IF NOT EXISTS plugin_skill_references (
+    plugin_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    path TEXT NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, version, path)
+);
+
+CREATE TABLE IF NOT EXISTS agent_profiles (
+    id TEXT PRIMARY KEY NOT NULL,
+    display_name TEXT NOT NULL,
+    handle TEXT NOT NULL UNIQUE,
+    instructions TEXT NOT NULL DEFAULT '',
+    model_json TEXT NOT NULL,
+    thinking_json TEXT,
+    rag_json TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    alias TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_profiles_handle ON agent_profiles(handle);
+CREATE INDEX IF NOT EXISTS idx_agent_profiles_sort ON agent_profiles(sort_order, display_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_profiles_alias ON agent_profiles(alias) WHERE alias IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS messaging_agent_handled (
+    plugin_id TEXT NOT NULL,
+    vendor_message_id TEXT NOT NULL,
+    handled_at TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, vendor_message_id)
+);
+
+CREATE TABLE IF NOT EXISTS plugin_host_ui (
+    plugin_id TEXT PRIMARY KEY NOT NULL,
+    present_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messaging_agent_work (
+    plugin_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    parent_vendor_message_id TEXT NOT NULL,
+    profile_handle TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, thread_id, parent_vendor_message_id)
+);
+
 CREATE TABLE IF NOT EXISTS messaging_connectors (
     plugin_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
     listening INTEGER NOT NULL DEFAULT 0,
+    listening_since TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -355,6 +417,7 @@ CREATE TABLE IF NOT EXISTS messaging_threads (
     last_activity_at TEXT NOT NULL,
     muted INTEGER NOT NULL DEFAULT 0,
     unread_count INTEGER NOT NULL DEFAULT 0,
+    default_agent_profile_handle TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY(plugin_id) REFERENCES messaging_connectors(plugin_id) ON DELETE CASCADE,
     UNIQUE (plugin_id, vendor_thread_id)
@@ -370,9 +433,14 @@ CREATE TABLE IF NOT EXISTS messaging_messages (
     direction TEXT NOT NULL,
     sender TEXT NOT NULL,
     body TEXT NOT NULL,
+    parent_vendor_message_id TEXT,
+    reply_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY(thread_id) REFERENCES messaging_threads(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_messaging_messages_parent
+    ON messaging_messages(thread_id, parent_vendor_message_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messaging_messages_vendor
     ON messaging_messages(thread_id, vendor_message_id)

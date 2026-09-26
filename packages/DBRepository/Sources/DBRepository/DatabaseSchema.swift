@@ -2,7 +2,7 @@ import Foundation
 import Structure
 
 public enum DatabaseSchema {
-    public static let latestVersion = 13
+    public static let latestVersion = 1
 
     public static func migrationSQL(version: Int, isUp: Bool) throws -> String {
         let migrationName = String(format: "%04d_%@", version, migrationFileBaseName(for: version))
@@ -25,30 +25,6 @@ public enum DatabaseSchema {
         switch version {
         case 1:
             return "initial_schema"
-        case 2:
-            return "schema_refresh"
-        case 3:
-            return "messaging_listening_since"
-        case 4:
-            return "messaging_reply_threads"
-        case 5:
-            return "news_readers"
-        case 6:
-            return "agent_profiles"
-        case 7:
-            return "messaging_agent_handled"
-        case 8:
-            return "messaging_thread_default_profile"
-        case 9:
-            return "drop_news_readers"
-        case 10:
-            return "plugin_host_ui"
-        case 11:
-            return "messaging_agent_work"
-        case 12:
-            return "agent_profile_capabilities"
-        case 13:
-            return "agent_profile_alias"
         default:
             return "unknown"
         }

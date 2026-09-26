@@ -1,0 +1,10 @@
+---
+description: During alpha, put every database schema change in migration 0001
+alwaysApply: true
+---
+
+# Alpha database migrations
+
+Derrick is in alpha and is not deployed. Until it leaves alpha, put every database schema change in `packages/DBRepository/Sources/DBRepository/Resources/Migrations/0001_initial_schema.up.sql` and the matching `0001_initial_schema.down.sql`.
+
+Do not add `0002` or any later migration. Keep `DatabaseSchema.latestVersion` at 1. A local database is wiped and recreated instead of upgraded in place.
