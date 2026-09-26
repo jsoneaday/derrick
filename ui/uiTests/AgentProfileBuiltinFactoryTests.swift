@@ -19,15 +19,15 @@ import Testing
         let researcherModel = try JSONDecoder().decode(LLMModelChoice.self, from: researcher.modelJSON)
         let generalistModel = try JSONDecoder().decode(LLMModelChoice.self, from: generalist.modelJSON)
 
-        #expect(orchestratorModel.id == "openai:gpt-5.6-sol")
-        #expect(developerModel.id == "openai:gpt-5.6-terra")
-        #expect(researcherModel.id == "openai:gpt-5.6-terra")
+        #expect(orchestratorModel.id == "openai:gpt-5.6-luna")
+        #expect(developerModel.id == "openai:gpt-5.6-luna")
+        #expect(researcherModel.id == "openai:gpt-5.6-luna")
         #expect(generalistModel.id == "openai:gpt-5.6-luna")
 
         let orchestratorThinking = try JSONDecoder().decode(
             ModelThinkingOption.self,
             from: orchestrator.thinkingJSON!
         )
-        #expect(orchestratorThinking.id == "high")
+        #expect(orchestratorThinking.id == "medium")
     }
 }

@@ -70,8 +70,8 @@ enum LLMModelChoice: Hashable, Identifiable, Codable, Sendable {
     /// Default for summarizer, script reviewer, secondary agents, and conversation UI preselection.
     static let defaultHelperModel: LLMModelChoice = .openai(.gpt56Luna)
 
-    /// Default plugin factory builder: stronger reasoning than the helper default.
-    static let defaultPluginBuilderModel: LLMModelChoice = .openai(.gpt56Terra)
+    /// Default plugin factory builder. Same model as the helper, at medium thinking.
+    static let defaultPluginBuilderModel: LLMModelChoice = .openai(.gpt56Luna)
 
     var id: String {
         switch self {

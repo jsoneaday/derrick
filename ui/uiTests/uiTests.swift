@@ -315,8 +315,8 @@ import DBRepository
         #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Terra)))
         #expect(LLMModelChoice.allCases.contains(.openai(.gpt56Sol)))
         #expect(LLMModelChoice.defaultHelperModel == .openai(.gpt56Luna))
-        #expect(LLMModelChoice.defaultPluginBuilderModel == .openai(.gpt56Terra))
-        #expect(LLMModelChoice.defaultPluginBuilderModel.preferredHighThinkingOption.id == "high")
+        #expect(LLMModelChoice.defaultPluginBuilderModel == .openai(.gpt56Luna))
+        #expect(LLMModelChoice.defaultPluginBuilderModel.preferredMediumThinkingOption.id == "medium")
     }
 
     @MainActor @Test func modelThinkingSettingsPersistsPerModelSelection() async {
@@ -332,7 +332,7 @@ import DBRepository
         #expect(reloaded.thinking(for: .openai(.gpt56Sol)).id == "high")
         #expect(reloaded.thinking(for: .openai(.gpt56Luna)).id == "medium")
         #expect(reloaded.pluginSafetyReviewerThinking(for: .openai(.gpt56Luna)).id == "medium")
-        #expect(reloaded.pluginBuilderThinking(for: .openai(.gpt56Terra)).id == "high")
+        #expect(reloaded.pluginBuilderThinking(for: .openai(.gpt56Terra)).id == "medium")
         let medium = OpenAIModel.gpt56Terra.thinkingOptions.first { $0.id == "medium" }!
         settings.setPluginBuilderThinking(medium, for: .openai(.gpt56Terra))
         try? await Task.sleep(nanoseconds: 100_000_000)

@@ -230,7 +230,13 @@ public enum PluginSpecProcession: Sendable {
         }
 
         let reply: String
-        if session.ask == askAtStart {
+        if session.ask == askAtStart,
+           isAccessGuidanceTurn(ask: session.ask, utterance: trimmed) {
+            reply = PluginAccessAskPolicy.guidanceReply(
+                documentationURL: session.draft.documentationURL
+                    ?? PluginAccessAskPolicy.documentationURL(from: session.draft.connect)
+            )
+        } else if session.ask == askAtStart {
             reply = notBoundHint(for: session.ask, utterance: trimmed)
                 ?? question(for: session.ask, session: session)
         } else {
@@ -454,6 +460,16 @@ public enum PluginSpecProcession: Sendable {
         case .work: return PluginSpecClassifier.work(from: text) != nil ? true : nil
         case .returnPayload: return PluginSpecClassifier.returnClass(from: text) != nil ? true : nil
         case .trigger: return PluginSpecClassifier.triggers(from: text).isEmpty ? nil : true
+        }
+    }
+
+    private static func isAccessGuidanceTurn(ask: PluginSpecAsk, utterance: String) -> Bool {
+        guard PluginAccessAskPolicy.isGuidanceRequest(utterance) else { return false }
+        switch ask {
+        case .slot(.access), .accessSecret, .docsURL:
+            return true
+        default:
+            return false
         }
     }
 

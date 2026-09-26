@@ -48,7 +48,7 @@ final class LLMModelThinkingSettings: ObservableObject {
            let match = model.thinkingOptions.first(where: { $0.id == id }) {
             return match
         }
-        return model.preferredHighThinkingOption
+        return model.preferredMediumThinkingOption
     }
 
     func setThinking(_ option: ModelThinkingOption, for model: LLMModelChoice) {
