@@ -304,7 +304,8 @@ public struct PluginFactoryCreateInput: Codable, Sendable, Hashable {
                     extra.append("Host permission labels: \(auth.permissions.joined(separator: ", "))")
                 }
             }
-            if !description.isEmpty {
+            // Scope owns the blueprint. Only pass the failure oracle from the user/spec.
+            if description.contains("Unacceptable when:") {
                 extra.append("User-confirmed behavior:\n\(description)")
             }
             if let skillMarkdown, !skillMarkdown.isEmpty {

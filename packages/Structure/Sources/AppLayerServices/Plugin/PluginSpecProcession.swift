@@ -466,7 +466,7 @@ public enum PluginSpecProcession: Sendable {
     private static func isAccessGuidanceTurn(ask: PluginSpecAsk, utterance: String) -> Bool {
         guard PluginAccessAskPolicy.isGuidanceRequest(utterance) else { return false }
         switch ask {
-        case .slot(.access), .accessSecret, .docsURL:
+        case .slot(.access), .accessSecret:
             return true
         default:
             return false

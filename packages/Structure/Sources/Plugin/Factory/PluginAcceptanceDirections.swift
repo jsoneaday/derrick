@@ -6,6 +6,7 @@ public enum PluginAcceptanceDirections: Sendable {
         switch kind(forUserGoal: userGoal) {
         case .messagingConnector:
             return """
+            Acceptance test for a messaging connector (live, not a fixture):
             Write the tests after the code. Do not put http_results or any made-up service reply in test_input_json.
             Each messaging op is its own hop with params.messaging_op only.
             The test must prove the user's statement of what failure is does not happen.
