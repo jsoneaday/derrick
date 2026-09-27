@@ -82,11 +82,15 @@ public enum AppLayerFeatureCatalog {
         AppLayerFeatureContract(
             feature: .guardrail,
             structureTypeNames: [
+                "Guardrail",
                 "GuardrailDecision",
-                "PolicyEvaluator",
-                "ToolGovernancePolicy",
+                "GuardrailEvaluating",
+                "GuardrailApplying",
+                "GuardrailHITLPresenting",
                 "WorkflowKind",
-                "WorkflowAdmissionPolicy",
+                "WorkflowStartGuardrailApplying",
+                "ToolInvocationGuardrailApplying",
+                "AssistantContentGuardrailApplying",
                 "PendingHITLApprovalRow",
             ],
             persistenceMayBeSQLite: true,

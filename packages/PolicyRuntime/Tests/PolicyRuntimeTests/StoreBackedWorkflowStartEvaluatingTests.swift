@@ -2,13 +2,13 @@ import XCTest
 import Structure
 @testable import PolicyRuntime
 
-final class StoreBackedWorkflowAdmissionPolicyTests: XCTestCase {
+final class StoreBackedWorkflowStartEvaluatingTests: XCTestCase {
     func test_allowsSeededCreateAndDeniesEdit() async throws {
         let store = MockWorkflowPolicyStore()
         for rule in DefaultGuardrailPolicySeeds.workflowStartRules(applicationName: "ui") {
             try await store.saveRule(rule)
         }
-        let policy = StoreBackedWorkflowAdmissionPolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedWorkflowStartEvaluating(store: store, applicationName: "ui")
 
         let create = try await policy.evaluate(
             WorkflowStartRequest(
@@ -47,7 +47,7 @@ final class StoreBackedWorkflowAdmissionPolicyTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedWorkflowAdmissionPolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedWorkflowStartEvaluating(store: store, applicationName: "ui")
         let decision = try await policy.evaluate(
             WorkflowStartRequest(
                 kind: .pluginFactoryCreate,

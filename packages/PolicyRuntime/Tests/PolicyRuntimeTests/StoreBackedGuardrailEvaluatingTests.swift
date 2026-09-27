@@ -3,7 +3,7 @@ import MemorySystem
 @testable import PolicyRuntime
 import Structure
 
-final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
+final class StoreBackedGuardrailEvaluatingTests: XCTestCase {
     func test_toolPolicy_loadsRelevantScopeAndDeniesMatch() async throws {
         let store = MockPolicyStore(rulesByScope: [
             "tool_invocation": [
@@ -16,13 +16,13 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
         let event = ToolInvocationEvent(
             sessionID: "s1",
             toolName: "delete_file",
             argumentsJSON: #"{"path":"/tmp/a"}"#
         )
-        let outcome = try await policy.evaluateToolInvocation(event)
+        let outcome = try await policy.evaluate(event)
         XCTAssertEqual(outcome, .deny(reason: "blocked"))
     }
 
@@ -39,8 +39,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "factory-1",
                 toolName: "tool_search",
@@ -73,8 +73,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(outcome, .allow)
@@ -82,11 +82,11 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
 
     func test_toolPolicy_deniesWhenNoRulesConfigured() async throws {
         let store = MockPolicyStore(rulesByScope: [:])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
-        XCTAssertEqual(outcome, .deny(reason: StoreBackedToolGovernancePolicy.noRulesConfiguredReason))
+        XCTAssertEqual(outcome, .deny(reason: StoreBackedToolInvocationEvaluating.noRulesConfiguredReason))
     }
 
     func test_toolPolicy_deniesWhenNoRuleMatches() async throws {
@@ -102,11 +102,11 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
-        XCTAssertEqual(outcome, .deny(reason: StoreBackedToolGovernancePolicy.noMatchingRuleReason))
+        XCTAssertEqual(outcome, .deny(reason: StoreBackedToolInvocationEvaluating.noMatchingRuleReason))
     }
 
     func test_toolPolicy_prefersHigherPriorityAcrossScopes() async throws {
@@ -132,8 +132,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "file_write", argumentsJSON: "{}")
         )
         XCTAssertEqual(outcome, .deny(reason: "high priority"))
@@ -151,8 +151,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedCompletionContentPolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateAssistantCompletion(
+        let policy = StoreBackedAssistantContentEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             AssistantCompletionEvent(
                 sessionID: "s1",
                 fullCompletion: "Please email me at hi@example.com",
@@ -185,8 +185,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedCompletionContentPolicy(store: store, applicationName: "ui")
-        let outcome = try await policy.evaluateAssistantCompletion(
+        let policy = StoreBackedAssistantContentEvaluating(store: store, applicationName: "ui")
+        let outcome = try await policy.evaluate(
             AssistantCompletionEvent(
                 sessionID: "s1",
                 fullCompletion: "hi@example.com",
@@ -218,9 +218,9 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
 
-        let withCode = try await policy.evaluateToolInvocation(
+        let withCode = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "s1",
                 toolName: "script_exec",
@@ -229,7 +229,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         )
         XCTAssertEqual(withCode, .confirmHITL(GuardrailHITLRequest(requiredFields: ["review"])))
 
-        let withoutCode = try await policy.evaluateToolInvocation(
+        let withoutCode = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "s1",
                 toolName: "script_exec",
@@ -238,7 +238,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         )
         XCTAssertEqual(withoutCode, .allow)
 
-        let otherTool = try await policy.evaluateToolInvocation(
+        let otherTool = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "s1",
                 toolName: "read_file",
@@ -268,19 +268,19 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
 
-        let fileWrite = try await policy.evaluateToolInvocation(
+        let fileWrite = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "file_write", argumentsJSON: "{}")
         )
         XCTAssertEqual(fileWrite, .deny(reason: "mutating tool"))
 
-        let deleteFile = try await policy.evaluateToolInvocation(
+        let deleteFile = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "delete_file", argumentsJSON: "{}")
         )
         XCTAssertEqual(deleteFile, .deny(reason: "mutating tool"))
 
-        let readFile = try await policy.evaluateToolInvocation(
+        let readFile = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "read_file", argumentsJSON: "{}")
         )
         XCTAssertEqual(readFile, .allow)
@@ -306,14 +306,14 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
 
-        let sessionTool = try await policy.evaluateToolInvocation(
+        let sessionTool = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "session_memory_search", argumentsJSON: "{}")
         )
         XCTAssertEqual(sessionTool, .allow)
 
-        let otherTool = try await policy.evaluateToolInvocation(
+        let otherTool = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(otherTool, .deny(reason: "only session memory allowed"))
@@ -346,9 +346,9 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
 
-        let offlineScript = try await policy.evaluateToolInvocation(
+        let offlineScript = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "s1",
                 toolName: "script_exec",
@@ -357,7 +357,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         )
         XCTAssertEqual(offlineScript, .confirmHITL(GuardrailHITLRequest(requiredFields: ["offline_ok"])))
 
-        let networkedScript = try await policy.evaluateToolInvocation(
+        let networkedScript = try await policy.evaluate(
             ToolInvocationEvent(
                 sessionID: "s1",
                 toolName: "script_exec",
@@ -366,7 +366,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         )
         XCTAssertEqual(networkedScript, .allow)
 
-        let otherTool = try await policy.evaluateToolInvocation(
+        let otherTool = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "read_file", argumentsJSON: "{}")
         )
         XCTAssertEqual(otherTool, .allow)
@@ -392,13 +392,13 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedToolGovernancePolicy(store: store, applicationName: "ui")
-        let sessionTool = try await policy.evaluateToolInvocation(
+        let policy = StoreBackedToolInvocationEvaluating(store: store, applicationName: "ui")
+        let sessionTool = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "session_memory_search", argumentsJSON: "{}")
         )
         XCTAssertEqual(sessionTool, .confirmHITL(GuardrailHITLRequest(requiredFields: ["ok"])))
 
-        let otherTool = try await policy.evaluateToolInvocation(
+        let otherTool = try await policy.evaluate(
             ToolInvocationEvent(sessionID: "s1", toolName: "script_exec", argumentsJSON: "{}")
         )
         XCTAssertEqual(otherTool, .allow)
@@ -424,8 +424,8 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
                 )
             ]
         ])
-        let policy = StoreBackedCompletionContentPolicy(store: store, applicationName: "ui")
-        let ssn = try await policy.evaluateAssistantCompletion(
+        let policy = StoreBackedAssistantContentEvaluating(store: store, applicationName: "ui")
+        let ssn = try await policy.evaluate(
             AssistantCompletionEvent(
                 sessionID: "s1",
                 fullCompletion: "SSN 123-45-6789",
@@ -434,7 +434,7 @@ final class StoreBackedPolicyEvaluatorsTests: XCTestCase {
         )
         XCTAssertEqual(ssn, .confirmHITL(GuardrailHITLRequest(requiredFields: ["review"])))
 
-        let plain = try await policy.evaluateAssistantCompletion(
+        let plain = try await policy.evaluate(
             AssistantCompletionEvent(
                 sessionID: "s1",
                 fullCompletion: "hello world",

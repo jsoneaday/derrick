@@ -289,9 +289,9 @@ actor MCPServiceToolHost {
             helperReviewerModelJSON: request.helperReviewerModelJSON,
             memorySessionKey: sessionKey,
             pluginFactoryCreationActive: request.pluginFactoryCreationActive
-                || EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+                || ExecutionContextWire.parseOptionalJSON(request.executionContextJSON)?
                     .capabilities.contains(.syncWebCrawl) == true,
-            workflowID: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+            workflowID: ExecutionContextWire.parseOptionalJSON(request.executionContextJSON)?
                 .workflow?.workflowID
         )
         let jobID: String?
@@ -302,10 +302,9 @@ actor MCPServiceToolHost {
             HostHTTPCallContext.shared.clear()
         }
 
-        // Policy decides effector/tool admission (same engine as chat). Apply allow / deny /
-        // confirmHITL / redact before the tool runs.
+        // Policy decides effector/tool admission (same engine as chat). Evaluate then apply.
         let policyRepo = try await MCPServiceStore.shared.sharedRepository()
-        let toolPolicy = StoreBackedToolGovernancePolicy(
+        let toolEvaluating = StoreBackedToolInvocationEvaluating(
             store: policyRepo,
             applicationName: DerrickAppSupport.defaultApplicationName
         )
@@ -314,18 +313,34 @@ actor MCPServiceToolHost {
             if case .job(let jobID) = request.principal { return jobID }
             return "mcp-service"
         }()
-        var argumentsJSON = request.argumentsJSON
-        let decision = try await toolPolicy.evaluateToolInvocation(
-            ToolInvocationEvent(
-                sessionID: sessionIDForPolicy,
-                toolName: toolName,
-                argumentsJSON: argumentsJSON
-            )
+        let invocationEvent = ToolInvocationEvent(
+            sessionID: sessionIDForPolicy,
+            toolName: toolName,
+            argumentsJSON: request.argumentsJSON
         )
-        switch decision {
-        case .allow:
-            break
-        case .deny(let reason):
+        let decision = try await toolEvaluating.evaluate(invocationEvent)
+        let hitl = ClosureGuardrailHITLPresenting { [self] presentation in
+            let resolved = await awaitMCPToolHITL(
+                sessionID: sessionIDForPolicy,
+                toolName: presentation.subject,
+                argumentsJSON: presentation.payloadJSON,
+                hitl: presentation.hitl,
+                principal: request.principal,
+                repository: policyRepo
+            )
+            switch resolved {
+            case .approved(let edited, let actor):
+                return .approved(editedPayloadJSON: edited, actor: actor)
+            case .cancelled(let actor):
+                return .cancelled(actor: actor)
+            }
+        }
+        let argumentsJSON: String
+        do {
+            let gated = try await ToolInvocationGuardrailApplying(hitl: hitl)
+                .apply(decision, for: invocationEvent)
+            argumentsJSON = gated.argumentsJSON
+        } catch ToolInvocationGuardrailError.denied(let reason) {
             await MCPServiceStore.shared.log(
                 level: .error,
                 message: "tool denied by Policy tool=\(toolName): \(reason)",
@@ -339,43 +354,13 @@ actor MCPServiceToolHost {
                 text: "",
                 message: reason
             )
-        case .confirmHITL(let hitl):
-            let approved = await awaitMCPToolHITL(
-                sessionID: sessionIDForPolicy,
-                toolName: toolName,
-                argumentsJSON: argumentsJSON,
-                hitl: hitl,
-                principal: request.principal,
-                repository: policyRepo
-            )
-            switch approved {
-            case .approved(let edited, _):
-                argumentsJSON = edited
-            case .cancelled(let actor):
-                let message = "Tool \(toolName) was not approved\(actor.map { " by \($0)" } ?? "")."
-                return MCPToolCallResultDTO(
-                    requestID: request.requestID,
-                    ok: false,
-                    isError: true,
-                    text: "",
-                    message: message
-                )
-            }
-        case .redactArgument(let key, let pattern, let replacement):
-            argumentsJSON = redactToolArgumentJSON(
-                argumentsJSON,
-                key: key,
-                pattern: pattern,
-                replacement: replacement
-            )
-        case .requireWorkflow, .redactContent:
-            let message = "Tool \(toolName) returned an unsupported Policy decision."
+        } catch ToolInvocationGuardrailError.cancelled(let reason) {
             return MCPToolCallResultDTO(
                 requestID: request.requestID,
                 ok: false,
                 isError: true,
                 text: "",
-                message: message
+                message: reason
             )
         }
 
@@ -518,30 +503,6 @@ actor MCPServiceToolHost {
         )
         return .cancelled(actor: "system-timeout")
     }
-}
-
-private func redactToolArgumentJSON(
-    _ json: String,
-    key: String,
-    pattern: String,
-    replacement: String
-) -> String {
-    guard let data = json.data(using: .utf8),
-          var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return json
-    }
-    if let stringValue = object[key] as? String {
-        object[key] = stringValue.replacingOccurrences(
-            of: pattern,
-            with: replacement,
-            options: .regularExpression
-        )
-    }
-    guard let redacted = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-          let redactedString = String(data: redacted, encoding: .utf8) else {
-        return json
-    }
-    return redactedString
 }
 
 private func pluginFactoryFailureDetail(for error: Error) -> String {

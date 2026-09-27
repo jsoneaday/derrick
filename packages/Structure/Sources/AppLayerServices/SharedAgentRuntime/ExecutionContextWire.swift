@@ -96,6 +96,15 @@ public struct ExecutionContextWire: Codable, Sendable, Hashable {
         return try JSONDecoder.service.decode(ExecutionContextWire.self, from: data)
     }
 
+    /// Best-effort decode used at MCP / effector boundaries when context may be absent.
+    public static func parseOptionalJSON(_ json: String?) -> ExecutionContextWire? {
+        guard let json,
+              !json.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return try? decodeJSON(json)
+    }
+
     public func withWorkflow(
         workflowID: String,
         kind: WorkflowKind,

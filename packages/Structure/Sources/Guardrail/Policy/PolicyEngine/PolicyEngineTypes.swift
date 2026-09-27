@@ -73,7 +73,11 @@ public struct PolicyConfirmationRequest: Hashable, Sendable {
     }
 
     public var guardrailHITL: GuardrailHITLRequest {
-        GuardrailHITLRequest(self)
+        GuardrailHITLRequest(
+            requiredFields: ["user_approval"],
+            title: title,
+            message: message
+        )
     }
 }
 

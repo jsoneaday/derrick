@@ -1,8 +1,8 @@
 import Foundation
 import Structure
 
-/// Store-backed workflow start admission. Scope: `workflow_start`.
-public struct StoreBackedWorkflowAdmissionPolicy: Sendable {
+/// Store-backed `workflow_start` interpreter. Implements `GuardrailEvaluating`.
+public struct StoreBackedWorkflowStartEvaluating: GuardrailEvaluating {
     private let store: any PolicyStore
     private let applicationName: String
 

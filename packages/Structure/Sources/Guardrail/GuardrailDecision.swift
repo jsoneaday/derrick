@@ -1,12 +1,10 @@
 import Foundation
 
-/// Canonical control-plane decision. Every Policy evaluator maps to this.
+/// Canonical control-plane decision. Every `*Evaluating` type returns this; every `*Applying` type consumes it.
 public enum GuardrailDecision: Hashable, Sendable {
     case allow
     case deny(reason: String)
-    /// Require a human gate before proceeding.
     case confirmHITL(GuardrailHITLRequest)
-    /// Require a sequenced workflow before / instead of the proposed action.
     case requireWorkflow(WorkflowKind)
     case redactContent(pattern: String, replacement: String)
     case redactArgument(argumentKey: String, pattern: String, replacement: String)
@@ -32,15 +30,4 @@ public struct GuardrailHITLRequest: Hashable, Sendable {
         self.title = title
         self.message = message
     }
-
-    public init(_ confirmation: PolicyConfirmationRequest) {
-        self.requiredFields = ["user_approval"]
-        self.title = confirmation.title
-        self.message = confirmation.message
-    }
-}
-
-/// Something Policy can evaluate into a `GuardrailDecision`.
-public protocol GuardrailEvaluating: Sendable {
-    func guardrailDecision() async throws -> GuardrailDecision
 }

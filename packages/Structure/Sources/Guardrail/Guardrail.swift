@@ -2,11 +2,11 @@ import Foundation
 
 /// Derrick's agent-control umbrella in Structure.
 ///
-/// **Policy decides.** HITL and workflows are enforcement shapes for those decisions.
-/// Plugins propose actions; they do not authorize control outcomes.
+/// Flow: **Policy evaluates rules → adapters apply `GuardrailDecision` → chokepoints only call those two.**
 ///
-/// Folder layout:
-/// - `Guardrail/Policy` — rules and interception contracts
-/// - `Guardrail/HITL` — human confirmation wire types and presentation signals
-/// - `Guardrail/Workflow` — workflow kinds, runtime DTOs, effector admission
+/// Naming (no exceptions):
+/// - `Guardrail*` — control-plane types
+/// - `*Evaluating` — rule interpreters (`Request` → `GuardrailDecision`)
+/// - `*Applying` — decision adapters (decision → effect)
+/// - `StoreBacked*Evaluating` — SQLite-backed interpreters in PolicyRuntime
 public enum Guardrail: Sendable {}

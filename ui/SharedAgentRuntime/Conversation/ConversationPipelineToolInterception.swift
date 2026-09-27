@@ -14,7 +14,7 @@ extension ConversationPipeline {
         arguments: [String: Value],
         sessionID: String,
         userPrompt: String? = nil,
-        interceptor: ToolRequestInterceptor? = nil,
+        toolEvaluating: (any GuardrailEvaluating<ToolInvocationEvent>)? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolResult {
         let toolOverallStarted = Date()
@@ -45,7 +45,7 @@ extension ConversationPipeline {
         }
 
 
-        let effectiveInterceptor = makeToolInterceptor(override: interceptor)
+        let evaluating = makeToolEvaluating(override: toolEvaluating)
         await MainActor.run {
             debugLog("Policy rule processing: evaluating \(name)")
         }
@@ -53,165 +53,162 @@ extension ConversationPipeline {
         do {
             let confirmMSBox = TimingAccumulator()
             let proceedMSBox = TimingAccumulator()
-            let result = try await effectiveInterceptor.interceptAndRun(
-                event,
-                confirm: { [self] confirmEvent, requiredFields in
-                    let confirmStarted = Date()
-                    defer { confirmMSBox.add(PipelineTiming.elapsedMS(from: confirmStarted)) }
-                    await MainActor.run {
-                        debugLog("Policy decision: confirm \(name)")
-                    }
-                    guard let approvalPresenter else {
-                        try await policyStore?.saveApproval(
-                            PolicyApproval(
-                                applicationName: applicationName,
-                                sessionID: sessionID,
-                                ruleID: "runtime-confirmation",
-                                requestType: "tool_invocation",
-                                requestPayloadJSON: event.argumentsJSON,
-                                editedPayloadJSON: nil,
-                                decision: "cancelled",
-                                actor: "system",
-                                createdAt: .now,
-                                acedAt: .now
-                            )
-                        )
-                        try await persistPolicyDecision(
-                            sessionID: sessionID,
-                            requestPayloadJSON: event.argumentsJSON,
-                            decision: "cancelled",
-                            actor: "system"
-                        )
-                        throw MCPClientError.toolExecutionDenied(
-                            toolName: name,
-                            reason: "Tool execution requires user confirmation"
-                        )
-                    }
-
-                    let confirmationRequest = ApprovalConfirmationRequest(
-                        sessionID: sessionID,
-                        toolName: confirmEvent.toolName,
-                        argumentsJSON: confirmEvent.argumentsJSON,
-                        requiredFields: requiredFields
-                    )
-                    let confirmation = await approvalPresenter.confirm(confirmationRequest)
-                    await MainActor.run {
-                        debugLog("Approval response received for \(name)")
-                    }
-                    let approvalRecord = PolicyApproval.fromApprovalDecision(
-                        applicationName: applicationName,
-                        sessionID: sessionID,
-                        requestPayloadJSON: confirmEvent.argumentsJSON,
-                        decision: confirmation
-                    )
-                    try await policyStore?.saveApproval(approvalRecord)
-
-                    switch confirmation {
-                    case .approved(let editedArgumentsJSON, let actor):
-                        await MainActor.run {
-                            debugLog("Approval granted for \(name) by \(actor ?? "unknown")")
-                        }
-                        try await persistPolicyDecision(
-                            sessionID: sessionID,
-                            requestPayloadJSON: confirmEvent.argumentsJSON,
-                            decision: "approved",
-                            actor: actor
-                        )
-                        return .approved(
-                            ToolInvocationEvent(
-                                sessionID: confirmEvent.sessionID,
-                                toolName: confirmEvent.toolName,
-                                argumentsJSON: editedArgumentsJSON,
-                                timestamp: confirmEvent.timestamp
-                            )
-                        )
-                    case .cancelled(let actor):
-                        await MainActor.run {
-                            debugLog("Approval cancelled for \(name) by \(actor ?? "unknown")")
-                        }
-                        try await persistPolicyDecision(
-                            sessionID: sessionID,
-                            requestPayloadJSON: confirmEvent.argumentsJSON,
-                            decision: "cancelled",
-                            actor: actor
-                        )
-                        return .cancelled(actor: actor)
-                    }
-                },
-                proceed: { [self] interceptedEvent in
-                    let proceedStarted = Date()
-                    defer { proceedMSBox.add(PipelineTiming.elapsedMS(from: proceedStarted)) }
-                    await MainActor.run {
-                        debugLog("Policy decision: allow \(interceptedEvent.toolName)")
-                    }
-                    let interceptedArguments = try toolArgumentsFromJSON(interceptedEvent.argumentsJSON)
-                    guard let mcpClient else {
-                        return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
-                    }
-                    if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
-                        let scriptAllowed = await UsageLimitsService.shared.allowScriptRun()
-                        if !scriptAllowed {
-                            throw MCPClientError.toolExecutionDenied(
-                                toolName: interceptedEvent.toolName,
-                                reason: "Usage limit: max script_exec runs for this message."
-                            )
-                        }
-                        let reviewerAllowed = await UsageLimitsService.shared.allowReviewerCall()
-                        if !reviewerAllowed {
-                            throw MCPClientError.toolExecutionDenied(
-                                toolName: interceptedEvent.toolName,
-                                reason: "Usage limit: max security reviewer calls for this message."
-                            )
-                        }
-                    }
-                    await MainActor.run {
-                        debugLog("Executing tool: \(interceptedEvent.toolName)")
-                    }
-                    let execStarted = Date()
-                    let result = try await mcpClient.callTool(
-                        named: interceptedEvent.toolName,
-                        arguments: interceptedArguments
-                    )
-                    let mcpCallMS = PipelineTiming.elapsedMS(from: execStarted)
-                    PipelineTiming.log(
-                        "tool=\(interceptedEvent.toolName) mcp_call_ms=\(mcpCallMS) isError=\(result.isError) result_chars=\(result.text.utf8.count)"
-                    )
-                    // Attribute reviewer-ish tokens from phase timing when present.
-                    if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
-                        await Self.recordReviewerTokensIfPresent(resultText: result.text)
-                    }
-                    await MainActor.run {
-                        debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(result.isError))")
-                        ToolOutcomeLogger.log(
-                            toolName: interceptedEvent.toolName,
-                            rawText: result.text
-                        )
-                        if interceptedEvent.toolName != AllowedMCPTool.pluginFactoryBuild.rawValue
-                            && interceptedEvent.toolName != AllowedMCPTool.webCrawl.rawValue {
-                            debugLog("Tool result content: \(Self.debugPayload(result.text))")
-                        }
-                    }
-                    await Self.publishJobSchedulingFailureIfNeeded(
-                        toolName: interceptedEvent.toolName,
-                        resultText: result.text,
-                        sessionID: sessionID
-                    )
-                    if interceptedEvent.toolName == AllowedMCPTool.pluginFactoryBuild.rawValue {
-                        return try await self.resolvePluginFactoryBuildResult(
-                            initialResult: result,
-                            arguments: interceptedArguments,
-                            userPrompt: userPrompt,
-                            mcpClient: mcpClient
-                        )
-                    }
-                    return result
+            let hitl = ClosureGuardrailHITLPresenting { [self] presentation in
+                let confirmStarted = Date()
+                defer { confirmMSBox.add(PipelineTiming.elapsedMS(from: confirmStarted)) }
+                await MainActor.run {
+                    debugLog("Policy decision: confirm \(name)")
                 }
+                guard let approvalPresenter else {
+                    try? await policyStore?.saveApproval(
+                        PolicyApproval(
+                            applicationName: applicationName,
+                            sessionID: sessionID,
+                            ruleID: "runtime-confirmation",
+                            requestType: "tool_invocation",
+                            requestPayloadJSON: event.argumentsJSON,
+                            editedPayloadJSON: nil,
+                            decision: "cancelled",
+                            actor: "system",
+                            createdAt: .now,
+                            acedAt: .now
+                        )
+                    )
+                    try? await persistPolicyDecision(
+                        sessionID: sessionID,
+                        requestPayloadJSON: event.argumentsJSON,
+                        decision: "cancelled",
+                        actor: "system"
+                    )
+                    return .cancelled(actor: "system")
+                }
+
+                let confirmationRequest = ApprovalConfirmationRequest(
+                    sessionID: sessionID,
+                    toolName: presentation.subject,
+                    argumentsJSON: presentation.payloadJSON,
+                    requiredFields: presentation.hitl.requiredFields
+                )
+                let confirmation = await approvalPresenter.confirm(confirmationRequest)
+                await MainActor.run {
+                    debugLog("Approval response received for \(name)")
+                }
+                let approvalRecord = PolicyApproval.fromApprovalDecision(
+                    applicationName: applicationName,
+                    sessionID: sessionID,
+                    requestPayloadJSON: presentation.payloadJSON,
+                    decision: confirmation
+                )
+                try? await policyStore?.saveApproval(approvalRecord)
+
+                switch confirmation {
+                case .approved(let editedArgumentsJSON, let actor):
+                    await MainActor.run {
+                        debugLog("Approval granted for \(name) by \(actor ?? "unknown")")
+                    }
+                    try? await persistPolicyDecision(
+                        sessionID: sessionID,
+                        requestPayloadJSON: presentation.payloadJSON,
+                        decision: "approved",
+                        actor: actor
+                    )
+                    return .approved(editedPayloadJSON: editedArgumentsJSON, actor: actor)
+                case .cancelled(let actor):
+                    await MainActor.run {
+                        debugLog("Approval cancelled for \(name) by \(actor ?? "unknown")")
+                    }
+                    try? await persistPolicyDecision(
+                        sessionID: sessionID,
+                        requestPayloadJSON: presentation.payloadJSON,
+                        decision: "cancelled",
+                        actor: actor
+                    )
+                    return .cancelled(actor: actor)
+                }
+            }
+
+            let decision: GuardrailDecision
+            if let evaluating {
+                decision = try await evaluating.evaluate(event)
+            } else {
+                decision = .allow
+            }
+            let applying = ToolInvocationGuardrailApplying(hitl: hitl)
+            let interceptedEvent = try await applying.apply(decision, for: event)
+
+            let proceedStarted = Date()
+            await MainActor.run {
+                debugLog("Policy decision: allow \(interceptedEvent.toolName)")
+            }
+            let interceptedArguments = try toolArgumentsFromJSON(interceptedEvent.argumentsJSON)
+            guard let mcpClient else {
+                proceedMSBox.add(PipelineTiming.elapsedMS(from: proceedStarted))
+                return MCPToolResult(content: [MCPToolContent.text("Tool client unavailable.")], isError: true)
+            }
+            if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
+                let scriptAllowed = await UsageLimitsService.shared.allowScriptRun()
+                if !scriptAllowed {
+                    throw MCPClientError.toolExecutionDenied(
+                        toolName: interceptedEvent.toolName,
+                        reason: "Usage limit: max script_exec runs for this message."
+                    )
+                }
+                let reviewerAllowed = await UsageLimitsService.shared.allowReviewerCall()
+                if !reviewerAllowed {
+                    throw MCPClientError.toolExecutionDenied(
+                        toolName: interceptedEvent.toolName,
+                        reason: "Usage limit: max security reviewer calls for this message."
+                    )
+                }
+            }
+            await MainActor.run {
+                debugLog("Executing tool: \(interceptedEvent.toolName)")
+            }
+            let execStarted = Date()
+            let toolResult = try await mcpClient.callTool(
+                named: interceptedEvent.toolName,
+                arguments: interceptedArguments
             )
+            let mcpCallMS = PipelineTiming.elapsedMS(from: execStarted)
+            PipelineTiming.log(
+                "tool=\(interceptedEvent.toolName) mcp_call_ms=\(mcpCallMS) isError=\(toolResult.isError) result_chars=\(toolResult.text.utf8.count)"
+            )
+            if AllowedMCPTool.isScriptExec(interceptedEvent.toolName) {
+                await Self.recordReviewerTokensIfPresent(resultText: toolResult.text)
+            }
+            await MainActor.run {
+                debugLog("Tool result: \(interceptedEvent.toolName) (isError=\(toolResult.isError))")
+                ToolOutcomeLogger.log(
+                    toolName: interceptedEvent.toolName,
+                    rawText: toolResult.text
+                )
+                if interceptedEvent.toolName != AllowedMCPTool.pluginFactoryBuild.rawValue
+                    && interceptedEvent.toolName != AllowedMCPTool.webCrawl.rawValue {
+                    debugLog("Tool result content: \(Self.debugPayload(toolResult.text))")
+                }
+            }
+            await Self.publishJobSchedulingFailureIfNeeded(
+                toolName: interceptedEvent.toolName,
+                resultText: toolResult.text,
+                sessionID: sessionID
+            )
+            let result: MCPToolResult
+            if interceptedEvent.toolName == AllowedMCPTool.pluginFactoryBuild.rawValue {
+                result = try await self.resolvePluginFactoryBuildResult(
+                    initialResult: toolResult,
+                    arguments: interceptedArguments,
+                    userPrompt: userPrompt,
+                    mcpClient: mcpClient
+                )
+            } else {
+                result = toolResult
+            }
+            proceedMSBox.add(PipelineTiming.elapsedMS(from: proceedStarted))
             PipelineTiming.log(
                 "tool=\(name) encode_ms=\(encodeMS) confirm_ms=\(confirmMSBox.total) proceed_ms=\(proceedMSBox.total) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted))"
             )
             return result
-        } catch ToolInvocationInterceptionError.denied(let reason) {
+        } catch ToolInvocationGuardrailError.denied(let reason) {
             PipelineTiming.log(
                 "tool=\(name) denied encode_ms=\(encodeMS) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted)) reason=\(reason)"
             )
@@ -267,7 +264,7 @@ extension ConversationPipeline {
                 )
             )
             throw MCPClientError.toolExecutionDenied(toolName: name, reason: reason)
-        } catch ToolInvocationInterceptionError.cancelled(let reason) {
+        } catch ToolInvocationGuardrailError.cancelled(let reason) {
             PipelineTiming.log(
                 "tool=\(name) cancelled encode_ms=\(encodeMS) total_ms=\(PipelineTiming.elapsedMS(from: toolOverallStarted)) reason=\(reason)"
             )
@@ -301,7 +298,7 @@ extension ConversationPipeline {
         _ request: MCPToolBatchRequest,
         sessionID: String,
         userPrompt: String? = nil,
-        interceptor: ToolRequestInterceptor? = nil,
+        toolEvaluating: (any GuardrailEvaluating<ToolInvocationEvent>)? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil
     ) async throws -> MCPToolBatchResult {
         // MA-3: run independent batch invocations concurrently (order of results preserved).
@@ -319,7 +316,7 @@ extension ConversationPipeline {
                             arguments: invocation.arguments,
                             sessionID: sessionID,
                             userPrompt: userPrompt,
-                            interceptor: interceptor,
+                            toolEvaluating: toolEvaluating,
                             approvalPresenter: approvalPresenter
                         )
                         return (index, result)
@@ -354,15 +351,12 @@ extension ConversationPipeline {
         )
     }
 
-    private func makeToolInterceptor(override: ToolRequestInterceptor?) -> ToolRequestInterceptor {
-        if let override {
-            return override
-        }
-        if let policyStore {
-            let policy = StoreBackedToolGovernancePolicy(store: policyStore, applicationName: applicationName)
-            return DefaultToolRequestInterceptor(policy: policy)
-        }
-        return DefaultToolRequestInterceptor()
+    private func makeToolEvaluating(
+        override: (any GuardrailEvaluating<ToolInvocationEvent>)?
+    ) -> (any GuardrailEvaluating<ToolInvocationEvent>)? {
+        if let override { return override }
+        guard let policyStore else { return nil }
+        return StoreBackedToolInvocationEvaluating(store: policyStore, applicationName: applicationName)
     }
 
     private func persistPolicyDecision(

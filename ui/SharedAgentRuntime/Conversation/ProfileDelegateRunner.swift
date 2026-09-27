@@ -44,7 +44,7 @@ enum ProfileDelegateRunner {
         ragInstructions: String,
         mcpToolInstructions: String,
         responseSchema: AgentSchema,
-        interceptor: PolicyInterceptor
+        contentEvaluating: StoreBackedAssistantContentEvaluating?
     ) async throws -> String {
         let normalized = AgentProfileHandle.normalize(
             profileHandle.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "$", with: "")
@@ -103,7 +103,7 @@ enum ProfileDelegateRunner {
                 ragInstructions: userRagBase,
                 mcpToolInstructions: mcpToolInstructions,
                 responseSchema: responseSchema,
-                interceptor: interceptor,
+                contentEvaluating: contentEvaluating,
                 approvalPresenter: nil,
                 retrievalLimit: retrievalLimit
             )

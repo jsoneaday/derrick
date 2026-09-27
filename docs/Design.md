@@ -11,14 +11,18 @@ This application is Protocol first. All major features must have a Protocol and 
 ## Guardrail
 Guardrail is Derrick's control plane in Structure (`Sources/Guardrail`).
 
-Flow:
+Flow: **Policy evaluates rules → adapters apply `GuardrailDecision` → chokepoints only call those two.**
 
-1. **Guardrail** — logical container
-2. **Policy engine** — store-backed rules decide allow / deny / confirm HITL / require workflow / redact
-3. **Enforcement** — those decisions gate workflow starts, MCP effector/tool calls, HITL confirmations, and content redaction (e.g. PII)
+Naming (no exceptions):
 
-- Workflow starts: `StoreBackedWorkflowAdmissionPolicy` (`workflow_start` scope) → `WorkflowAdmissionPolicy.apply` in `WorkflowRuntimeEngine` (allow / deny / confirmHITL then resume or cancel).
-- MCP tools/effectors: `StoreBackedToolGovernancePolicy` (`tool_invocation`) in the chat pipeline and again in MCPService before the tool runs.
-- Content: same engine via `StoreBackedCompletionContentPolicy`.
+- `Guardrail*` — control-plane types
+- `*Evaluating` — rule interpreters (`Request` → `GuardrailDecision`)
+- `*Applying` — decision adapters (decision → effect)
+- `StoreBacked*Evaluating` — SQLite-backed interpreters in `packages/PolicyRuntime`
+
+- Workflow starts: `StoreBackedWorkflowStartEvaluating` (`workflow_start`) → `WorkflowStartGuardrailApplying` in `WorkflowRuntimeEngine`.
+- MCP tools/effectors: `StoreBackedToolInvocationEvaluating` (`tool_invocation`) → `ToolInvocationGuardrailApplying` in the chat pipeline and MCPService.
+- Content: `StoreBackedAssistantContentEvaluating` → `AssistantContentGuardrailApplying`.
+- HITL: `GuardrailHITLPresenting` (shared); adapters take a presenter, chokepoints do not switch on decisions.
 - `WorkflowKind.pluginFactoryEdit` is denied by a Policy rule until editability ships.
 - Plugins propose work; they do not authorize control outcomes.

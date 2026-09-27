@@ -21,18 +21,21 @@ public actor WorkflowRuntimeEngine {
             store: repo,
             applicationName: DerrickAppSupport.defaultApplicationName
         )
-        let decision = try await StoreBackedWorkflowAdmissionPolicy(
+        let decision = try await StoreBackedWorkflowStartEvaluating(
             store: repo,
             applicationName: DerrickAppSupport.defaultApplicationName
         ).evaluate(request)
-        try await WorkflowAdmissionPolicy.apply(decision) {
-            guard case .confirmHITL(let hitl) = decision else { return true }
-            return await awaitWorkflowStartHITL(
+        let hitl = ClosureGuardrailHITLPresenting { [self] presentation in
+            let approved = await awaitWorkflowStartHITL(
                 request: request,
                 repository: repo,
-                hitl: hitl
+                hitl: presentation.hitl
             )
+            return approved
+                ? .approved(editedPayloadJSON: nil, actor: nil)
+                : .cancelled(actor: nil)
         }
+        try await WorkflowStartGuardrailApplying(hitl: hitl).apply(decision, for: request)
         let idempotencyKey = WorkflowRuntimeIdempotency.key(
             sessionID: request.sessionID,
             kind: request.kind,

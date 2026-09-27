@@ -96,10 +96,10 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 
 ### Guardrail
 
-- **`Structure/Guardrail`** — control plane umbrella. Policy decides; HITL and workflows enforce.
+- **`Structure/Guardrail`** — control plane. Policy evaluates; adapters apply `GuardrailDecision`; chokepoints only call those two.
+- Naming: `Guardrail*`, `*Evaluating`, `*Applying`, `StoreBacked*Evaluating`.
 - Persisted rules in SQLite (`Guardrail/Policy`, `packages/PolicyRuntime`) produce `GuardrailDecision`.
-- **`PolicyInterceptor`** / **`ToolRequestInterceptor`** (MemorySystem) — pipeline hooks that apply those decisions.
-- Workflow starts and MCP tools are admitted by Policy rules (`workflow_start` / `tool_invocation`); thin adapters apply allow / deny / confirmHITL / redact.
+- Workflow starts and MCP tools are admitted by Policy rules (`workflow_start` / `tool_invocation`); thin `*GuardrailApplying` adapters apply allow / deny / confirmHITL / redact.
 
 ### Messaging
 
@@ -117,7 +117,7 @@ Connectors are just-in-time software with `role: connector`. They must emit a Ho
 | `packages/Plugin` | Just-in-time software factory (builder, reviewer, release) |
 | `packages/DerrickBackend` | Daemon runtime, notifications, HITL polling |
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
-| `packages/PolicyRuntime` | Store-backed policy evaluators (`Structure/Guardrail/Policy`) |
+| `packages/PolicyRuntime` | `StoreBacked*Evaluating` interpreters (`Structure/Guardrail`) |
 | `packages/LLMAgentClient` | Provider clients (OpenAI, Gemini, …) |
 
 ## Quick start

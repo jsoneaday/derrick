@@ -1413,17 +1413,17 @@ import Testing
         #expect(fromMinutes.containerRunMaxTTLMinutes == 12)
     }
 
-    @Test func effectorAdmissionParseContextJSON() throws {
+    @Test func executionContextParseOptionalJSON() throws {
         let context = ExecutionContextWire(
             sessionID: "s",
             principal: .ui,
             capabilities: [.syncWebCrawl]
         )
         let json = try context.encodedJSON()
-        let parsed = EffectorAdmissionPolicy.parseContextJSON(json)
+        let parsed = ExecutionContextWire.parseOptionalJSON(json)
         #expect(parsed?.capabilities.contains(.syncWebCrawl) == true)
-        #expect(EffectorAdmissionPolicy.parseContextJSON(nil) == nil)
-        #expect(EffectorAdmissionPolicy.parseContextJSON("  ") == nil)
+        #expect(ExecutionContextWire.parseOptionalJSON(nil) == nil)
+        #expect(ExecutionContextWire.parseOptionalJSON("  ") == nil)
     }
 
     @Test func executionContextWireRoundTrip() throws {
