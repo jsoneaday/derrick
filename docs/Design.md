@@ -8,6 +8,21 @@ Derrick does not provide many tools to agents. Instead Derrick provides a small 
 ## Structure
 This application is Protocol first. All major features must have a Protocol and internally use GoF Design Patterns. No exceptions. The Protocols can be found in the Structure spm.
 
-## Plugins
-- Plugins are using the Agent Plugin standard
-- Plugins and `script_exec` run in the unified Go worker Docker image (`derrick-worker:go-v1`)
+## Guardrail
+Guardrail is Derrick's control plane in Structure (`Sources/Guardrail`).
+
+Flow: **Policy evaluates rules → adapters apply `GuardrailDecision` → chokepoints only call those two.**
+
+Naming (no exceptions):
+
+- `Guardrail*` — control-plane types
+- `*Evaluating` — rule interpreters (`Request` → `GuardrailDecision`)
+- `*Applying` — decision adapters (decision → effect)
+- `StoreBacked*Evaluating` — SQLite-backed interpreters in `packages/PolicyRuntime`
+
+- Workflow starts: `StoreBackedWorkflowStartEvaluating` (`workflow_start`) → `WorkflowStartGuardrailApplying` in `WorkflowRuntimeEngine`.
+- MCP tools/effectors: `StoreBackedToolInvocationEvaluating` (`tool_invocation`) → `ToolInvocationGuardrailApplying` in the chat pipeline and MCPService.
+- Content: `StoreBackedAssistantContentEvaluating` → `AssistantContentGuardrailApplying`.
+- HITL: `GuardrailHITLPresenting` (shared); adapters take a presenter, chokepoints do not switch on decisions.
+- `WorkflowKind.pluginFactoryEdit` is denied by a Policy rule until editability ships.
+- Plugins propose work; they do not authorize control outcomes.

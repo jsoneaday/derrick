@@ -118,8 +118,7 @@ In-use lease TTL (default 7 minutes) stays as the anti-hoard cap. No idle TTL (n
 
 ### Docs
 
-- [ ] Sweep `docs/`: drop or mark stale ADRs, fix Python-vs-Swift guest, file extractor vs native reads, container recreate-on-handoff, messaging roadmap items that already shipped.
-- [ ] Files to revisit: `docs/adr-swift-script-runtime.md`, `docs/development.md`, `docs/messaging-design.md` remaining table, `docs/opensource-plan.md`, `readme.md` if it still implies one-shot containers only.
+- [x] Dropped stale ADRs / plan docs; `docs/Design.md` is the remaining architecture note. README/CONTRIBUTING no longer link to deleted files.
 
 ### Startup: crawler image build blocks the app
 

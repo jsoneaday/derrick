@@ -3,6 +3,7 @@ import LLMAgentClient
 import MCP
 import MCPClient
 import MemorySystem
+import PolicyRuntime
 import PartialJSON
 import AppEvents
 import PolicyUserInteraction
@@ -15,7 +16,7 @@ extension ConversationPipeline {
         parentAgentID: String? = nil,
         toolCalls: [ToolCallRecord] = [],
         scope: MemoryAccessibility = .private,
-        interceptor: PolicyInterceptor = DefaultPolicyInterceptor(),
+        contentEvaluating: StoreBackedAssistantContentEvaluating? = nil,
         approvalPresenter: (any ApprovalConfirmationPresenting)? = nil,
         responseSchema: AgentSchema? = nil
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
@@ -104,7 +105,13 @@ extension ConversationPipeline {
                             )
 
                             let chunkPolicyStarted = Date()
-                            let chunkIntercept = try await interceptor.interceptAssistantChunk(event)
+                            let chunkDecision: GuardrailDecision
+                            if let contentEvaluating {
+                                chunkDecision = try await contentEvaluating.evaluate(event)
+                            } else {
+                                chunkDecision = .allow
+                            }
+                            let chunkIntercept = AssistantContentGuardrailApplying().apply(chunkDecision, for: event)
                             chunkPolicyMS += PipelineTiming.elapsedMS(from: chunkPolicyStarted)
                             let interceptedContent: String
                             switch chunkIntercept {
@@ -329,7 +336,16 @@ extension ConversationPipeline {
                             chunkCount: chunkIndex
                         )
                         let completionPolicyStarted = Date()
-                        let completionIntercept = try await interceptor.interceptAssistantCompletion(completionEvent)
+                        let completionDecision: GuardrailDecision
+                        if let contentEvaluating {
+                            completionDecision = try await contentEvaluating.evaluate(completionEvent)
+                        } else {
+                            completionDecision = .allow
+                        }
+                        let completionIntercept = AssistantContentGuardrailApplying().apply(
+                            completionDecision,
+                            for: completionEvent
+                        )
                         var completionPolicyMS = PipelineTiming.elapsedMS(from: completionPolicyStarted)
                         let contentConfirmStarted = Date()
                         let interceptedCompletion: String?

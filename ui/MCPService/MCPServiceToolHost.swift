@@ -5,6 +5,7 @@ import MCPClient
 import MCPServer
 import MemorySystem
 import Plugin
+import PolicyRuntime
 import Structure
 
 /// MCP effectors hosted in MCPService (`script_exec`, `web.crawl`, `web.search`, factory
@@ -288,9 +289,9 @@ actor MCPServiceToolHost {
             helperReviewerModelJSON: request.helperReviewerModelJSON,
             memorySessionKey: sessionKey,
             pluginFactoryCreationActive: request.pluginFactoryCreationActive
-                || EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+                || ExecutionContextWire.parseOptionalJSON(request.executionContextJSON)?
                     .capabilities.contains(.syncWebCrawl) == true,
-            workflowID: EffectorAdmissionPolicy.parseContextJSON(request.executionContextJSON)?
+            workflowID: ExecutionContextWire.parseOptionalJSON(request.executionContextJSON)?
                 .workflow?.workflowID
         )
         let jobID: String?
@@ -301,11 +302,73 @@ actor MCPServiceToolHost {
             HostHTTPCallContext.shared.clear()
         }
 
+        // Policy decides effector/tool admission (same engine as chat). Evaluate then apply.
+        let policyRepo = try await MCPServiceStore.shared.sharedRepository()
+        let toolEvaluating = StoreBackedToolInvocationEvaluating(
+            store: policyRepo,
+            applicationName: DerrickAppSupport.defaultApplicationName
+        )
+        let sessionIDForPolicy: String = {
+            if case .agent(let sessionID, _) = request.principal { return sessionID }
+            if case .job(let jobID) = request.principal { return jobID }
+            return "mcp-service"
+        }()
+        let invocationEvent = ToolInvocationEvent(
+            sessionID: sessionIDForPolicy,
+            toolName: toolName,
+            argumentsJSON: request.argumentsJSON
+        )
+        let decision = try await toolEvaluating.evaluate(invocationEvent)
+        let hitl = ClosureGuardrailHITLPresenting { [self] presentation in
+            let resolved = await awaitMCPToolHITL(
+                sessionID: sessionIDForPolicy,
+                toolName: presentation.subject,
+                argumentsJSON: presentation.payloadJSON,
+                hitl: presentation.hitl,
+                principal: request.principal,
+                repository: policyRepo
+            )
+            switch resolved {
+            case .approved(let edited, let actor):
+                return .approved(editedPayloadJSON: edited, actor: actor)
+            case .cancelled(let actor):
+                return .cancelled(actor: actor)
+            }
+        }
+        let argumentsJSON: String
+        do {
+            let gated = try await ToolInvocationGuardrailApplying(hitl: hitl)
+                .apply(decision, for: invocationEvent)
+            argumentsJSON = gated.argumentsJSON
+        } catch ToolInvocationGuardrailError.denied(let reason) {
+            await MCPServiceStore.shared.log(
+                level: .error,
+                message: "tool denied by Policy tool=\(toolName): \(reason)",
+                code: "tool_denied",
+                detailJSON: #"{"requestID":"\#(request.requestID)"}"#
+            )
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: reason
+            )
+        } catch ToolInvocationGuardrailError.cancelled(let reason) {
+            return MCPToolCallResultDTO(
+                requestID: request.requestID,
+                ok: false,
+                isError: true,
+                text: "",
+                message: reason
+            )
+        }
+
         // Shared Lib parser (same as Agent policy path) — handles repaired model JSON.
         // `{}` is a valid empty object for tools with no required args.
         let args: [String: Value]
         do {
-            args = try parseToolArgumentsObject(request.argumentsJSON)
+            args = try parseToolArgumentsObject(argumentsJSON)
         } catch {
             await MCPServiceStore.shared.log(
                 level: .error,
@@ -377,6 +440,68 @@ actor MCPServiceToolHost {
 
     private static func skillIndex(from repo: DBRepository) async throws -> [PluginSkillDisclosure.IndexEntry] {
         try await repo.listPluginSkillIndex()
+    }
+
+    private static let toolHITLPollNanoseconds: UInt64 = 1_000_000_000
+    private static let toolHITLTimeoutNanoseconds: UInt64 = 15 * 60 * 1_000_000_000
+
+    private func awaitMCPToolHITL(
+        sessionID: String,
+        toolName: String,
+        argumentsJSON: String,
+        hitl: GuardrailHITLRequest,
+        principal: ServicePrincipal,
+        repository: DBRepository
+    ) async -> ApprovalConfirmationDecision {
+        let approvalID = UUID().uuidString
+        let requiredJSON = (try? JSONEncoder().encode(hitl.requiredFields))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let isJob = isJobPrincipal(principal)
+        let row = PendingHITLApprovalRow(
+            id: approvalID,
+            turnID: sessionID,
+            sessionID: sessionID,
+            toolName: toolName,
+            argumentsJSON: argumentsJSON,
+            requiredFieldsJSON: requiredJSON,
+            isJobContext: isJob
+        )
+        do {
+            try await repository.insertPendingHITLApproval(row)
+        } catch {
+            fputs("[MCPService] HITL persist failed: \(error.localizedDescription)\n", stderr)
+            return .cancelled(actor: "system-persist-failed")
+        }
+        DerrickHITLNotificationSignal.postPoll()
+
+        let deadline = Date().addingTimeInterval(
+            Double(Self.toolHITLTimeoutNanoseconds) / 1_000_000_000
+        )
+        while Date() < deadline {
+            if Task.isCancelled {
+                return .cancelled(actor: "system-cancelled")
+            }
+            if let decision = try? await repository.fetchPendingHITLApproval(id: approvalID),
+               decision.status != .pending {
+                switch decision.status {
+                case .approved:
+                    let args = decision.editedArgumentsJSON?.isEmpty == false
+                        ? decision.editedArgumentsJSON!
+                        : argumentsJSON
+                    return .approved(editedArgumentsJSON: args, actor: decision.actor)
+                case .cancelled, .timeout, .pending:
+                    return .cancelled(actor: decision.actor ?? decision.status.rawValue)
+                }
+            }
+            try? await Task.sleep(nanoseconds: Self.toolHITLPollNanoseconds)
+        }
+        try? await repository.resolveHITLApproval(
+            id: approvalID,
+            status: .timeout,
+            editedArgumentsJSON: nil,
+            actor: "system-timeout"
+        )
+        return .cancelled(actor: "system-timeout")
     }
 }
 

@@ -45,7 +45,7 @@ A native Swift macOS desktop agent: chat, just-in-time software (plugins), messa
 - **Docker** runs untrusted Go for `script_exec`, just-in-time plugin builds, and approved plugin invocations.
 - **HostUI** (`packages/HostUI`) paints plugin screens from a declared schema. The host does not invent a default inbox.
 
-See [docs/adr-headless-backend.md](docs/adr-headless-backend.md) and [docs/services-plan.md](docs/services-plan.md).
+See [docs/Design.md](docs/Design.md) for the current architecture notes.
 
 ## Security model
 
@@ -58,7 +58,6 @@ Derrick treats model output and guest code as untrusted.
 - Canonical I/O types live in `packages/Structure/Sources/Contract/Resources/schemas/` and are mirrored to `workers/go/internal/contract/schemas/`.
 - No net/http, subprocess, filesystem access, or credentials inside the guest.
 - The host dispatches `http.request` envelopes, attaches secrets, and enforces egress policy.
-- Historical Swift guest notes: [docs/adr-swift-script-runtime.md](docs/adr-swift-script-runtime.md).
 
 ### Script review agent
 
@@ -95,15 +94,16 @@ Copy [.env.example](.env.example) — **never commit `.env`**.
 - Plugin credential collection (Keychain save)
 - Policy events (usage limits, content sensitivity)
 
-### Policy
+### Guardrail
 
-- **`PolicyEngine`** — in-process tool-call rules for chat (`Structure/Policy/PolicyEngine`).
-- **`PolicyRuntime`** — persisted rules from SQLite (`Structure/Policy/PolicyRuntime`); implemented by `StoreBacked*` evaluators in `packages/PolicyRuntime`.
-- **`PolicyInterceptor`** / **`ToolRequestInterceptor`** (MemorySystem) — pipeline hooks that call those policies.
+- **`Structure/Guardrail`** — control plane. Policy evaluates; adapters apply `GuardrailDecision`; chokepoints only call those two.
+- Naming: `Guardrail*`, `*Evaluating`, `*Applying`, `StoreBacked*Evaluating`.
+- Persisted rules in SQLite (`Guardrail/Policy`, `packages/PolicyRuntime`) produce `GuardrailDecision`.
+- Workflow starts and MCP tools are admitted by Policy rules (`workflow_start` / `tool_invocation`); thin `*GuardrailApplying` adapters apply allow / deny / confirmHITL / redact.
 
 ### Messaging
 
-Connectors are just-in-time software with `role: connector`. They must emit a HostUI tree (`ui.present`) — copy `messaging_inbox` or compose their own. Messages live in SQLite; sync and send still go through the guest. See [docs/messaging-design.md](docs/messaging-design.md).
+Connectors are just-in-time software with `role: connector`. They must emit a HostUI tree (`ui.present`) — copy `messaging_inbox` or compose their own. Messages live in SQLite; sync and send still go through the guest.
 
 ## Repository layout
 
@@ -112,12 +112,12 @@ Connectors are just-in-time software with `role: connector`. They must emit a Ho
 | `ui/` | macOS app, Login Item daemon, XPC services |
 | `packages/DBRepository` | SQLite schema, migrations, messaging tables |
 | `packages/MCPServer` | MCP bridge, script execution, plugin runtime |
-| `packages/Structure` | Architecture map: wire types, protocols, JSON schemas (`AppLayerServices/`, `Policy/`, `Plugin/`, `Contract/`, …) |
+| `packages/Structure` | Architecture map: wire types, protocols, JSON schemas (`AppLayerServices/`, `Guardrail/`, `Plugin/`, `Contract/`, …) |
 | `packages/HostUI` | Schema-driven screens for connectors and plugin present trees |
 | `packages/Plugin` | Just-in-time software factory (builder, reviewer, release) |
 | `packages/DerrickBackend` | Daemon runtime, notifications, HITL polling |
 | `packages/DockerRunnerXPC` | Constrained Docker helper |
-| `packages/PolicyRuntime` | Store-backed policy evaluators (`Structure/Policy/PolicyRuntime`) |
+| `packages/PolicyRuntime` | `StoreBacked*Evaluating` interpreters (`Structure/Guardrail`) |
 | `packages/LLMAgentClient` | Provider clients (OpenAI, Gemini, …) |
 
 ## Quick start
@@ -141,11 +141,11 @@ Connectors are just-in-time software with `role: connector`. They must emit a Ho
 
 Or from the terminal: `./scripts/build.sh test`
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/development.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/Design.md](docs/Design.md).
 
 ## Open-sourcing checklist
 
-We maintain [docs/opensource-plan.md](docs/opensource-plan.md) for pre-release cleanup (secret audit, personal reference removal, CI).
+Pre-release cleanup: secret audit (`./scripts/verify-no-secrets.sh`), personal reference removal, and CI hygiene.
 
 Verify no secrets in git:
 
@@ -155,10 +155,7 @@ Verify no secrets in git:
 
 ## Documentation
 
-- [Headless backend ADR](docs/adr-headless-backend.md)
-- [Swift Docker runtime ADR](docs/adr-swift-script-runtime.md)
-- [Background services plan](docs/services-plan.md)
-- [Messaging design](docs/messaging-design.md)
+- [Design](docs/Design.md)
 - [Security policy](SECURITY.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)

@@ -89,8 +89,9 @@ final class ConversationModel {
             policy: TieredMemoryCompactionPolicy(),
             budget: budget
         )
-        let interceptor = DefaultPolicyInterceptor(
-            policy: StoreBackedCompletionContentPolicy(store: repository, applicationName: "ui")
+        let contentEvaluating = StoreBackedAssistantContentEvaluating(
+            store: repository,
+            applicationName: "ui"
         )
 
         let delegateAgentsHost = try await makeAgentsOrchestrationHost(
@@ -143,7 +144,7 @@ final class ConversationModel {
                 ragInstructions: ragInstructions,
                 mcpToolInstructions: mcpToolInstructions,
                 responseSchema: Self.defaultResponseSchema,
-                interceptor: interceptor
+                contentEvaluating: contentEvaluating
                 )
                 await ProfileSubagentGate.shared.end(caller: caller)
                 return result
@@ -290,7 +291,7 @@ final class ConversationModel {
         let ragInstructions = self.ragInstructions
         let mcpToolInstructions = self.mcpToolInstructions
         let responseSchema = self.responseSchema
-        let interceptor = makeContentPolicyInterceptor()
+        let contentEvaluating = makeContentEvaluating()
         let orchestrator = self.orchestrator
         let workerModel = helperModelSettings.workerAgentModel
         let workerApiKey = await LLMProviderCredentialGate.resolveAPIKey(for: workerModel) ?? apiKey
@@ -345,7 +346,7 @@ final class ConversationModel {
                     ragInstructions: rag,
                     mcpToolInstructions: mcpToolInstructions,
                     responseSchema: responseSchema,
-                    interceptor: interceptor,
+                    contentEvaluating: contentEvaluating,
                     approvalPresenter: nil
                 )
                 var completeText = ""
@@ -385,7 +386,7 @@ final class ConversationModel {
                         ragInstructions: userRagBase,
                         mcpToolInstructions: effectiveMcpToolInstructions,
                         responseSchema: responseSchema,
-                        interceptor: interceptor,
+                        contentEvaluating: contentEvaluating,
                         approvalPresenter: approvalPresenter,
                         retrievalLimit: retrievalLimit
                     )
@@ -606,7 +607,7 @@ final class ConversationModel {
         ragInstructions: String,
         mcpToolInstructions: String,
         responseSchema: AgentSchema,
-        interceptor: PolicyInterceptor,
+        contentEvaluating: StoreBackedAssistantContentEvaluating?,
         approvalPresenter: (any ApprovalConfirmationPresenting)?,
         retrievalLimit: Int = 5
     ) async -> AsyncThrowingStream<AgentResponseNextChunk, Error> {
@@ -630,7 +631,7 @@ final class ConversationModel {
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
-                interceptor: interceptor,
+                contentEvaluating: contentEvaluating,
                 approvalPresenter: approvalPresenter,
                 responseSchema: responseSchema
             )
@@ -653,19 +654,16 @@ final class ConversationModel {
             return await pipeline.streamWithPolicyInterception(
                 prompt: prompt,
                 sessionID: sessionKey.sessionID,
-                interceptor: interceptor,
+                contentEvaluating: contentEvaluating,
                 approvalPresenter: approvalPresenter,
                 responseSchema: responseSchema
             )
         }
     }
 
-    private func makeContentPolicyInterceptor() -> PolicyInterceptor {
-        guard let policyStore else {
-            return DefaultPolicyInterceptor()
-        }
-        let policy = StoreBackedCompletionContentPolicy(store: policyStore, applicationName: "ui")
-        return DefaultPolicyInterceptor(policy: policy)
+    private func makeContentEvaluating() -> StoreBackedAssistantContentEvaluating? {
+        guard let policyStore else { return nil }
+        return StoreBackedAssistantContentEvaluating(store: policyStore, applicationName: "ui")
     }
 
     /// In-process host for orchestration tools (`agents_*`, `jobs_*`). Not used for MCP effectors.
@@ -970,7 +968,7 @@ final class ConversationModel {
                 outcomeJSON: #"{"action":"allow"}"#,
                 priority: 1
             )
-        } + [
+        } + DefaultGuardrailPolicySeeds.workflowStartRules(applicationName: applicationName) + [
             PolicyRule(
                 applicationName: applicationName,
                 name: "allow-default-assistant-chunks",

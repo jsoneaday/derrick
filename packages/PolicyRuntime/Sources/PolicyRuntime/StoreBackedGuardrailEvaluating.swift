@@ -1,9 +1,8 @@
 import Foundation
-import MemorySystem
 import Structure
 
 /// Store-backed tool governance: loads rules from `PolicyStore`, matches, returns first enabled hit.
-public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {
+public struct StoreBackedToolInvocationEvaluating: GuardrailEvaluating {
     private let store: any PolicyStore
     private let applicationName: String
 
@@ -12,19 +11,19 @@ public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {
         self.applicationName = applicationName
     }
 
-    public func evaluateToolInvocation(_ event: ToolInvocationEvent) async throws -> ToolGovernanceOutcome {
-        let rules = try await loadRules(scopes: ["tool_invocation", "tool_call"])
+    public func evaluate(_ request: ToolInvocationEvent) async throws -> GuardrailDecision {
+        let rules = try await loadRules(scopes: GuardrailPolicyScope.toolInvocationScopes.map(\.rawValue))
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
         }
 
-        let argumentsObject = parseJSONObject(from: event.argumentsJSON)
+        let argumentsObject = parseJSONObject(from: request.argumentsJSON)
         for rule in rules {
             guard rule.enabled else { continue }
             guard let matcher = try? decode(ToolMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
-            guard matcher.matches(event: event, arguments: argumentsObject) else {
+            guard matcher.matches(event: request, arguments: argumentsObject) else {
                 continue
             }
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
@@ -57,7 +56,7 @@ public struct StoreBackedToolGovernancePolicy: ToolGovernancePolicy {
 }
 
 /// Store-backed assistant content policy for chunks and full completions.
-public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
+public struct StoreBackedAssistantContentEvaluating: Sendable {
     private let store: any PolicyStore
     private let applicationName: String
 
@@ -66,8 +65,8 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
         self.applicationName = applicationName
     }
 
-    public func evaluateAssistantChunk(_ event: AssistantChunkEvent) async throws -> PolicyDecisionOutcome {
-        let rules = try await loadRules(scopes: ["assistant_chunk"])
+    public func evaluate(_ request: AssistantChunkEvent) async throws -> GuardrailDecision {
+        let rules = try await loadRules(scopes: [GuardrailPolicyScope.assistantChunk.rawValue])
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
         }
@@ -77,7 +76,7 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
             guard let matcher = try? decode(ContentMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
-            guard matcher.matches(content: event.content) else {
+            guard matcher.matches(content: request.content) else {
                 continue
             }
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
@@ -89,19 +88,19 @@ public struct StoreBackedCompletionContentPolicy: PolicyEvaluator {
         return .deny(reason: Self.noMatchingRuleReason)
     }
 
-    public func evaluateAssistantCompletion(_ event: AssistantCompletionEvent) async throws -> PolicyDecisionOutcome {
-        let rules = try await loadRules(scopes: ["assistant_completion_content", "assistant_completion"])
+    public func evaluate(_ request: AssistantCompletionEvent) async throws -> GuardrailDecision {
+        let rules = try await loadRules(scopes: GuardrailPolicyScope.assistantCompletionScopes.map(\.rawValue))
         guard !rules.isEmpty else {
             return .deny(reason: Self.noRulesConfiguredReason)
         }
 
-        let detectedPatterns = detectSensitivePatterns(in: event.fullCompletion)
+        let detectedPatterns = detectSensitivePatterns(in: request.fullCompletion)
         for rule in rules {
             guard rule.enabled else { continue }
             guard let matcher = try? decode(CompletionMatcher.self, from: rule.matcherJSON) else {
                 continue
             }
-            guard matcher.matches(content: event.fullCompletion, detectedPatterns: detectedPatterns) else {
+            guard matcher.matches(content: request.fullCompletion, detectedPatterns: detectedPatterns) else {
                 continue
             }
             guard let outcome = try? decode(OutcomeRule.self, from: rule.outcomeJSON) else {
@@ -415,30 +414,38 @@ private struct OutcomeRule: Decodable {
         case replacement
     }
 
-    var toolOutcome: ToolGovernanceOutcome {
+    var toolOutcome: GuardrailDecision {
         switch action.lowercased() {
         case "deny":
             return .deny(reason: reason ?? "Tool invocation denied by policy.")
         case "confirm":
-            return .confirm(requiredFields: requiredFields ?? ["user_approval"])
+            return .confirmHITL(
+                GuardrailHITLRequest(requiredFields: requiredFields ?? ["user_approval"])
+            )
         case "allow":
             return .allow
         case "redact":
             guard let argumentKey, let pattern else {
                 return .deny(reason: "Invalid redact outcome for tool rule (missing argument_key/pattern).")
             }
-            return .redact(argumentKey: argumentKey, pattern: pattern, replacement: replacement ?? "[REDACTED]")
+            return .redactArgument(
+                argumentKey: argumentKey,
+                pattern: pattern,
+                replacement: replacement ?? "[REDACTED]"
+            )
         default:
             return .deny(reason: "Unknown tool policy action '\(action)'; denying by default.")
         }
     }
 
-    func contentOutcome(fallbackPattern: String?) -> PolicyDecisionOutcome {
+    func contentOutcome(fallbackPattern: String?) -> GuardrailDecision {
         switch action.lowercased() {
         case "deny":
             return .deny(reason: reason ?? "Assistant content denied by policy.")
         case "confirm":
-            return .confirm(requiredFields: requiredFields ?? ["review_confirmation"])
+            return .confirmHITL(
+                GuardrailHITLRequest(requiredFields: requiredFields ?? ["review_confirmation"])
+            )
         case "allow":
             return .allow
         case "redact":
@@ -446,12 +453,13 @@ private struct OutcomeRule: Decodable {
             guard let patternToUse else {
                 return .deny(reason: "Invalid redact outcome for content rule (missing pattern).")
             }
-            return .redact(pattern: patternToUse, replacement: replacement ?? "[REDACTED]")
+            return .redactContent(pattern: patternToUse, replacement: replacement ?? "[REDACTED]")
         default:
             return .deny(reason: "Unknown content policy action '\(action)'; denying by default.")
         }
     }
 }
+
 
 private func parseJSONObject(from json: String) -> [String: Any] {
     guard let data = json.data(using: .utf8),

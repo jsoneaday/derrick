@@ -25,8 +25,8 @@ struct PolicyEngineTests {
 
         let decision = engine.decision(for: .init(call: .init(name: "writeFile", effects: [.changesState]), context: .init(agentID: "a")))
         #expect({
-            if case .confirm(let request) = decision {
-                return request.title == "Confirm action"
+            if case .confirmHITL(let hitl) = decision {
+                return hitl.title == "Confirm action"
             }
             return false
         }())

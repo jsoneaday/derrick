@@ -26,7 +26,7 @@ Thank you for your interest in contributing. Please read the [Code of Conduct](C
    git config core.hooksPath .githooks
    ```
 
-See [docs/development.md](docs/development.md) for daemon bootstrap, Login Items, and database paths.
+See [docs/Design.md](docs/Design.md) for architecture notes. Local SQLite lives under the Derrick app group; reset with `./scripts/reset-local-state.sh`.
 
 ## Build from the command line
 
@@ -48,7 +48,7 @@ Do not commit provisioning profiles (`.mobileprovision`, `.p12`, `.pem`).
 - Run `./scripts/verify-no-secrets.sh --staged` before committing.
 - Run `./scripts/build.sh test` when you change build-affecting code.
 - Keep changes focused; match existing Swift style and module boundaries.
-- Update README or ADRs when behavior or architecture changes.
+- Update README or `docs/Design.md` when behavior or architecture changes.
 
 ## License
 

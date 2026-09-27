@@ -37,6 +37,7 @@ public enum WorkflowRuntimeError: Error, LocalizedError, Sendable {
     case mcpUnavailable
     case workflowNotFound
     case unsupportedKind(WorkflowKind)
+    case deniedByGuardrail(String)
 
     public var errorDescription: String? {
         switch self {
@@ -46,6 +47,8 @@ public enum WorkflowRuntimeError: Error, LocalizedError, Sendable {
             return "Workflow was not found."
         case .unsupportedKind(let kind):
             return "Unsupported workflow kind \(kind.rawValue)."
+        case .deniedByGuardrail(let reason):
+            return reason
         }
     }
 }

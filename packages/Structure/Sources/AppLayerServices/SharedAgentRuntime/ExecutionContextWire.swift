@@ -11,15 +11,6 @@ public enum ExecutionContextCapability: String, Codable, Sendable, Hashable, Cas
     case hostReviewRetry = "host_review_retry"
 }
 
-public enum WorkflowKind: String, Codable, Sendable, Hashable, CaseIterable {
-    case pluginFactoryCreate = "plugin_factory_create"
-    case pluginFactoryEdit = "plugin_factory_edit"
-    case connectorAuthDiscover = "connector_auth_discover"
-    case jobStep = "job_step"
-    case interactiveTool = "interactive_tool"
-    case none
-}
-
 public struct WorkflowContextWire: Codable, Sendable, Hashable {
     public let workflowID: String?
     public let kind: WorkflowKind
@@ -103,6 +94,15 @@ public struct ExecutionContextWire: Codable, Sendable, Hashable {
             throw ExecutionContextWireError.invalidJSON
         }
         return try JSONDecoder.service.decode(ExecutionContextWire.self, from: data)
+    }
+
+    /// Best-effort decode used at MCP / effector boundaries when context may be absent.
+    public static func parseOptionalJSON(_ json: String?) -> ExecutionContextWire? {
+        guard let json,
+              !json.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return try? decodeJSON(json)
     }
 
     public func withWorkflow(
