@@ -78,18 +78,37 @@ refactor.
 
 ## Phase 1 — Protocol decision gate
 
-Present exact contracts and types for approval before implementation.
+Status: approved and implemented as `Structure` contracts. Runtime adapters and
+caller migration are deferred to later phases.
+
+Implemented in this phase:
+
+- `AgentRegistryManaging`
+- `AgentDirecting`
+- `AgentOrchestrationServing`
+- `ActorID`, `ActorKind`, and `AgentKind`
+- Capability request, decision, set, and checking contracts
+- Process supervision request, handle, status, and checking contract
+- `JobSchedulingServing`
+- Host, network, and UI SideEffect execution contracts
+- Host secret scope, reference, and attachment contracts
+- `AgentConfigurationReference`
+
+No host module or service implementation was added in this phase.
 
 ### Agent orchestration
 
 Use these existing protocols as the base:
 
 - `AgentMailboxing`
-- `AgentDirectorying`
+- `AgentRegistryManaging` — authoritative live `AgentInstance` registry
+- `AgentDirecting`
 - `TurnRunning`
 
 Propose a composite `AgentOrchestrationServing` contract only after reviewing
-those existing shapes.
+those existing shapes. `AgentRegistryManaging` owns the authoritative live
+`AgentInstance` registry. `AgentDirecting` owns delegation, spawn, cancel, and
+route decisions. `AgentMailboxing` owns queue operations.
 
 ### Job scheduling
 
@@ -108,6 +127,7 @@ Propose typed contracts for:
 
 - `ActorID`
 - `ActorKind`
+- `AgentKind`
 - `CapabilityID`
 - `CapabilitySet`
 - `CapabilityRequest`
@@ -115,6 +135,15 @@ Propose typed contracts for:
 
 `agentID` remains the identity of an agent and is not silently reinterpreted as
 the universal Actor identity.
+
+`ActorKind` identifies who is attempting a capability, such as `operator`,
+`ui`, `agent`, `pluginGuest`, `module`, `service`, `job`, `workflow`, or
+`system`.
+
+`AgentKind` applies only to an agent and identifies how it exists, such as
+`interactive`, `delegated`, `scheduled`, `workflow`, `integration`, or
+`system`. It is separate from `AgentRole`, `AgentStatus`, and
+`AgentConfiguration`.
 
 ### SideEffect Broker
 
@@ -170,7 +199,8 @@ Message validation
 Consolidate these existing pieces behind one approved module contract:
 
 - `AgentMailboxing`
-- `AgentDirectorying`
+- `AgentRegistryManaging`
+- `AgentDirecting`
 - `TurnRunning`
 - `InMemoryAgentDirectory`
 - `InMemoryMailbox`
@@ -178,9 +208,10 @@ Consolidate these existing pieces behind one approved module contract:
 - `SessionOrchestrator`
 - Agent turn routing
 
-The `AgentOrchestrationModule` owns registration, parent/child relationships,
-mailboxes, turn scheduling, concurrency, depth limits, cancellation, status,
-and result routing.
+The `AgentOrchestrationModule` composes `AgentRegistryManaging`,
+`AgentDirecting`, and `AgentMailboxing`. It owns registration, parent/child
+relationships, mailboxes, turn scheduling, concurrency, depth limits,
+cancellation, status, and result routing.
 
 It works with `SessionMemoryModule`, but they remain separate:
 

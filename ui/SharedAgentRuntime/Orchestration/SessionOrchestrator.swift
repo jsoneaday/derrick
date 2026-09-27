@@ -7,7 +7,7 @@ import Structure
 /// Session-scoped multi-agent entry point (MA-1–MA-3).
 final class SessionOrchestrator: Sendable {
     let sessionID: String
-    let directory: any AgentDirectorying
+    let directory: any AgentRegistryManaging
     let hierarchy: HierarchicalOrchestrator
     let limits: OrchestrationLimits
     let userFacingRef: AgentRef
@@ -17,7 +17,7 @@ final class SessionOrchestrator: Sendable {
 
     init(
         sessionID: String,
-        directory: any AgentDirectorying,
+        directory: any AgentRegistryManaging,
         limits: OrchestrationLimits = OrchestrationLimitsRuntime.current
     ) {
         self.sessionID = sessionID

@@ -7,8 +7,12 @@ public protocol AgentMailboxing: Sendable {
     func peekCount() async -> Int
 }
 
-/// Registry of agents for a session (or process).
-public protocol AgentDirectorying: Sendable {
+/// Authoritative registry of runtime agent instances for a session or process.
+///
+/// This is the Phase 1 name for the existing registry contract. Message
+/// delivery remains here temporarily for source compatibility; the
+/// AgentOrchestrationModule will separate registry and directing concerns.
+public protocol AgentRegistryManaging: Sendable {
     var limits: OrchestrationLimits { get async }
 
     func record(for ref: AgentRef) async -> AgentRecord?
@@ -39,3 +43,26 @@ public protocol AgentDirectorying: Sendable {
 public protocol TurnRunning: Sendable {
     func run(envelope: AgentEnvelope) async throws
 }
+
+/// Directs runtime agents through delegation, messaging, completion, and
+/// cancellation operations.
+public protocol AgentDirecting: Sendable {
+    func spawnAndAwait(
+        _ request: SpawnWorkerRequest,
+        runTurn: @escaping @Sendable (_ child: AgentRecord, _ envelope: AgentEnvelope) async throws -> String
+    ) async throws -> SpawnWorkerResult
+
+    func spawnManyAndAwait(
+        _ requests: [SpawnWorkerRequest],
+        runTurn: @escaping @Sendable (_ child: AgentRecord, _ envelope: AgentEnvelope) async throws -> String
+    ) async throws -> [SpawnWorkerResult]
+
+    func completeTask(worker: AgentRef, result: String) async throws
+    func listAgents(sessionID: String) async -> [AgentRecord]
+    func listChildren(of parent: AgentRef) async -> [AgentRecord]
+    func send(from: AgentRef, toAgentID: String, message: String) async throws
+    func cancel(agent: AgentRef, by requester: AgentRef) async throws
+}
+
+/// Composite facade implemented by the future AgentOrchestrationModule.
+public protocol AgentOrchestrationServing: AgentRegistryManaging, AgentDirecting {}

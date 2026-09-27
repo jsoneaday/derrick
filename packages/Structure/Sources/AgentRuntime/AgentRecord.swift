@@ -26,9 +26,13 @@ public struct AgentRecord: Hashable, Codable, Sendable, Identifiable {
     public var id: AgentRef { ref }
 
     public let ref: AgentRef
+    /// Runtime category, distinct from hierarchy role and lifecycle status.
+    public var kind: AgentKind
     public var role: AgentRole
     public var parentAgentID: String?
     public var status: AgentStatus
+    /// Optional during migration; new orchestration-created instances must set it.
+    public var configurationReference: AgentConfigurationReference?
     /// Short role / goal overlay for system prompt composition.
     public var goal: String?
     public var systemOverlay: String?
@@ -39,9 +43,11 @@ public struct AgentRecord: Hashable, Codable, Sendable, Identifiable {
 
     public init(
         ref: AgentRef,
+        kind: AgentKind = .interactive,
         role: AgentRole,
         parentAgentID: String? = nil,
         status: AgentStatus = .idle,
+        configurationReference: AgentConfigurationReference? = nil,
         goal: String? = nil,
         systemOverlay: String? = nil,
         modelPreference: String? = nil,
@@ -50,9 +56,11 @@ public struct AgentRecord: Hashable, Codable, Sendable, Identifiable {
         metadata: [String: String] = [:]
     ) {
         self.ref = ref
+        self.kind = kind
         self.role = role
         self.parentAgentID = parentAgentID
         self.status = status
+        self.configurationReference = configurationReference
         self.goal = goal
         self.systemOverlay = systemOverlay
         self.modelPreference = modelPreference
