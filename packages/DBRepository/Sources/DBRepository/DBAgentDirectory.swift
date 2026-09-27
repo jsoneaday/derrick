@@ -3,8 +3,8 @@ import AgentRuntime
 import Structure
 
 /// DB-backed agent directory: persists registry rows via `DBRepository` and delegates
-/// runtime mailbox / turn concurrency to an in-memory `AgentDirectorying` implementation.
-public actor DBAgentDirectory: AgentDirectorying {
+/// runtime mailbox / turn concurrency to an in-memory `AgentRegistryManaging` implementation.
+public actor DBAgentDirectory: AgentRegistryManaging {
     public let limits: OrchestrationLimits
 
     private let repository: DBRepository

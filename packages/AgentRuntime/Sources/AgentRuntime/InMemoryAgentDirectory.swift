@@ -2,7 +2,7 @@ import Foundation
 import Structure
 
 /// In-process agent registry + serial mailbox processing (MA-0/MA-1).
-public actor InMemoryAgentDirectory: AgentDirectorying {
+public actor InMemoryAgentDirectory: AgentRegistryManaging {
     public let limits: OrchestrationLimits
 
     private struct RuntimeSlot {
